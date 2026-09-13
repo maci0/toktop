@@ -10,6 +10,9 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+- Recaptured the README and toktop.ai dashboard screenshot from a 0.9.0
+  demo frame.
+
 ## [0.9.0] - 2026-09-13
 
 Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
