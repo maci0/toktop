@@ -4,7 +4,7 @@
 # pins so other OS/arch/CPython combinations still install.
 -r requirements.txt
 black==26.5.1
-ruff==0.16.5
+ruff==0.16.6
 click==8.5.0 \
     --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
 packaging==26.3 \
