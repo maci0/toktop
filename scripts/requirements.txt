@@ -8,6 +8,7 @@
 # pin only; hashing one wheel would refuse every other OS/arch/CPython.
 pyte==0.8.2 \
     --hash=sha256:85db42a35798a5aafa96ac4d8da78b090b2c933248819157fc0e6f78876a0135
-wcwidth==0.8.2 \
-    --hash=sha256:d63947694a0539a1d51e01eda7caf800c291020e6cdd7e28ad7b14dd33ad4f85
+wcwidth==0.8.3 \
+    --hash=sha256:d128512515fbf4612e0ff21fd6380399210318b7b54a9af59dff8454cf9730eb \
+    --hash=sha256:d5b73dba6158a595ec9370350e7f2637bcac8d6c5e4fde34f30fcffb6103a5e4
 pillow==12.3.0
