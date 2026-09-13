@@ -735,10 +735,18 @@ func TestShortDirHidesHomeForAPathNotOnDisk(t *testing.T) {
 	}
 }
 
+func loadDefs() error {
+	path := agentusage.DefinitionsPath()
+	if path == "" {
+		return nil
+	}
+	return agentusage.LoadDefinitions(path)
+}
+
 func TestLoadDefinitions(t *testing.T) {
 	t.Run("missing file is success", func(t *testing.T) {
 		t.Setenv("GAUNTLET_HOME", t.TempDir())
-		if err := LoadDefinitions(); err != nil {
+		if err := loadDefs(); err != nil {
 			t.Fatalf("LoadDefinitions() = %v, want nil", err)
 		}
 	})
@@ -748,7 +756,7 @@ func TestLoadDefinitions(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("GAUNTLET_HOME", dir)
-		err := LoadDefinitions()
+		err := loadDefs()
 		if err == nil {
 			t.Fatal("LoadDefinitions() = nil, want error")
 		}
@@ -763,7 +771,7 @@ func TestLoadDefinitions(t *testing.T) {
 			t.Fatal(err)
 		}
 		t.Setenv("GAUNTLET_HOME", dir)
-		if err := LoadDefinitions(); err != nil {
+		if err := loadDefs(); err != nil {
 			t.Fatalf("LoadDefinitions() = %v, want nil", err)
 		}
 		if !slices.Contains(agentusage.Agents(), "deftest-agentwatch") {

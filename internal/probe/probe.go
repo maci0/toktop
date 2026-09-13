@@ -17,7 +17,6 @@ import (
 
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/core"
-	"github.com/maci0/toktop/internal/httperr"
 )
 
 var client = &http.Client{Timeout: 30 * time.Second}
@@ -161,7 +160,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		// Ollama streams failures as {"error":…} lines with HTTP 200; decoding
 		// them as content would report a green probe with invented throughput.
 		if chunk.Error != "" {
-			return 0, 0, ttft, fmt.Errorf("engine error: %s", httperr.Snippet([]byte(chunk.Error)))
+			return 0, 0, ttft, fmt.Errorf("engine error: %s", core.Snippet([]byte(chunk.Error)))
 		}
 		// Non-stream Ollama answers in one object with both response and
 		// done=true; counting only !Done frames treated that as empty.
@@ -316,7 +315,7 @@ func streamReadErr(ctx context.Context, err error, tokens int) error {
 // sseErrorMessage extracts an engine-reported failure from a streaming data
 // payload. Gateways disagree on the shape: {"error":{"message":…}},
 // {"error":"…"}, or other junk; null and absent mean no error. Unrecognized
-// junk is capped by httperr.Snippet; a recognized message passes through as
+// junk is capped by core.Snippet; a recognized message passes through as
 // sent, clipped to the readout's line width at render time.
 func sseErrorMessage(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
@@ -332,7 +331,7 @@ func sseErrorMessage(raw json.RawMessage) string {
 	if json.Unmarshal(raw, &s) == nil && s != "" {
 		return s
 	}
-	return httperr.Snippet(raw)
+	return core.Snippet(raw)
 }
 
 func postJSON(ctx context.Context, url string, body []byte) (*http.Response, error) {
@@ -351,7 +350,12 @@ func postJSON(ctx context.Context, url string, body []byte) (*http.Response, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		se := &httpStatusError{status: resp.StatusCode, err: httperr.Status(url, resp)}
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
+		msg := fmt.Sprintf("%s: http %s", url, resp.Status)
+		if s := core.Snippet(b); s != "" {
+			msg += ": " + s
+		}
+		se := &httpStatusError{status: resp.StatusCode, err: errors.New(msg)}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			se.after = parseRetryAfter(resp)
 		}

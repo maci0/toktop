@@ -10,10 +10,20 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
-## [0.8.0] - 2026-09-02
+## [0.9.0] - 2026-09-13
 
 Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
-[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.8.0).
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.9.0).
+
+### Changed
+
+- Ingest `ts` is RFC 3339 with an offset (`2026-01-02T03:04:05Z`). Naive
+  stamps, colon-less offsets, SQL-style spaces, and Unix epoch numbers
+  now 400. Harnesses you own can send RFC 3339.
+- Ingest dropped `GET /v1/events`. The schema lives in the README; the
+  live endpoints are `POST /v1/events` and `GET /healthz`.
+
+## [0.8.0] - 2026-09-02
 
 ### Added
 
@@ -279,7 +289,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/maci0/toktop/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/maci0/toktop/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/maci0/toktop/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/maci0/toktop/compare/v0.6.0...v0.6.1

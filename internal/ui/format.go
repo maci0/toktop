@@ -16,10 +16,6 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// Shared formatting and small layout helpers used by the renderers in
-// ui.go: number/duration/byte formatting plus visible-width text cutting.
-// Rendering primitives live in spark.go, styles in theme.go.
-
 func norm(v, maxV float64) float64 {
 	if maxV <= 0 {
 		return 0

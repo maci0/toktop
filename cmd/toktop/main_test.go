@@ -782,19 +782,19 @@ func TestInterpretArgs(t *testing.T) {
 	}
 }
 
-func TestFlagAddListRejectsEmpty(t *testing.T) {
-	var a flagAddList
-	if err := a.Set(""); err == nil {
+func TestFlagAddRejectsEmpty(t *testing.T) {
+	var adds []string
+	if err := parseAdd("", &adds); err == nil {
 		t.Fatal("empty --add must be rejected")
 	}
-	if err := a.Set("   "); err == nil {
+	if err := parseAdd("   ", &adds); err == nil {
 		t.Fatal("whitespace --add must be rejected")
 	}
-	if err := a.Set("http://127.0.0.1:8000"); err != nil {
+	if err := parseAdd("http://127.0.0.1:8000", &adds); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.String(); got != "http://127.0.0.1:8000" {
-		t.Fatalf("String() = %q", got)
+	if got := strings.Join(adds, ","); got != "http://127.0.0.1:8000" {
+		t.Fatalf("adds = %q", got)
 	}
 }
 
@@ -824,15 +824,15 @@ func TestValidateAddURL(t *testing.T) {
 			t.Errorf("validateAddURL(%q) = %v, want error mentioning %q", tt.raw, err, tt.wantErr)
 		}
 	}
-	var a flagAddList
-	if err := a.Set("not-a-url"); err == nil {
+	var adds []string
+	if err := parseAdd("not-a-url", &adds); err == nil {
 		t.Fatal("scheme-less --add must be rejected")
 	}
-	if err := a.Set("  https://10.0.0.5:8000  "); err != nil {
+	if err := parseAdd("  https://10.0.0.5:8000  ", &adds); err != nil {
 		t.Fatal(err)
 	}
-	if got := a.String(); got != "https://10.0.0.5:8000" {
-		t.Fatalf("trimmed Set stored %q", got)
+	if got := strings.Join(adds, ","); got != "https://10.0.0.5:8000" {
+		t.Fatalf("trimmed --add stored %q", got)
 	}
 }
 

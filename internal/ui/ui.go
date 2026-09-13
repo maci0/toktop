@@ -16,19 +16,13 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// Prober fires generation probes on demand. Live backends run a real
-// streaming generation; demo mode synthesizes the sample.
-type Prober interface {
-	ProbeAll()
-}
-
 // Config wires the dashboard to its data source.
 type Config struct {
 	Version    string
 	Demo       bool
 	IngestAddr string
 	PollEvery  time.Duration // sampling cadence; anchors the chart timescale
-	Prober     Prober        // nil disables manual probing
+	Prober     func()        // nil disables manual probing
 	// Agents reports that local agent watching (--agents) is on: only then
 	// may empty-feed guidance promise that running agents are picked up.
 	Agents bool
@@ -178,7 +172,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// No engines: ProbeAll is a silent no-op and the PROBES panel
 			// (where "probing…" lives) is absent. Skip rather than look dead.
 			if m.cfg.Prober != nil && len(m.snap.Providers) > 0 {
-				go m.cfg.Prober.ProbeAll()
+				go m.cfg.Prober()
 				m.probeReq = m.clock
 			}
 			return m, nil

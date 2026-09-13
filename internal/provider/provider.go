@@ -8,6 +8,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -21,7 +22,6 @@ import (
 
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/core"
-	"github.com/maci0/toktop/internal/httperr"
 )
 
 // PollTimeout bounds a single metrics scrape.
@@ -44,19 +44,23 @@ type Metrics struct {
 }
 
 // Provider is one inference backend the collector can poll.
-type Provider interface {
-	Label() string
-	Addr() string
-	Kind() string
-	Poll(ctx context.Context) (*Metrics, error)
+type Provider struct {
+	Label string
+	Addr  string
+	Kind  string
+	Poll  func(ctx context.Context) (*Metrics, error)
 }
 
-var (
-	_ Provider = (*Ollama)(nil)
-	_ Provider = (*OpenAICompat)(nil)
-)
-
 var httpClient = &http.Client{Timeout: PollTimeout}
+
+func httpStatus(url string, resp *http.Response) error {
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
+	msg := fmt.Sprintf("%s: http %s", url, resp.Status)
+	if s := core.Snippet(b); s != "" {
+		msg += ": " + s
+	}
+	return errors.New(msg)
+}
 
 func getJSON(ctx context.Context, url string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -73,7 +77,7 @@ func getJSON(ctx context.Context, url string, out any) error {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return httperr.Status(url, resp)
+		return httpStatus(url, resp)
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out); err != nil {
 		return fmt.Errorf("%s: %w", url, err)
@@ -98,7 +102,7 @@ func getText(ctx context.Context, c *http.Client, url string) (string, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", httperr.Status(url, resp)
+		return "", httpStatus(url, resp)
 	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {

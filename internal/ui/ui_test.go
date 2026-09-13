@@ -13,10 +13,6 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-type proberFunc func()
-
-func (f proberFunc) ProbeAll() { f() }
-
 func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case " ":
@@ -33,7 +29,7 @@ func keyMsg(s string) tea.KeyMsg {
 // probes, t flips the timescale, and a paused frame must advertise itself.
 func TestUpdateKeyMap(t *testing.T) {
 	var probes atomic.Int32
-	m := New(Config{Version: "t", Prober: proberFunc(func() { probes.Add(1) })}, nil)
+	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
 	key := func(s string) tea.Cmd {
 		nm, cmd := m.Update(keyMsg(s))
 		m = nm.(Model)
@@ -129,7 +125,7 @@ func TestUpdateKeyMap(t *testing.T) {
 // feedback until the overlay is dismissed.
 func TestHelpOverlayMutesActionKeys(t *testing.T) {
 	var probes atomic.Int32
-	m := New(Config{Version: "t", Prober: proberFunc(func() { probes.Add(1) })}, nil)
+	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
 	key := func(s string) tea.Cmd {
 		nm, cmd := m.Update(keyMsg(s))
 		m = nm.(Model)
@@ -943,7 +939,7 @@ func TestFitSegmentsShedsByPriority(t *testing.T) {
 // Pressing p fires generations that take seconds: the keypress must be
 // acknowledged immediately, then hand over once a result lands.
 func TestProbePressAcknowledgesUntilResult(t *testing.T) {
-	m := New(Config{Version: "t", Prober: proberFunc(func() {})}, nil)
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
 	nm, _ := m.Update(snapMsg(core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}))
 	m = nm.(Model)
 	m.w, m.h, m.ready, m.clock = 110, 36, true, time.Now()
@@ -1308,7 +1304,7 @@ func TestEnginesPanelMarksDownEnginesWithoutColor(t *testing.T) {
 // A failed probe must say so and keep the reason: the same row used to
 // print 0.0/s in the success shape, which hid the failure.
 func TestFailedProbeShowsError(t *testing.T) {
-	m := New(Config{Version: "t", Prober: proberFunc(func() {})}, nil)
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
 	nm, _ := m.Update(snapMsg(core.Snapshot{
 		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
 		Probes:    []core.ProbeSample{{At: time.Now(), Model: "gone", OK: false, Err: "timeout"}},
@@ -1358,11 +1354,11 @@ func TestProbeEmptyHintsRerunForAuto(t *testing.T) {
 // p and t only have a visible effect with engines (or agents, for t). The
 // compact strip already hides them; the full footer must match.
 func TestFooterOmitsDeadKeys(t *testing.T) {
-	empty := New(Config{Version: "t", Prober: proberFunc(func() {})}, nil)
+	empty := New(Config{Version: "t", Prober: func() {}}, nil)
 	if got := strip(empty.renderFooter()); strings.Contains(got, "probe") || strings.Contains(got, "timescale") {
 		t.Errorf("empty footer advertised keys with no effect: %q", got)
 	}
-	agents := New(Config{Version: "t", Prober: proberFunc(func() {})}, nil)
+	agents := New(Config{Version: "t", Prober: func() {}}, nil)
 	agents.snap = core.Snapshot{Agents: []core.AgentEvent{{Agent: "claude"}}}
 	got := strip(agents.renderFooter())
 	if strings.Contains(got, "probe") {
@@ -1371,7 +1367,7 @@ func TestFooterOmitsDeadKeys(t *testing.T) {
 	if !strings.Contains(got, "timescale") {
 		t.Errorf("agents-only footer lost t: %q", got)
 	}
-	full := New(Config{Version: "t", Prober: proberFunc(func() {})}, nil)
+	full := New(Config{Version: "t", Prober: func() {}}, nil)
 	full.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "x", OK: true}}}
 	got = strip(full.renderFooter())
 	if !strings.Contains(got, "probe") || !strings.Contains(got, "timescale") {
@@ -1397,7 +1393,7 @@ func TestHeaderSessionMatchesPlain(t *testing.T) {
 
 func TestProbeKeyNoopsWithoutEngines(t *testing.T) {
 	var probes atomic.Int32
-	m := New(Config{Version: "t", Prober: proberFunc(func() { probes.Add(1) })}, nil)
+	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
 	nm, _ := m.Update(keyMsg("p"))
 	m = nm.(Model)
 	time.Sleep(20 * time.Millisecond)

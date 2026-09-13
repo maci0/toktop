@@ -190,7 +190,6 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 | endpoint | purpose |
 |---|---|
 | `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
-| `GET /v1/events` | schema hint for humans (POST one object or NDJSON) |
 | `GET /healthz` | liveness probe, answers `ok` |
 
 Event fields are all optional; anything omitted gets the default:
@@ -198,7 +197,7 @@ Event fields are all optional; anything omitted gets the default:
 | field | type | default | notes |
 |---|---|---|---|
 | `id` | string | - | caller-chosen key, capped at 128 characters; a repeat of a key still in the retained feed (last 512 events) is ignored. When omitted, a request `Idempotency-Key` header is used (`key:1`, `key:2`, and so on per line in the POST) |
-| `ts` | RFC 3339 string or Unix epoch number | arrival instant | offset-less stamps decode as UTC; a space instead of `T` is accepted, as is a colon-less numeric offset (`-0700`); a Unix epoch number (seconds / ms / µs / ns by magnitude, including `time.time()` and `Date.now()`) is accepted; stamps more than two minutes ahead of arrival are clamped to the arrival instant |
+| `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); stamps more than two minutes ahead of arrival are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
 | `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`; custom kinds pass through lowercased, capped at 24 characters |
@@ -212,7 +211,7 @@ stalls mid-body, and `413` past the 1 MiB body cap. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
 refused with `403`, so a web page cannot forge rows into a running
 dashboard. Wrong methods on these paths answer `405` with `Allow`.
-Unknown paths answer `404` naming the three endpoints, so a POST to `/events`
+Unknown paths answer `404` naming the two endpoints, so a POST to `/events`
 is not a generic not-found page. Error bodies are short plain-text reasons
 that name the field or expected shape; unknown fields are ignored, so
 harnesses can include their own. The request `Content-Type` header is not
@@ -221,8 +220,8 @@ unmodified.
 Every POST is logged to stderr as one structured line (`req`, `method`,
 `path`, `status`, `accepted`, `duration`, `remote`; failures add `error`).
 Wrong-method and unknown-path requests log the same way, so a harness
-posting to `/events` is not silent. `GET /healthz` and `GET /v1/events`
-are not logged. Event bodies are not logged. A handler panic is one ERROR
+posting to `/events` is not silent. `GET /healthz` is not logged. Event
+bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. Responses carry `X-Request-Id`,
 echoed from the request when the sender set one.
 

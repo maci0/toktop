@@ -93,6 +93,11 @@ const (
 	AgentKindNote  = "note"
 )
 
+// AgentRecorder is the sink for agent events (ingest HTTP and --agents).
+type AgentRecorder interface {
+	RecordAgent(ev AgentEvent)
+}
+
 // AgentEvent is a token-usage event pushed by an agent or harness. The HTTP
 // wire shape is defined separately by ingest's agentEventWire.
 type AgentEvent struct {

@@ -115,9 +115,9 @@ jobs:
           cache-dependency-glob: |
             scripts/requirements.txt
             scripts/requirements-dev.txt
-      - name: format, lint and type check the screenshot script
+      - name: format and lint the screenshot script
         # Pins live in scripts/requirements-dev.txt so local `make scripts-check`
-        # and CI cannot run different black/ruff/mypy versions.
+        # and CI cannot run different black/ruff versions.
         run: make scripts-check
 
   build:

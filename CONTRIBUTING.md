@@ -15,9 +15,9 @@
   nothing else.
 - `bun` at the version in `.bun-version` for `make site-check`. The target
   refuses a different version on PATH, matching CI's `bun-version-file`.
-- `uv` >= 0.12.6 for `make scripts-check` (CI installs 0.12.6; tool pins
-  in `scripts/requirements-dev.txt`). The target names a too-old uv rather
-  than failing on an unknown flag.
+- `uv` >= 0.12.6 for `make scripts-check` (CI installs 0.12.6; black/ruff
+  pins in `scripts/requirements-dev.txt`). The target names a too-old uv
+  rather than failing on an unknown flag.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
 
@@ -123,7 +123,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
 | `make govulncheck` | `govulncheck` at the Makefile pin (same pin as CI) |
-| `make scripts-check` | black, ruff and mypy over `scripts/` (same pins as CI) |
+| `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
 | `make site-check` | `bun test site/` |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 
@@ -148,12 +148,12 @@ make pr
 That is `make ci` (gofmt, tidy, staticcheck, vet, govulncheck, race tests for
 both sqlite tag halves), `make site-check` (`bun test site/`), and
 `make scripts-check`. `scripts-check` installs the exact versions in
-`scripts/requirements-dev.txt` into an isolated env (black, ruff, mypy, plus
-the renderer deps and their transitives). Pure-Python pins carry a wheel
-sha256; bumping one of those lines means updating the hash too. Do not run
-unpinned `uvx black` / `uvx ruff` / `uvx mypy`: those resolve to whatever
-PyPI returns today. Platform-specific files also
-need `make vet-cross` (the same gate `release.yml` runs before shipping).
+`scripts/requirements-dev.txt` into an isolated env (black, ruff, plus the
+renderer deps). Pure-Python pins carry a wheel sha256; bumping one of those
+lines means updating the hash too. Do not run unpinned `uvx black` /
+`uvx ruff`: those resolve to whatever PyPI returns today. Platform-specific
+files also need `make vet-cross` (the same gate `release.yml` runs before
+shipping).
 
 Keep platform-specific code behind build tags or runtime checks; the
 cross-compile job catches code that only builds, or only vets and lints

@@ -19,15 +19,12 @@ type OpenAICompat struct {
 	version versionCache
 }
 
-func NewOpenAICompat(base, label, kind string) *OpenAICompat {
-	return &OpenAICompat{base: strings.TrimRight(base, "/"), label: label, kind: kind}
+func NewOpenAICompat(base, label, kind string) Provider {
+	o := &OpenAICompat{base: strings.TrimRight(base, "/"), label: label, kind: kind}
+	return Provider{Label: o.label, Addr: o.base, Kind: o.kind, Poll: o.poll}
 }
 
-func (o *OpenAICompat) Label() string { return o.label }
-func (o *OpenAICompat) Addr() string  { return o.base }
-func (o *OpenAICompat) Kind() string  { return o.kind }
-
-func (o *OpenAICompat) Poll(ctx context.Context) (*Metrics, error) {
+func (o *OpenAICompat) poll(ctx context.Context) (*Metrics, error) {
 	m := &Metrics{}
 	var lm struct {
 		Data []struct {

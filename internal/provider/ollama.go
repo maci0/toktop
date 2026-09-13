@@ -15,15 +15,12 @@ type Ollama struct {
 	version versionCache
 }
 
-func NewOllama(base string) *Ollama {
-	return &Ollama{base: strings.TrimRight(base, "/")}
+func NewOllama(base string) Provider {
+	o := &Ollama{base: strings.TrimRight(base, "/")}
+	return Provider{Label: "ollama", Addr: o.base, Kind: core.KindOllama, Poll: o.poll}
 }
 
-func (o *Ollama) Label() string { return "ollama" }
-func (o *Ollama) Addr() string  { return o.base }
-func (o *Ollama) Kind() string  { return core.KindOllama }
-
-func (o *Ollama) Poll(ctx context.Context) (*Metrics, error) {
+func (o *Ollama) poll(ctx context.Context) (*Metrics, error) {
 	m := &Metrics{}
 	var ps struct {
 		Models []struct {

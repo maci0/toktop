@@ -26,6 +26,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"golang.org/x/term"
 
+	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/agentwatch"
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/collector"
@@ -74,7 +75,7 @@ func resolveVersion(stamped, moduleVersion string) string {
 // flag.Parse so `toktop help` can PrintDefaults the same way `--help` does.
 type cliFlags struct {
 	demo      bool
-	adds      flagAddList
+	adds      []string
 	probeSecs int
 	interval  time.Duration
 	ingest    string
@@ -116,7 +117,9 @@ func registerFlags() *cliFlags {
 		flag.BoolVar(&cli.showVer, "version", false, "print version and exit")
 		flag.BoolVar(&cli.showHelp, "help", false, "show help and exit")
 		flag.BoolVar(&cli.showHelp, "h", false, "show help and exit")
-		flag.Var(&cli.adds, "add", "attach an openai-compatible backend http(s) URL (repeatable)")
+		flag.Func("add", "attach an openai-compatible backend http(s) URL (repeatable)", func(v string) error {
+			return parseAdd(v, &cli.adds)
+		})
 		// Error paths (unknown flag, bad value) print this usage on stderr and
 		// exit 2; -h/--help is handled below so it lands on stdout with exit 0.
 		flag.Usage = func() { usage(os.Stderr) }
@@ -231,12 +234,12 @@ func main() {
 	defer stop()
 
 	ch := make(chan core.Snapshot, 8)
-	var prober ui.Prober
+	var prober func()
 	feedErr := make(chan string, 1) // carries the ingest endpoint's death to the UI
 
 	// The agent event endpoint runs in every mode so harnesses can always
 	// feed the dashboard.
-	var recorder ingest.Recorder
+	var recorder core.AgentRecorder
 	// Endpoints toktop is already measuring. An agent generating through one
 	// of them has its tokens reported by the engine, which sees every client;
 	// counting the agent as well would double the total.
@@ -248,7 +251,7 @@ func main() {
 	case f.demo:
 		demoSrc = demo.NewSource(f.interval, f.seed)
 		go demoSrc.Run(ctx, ch)
-		prober = demoSrc
+		prober = demoSrc.ProbeAll
 		recorder = demoSrc
 
 	default:
@@ -258,7 +261,7 @@ func main() {
 			// probes every well-known port on spec, and whatever answers there
 			// must not be able to harvest the credential.
 			bearer.Allow(raw)
-			if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p != nil {
+			if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p.Poll != nil {
 				providers = append(providers, p)
 			} else {
 				fmt.Fprintf(os.Stderr, "toktop: nothing recognized at %s; polling as generic openai anyway\n", raw)
@@ -302,7 +305,7 @@ func main() {
 		engineAddrs = func() []string {
 			out := make([]string, 0, len(providers))
 			for _, p := range providers {
-				out = append(out, p.Addr())
+				out = append(out, p.Addr)
 			}
 			return out
 		}
@@ -312,7 +315,7 @@ func main() {
 			col.SetSysFn(sysWrap)
 		}
 		go col.Run(ctx, ch)
-		prober = col
+		prober = col.ProbeAll
 		recorder = col
 	}
 
@@ -321,13 +324,13 @@ func main() {
 		go func() {
 			t := time.NewTicker(d)
 			defer t.Stop()
-			prober.ProbeAll()
+			prober()
 			for {
 				select {
 				case <-ctx.Done():
 					return
 				case <-t.C:
-					prober.ProbeAll()
+					prober()
 				}
 			}
 		}()
@@ -344,7 +347,7 @@ func main() {
 	if f.agents {
 		loadAgentDefs()
 	}
-	if f.agents && f.opencode && !agentwatch.EnableOpenCodeDB(true) {
+	if f.agents && f.opencode && !agentusage.EnableOpenCodeDB(true) {
 		// Silence here would look like an agent that generates nothing.
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
 	}
@@ -542,10 +545,7 @@ func runOnce(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, n int,
 	fmt.Println(ui.StaticFrame(cfg, snap, w, h))
 }
 
-type flagAddList []string
-
-func (a *flagAddList) String() string { return strings.Join(*a, ",") }
-func (a *flagAddList) Set(v string) error {
+func parseAdd(v string, dst *[]string) error {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return errors.New("empty URL")
@@ -553,7 +553,7 @@ func (a *flagAddList) Set(v string) error {
 	if err := validateAddURL(v); err != nil {
 		return err
 	}
-	*a = append(*a, v)
+	*dst = append(*dst, v)
 	return nil
 }
 
@@ -1011,7 +1011,11 @@ func warnUnknownEnv() {
 // case; a malformed one is reported instead of swallowed, because agents
 // silently missing from the watch look exactly like agents doing nothing.
 func loadAgentDefs() {
-	if err := agentwatch.LoadDefinitions(); err != nil {
+	path := agentusage.DefinitionsPath()
+	if path == "" {
+		return
+	}
+	if err := agentusage.LoadDefinitions(path); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v; watching only the built-in agents\n", err)
 	}
 }

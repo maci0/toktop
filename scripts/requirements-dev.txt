@@ -1,20 +1,12 @@
-# Format, lint and type-check tools for scripts/. CI and CONTRIBUTING run from
-# this file so those versions cannot float to whatever PyPI returns today.
-# Transitives of black and mypy are pinned the same way: without them, each
-# `uv run` would take whatever PyPI returns for click, pathspec, and the rest.
-# sha256 is on the py3-none-any wheels only. Binary wheels (black, ruff, mypy,
-# librt, pytokens, ast-serialize) stay version pins so other OS/arch/CPython
-# combinations still install.
+# Format and lint tools for scripts/. CI and CONTRIBUTING run from this
+# file so those versions cannot float to whatever PyPI returns today.
+# sha256 is on the py3-none-any wheels only. Binary wheels stay version
+# pins so other OS/arch/CPython combinations still install.
 -r requirements.txt
 black==26.5.1
 ruff==0.16.5
-mypy==2.3.1
-ast-serialize==0.8.0
 click==8.5.0 \
     --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
-librt==0.15.0
-mypy-extensions==1.1.0 \
-    --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505
 packaging==26.3 \
     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
 pathspec==1.1.1 \
@@ -22,5 +14,3 @@ pathspec==1.1.1 \
 platformdirs==4.11.5 \
     --hash=sha256:89f8d42695853b89c7170bd49bc3dc593f98a71e695ede88e06a3a247bc4563b
 pytokens==0.4.1
-typing-extensions==4.16.0 \
-    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

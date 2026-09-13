@@ -244,11 +244,11 @@ func TestAttachIdentifiesOrRefuses(t *testing.T) {
 	engine, plain := sglangAndPlainURLs(t)
 
 	p := Attach(context.Background(), engine)
-	if p == nil || p.Addr() != engine || p.Label() != core.KindSGLang {
-		t.Fatalf("Attach = %v, want sglang provider at %s", p, engine)
+	if p.Poll == nil || p.Addr != engine || p.Label != core.KindSGLang {
+		t.Fatalf("Attach = %+v, want sglang provider at %s", p, engine)
 	}
-	if p := Attach(context.Background(), plain); p != nil {
-		t.Fatalf("unidentifiable server must not attach, got %v", p)
+	if p := Attach(context.Background(), plain); p.Poll != nil {
+		t.Fatalf("unidentifiable server must not attach, got %+v", p)
 	}
 }
 
@@ -262,8 +262,8 @@ func TestDiscoverBasesParallelKeepsOrder(t *testing.T) {
 		t.Fatalf("providers = %d, want 1", len(found))
 	}
 	// newProvider labels non-ollama engines with their kind
-	if found[0].Addr() != engine || found[0].Label() != core.KindSGLang {
+	if found[0].Addr != engine || found[0].Label != core.KindSGLang {
 		t.Fatalf("got %s (%s), want engine %s as %s",
-			found[0].Addr(), found[0].Label(), engine, core.KindSGLang)
+			found[0].Addr, found[0].Label, engine, core.KindSGLang)
 	}
 }

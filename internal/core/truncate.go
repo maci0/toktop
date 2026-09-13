@@ -54,3 +54,16 @@ func ClampField(s string, n int) string {
 	}
 	return TruncateClusters(s, n)
 }
+
+// SnippetCap bounds how much of an error response body is quoted into
+// failure messages.
+const SnippetCap = 256
+
+// Snippet collapses raw bytes to at most SnippetCap characters (grapheme
+// clusters) on one line, cutting between characters so a trailing emoji or
+// accented letter from an engine's body is never sliced in half.
+func Snippet(b []byte) string {
+	s := strings.Join(strings.Fields(string(b)), " ")
+	s = SanitizeText(s)
+	return TruncateClusters(s, SnippetCap)
+}

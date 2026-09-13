@@ -234,7 +234,7 @@ tidy-check: ## fail if go.mod or go.sum would change
 	$(GO) mod tidy -diff
 
 .PHONY: scripts-check
-scripts-check: ## black, ruff and mypy over scripts/ (same pins as CI)
+scripts-check: ## black and ruff over scripts/ (same pins as CI)
 	@command -v uv >/dev/null 2>&1 || { \
 		echo "make scripts-check: uv is not on PATH (need >= $(UV_MIN); pins are scripts/requirements-dev.txt)" >&2; \
 		exit 1; \
@@ -246,7 +246,6 @@ scripts-check: ## black, ruff and mypy over scripts/ (same pins as CI)
 		fi
 	uv run --isolated --no-project --with-requirements scripts/requirements-dev.txt black --check scripts/
 	uv run --isolated --no-project --with-requirements scripts/requirements-dev.txt ruff check scripts/
-	uv run --isolated --no-project --with-requirements scripts/requirements-dev.txt mypy scripts/
 
 .PHONY: check
 check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)

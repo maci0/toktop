@@ -152,7 +152,7 @@ func Attach(ctx context.Context, base string) Provider {
 	if kind := identify(ctx, base); kind != "" {
 		return newProvider(kind, base)
 	}
-	return nil
+	return Provider{}
 }
 
 func newProvider(kind, base string) Provider {

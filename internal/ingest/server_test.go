@@ -49,7 +49,7 @@ func postBody(t *testing.T, url, body string) (int, string) {
 
 // startIngest serves on an ephemeral port backed by rec and closes it at
 // cleanup.
-func startIngest(t *testing.T, rec Recorder) *Server {
+func startIngest(t *testing.T, rec core.AgentRecorder) *Server {
 	t.Helper()
 	return startIngestLog(t, rec, slog.New(slog.DiscardHandler))
 }
@@ -260,128 +260,8 @@ func TestIngestForwardsViaEngine(t *testing.T) {
 	}
 }
 
-// Offset-less RFC 3339 stamps (Python datetime.isoformat() without tzinfo,
-// hand-rolled harnesses) decode as UTC: encoding/json alone would reject
-// them and drop every event queued behind the bad one in the same batch.
-// Offset-aware stamps keep their zone; all forms must land on the instant.
-func TestIngestAcceptsNaiveTimestampsAsUTC(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
-
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		`{"agent":"py","ts":"2026-01-02T03:04:05"}`+"\n"+
-			`{"agent":"py","ts":"2026-01-02T03:04:05.123456"}`+"\n"+
-			`{"agent":"rfc","ts":"2026-01-02T05:04:05+02:00"}`+"\n")
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 3)
-	want := time.Date(2026, 1, 2, 3, 4, 5, 123456000, time.UTC)
-	if got := rec.evs[0].At; !got.Equal(want.Truncate(time.Second)) || got.Location() != time.UTC {
-		t.Errorf("naive stamp = %v (%v), want 03:04:05 UTC", got, got.Location())
-	}
-	if got := rec.evs[1].At; !got.Equal(want) {
-		t.Errorf("naive fractional stamp = %v, want %v", got, want)
-	}
-	if got := rec.evs[2].At; !got.Equal(want.Truncate(time.Second)) {
-		t.Errorf("+02:00 stamp = %v, want same instant as %v", got, want)
-	}
-}
-
-// Colon-less numeric offsets (`date '+%Y-%m-%dT%H:%M:%S%z'` -> -0700) are
-// ISO 8601 but not RFC 3339. They used to fail every accepted layout and
-// abort the NDJSON batch with 400, dropping every event queued behind the
-// first one. They must land on the same instant as the colon form.
-func TestIngestAcceptsColonlessNumericOffsets(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
-
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		`{"agent":"date","ts":"2026-01-02T03:04:05-0700"}`+"\n"+
-			`{"agent":"date","ts":"2026-01-02 03:04:05-0700"}`+"\n"+
-			`{"agent":"rfc","ts":"2026-01-02T03:04:05-07:00"}`)
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 3)
-	want := time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("", -7*3600))
-	for i, ev := range rec.evs {
-		if !ev.At.Equal(want) {
-			t.Errorf("event %d At = %v, want same instant as %v", i, ev.At, want)
-		}
-	}
-}
-
-// SQL-style stamps separate date and time with a space (`date '+%F %T'`,
-// SQLite and Postgres text output). One of them used to fail both accepted
-// shapes and abort the whole NDJSON batch with 400, dropping every event
-// queued behind it; they must parse on the same terms as T-separated ones:
-// an offset is honored, its absence decodes as UTC.
-func TestIngestAcceptsSpaceSeparatedTimestamps(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
-
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		`{"agent":"sql","ts":"2026-01-02 03:04:05"}`+"\n"+
-			`{"agent":"sql","ts":"2026-01-02 03:04:05.25"}`+"\n"+
-			`{"agent":"pg","ts":"2026-01-02 05:04:05+02:00"}`)
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 3)
-	want := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
-	if got := rec.evs[0].At; !got.Equal(want) || got.Location() != time.UTC {
-		t.Errorf("space-separated naive stamp = %v (%v), want 03:04:05 UTC", got, got.Location())
-	}
-	if got := rec.evs[1].At; !got.Equal(want.Add(250 * time.Millisecond)) {
-		t.Errorf("fractional stamp = %v, want %v", got, want.Add(250*time.Millisecond))
-	}
-	if got := rec.evs[2].At; !got.Equal(want) {
-		t.Errorf("+02:00 space-separated stamp = %v, want same instant as %v", got, want)
-	}
-}
-
-// Unix epoch numbers (Python time.time(), JS Date.now()) used to fail every
-// RFC 3339 layout and abort the NDJSON batch with 400. Magnitude selects
-// the unit; a small integer stays a type error so ts:123 is not 1970.
-func TestIngestAcceptsUnixEpochTimestamps(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
-
-	want := time.Unix(1_700_000_000, 0).UTC()
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		`{"agent":"py","ts":1700000000}`+"\n"+
-			`{"agent":"py","ts":1700000000.5}`+"\n"+
-			`{"agent":"js","ts":1700000000000}`+"\n"+
-			`{"agent":"str","ts":"1700000000"}`+"\n"+
-			`{"agent":"us","ts":1700000000000000}`+"\n"+
-			`{"agent":"ns","ts":1700000000000000000}`)
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 6)
-	if got := rec.evs[0].At; !got.Equal(want) {
-		t.Errorf("seconds stamp = %v, want %v", got, want)
-	}
-	if got := rec.evs[1].At; !got.Equal(want.Add(500 * time.Millisecond)) {
-		t.Errorf("fractional seconds = %v, want %v", got, want.Add(500*time.Millisecond))
-	}
-	if got := rec.evs[2].At; !got.Equal(want) {
-		t.Errorf("millis stamp = %v, want %v", got, want)
-	}
-	if got := rec.evs[3].At; !got.Equal(want) {
-		t.Errorf("numeric string = %v, want %v", got, want)
-	}
-	if got := rec.evs[4].At; !got.Equal(want) {
-		t.Errorf("micros stamp = %v, want %v", got, want)
-	}
-	if got := rec.evs[5].At; !got.Equal(want) {
-		t.Errorf("nanos stamp = %v, want %v", got, want)
-	}
-}
-
-// A ts that is neither RFC 3339 nor an offset-less variant stays a hard
-// error so sender bugs surface instead of silently becoming "now".
+// A ts that is not RFC 3339 stays a hard error so sender bugs surface
+// instead of silently becoming "now".
 func TestIngestRejectsGarbageTimestamp(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
@@ -461,7 +341,7 @@ func TestIngestMethodNotAllowedSetsAllow(t *testing.T) {
 		method, path string
 		want         []string
 	}{
-		{http.MethodPut, "/v1/events", []string{http.MethodGet, http.MethodHead, http.MethodPost}},
+		{http.MethodPut, "/v1/events", []string{http.MethodPost}},
 		{http.MethodPost, "/healthz", []string{http.MethodGet, http.MethodHead}},
 	}
 	for _, tc := range cases {
@@ -749,35 +629,6 @@ func TestIngestAckContentType(t *testing.T) {
 	io.Copy(io.Discard, resp.Body)
 	if got := resp.Header.Get("Content-Type"); got != "application/json" {
 		t.Errorf("ack content-type = %q, want application/json", got)
-	}
-}
-
-// The GET hint is the schema documentation senders see first; it must list
-// every accepted field, including ts, and name NDJSON so a harness does not
-// have to fail a JSON array POST to learn the stream shape.
-func TestIngestHintListsAllFields(t *testing.T) {
-	s := startIngest(t, &memRecorder{})
-
-	resp, err := http.Get("http://" + s.Addr() + "/v1/events")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := resp.Header.Get("Content-Type"); got != "application/json" {
-		t.Errorf("hint content-type = %q, want application/json", got)
-	}
-	got := string(body)
-	if !strings.Contains(got, "NDJSON") {
-		t.Errorf("hint omits NDJSON stream shape: %s", got)
-	}
-	for _, field := range []string{"id", "ts", "agent", "kind", "model", "prompt_tokens", "output_tokens", "thinking_tokens", "via_engine", "note"} {
-		if !strings.Contains(got, field) {
-			t.Errorf("hint omits accepted field %s: %s", field, got)
-		}
 	}
 }
 
@@ -1152,7 +1003,7 @@ func captureLogger() (*slog.Logger, *bytes.Buffer) {
 	return lg, &buf
 }
 
-func startIngestLog(t *testing.T, rec Recorder, lg *slog.Logger) *Server {
+func startIngestLog(t *testing.T, rec core.AgentRecorder, lg *slog.Logger) *Server {
 	t.Helper()
 	s, err := newServer("127.0.0.1:0", rec, lg)
 	if err != nil {
@@ -1403,24 +1254,6 @@ func TestHealthzIsNotLogged(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("healthz must not log, got %q", buf.String())
-	}
-}
-
-func TestIngestGetHintIsNotLogged(t *testing.T) {
-	lg, buf := captureLogger()
-	s := startIngestLog(t, &memRecorder{}, lg)
-
-	resp, err := http.Get("http://" + s.Addr() + "/v1/events")
-	if err != nil {
-		t.Fatal(err)
-	}
-	io.Copy(io.Discard, resp.Body)
-	resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("GET /v1/events = %d", resp.StatusCode)
-	}
-	if buf.Len() != 0 {
-		t.Errorf("schema hint must not log, got %q", buf.String())
 	}
 }
 

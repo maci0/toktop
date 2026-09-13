@@ -35,12 +35,6 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// Recorder receives the events this watcher produces. It is satisfied by the
-// collector, the same as the HTTP ingest path.
-type Recorder interface {
-	RecordAgent(ev core.AgentEvent)
-}
-
 // Engines reports the endpoints toktop is already measuring, as the URLs the
 // providers advertise. An agent generating through one of those engines has
 // its tokens counted by the engine already. Events are still recorded so the
@@ -58,7 +52,7 @@ const (
 
 // Watcher follows the agent processes on this machine.
 type Watcher struct {
-	rec           Recorder
+	rec           core.AgentRecorder
 	engines       Engines
 	discoverEvery time.Duration
 	readEvery     time.Duration
@@ -86,7 +80,7 @@ type tracked struct {
 
 // New returns a watcher feeding rec. A nil engines function means nothing is
 // being measured elsewhere.
-func New(rec Recorder, engines Engines) *Watcher {
+func New(rec core.AgentRecorder, engines Engines) *Watcher {
 	return &Watcher{
 		rec: rec, engines: engines,
 		discoverEvery: defaultDiscoverEvery, readEvery: defaultReadEvery,
@@ -106,30 +100,7 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	w.now = fn
 }
 
-func (w *Watcher) instant() time.Time {
-	if w.now != nil {
-		return w.now()
-	}
-	return time.Now()
-}
-
-// LoadDefinitions reads ~/.gauntlet/agents.json (or $GAUNTLET_HOME/agents.json)
-// so Watch can follow agents that are not built in. A missing file is success.
-// Call it before Run: a malformed file must be reported where the operator
-// can see it, not swallowed inside a goroutine behind the alt screen.
-func LoadDefinitions() error {
-	path := agentusage.DefinitionsPath()
-	if path == "" {
-		return nil
-	}
-	return agentusage.LoadDefinitions(path)
-}
-
-// EnableOpenCodeDB opts into opencode's machine-wide SQLite session store.
-// False means this build was compiled without -tags sqlite.
-func EnableOpenCodeDB(on bool) bool {
-	return agentusage.EnableOpenCodeDB(on)
-}
+func (w *Watcher) instant() time.Time { return w.now() }
 
 // Run follows agents until the context is canceled. Call LoadDefinitions
 // before Run so a malformed definitions file is reported where the operator

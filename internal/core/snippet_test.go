@@ -1,8 +1,6 @@
-package httperr
+package core
 
 import (
-	"io"
-	"net/http"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -47,28 +45,6 @@ func TestSnippetKeepsCharactersWhole(t *testing.T) {
 	}
 	if indicators%2 != 0 {
 		t.Errorf("snippet holds a lone regional indicator (half a flag): %q", got)
-	}
-}
-
-func TestStatusCarriesStatusLineAndBodySnippet(t *testing.T) {
-	resp := &http.Response{
-		Status: "500 Internal Server Error",
-		Body:   io.NopCloser(strings.NewReader("CUDA out of memory\n")),
-	}
-	err := Status("http://x/metrics", resp)
-	if err == nil {
-		t.Fatal("Status = nil, want error")
-	}
-	msg := err.Error()
-	if !strings.Contains(msg, "http://x/metrics") ||
-		!strings.Contains(msg, "500 Internal Server Error") ||
-		!strings.Contains(msg, "CUDA out of memory") {
-		t.Errorf("error = %q, want url, status and body snippet", msg)
-	}
-
-	resp = &http.Response{Status: "503 Service Unavailable", Body: io.NopCloser(strings.NewReader(""))}
-	if msg := Status("http://x/health", resp).Error(); strings.HasSuffix(msg, ": ") || strings.Contains(msg, ": \n") {
-		t.Errorf("empty body produced dangling separator: %q", msg)
 	}
 }
 

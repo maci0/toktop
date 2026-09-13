@@ -98,12 +98,7 @@ func (c *Collector) SetNow(fn func() time.Time) {
 	c.started = fn()
 }
 
-func (c *Collector) instant() time.Time {
-	if c.now != nil {
-		return c.now()
-	}
-	return time.Now()
-}
+func (c *Collector) instant() time.Time { return c.now() }
 
 // procSampler is the shared engine-process sampler; nil-safe when the
 // platform has no process table access.
@@ -263,9 +258,9 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	for i, r := range results {
 		p := c.providers[i]
 		ps := core.ProviderSnapshot{
-			Label: p.Label(),
-			Kind:  p.Kind(),
-			Addr:  p.Addr(),
+			Label: p.Label,
+			Kind:  p.Kind,
+			Addr:  p.Addr,
 		}
 		// Per-provider state is keyed by endpoint, not display label (see
 		// providerKey): labels repeat across instances of the same engine
@@ -281,7 +276,7 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			ps.Running = r.m.Running
 			ps.Waiting = r.m.Waiting
 			ps.TTFTms = r.m.TTFTms
-			if port := urlPort(p.Addr()); port > 0 {
+			if port := urlPort(p.Addr); port > 0 {
 				if proc, ok := byPort[port]; ok {
 					ps.PID, ps.ProcRSS, ps.ProcCPU = proc.PID, proc.RSS, proc.CPUPct
 				}
@@ -505,10 +500,10 @@ func insertSorted[T any](s []T, cmp func(a, b T) int) []T {
 // the display label. Endpoints are unique per instance; labels repeat across
 // instances of the same engine kind.
 func providerKey(p provider.Provider) string {
-	if addr := p.Addr(); addr != "" {
+	if addr := p.Addr; addr != "" {
 		return addr
 	}
-	return p.Label()
+	return p.Label
 }
 
 // probeModelName picks the model a generation probe should hit.
@@ -556,7 +551,7 @@ func (c *Collector) ProbeAll() {
 	var targets []probe.Request
 	for _, p := range c.providers {
 		if model := c.lastModel[providerKey(p)]; model != "" {
-			targets = append(targets, probe.Request{Kind: p.Kind(), Base: p.Addr(), Model: model})
+			targets = append(targets, probe.Request{Kind: p.Kind, Base: p.Addr, Model: model})
 		}
 	}
 	ctx := c.baseCtx

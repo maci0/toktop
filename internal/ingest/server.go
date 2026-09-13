@@ -23,20 +23,15 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// Server accepts POST /v1/events (single object or newline-delimited stream),
-// GET /v1/events as a schema hint, and GET /healthz.
+// Server accepts POST /v1/events (single object or newline-delimited stream)
+// and GET /healthz.
 type Server struct {
-	rec  Recorder
-	now  func() time.Time // event stamps; nil means time.Now. I/O deadlines stay wall-clock.
+	rec  core.AgentRecorder
+	now  func() time.Time // event stamps; defaults to time.Now. I/O deadlines stay wall-clock.
 	srv  http.Server
 	ln   net.Listener
 	addr string
 	log  *slog.Logger
-}
-
-// Recorder is the sink for incoming events.
-type Recorder interface {
-	RecordAgent(ev core.AgentEvent)
 }
 
 // idleTimeout reaps keep-alive connections that sit between requests. Both
@@ -48,11 +43,11 @@ var idleTimeout = 2 * time.Minute
 // New binds addr and returns a server that Serve will accept on. The listen
 // happens here so Addr reports the actual bound port (including :0) before
 // Serve runs.
-func New(addr string, rec Recorder) (*Server, error) {
+func New(addr string, rec core.AgentRecorder) (*Server, error) {
 	return newServer(addr, rec, newIngestLogger())
 }
 
-func newServer(addr string, rec Recorder, lg *slog.Logger) (*Server, error) {
+func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, error) {
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -60,17 +55,16 @@ func newServer(addr string, rec Recorder, lg *slog.Logger) (*Server, error) {
 	if lg == nil {
 		lg = slog.New(slog.DiscardHandler)
 	}
-	s := &Server{rec: rec, ln: ln, addr: ln.Addr().String(), log: lg}
+	s := &Server{rec: rec, now: time.Now, ln: ln, addr: ln.Addr().String(), log: lg}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /v1/events", s.handlePost)
-	mux.HandleFunc("GET /v1/events", s.handleGet)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprint(w, "ok")
 	})
 	s.srv = http.Server{
-		Handler:           withSecurityHeaders(withRequestID(withRecover(s, withUnhandledLog(s, withKnownPaths(mux))))),
+		Handler:           s.wrap(mux),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    16 << 10, // default 1 MiB; this endpoint has no large headers
@@ -82,34 +76,68 @@ func newServer(addr string, rec Recorder, lg *slog.Logger) (*Server, error) {
 	return s, nil
 }
 
-// withSecurityHeaders sets browser-facing controls on every ingest
-// response. The endpoint is HTTP (loopback by default, optionally a
-// routable bind); HSTS is omitted because it would pin HTTPS on a
-// cleartext listener. nosniff/frame/CSP stop a fetched JSON body from
-// being sniffed as HTML or framed when --ingest is exposed.
-func withSecurityHeaders(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h := w.Header()
-		h.Set("X-Content-Type-Options", "nosniff")
-		h.Set("X-Frame-Options", "DENY")
-		h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
-		h.Set("Cross-Origin-Resource-Policy", "same-origin")
-		h.Set("Cache-Control", "no-store")
-		h.Set("Referrer-Policy", "no-referrer")
-		next.ServeHTTP(w, r)
-	})
-}
-
 type ctxReqID struct{}
 
-// withRequestID stamps every ingest response with X-Request-Id so a harness
-// can join its send with the stderr audit line. A caller-supplied header is
-// honored after sanitizing; otherwise a random id is minted.
-func withRequestID(next http.Handler) http.Handler {
+func setSecurityHeaders(h http.Header) {
+	h.Set("X-Content-Type-Options", "nosniff")
+	h.Set("X-Frame-Options", "DENY")
+	h.Set("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
+	h.Set("Cross-Origin-Resource-Policy", "same-origin")
+	h.Set("Cache-Control", "no-store")
+	h.Set("Referrer-Policy", "no-referrer")
+}
+
+// wrap is the single ingest handler: security headers, request id, panic
+// recover, 404 naming the two endpoints, and 404/405 audit lines. POST
+// /v1/events keeps a bare ResponseWriter so handlePost can SetReadDeadline.
+func (s *Server) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		setSecurityHeaders(w.Header())
 		id := incomingRequestID(r)
 		w.Header().Set("X-Request-Id", id)
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxReqID{}, id)))
+		r = r.WithContext(context.WithValue(r.Context(), ctxReqID{}, id))
+
+		start := time.Now()
+		defer func() {
+			recov := recover()
+			if recov == nil {
+				return
+			}
+			if recov == http.ErrAbortHandler {
+				panic(recov)
+			}
+			s.logRequest(r, requestID(r), http.StatusInternalServerError, 0, time.Since(start),
+				fmt.Sprintf("panic: %v", recov),
+				"stack", logField(string(debug.Stack()), 2048))
+			http.Error(w, "internal error", http.StatusInternalServerError)
+		}()
+
+		if r.URL == nil || !knownIngestPath(r.URL.Path) {
+			http.Error(w, "not found; endpoints: POST /v1/events, GET /healthz", http.StatusNotFound)
+			s.logRequest(r, id, http.StatusNotFound, 0, time.Since(start), "not found")
+			return
+		}
+		if skipUnhandledLog(r) {
+			next.ServeHTTP(w, r)
+			return
+		}
+		sw := &statusWriter{ResponseWriter: w}
+		next.ServeHTTP(sw, r)
+		status := sw.status
+		if status == 0 {
+			status = http.StatusOK
+		}
+		if status < 400 {
+			return
+		}
+		msg := "method not allowed"
+		if status != http.StatusMethodNotAllowed {
+			msg = "not found"
+			if status != http.StatusNotFound {
+				msg = strings.ToLower(http.StatusText(status))
+			}
+		}
+		s.logRequest(r, id, status, 0, time.Since(start), msg)
 	})
 }
 
@@ -136,7 +164,7 @@ func derivedEventID(key string, seq int) string {
 		return ""
 	}
 	suffix := ":" + strconv.Itoa(seq)
-	head := clampField(key, 128-utf8.RuneCountInString(suffix))
+	head := core.ClampField(key, 128-utf8.RuneCountInString(suffix))
 	if head == "" {
 		return ""
 	}
@@ -193,7 +221,7 @@ func utcLogTime(_ []string, a slog.Attr) slog.Attr {
 // terminal escapes stripped, whitespace collapsed so a payload cannot split
 // the line, then capped.
 func logField(s string, n int) string {
-	return clampField(strings.Join(strings.Fields(core.SanitizeText(s)), " "), n)
+	return core.ClampField(strings.Join(strings.Fields(core.SanitizeText(s)), " "), n)
 }
 
 // logRemote prepares a peer address for the ingest audit line. Loopback
@@ -275,51 +303,6 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted int,
 	s.log.Log(r.Context(), level, "toktop: ingest", attrs...)
 }
 
-// withUnhandledLog writes the same structured ingest line for requests the
-// mux answers itself (404, 405). POST /v1/events is logged in handlePost;
-// GET /healthz and GET /v1/events are not (probes and the schema hint
-// would only add noise). The wrapper is skipped on POST /v1/events so
-// handlePost keeps a bare ResponseWriter for SetReadDeadline.
-func withUnhandledLog(s *Server, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if skipUnhandledLog(r) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		start := time.Now()
-		sw := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
-		status := sw.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-		if status < 400 {
-			return
-		}
-		msg := "method not allowed"
-		if status != http.StatusMethodNotAllowed {
-			msg = "not found"
-			if status != http.StatusNotFound {
-				msg = strings.ToLower(http.StatusText(status))
-			}
-		}
-		s.logRequest(r, requestID(r), status, 0, time.Since(start), msg)
-	})
-}
-
-// withKnownPaths answers unknown URLs with the real surface instead of
-// Go's generic 404 page. It must not wrap registered paths: a catch-all
-// "/" would match PUT /v1/events and turn a 405 into a 404.
-func withKnownPaths(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL != nil && knownIngestPath(r.URL.Path) {
-			next.ServeHTTP(w, r)
-			return
-		}
-		http.Error(w, "not found; endpoints: POST /v1/events, GET /v1/events, GET /healthz", http.StatusNotFound)
-	})
-}
-
 func knownIngestPath(path string) bool {
 	switch path {
 	case "/v1/events", "/healthz":
@@ -333,10 +316,7 @@ func skipUnhandledLog(r *http.Request) bool {
 	case "/healthz":
 		return r.Method == http.MethodGet || r.Method == http.MethodHead
 	case "/v1/events":
-		switch r.Method {
-		case http.MethodPost, http.MethodGet, http.MethodHead:
-			return true
-		}
+		return r.Method == http.MethodPost
 	}
 	return false
 }
@@ -359,30 +339,6 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 }
 
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
-
-// withRecover turns a handler panic into a 500 and the structured ingest
-// line with req id, so a crash in RecordAgent is not only net/http's
-// "panic serving" without correlation. The stack is one log attribute
-// (whitespace-collapsed) so it does not split the line.
-func withRecover(s *Server, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-		defer func() {
-			recov := recover()
-			if recov == nil {
-				return
-			}
-			if recov == http.ErrAbortHandler {
-				panic(recov)
-			}
-			s.logRequest(r, requestID(r), http.StatusInternalServerError, 0, time.Since(start),
-				fmt.Sprintf("panic: %v", recov),
-				"stack", logField(string(debug.Stack()), 2048))
-			http.Error(w, "internal error", http.StatusInternalServerError)
-		}()
-		next.ServeHTTP(w, r)
-	})
-}
 
 // SetNow overrides the clock used to stamp events that arrive without a
 // timestamp and to clamp far-future stamps. Request timeouts still use
@@ -615,9 +571,4 @@ func wantJSONType(ut *json.UnmarshalTypeError) string {
 		return "a string"
 	}
 	return "the documented type"
-}
-
-func (s *Server) handleGet(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
-	fmt.Fprintln(w, `{"hint":"POST /v1/events with one JSON object or NDJSON stream of {id,ts,agent,kind,model,prompt_tokens,output_tokens,thinking_tokens,via_engine,note}"}`)
 }

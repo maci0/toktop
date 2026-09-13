@@ -93,7 +93,7 @@ What is worth stealing, corrupting, or denying:
 Every externally reachable input, with its code location:
 
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
-   NDJSON stream), `GET /v1/events`, `GET /healthz`
+   NDJSON stream), `GET /healthz`
    (internal/ingest/server.go:67-74). Binds `127.0.0.1:8420` unless `--ingest`
    says otherwise (cmd/toktop/main.go:107); any address is accepted, including
    routable interfaces. An empty `--ingest` is rejected (validateIngestAddr,
@@ -430,7 +430,7 @@ Controls verified in code, with the threats they cover:
 | M5: Event field clamps (agent 64, model 128, note 512, kind 24 runes, id 128) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering) | server.go:598-617,783-790; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go:9-21; collector.go:428-441,446-452 |
 | M6: Event timestamp skew clamp: stamps >2 min in the future reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing) | server.go:423,548-550 |
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go:611-624 |
-| M8: Engine response caps: 4 MiB JSON, 8 MiB text, 256-rune error snippets | memory blowup and log flooding from hostile engines (B2 DoS/disclosure) | provider/provider.go:78,103; httperr/httperr.go:19,24-38 |
+| M8: Engine response caps: 4 MiB JSON, 8 MiB text, 256-rune error snippets | memory blowup and log flooding from hostile engines (B2 DoS/disclosure) | provider/provider.go httpStatus; core.Snippet |
 | M9: Non-finite rejection in metrics (per-value and family-sum overflow guard) and vendor CSV/JSON coercion | poisoned counters/rates propagating through history (B2 tampering) | provider.go:202-215; gpu.go:213-232; collector counter-reset clamp collector.go:350 |
 | M10: Probe generation ceiling 32 tokens; think disabled; max_completion_tokens + n=1; content-byte hang-up; 16 KiB line cap; token-trust 128; fixed small prompt; model-id cap 256; 429/503 Retry-After backoff 15s–5m; embed/rerank ids skipped | probes becoming compute-amplification attacks against engines (B2 DoS) or spend amplifiers on billed gateways | probe.go:25-65,123-217; collector.go:516-539,579-612 |
 | M11: Poll/scan/probe timeouts (700ms/1.5s/30s) + context-bounded requests | hung-engine DoS (B2/B3) | discover.go:20; provider.go:28; probe.go:20 |
@@ -447,7 +447,7 @@ Controls verified in code, with the threats they cover:
 | M22: Remote discovery ports parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go:93-114; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go:109-110,340-348; agentusage/source.go:70-81; crush_sqlite.go:34-40 |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go:67-82; crush_sqlite.go:42-45,73-88; watch.go:152,164-171; opencode_sqlite.go:90-100,109 |
-| M25: Structured ingest audit log (req, method, path, status, accepted, duration, remote, error) with X-Request-Id; bodies excluded; 404/405 and handler panics share the line | B1 repudiation of the HTTP exchange; reconstructing whether a POST (or a missed one) happened after the fact | server.go logRequest/withUnhandledLog/withRecover; tests internal/ingest/server_test.go |
+| M25: Structured ingest audit log (req, method, path, status, accepted, duration, remote, error) with X-Request-Id; bodies excluded; 404/405 and handler panics share the line | B1 repudiation of the HTTP exchange; reconstructing whether a POST (or a missed one) happened after the fact | server.go logRequest/wrap; tests internal/ingest/server_test.go |
 | M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'`, CORP same-origin, no-store) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go:76-79,88-104 |
 | M27: logRemote rewrites non-loopback peer addresses to `"remote"` on the audit line and on http.Server.ErrorLog | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | server.go:202-239 |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go:139-155 |

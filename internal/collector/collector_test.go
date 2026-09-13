@@ -32,24 +32,18 @@ type fakeProvider struct {
 	err   error
 }
 
-func (f *fakeProvider) Label() string { return f.label }
-func (f *fakeProvider) Addr() string {
-	if f.addr != "" {
-		return f.addr
+func (f *fakeProvider) asProvider() provider.Provider {
+	addr, kind := f.addr, f.kind
+	if addr == "" {
+		addr = "fake://" + f.label
 	}
-	return "fake://" + f.label
-}
-func (f *fakeProvider) Kind() string {
-	if f.kind != "" {
-		return f.kind
+	if kind == "" {
+		kind = core.KindOllama
 	}
-	return core.KindOllama
+	return provider.Provider{Label: f.label, Addr: addr, Kind: kind, Poll: func(context.Context) (*provider.Metrics, error) {
+		return f.m, f.err
+	}}
 }
-func (f *fakeProvider) Poll(context.Context) (*provider.Metrics, error) {
-	return f.m, f.err
-}
-
-var _ provider.Provider = (*fakeProvider)(nil)
 
 func TestURLPort(t *testing.T) {
 	cases := []struct {
@@ -198,9 +192,9 @@ func TestHistoryRingRetimesAfterGap(t *testing.T) {
 }
 
 func TestEmitCopiesProviderKind(t *testing.T) {
-	fp := &fakeProvider{label: "v", kind: core.KindVLLM, m: &provider.Metrics{}}
+	fp := fakeProvider{label: "v", kind: core.KindVLLM, m: &provider.Metrics{}}
 	ch := make(chan core.Snapshot, 1)
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.sysFn = func() core.SysSample { return core.SysSample{} }
 	go c.emit(context.Background(), ch)
 
@@ -218,11 +212,11 @@ func TestEmitCopiesProviderKind(t *testing.T) {
 }
 
 func TestEmitSnapshotShape(t *testing.T) {
-	fp := &fakeProvider{label: "testprov", m: &provider.Metrics{
+	fp := fakeProvider{label: "testprov", m: &provider.Metrics{
 		Models: []core.ModelInfo{{Name: "m1"}}, Running: 2,
 	}}
 	ch := make(chan core.Snapshot, 1)
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.sysFn = func() core.SysSample {
 		return core.SysSample{MemTotal: 100, MemUsed: 50, Load1: 0.5,
 			Temps: []core.TempReading{{Label: "package", MilliC: 45000}}}
@@ -305,9 +299,7 @@ func frozenCollector(t *testing.T, frozen time.Time, providers []provider.Provid
 // wall-clock read inside emit, so a replay from the same instant matches.
 func TestEmitFollowsInjectedClock(t *testing.T) {
 	frozen := time.Unix(1_700_000_000, 0).UTC()
-	c := frozenCollector(t, frozen, []provider.Provider{
-		&fakeProvider{label: "x", m: &provider.Metrics{OutTotal: 10}},
-	})
+	c := frozenCollector(t, frozen, []provider.Provider{(&fakeProvider{label: "x", m: &provider.Metrics{OutTotal: 10}}).asProvider()})
 	ch := make(chan core.Snapshot, 1)
 	c.emit(context.Background(), ch)
 	snap := <-ch
@@ -321,10 +313,10 @@ func TestEmitFollowsInjectedClock(t *testing.T) {
 
 func TestEmitDeterministicUnderSameClock(t *testing.T) {
 	frozen := time.Unix(1_700_000_000, 0).UTC()
-	fp := &fakeProvider{label: "ollama", m: &provider.Metrics{OutTotal: 100, InTotal: 20, Running: 1}}
+	fp := fakeProvider{label: "ollama", m: &provider.Metrics{OutTotal: 100, InTotal: 20, Running: 1}}
 	chA, chB := make(chan core.Snapshot, 1), make(chan core.Snapshot, 1)
-	frozenCollector(t, frozen, []provider.Provider{fp}).emit(context.Background(), chA)
-	frozenCollector(t, frozen, []provider.Provider{fp}).emit(context.Background(), chB)
+	frozenCollector(t, frozen, []provider.Provider{fp.asProvider()}).emit(context.Background(), chA)
+	frozenCollector(t, frozen, []provider.Provider{fp.asProvider()}).emit(context.Background(), chB)
 	sa, sb := <-chA, <-chB
 	if !reflect.DeepEqual(sa, sb) {
 		t.Fatalf("same clock, same providers diverged:\n%+v\n%+v", sa, sb)
@@ -345,12 +337,12 @@ func TestRecordAgentZeroAtUsesClock(t *testing.T) {
 // stop promptly on ctx cancellation without stranding the emit goroutine.
 func TestRunEmitsUntilCancel(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		fp := &fakeProvider{label: "run", m: &provider.Metrics{
+		fp := fakeProvider{label: "run", m: &provider.Metrics{
 			OutTotal: 1, Models: []core.ModelInfo{{Name: "m"}},
 		}}
 		ch := make(chan core.Snapshot)
 		ctx, cancel := context.WithCancel(t.Context())
-		c := New([]provider.Provider{fp}, 5*time.Millisecond)
+		c := New([]provider.Provider{fp.asProvider()}, 5*time.Millisecond)
 		c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 9} })
 
 		done := make(chan struct{})
@@ -487,7 +479,7 @@ func TestProbeRingCap(t *testing.T) {
 }
 
 func TestProbeAllSkipsWhenNoModelKnown(t *testing.T) {
-	c := New([]provider.Provider{&fakeProvider{label: "x"}}, time.Second)
+	c := New([]provider.Provider{(&fakeProvider{label: "x"}).asProvider()}, time.Second)
 	c.ProbeAll() // must not panic or block; no model known yet
 	if len(c.probes) != 0 {
 		t.Fatalf("unexpected probes: %d", len(c.probes))
@@ -607,10 +599,10 @@ func TestRecordAgentSameIDKeptOnce(t *testing.T) {
 // so the leak profile stays empty. A leaked poll goroutine would show up
 // here after GC, the same way a production dashboard would accumulate them.
 func TestEmitDoesNotLeakGoroutines(t *testing.T) {
-	fp := &fakeProvider{label: "x", m: &provider.Metrics{
+	fp := fakeProvider{label: "x", m: &provider.Metrics{
 		OutTotal: 1, Models: []core.ModelInfo{{Name: "m"}},
 	}}
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 1} })
 	ch := make(chan core.Snapshot, 1)
 	c.emit(context.Background(), ch)
@@ -668,10 +660,7 @@ func TestPerProviderStateKeyedByEndpoint(t *testing.T) {
 	m2 := &provider.Metrics{OutTotal: 500, Models: []core.ModelInfo{{Name: "m"}}}
 	ch := make(chan core.Snapshot, 1)
 	now := time.Unix(1_700_000_000, 0).UTC()
-	c := New([]provider.Provider{
-		&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8080", m: m1},
-		&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8081", m: m2},
-	}, time.Second)
+	c := New([]provider.Provider{(&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8080", m: m1}).asProvider(), (&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8081", m: m2}).asProvider()}, time.Second)
 	c.SetNow(func() time.Time { return now })
 
 	get := func() map[string]float64 {
@@ -702,14 +691,14 @@ func TestPerProviderStateKeyedByEndpoint(t *testing.T) {
 // backend URL. Two processes on the same port keep the first sample; a
 // provider with no match stays zeroed.
 func TestEmitAttachesProcessByListenPort(t *testing.T) {
-	ollama := &fakeProvider{label: "ollama", addr: "http://127.0.0.1:11434", m: &provider.Metrics{
+	ollama := fakeProvider{label: "ollama", addr: "http://127.0.0.1:11434", m: &provider.Metrics{
 		Models: []core.ModelInfo{{Name: "m"}},
 	}}
-	vllm := &fakeProvider{label: "vllm", addr: "http://127.0.0.1:8000", m: &provider.Metrics{
+	vllm := fakeProvider{label: "vllm", addr: "http://127.0.0.1:8000", m: &provider.Metrics{
 		Models: []core.ModelInfo{{Name: "m"}},
 	}}
 	ch := make(chan core.Snapshot, 1)
-	c := New([]provider.Provider{ollama, vllm}, time.Hour)
+	c := New([]provider.Provider{ollama.asProvider(), vllm.asProvider()}, time.Hour)
 	c.procCache = []procs.Info{
 		{PID: 42, RSS: 1000, CPUPct: 12.5, PortHint: 11434},
 		{PID: 43, RSS: 999, CPUPct: 1, PortHint: 11434}, // same port: first wins
@@ -783,9 +772,9 @@ func TestProcSnapshotDetachedFromCache(t *testing.T) {
 // A provider failing its very first poll has no history rings yet; emit must
 // still include it (with the error surfaced) instead of dereferencing nil.
 func TestEmitSurvivesFirstPollError(t *testing.T) {
-	fp := &fakeProvider{label: "dead", err: errors.New("connection refused")}
+	fp := fakeProvider{label: "dead", err: errors.New("connection refused")}
 	ch := make(chan core.Snapshot, 1)
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	done := make(chan struct{})
 	go func() { defer close(done); c.emit(context.Background(), ch) }()
 	select {
@@ -806,9 +795,9 @@ func TestEmitSurvivesFirstPollError(t *testing.T) {
 // Poll returning (nil, nil) used to dereference Metrics and panic, killing
 // the dashboard process. Treat it as a failed poll instead.
 func TestEmitSurvivesNilMetrics(t *testing.T) {
-	fp := &fakeProvider{label: "empty"}
+	fp := fakeProvider{label: "empty"}
 	ch := make(chan core.Snapshot, 1)
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.emit(context.Background(), ch)
 	snap := <-ch
 	if len(snap.Providers) != 1 {
@@ -827,7 +816,7 @@ func TestEmitCancelsPollsOnContext(t *testing.T) {
 	fp := &blockingProvider{started: started}
 	ch := make(chan core.Snapshot, 1)
 	ctx, cancel := context.WithCancel(context.Background())
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	done := make(chan struct{})
 	go func() { defer close(done); c.emit(ctx, ch) }()
 	select {
@@ -847,26 +836,23 @@ type blockingProvider struct {
 	started chan struct{}
 }
 
-func (b *blockingProvider) Label() string { return "block" }
-func (b *blockingProvider) Addr() string  { return "fake://block" }
-func (b *blockingProvider) Kind() string  { return core.KindOllama }
-func (b *blockingProvider) Poll(ctx context.Context) (*provider.Metrics, error) {
-	close(b.started)
-	<-ctx.Done()
-	return nil, ctx.Err()
+func (b *blockingProvider) asProvider() provider.Provider {
+	return provider.Provider{Label: "block", Addr: "fake://block", Kind: core.KindOllama, Poll: func(ctx context.Context) (*provider.Metrics, error) {
+		close(b.started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}}
 }
-
-var _ provider.Provider = (*blockingProvider)(nil)
 
 // The ingest handlers, the UI prober and the emit loop all touch the
 // collector's shared maps concurrently in production; hammer them together so
 // -race can prove the locking holds.
 func TestConcurrentRecordProbeEmit(t *testing.T) {
-	fp := &fakeProvider{label: "c", m: &provider.Metrics{
+	fp := fakeProvider{label: "c", m: &provider.Metrics{
 		OutTotal: 5, Models: []core.ModelInfo{{Name: "m"}},
 	}}
 	ch := make(chan core.Snapshot, 1)
-	c := New([]provider.Provider{fp}, time.Hour)
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 1} })
 
 	stop := make(chan struct{})
@@ -1056,7 +1042,7 @@ func TestProbeAllSingleFlightPerBackend(t *testing.T) {
 	probeWaveGap = 0 // isolate single-flight from the wave gate
 	defer func() { probeWaveGap = oldGap }()
 
-	c := New([]provider.Provider{&fakeProvider{label: "p", addr: srv.URL}}, time.Second)
+	c := New([]provider.Provider{(&fakeProvider{label: "p", addr: srv.URL}).asProvider()}, time.Second)
 	c.lastModel[srv.URL] = "m"
 
 	c.ProbeAll()
@@ -1091,7 +1077,7 @@ func TestProbeAllWaveGap(t *testing.T) {
 	probeWaveGap = time.Hour // longer than this test can run: only wave #1 passes
 	defer func() { probeWaveGap = oldGap }()
 
-	c := New([]provider.Provider{&fakeProvider{label: "g", addr: srv.URL}}, time.Second)
+	c := New([]provider.Provider{(&fakeProvider{label: "g", addr: srv.URL}).asProvider()}, time.Second)
 	c.lastModel[srv.URL] = "m"
 
 	c.ProbeAll()
@@ -1123,11 +1109,11 @@ func TestProbeAllDropsModelOnceUnloaded(t *testing.T) {
 	probeWaveGap = 0
 	defer func() { probeWaveGap = oldGap }()
 
-	fp := &fakeProvider{
+	fp := fakeProvider{
 		label: "p", addr: srv.URL,
 		m: &provider.Metrics{Models: []core.ModelInfo{{Name: "m"}}},
 	}
-	c := New([]provider.Provider{fp}, time.Second)
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	emitOnce(t, c)
 
 	fp.m = &provider.Metrics{} // still up, nothing loaded
@@ -1157,14 +1143,14 @@ func TestProbeAllPrefersLoadedModel(t *testing.T) {
 	probeWaveGap = 0
 	defer func() { probeWaveGap = oldGap }()
 
-	fp := &fakeProvider{
+	fp := fakeProvider{
 		label: "p", addr: srv.URL,
 		m: &provider.Metrics{Models: []core.ModelInfo{
 			{Name: "catalog-only"},
 			{Name: "loaded", SizeVRAM: 1 << 30},
 		}},
 	}
-	c := New([]provider.Provider{fp}, time.Second)
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	emitOnce(t, c)
 	c.ProbeAll()
 	waitFor(t, func() bool { return got.Load().(string) == "loaded" },
@@ -1182,11 +1168,11 @@ func TestProbeAllSkipsBlankModelName(t *testing.T) {
 	probeWaveGap = 0
 	defer func() { probeWaveGap = oldGap }()
 
-	fp := &fakeProvider{
+	fp := fakeProvider{
 		label: "p", addr: srv.URL,
 		m: &provider.Metrics{Models: []core.ModelInfo{{Name: "   "}}},
 	}
-	c := New([]provider.Provider{fp}, time.Second)
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	emitOnce(t, c)
 	c.ProbeAll()
 	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
@@ -1205,10 +1191,7 @@ func TestProbeAllStampsWithInjectedClock(t *testing.T) {
 	defer srvB.Close()
 
 	frozen := time.Unix(1_700_000_000, 0).UTC()
-	c := frozenCollector(t, frozen, []provider.Provider{
-		&fakeProvider{label: "b", addr: srvB.URL},
-		&fakeProvider{label: "a", addr: srvA.URL},
-	})
+	c := frozenCollector(t, frozen, []provider.Provider{(&fakeProvider{label: "b", addr: srvB.URL}).asProvider(), (&fakeProvider{label: "a", addr: srvA.URL}).asProvider()})
 	c.lastModel[srvA.URL] = "ma"
 	c.lastModel[srvB.URL] = "mb"
 	c.ProbeAll()
@@ -1250,14 +1233,14 @@ func TestProbeAllSkipsEmbeddingModel(t *testing.T) {
 	probeWaveGap = 0
 	defer func() { probeWaveGap = oldGap }()
 
-	fp := &fakeProvider{
+	fp := fakeProvider{
 		label: "p", addr: srv.URL,
 		m: &provider.Metrics{Models: []core.ModelInfo{
 			{Name: "text-embedding-3-small", SizeVRAM: 1 << 30},
 			{Name: "llama3"},
 		}},
 	}
-	c := New([]provider.Provider{fp}, time.Second)
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	emitOnce(t, c)
 	c.ProbeAll()
 	waitFor(t, func() bool { return got.Load().(string) == "llama3" },
@@ -1275,11 +1258,11 @@ func TestProbeAllSkipsEmbedOnlyInventory(t *testing.T) {
 	probeWaveGap = 0
 	defer func() { probeWaveGap = oldGap }()
 
-	fp := &fakeProvider{
+	fp := fakeProvider{
 		label: "p", addr: srv.URL,
 		m: &provider.Metrics{Models: []core.ModelInfo{{Name: "nomic-embed-text"}}},
 	}
-	c := New([]provider.Provider{fp}, time.Second)
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	emitOnce(t, c)
 	c.ProbeAll()
 	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
@@ -1304,7 +1287,7 @@ func TestProbeAllHonorsRetryAfter(t *testing.T) {
 
 	var clockMu sync.Mutex
 	now := time.Unix(1_700_000_000, 0).UTC()
-	c := New([]provider.Provider{&fakeProvider{label: "p", addr: srv.URL}}, time.Second)
+	c := New([]provider.Provider{(&fakeProvider{label: "p", addr: srv.URL}).asProvider()}, time.Second)
 	c.SetNow(func() time.Time {
 		clockMu.Lock()
 		defer clockMu.Unlock()
