@@ -135,6 +135,47 @@ func TestRatesHonorDirectThroughput(t *testing.T) {
 	}
 }
 
+func TestEmitFirstThroughputGaugeSeedsRate(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		has  bool
+		want float64
+	}{
+		{"present", true, 300},
+		{"absent", false, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := fakeProvider{label: "engine", m: &provider.Metrics{
+				OutTotal: 1000, InTotal: 2000,
+				HasDirectOutPS: tc.has, DirectOutPS: 300,
+			}}
+			c := New([]provider.Provider{f.asProvider()}, time.Second)
+			c.SetSysFn(nil)
+			now := time.Unix(1000, 0)
+			c.SetNow(func() time.Time { return now })
+			ch := make(chan core.Snapshot, 1)
+			c.emit(context.Background(), ch)
+			first := (<-ch).Providers[0]
+			if first.OutTokPS != tc.want || first.InTokPS != 0 {
+				t.Fatalf("first rates = %v/%v, want %v/0", first.OutTokPS, first.InTokPS, tc.want)
+			}
+			if len(first.OutHist) != 1 || first.OutHist[0] != tc.want {
+				t.Fatalf("first history = %v, want [%v]", first.OutHist, tc.want)
+			}
+			f.m.HasDirectOutPS = false
+			f.m.OutTotal += 300
+			f.m.InTotal += 100
+			now = now.Add(time.Second)
+			c.emit(context.Background(), ch)
+			next := (<-ch).Providers[0]
+			wantNext := tc.want*(1-emaAlpha) + 300*emaAlpha
+			if next.OutTokPS != wantNext || next.InTokPS != 35 {
+				t.Fatalf("next rates = %v/%v, want %v/35", next.OutTokPS, next.InTokPS, wantNext)
+			}
+		})
+	}
+}
+
 func TestEmitHonorsZeroThroughputGauge(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -143,7 +184,7 @@ func TestEmitHonorsZeroThroughputGauge(t *testing.T) {
 	}{
 		{"zero", "sglang:gen_throughput 0\n", 0},
 		{"absent", "", 105},
-		{"positive", "sglang:gen_throughput 200\n", 70},
+		{"positive", "sglang:gen_throughput 200\n", 200},
 		{"negative", "sglang:gen_throughput -1\n", 105},
 		{"nan", "sglang:gen_throughput NaN\n", 105},
 		{"infinite", "sglang:gen_throughput +Inf\n", 105},

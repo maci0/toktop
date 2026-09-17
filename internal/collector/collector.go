@@ -369,8 +369,14 @@ func procsByPort(infos []procs.Info) map[int]procs.Info {
 func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS, inPS float64) {
 	pv, had := c.prev[key]
 	if !had {
-		c.prev[key] = prevSample{at: now, outTotal: m.OutTotal, inTotal: m.InTotal}
-		return 0, 0
+		// The baseline is seeded so the next scrape's delta starts here,
+		// but a direct gauge does not need history: report it now instead
+		// of blanking a live engine for one interval.
+		if m.HasDirectOutPS {
+			outPS = m.DirectOutPS
+		}
+		c.prev[key] = prevSample{at: now, outTotal: m.OutTotal, inTotal: m.InTotal, outEMA: outPS}
+		return outPS, 0
 	}
 	dt := now.Sub(pv.at).Seconds()
 	if dt <= 0 {
