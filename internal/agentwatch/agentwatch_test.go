@@ -505,14 +505,14 @@ func TestAttributedAgentKeepsReporting(t *testing.T) {
 	path := filepath.Join(transcript, "s.jsonl")
 	appendLine(t, path, usageLine(work, 100))
 	tr.viaEngine = "http://127.0.0.1:11434"
-	w.read()
+	w.report(tr, tr.watch.Poll())
 
 	appendLine(t, path, usageLine(work, 150))
-	w.read()
+	w.report(tr, tr.watch.Poll())
 
 	appendLine(t, path, usageLine(work, 180))
 	tr.viaEngine = "http://127.0.0.1:8080"
-	w.read()
+	w.report(tr, tr.watch.Poll())
 
 	evs := rec.all()
 	if len(evs) != 3 {
@@ -539,7 +539,7 @@ func TestAttributedAgentKeepsReporting(t *testing.T) {
 // can only show completions.
 func TestReportsPromptAndThinking(t *testing.T) {
 	work, transcript := claudeHome(t)
-	w, rec, _ := followClaude(t, work)
+	w, rec, tr := followClaude(t, work)
 
 	quoted, err := json.Marshal(work)
 	if err != nil {
@@ -549,7 +549,7 @@ func TestReportsPromptAndThinking(t *testing.T) {
 		`,"message":{"usage":{"input_tokens":900,"output_tokens":120,` +
 		`"output_tokens_details":{"thinking_tokens":40}}}}`
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), line)
-	w.read()
+	w.report(tr, tr.watch.Poll())
 
 	evs := rec.all()
 	if len(evs) != 1 {
@@ -569,11 +569,11 @@ func TestReportsPromptAndThinking(t *testing.T) {
 // is what lands in the feed, not the transcript watcher's wall-clock read.
 func TestReportStampsWithInjectedClock(t *testing.T) {
 	work, transcript := claudeHome(t)
-	w, rec, _ := followClaude(t, work)
+	w, rec, tr := followClaude(t, work)
 	frozen := time.Unix(1_700_000_000, 0).UTC()
 	w.SetNow(func() time.Time { return frozen })
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 120))
-	w.read()
+	w.report(tr, tr.watch.Poll())
 	evs := rec.all()
 	if len(evs) != 1 {
 		t.Fatalf("got %d events, want 1: %+v", len(evs), evs)
@@ -621,7 +621,7 @@ func TestReplayOfSameSampleKeptOnce(t *testing.T) {
 	w.tracked[tr.proc.PID] = tr
 
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 80))
-	w.read()
+	w.report(tr, tr.watch.Poll())
 	evs := rec.all()
 	if len(evs) != 1 {
 		t.Fatalf("got %d events, want 1: %+v", len(evs), evs)
@@ -634,7 +634,7 @@ func TestReplayOfSameSampleKeptOnce(t *testing.T) {
 	// The delta guard would also skip this if last were kept; clearing it
 	// is the replay: same sample, same instant, a second RecordAgent.
 	tr.last = agentusage.Sample{}
-	w.read()
+	w.report(tr, tr.watch.Poll())
 	if got := rec.all(); len(got) != 1 {
 		t.Fatalf("replay recorded %d events, want 1: %+v", len(got), got)
 	}

@@ -259,13 +259,9 @@ func (w *Watcher) discover(ctx context.Context) {
 
 func (w *Watcher) stopAll() {
 	w.mu.Lock()
-	gone := make([]*tracked, 0, len(w.tracked))
-	for pid, t := range w.tracked {
-		delete(w.tracked, pid)
-		gone = append(gone, t)
-	}
+	gone := w.trackedList()
+	clear(w.tracked)
 	w.mu.Unlock()
-	sortTracked(gone)
 	for _, t := range gone {
 		w.stopOne(t)
 	}
@@ -329,19 +325,6 @@ func parseEngineAddr(addr string) (netip.AddrPort, string, bool) {
 	return ap, host, true
 }
 
-// read takes one reading per tracked agent and reports what grew.
-// Tests drive it directly; the live path is Watcher.Run per agent, which
-// already polls on readEvery without forcing a store walk each tick.
-func (w *Watcher) read() {
-	w.mu.Lock()
-	snapshot := w.trackedList()
-	w.mu.Unlock()
-
-	for _, t := range snapshot {
-		w.report(t, t.watch.Poll())
-	}
-}
-
 // trackedList is the followed agents in PID order. Report and shutdown
 // sequences must not depend on map iteration, or equal-timestamp events
 // land in a different order across replays. Caller holds w.mu.
@@ -360,8 +343,6 @@ func sortTracked(ts []*tracked) {
 	})
 }
 
-// report records growth since the last sample. Live Run callbacks and the
-// test-driven read path both come through here so deltas stay consistent.
 func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	if cur.Empty() {
 		return
