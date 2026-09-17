@@ -251,10 +251,7 @@ func clipUTF8Prefix(s string, n int) string {
 // capped so a process with a huge argv cannot force a huge allocation.
 func lowerJoinedArgs(args []string) string {
 	var b strings.Builder
-	n := len(args)
-	if n > matchJoinArgs {
-		n = matchJoinArgs
-	}
+	n := min(len(args), matchJoinArgs)
 	for i := 0; i < n; i++ {
 		if b.Len() >= matchJoinBytes {
 			break
@@ -283,11 +280,11 @@ var engineMatchers = []engineMatcher{
 	{"koboldcpp", 5001, func(_, c string, _ []string) bool {
 		return strings.Contains(c, "koboldcpp")
 	}},
-	{"vllm", 8000, func(_, c string, args []string) bool {
+	{"vllm", 8000, func(_, _ string, args []string) bool {
 		return anyArgContains(args, "vllm.entrypoints", "/vllm") ||
 			baseNameEq(args, "vllm")
 	}},
-	{"sglang", 30000, func(_, c string, args []string) bool {
+	{"sglang", 30000, func(_, _ string, args []string) bool {
 		// python -m sglang.launch_server / sglang.srt.*, and the
 		// `sglang serve` CLI (same shape as `vllm serve`).
 		return anyArgContains(args, "sglang.launch_server", "sglang.srt") ||
@@ -304,7 +301,7 @@ var engineMatchers = []engineMatcher{
 	{"localai", 8080, func(n, _ string, _ []string) bool {
 		return n == "localai" || n == "local-ai"
 	}},
-	{"litellm", 4000, func(_, c string, args []string) bool {
+	{"litellm", 4000, func(_, _ string, args []string) bool {
 		return baseNameEq(args, "litellm") || anyArgContains(args, "litellm.proxy")
 	}},
 	{"mlx", 8080, func(_, c string, _ []string) bool {
@@ -314,7 +311,7 @@ var engineMatchers = []engineMatcher{
 		return strings.Contains(n, "lm-studio") || strings.Contains(n, "lmstudio") ||
 			strings.Contains(n, "lm studio")
 	}},
-	{"gpustack", 80, func(_, c string, args []string) bool {
+	{"gpustack", 80, func(_, _ string, args []string) bool {
 		return anyArgContains(args, "gpustack.start")
 	}},
 	{"lemonade", 8000, func(n, _ string, _ []string) bool { return n == "lemonade-server" || n == "lemond" }},
