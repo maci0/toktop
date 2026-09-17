@@ -549,6 +549,32 @@ func TestRunOpenAIDoesNotRetry429(t *testing.T) {
 	}
 }
 
+func TestRetryAfterLargeDeltaSeconds(t *testing.T) {
+	for _, tc := range []struct {
+		header string
+		want   time.Duration
+	}{
+		{"9223372036", maxRetryAfter},
+		{"9223372037", maxRetryAfter},
+		{"9223372036854775807", maxRetryAfter},
+		{"-9223372037", defaultRetryAfter},
+		{"-9223372036854775808", defaultRetryAfter},
+		{"0", defaultRetryAfter},
+		{"15", defaultRetryAfter},
+		{"30", 30 * time.Second},
+		{"300", maxRetryAfter},
+		{"301", maxRetryAfter},
+	} {
+		t.Run(tc.header, func(t *testing.T) {
+			resp := &http.Response{Header: make(http.Header)}
+			resp.Header.Set("Retry-After", tc.header)
+			if got := parseRetryAfter(resp); got != tc.want {
+				t.Errorf("Retry-After %q = %s, want %s", tc.header, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunOpenAIRetryAfterFloorAndCap(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Retry-After", "2")

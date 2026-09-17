@@ -469,8 +469,9 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 	if v == "" {
 		return defaultRetryAfter
 	}
-	if secs, err := strconv.Atoi(v); err == nil {
-		return clampRetryAfter(time.Duration(secs) * time.Second)
+	if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
+		secs = min(max(secs, int64(defaultRetryAfter/time.Second)), int64(maxRetryAfter/time.Second))
+		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
 		return clampRetryAfter(time.Until(t))
