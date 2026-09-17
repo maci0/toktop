@@ -93,7 +93,7 @@ PLATFORMS := \
 
 .PHONY: help
 help: ## show available targets
-	@if [ -t 1 ] && [ -z "$${NO_COLOR}" ] && [ "$${TERM:-}" != "dumb" ]; then \
+	@if [ -t 1 ] && [ -z "$${NO_COLOR:-}" ] && [ "$${TERM:-}" != "dumb" ]; then \
 		color=1; \
 	else \
 		color=; \
