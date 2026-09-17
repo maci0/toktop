@@ -205,6 +205,7 @@ lint: ## run staticcheck (both halves of the sqlite tag gate)
 .PHONY: govulncheck
 govulncheck: ## run govulncheck at the GOVULNCHECK pin (same pin as CI)
 	$(GO) run $(GOVULNCHECK) ./...
+	$(GO) run $(GOVULNCHECK) -tags sqlite ./...
 
 .PHONY: site-check
 site-check: ## bun test the Cloudflare Worker in site/ (CI parity)

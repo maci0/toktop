@@ -122,16 +122,17 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make fmt` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
-| `make govulncheck` | `govulncheck` at the Makefile pin (same pin as CI) |
+| `make govulncheck` | `govulncheck` over both sqlite tag halves at the Makefile pin (same pin as CI) |
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
 | `make site-check` | `bun test site/` |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 
 ## Before opening a PR
 
-CI (`.github/workflows/ci.yml`) runs gofmt -s, `go mod tidy -diff`, and
-`govulncheck ./...` on Linux only (all three are platform-independent),
-`staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` on
+CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
+Linux only, plus `make govulncheck` for both sqlite tag halves on Linux.
+Vulnerability analysis follows the host platform's build constraints.
+`staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
 Linux, macOS and Windows, plus cross-compiles of linux/amd64, linux/arm64,
 darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64. Each
 cross-compile job also runs `go vet ./...` and staticcheck under its

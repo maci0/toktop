@@ -70,7 +70,7 @@ jobs:
         run: |
           go vet -mod=readonly ./...
           go vet -mod=readonly -tags sqlite ./agentusage/...
-      - name: govulncheck (linux only; source-level analysis is platform-independent)
+      - name: govulncheck (linux only; both sqlite tag halves)
         if: runner.os == 'Linux'
         # Makefile GOVULNCHECK is the only version string; `go run @version`
         # so PATH does not have to carry a go-install.
