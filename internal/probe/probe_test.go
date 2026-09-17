@@ -507,6 +507,43 @@ func TestRunOllamaStopsAfterProbeTokens(t *testing.T) {
 	}
 }
 
+func TestRunStopsOnReasoningBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		kind  string
+		frame string
+		late  string
+	}{
+		{"reasoning_content", core.KindVLLM, `data: {"choices":[{"delta":{"reasoning_content":%q}}]}` + "\n\n", `data: {"choices":[{"delta":{"content":"late"}}]}` + "\n\n"},
+		{"reasoning", core.KindVLLM, `data: {"choices":[{"delta":{"reasoning":%q}}]}` + "\n\n", `data: {"choices":[{"delta":{"content":"late"}}]}` + "\n\n"},
+		{"thinking", core.KindOllama, `{"thinking":%q}` + "\n", `{"response":"late","done":true}` + "\n"},
+	} {
+		for _, budget := range []struct {
+			name    string
+			payload string
+			frames  int
+		}{
+			{"bytes", strings.Repeat("r", probeContentBytes), 1},
+			{"cumulative_bytes", strings.Repeat("r", probeContentBytes/2), 2},
+			{"frames", "r", probeTokens},
+		} {
+			t.Run(tc.name+"/"+budget.name, func(t *testing.T) {
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					for range budget.frames {
+						fmt.Fprintf(w, tc.frame, budget.payload)
+					}
+					fmt.Fprint(w, tc.late)
+				}))
+				defer srv.Close()
+				s := Run(context.Background(), Request{Kind: tc.kind, Base: srv.URL, Model: "m"})
+				if s.OK || !strings.Contains(s.Err, "empty stream") {
+					t.Fatalf("reasoning budget must stop before answer content: %+v", s)
+				}
+			})
+		}
+	}
+}
+
 func TestRunOpenAIStopsOnStreamBytes(t *testing.T) {
 	frame := "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"r\"}}]}\n\n"
 	prefix := strings.Repeat(frame, 2*probeStreamMax/len(frame)+1)

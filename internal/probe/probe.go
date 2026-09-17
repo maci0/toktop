@@ -148,7 +148,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	defer resp.Body.Close()
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, 4<<10), probeLineMax)
-	var reported, contentBytes int
+	var reported, contentBytes, reasoning int
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
@@ -156,6 +156,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		}
 		var chunk struct {
 			Response     string `json:"response"`
+			Thinking     string `json:"thinking"`
 			Done         bool   `json:"done"`
 			EvalCount    int    `json:"eval_count"`
 			EvalDuration int64  `json:"eval_duration"`
@@ -177,9 +178,13 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 			if ttft == 0 {
 				ttft = time.Since(s.At)
 			}
-			if overBudget(tokens, contentBytes) { // engine ignored num_predict: hang up
-				break
-			}
+		}
+		if chunk.Thinking != "" {
+			reasoning++
+			contentBytes += len(chunk.Thinking)
+		}
+		if overBudget(tokens+reasoning, contentBytes) {
+			break
 		}
 		if chunk.Done {
 			if chunk.EvalCount > 0 {
@@ -223,7 +228,7 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	}
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, 4<<10), probeLineMax)
-	var reported, contentBytes int
+	var reported, contentBytes, reasoning int
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
 		payload, ok := openaiFrame(line)
@@ -258,8 +263,14 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 					ttft = time.Since(s.At)
 				}
 			}
+			for _, text := range []string{c.Delta.Reasoning, c.Delta.ReasoningContent} {
+				if text != "" {
+					reasoning++
+					contentBytes += len(text)
+				}
+			}
 		}
-		if overBudget(tokens, contentBytes) { // engine ignored max_tokens: hang up
+		if overBudget(tokens+reasoning, contentBytes) { // engine ignored max_tokens: hang up
 			break
 		}
 	}
@@ -422,7 +433,9 @@ func openaiBody(model string, extra bool) []byte {
 type openaiChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"delta"`
 		Message struct {
 			Content string `json:"content"`
