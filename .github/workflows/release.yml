@@ -85,4 +85,12 @@ jobs:
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: dist/*
+          files: |
+            dist/toktop_${{ env.VERSION }}_linux_amd64
+            dist/toktop_${{ env.VERSION }}_linux_arm64
+            dist/toktop_${{ env.VERSION }}_darwin_amd64
+            dist/toktop_${{ env.VERSION }}_darwin_arm64
+            dist/toktop_${{ env.VERSION }}_windows_amd64.exe
+            dist/toktop_${{ env.VERSION }}_windows_arm64.exe
+            dist/toktop_${{ env.VERSION }}_checksums.tar.gz
+            dist/toktop-sbom-${{ env.VERSION }}.cdx.json
