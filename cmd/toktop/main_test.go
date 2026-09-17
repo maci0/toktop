@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -40,6 +41,41 @@ func TestOutputFailures(t *testing.T) {
 			stderr := captureStderr(t, func() { code = tt.run(failedOutput{}) })
 			if code != 1 || !strings.Contains(stderr, "write stdout: output unavailable") {
 				t.Fatalf("code = %d, stderr = %q; want 1 and output error", code, stderr)
+			}
+		})
+	}
+}
+
+func TestUpdateErrorOmitsHomeDirectory(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("home", home)
+	self := filepath.Join(home, "bin", "toktop")
+	tmp := filepath.Join(home, "bin", ".toktop-update-123")
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+		code int
+	}{
+		{"create", fmt.Errorf("cannot write next to %s: %w", self,
+			&os.PathError{Op: "open", Path: tmp, Err: os.ErrPermission}),
+			"cannot write next to " + filepath.Join("~", "bin", "toktop") + ": open " + filepath.Join("~", "bin", ".toktop-update-123") + ": permission denied", 1},
+		{"rename", fmt.Errorf("cannot replace %s: %w", self,
+			&os.LinkError{Op: "rename", Old: tmp, New: self, Err: os.ErrPermission}),
+			"cannot replace " + filepath.Join("~", "bin", "toktop") + ": rename " + filepath.Join("~", "bin", ".toktop-update-123") + " " + filepath.Join("~", "bin", "toktop") + ": permission denied", 1},
+		{"ordinary", errors.New("checksum mismatch"), "checksum mismatch", 1},
+		{"canceled", fmt.Errorf("download: %w", context.Canceled), "interrupted", 130},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var code int
+			got := captureStderr(t, func() { code = updateErr("update failed", tc.err) })
+			if code != tc.code || !strings.Contains(got, tc.want) {
+				t.Errorf("code = %d, stderr = %q; want %d and %q", code, got, tc.code, tc.want)
+			}
+			if strings.Contains(got, home) || strings.Contains(got, "private-user") {
+				t.Errorf("update diagnostic contains home directory: %q", got)
 			}
 		})
 	}

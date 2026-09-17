@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/maci0/toktop/internal/selfupdate"
@@ -112,6 +113,14 @@ func updateErr(op string, err error) int {
 		fmt.Fprintln(os.Stderr, "toktop: interrupted")
 		return 130
 	}
-	fmt.Fprintf(os.Stderr, "toktop: %s: %v\n", op, err)
+	msg := err.Error()
+	if home, homeErr := os.UserHomeDir(); homeErr == nil && filepath.IsAbs(home) {
+		home = filepath.Clean(home)
+		if filepath.Dir(home) != home {
+			sep := string(filepath.Separator)
+			msg = strings.ReplaceAll(msg, home+sep, "~"+sep)
+		}
+	}
+	fmt.Fprintf(os.Stderr, "toktop: %s: %v\n", op, msg)
 	return 1
 }
