@@ -153,7 +153,7 @@ test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS) )$(race_flag)-shuffle=on $(if $(RUN),-run "$(RUN)" )"$(PKG)"
 	@if [ -z "$(TESTTAGS)" ]; then \
 		case "$(PKG)" in \
-		./agentusage|./agentusage/|agentusage|github.com/maci0/toktop/agentusage|github.com/maci0/toktop/agentusage/) \
+		./agentusage|./agentusage/|./agentusage/...|agentusage|github.com/maci0/toktop/agentusage|github.com/maci0/toktop/agentusage/|github.com/maci0/toktop/agentusage/...) \
 			echo "make test-pkg: also running -tags sqlite (set TESTTAGS to run one half)"; \
 			CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on $(if $(RUN),-run "$(RUN)" )"$(PKG)" || exit 1; \
 			;; \
