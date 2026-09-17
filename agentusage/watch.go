@@ -1063,8 +1063,6 @@ const maxLineBytes = 8 << 20
 // JSONL record fits; a giant one is assembled across fills until maxLineBytes.
 const appendReaderBytes = 64 << 10
 
-// collect parses one complete line and appends its values when it carries
-// usage belonging to this attach.
 func (w *Watcher) collect(recs []values, line []byte) []values {
 	v, cwd, ok := w.ad.parse(line)
 	if !ok {
@@ -1075,7 +1073,21 @@ func (w *Watcher) collect(recs []values, line []byte) []values {
 	if cwd != "" && !w.sameDir(cwd) {
 		return recs
 	}
-	return append(recs, v)
+	if len(recs) == 0 || (w.ad.kind == cumulative && len(recs) == 1) {
+		return append(recs, v)
+	}
+	cur := &recs[len(recs)-1]
+	if w.ad.kind == cumulative {
+		cur.output = max(cur.output, v.output)
+		cur.thinking = max(cur.thinking, v.thinking)
+		cur.input = max(cur.input, v.input)
+	} else {
+		cur.output = satAdd(cur.output, v.output)
+		cur.thinking = satAdd(cur.thinking, v.thinking)
+		cur.input = satAdd(cur.input, v.input)
+	}
+	cur.total = max(cur.total, v.total)
+	return recs
 }
 
 // applyRecord folds one counted record into the per-file bookkeeping.

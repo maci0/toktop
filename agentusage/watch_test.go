@@ -72,6 +72,79 @@ func append_(t *testing.T, path string, lines ...string) {
 	}
 }
 
+func TestCollectedRecordsStayBounded(t *testing.T) {
+	for _, kind := range []valueKind{perMessage, cumulative} {
+		w := &Watcher{ad: adapter{kind: kind, parse: parseGeneric}}
+		var recs []values
+		for range 10000 {
+			recs = w.collect(recs, []byte(`{"output_tokens":3,"input_tokens":5,"thinking_tokens":2,"total_tokens":9}`))
+		}
+		if len(recs) > 2 {
+			t.Fatalf("kind %d retained %d records", kind, len(recs))
+		}
+		want := values{output: 30000, input: 50000, thinking: 20000, total: 9}
+		if kind == cumulative {
+			want = values{output: 3, input: 5, thinking: 2, total: 9}
+		}
+		if got := recs[len(recs)-1]; got != want {
+			t.Fatalf("kind %d: got %+v, want %+v", kind, got, want)
+		}
+	}
+}
+
+func TestFoldedTranscriptCounts(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		tool        string
+		preexisting bool
+		seed        string
+		want        values
+	}{
+		{"per-message", "claude", false, "", values{output: 55, input: 77, thinking: 14, total: 60}},
+		{"new-cumulative", "codex", false, "", values{output: 30, input: 50, thinking: 9, total: 60}},
+		{"unseeded-cumulative", "codex", true, "", values{output: 20, input: 30, thinking: 6, total: 60}},
+		{"seeded-cumulative", "codex", true, `{"output_tokens":5,"input_tokens":6,"thinking_tokens":1}`, values{output: 25, input: 44, thinking: 8, total: 60}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := withStore(t, tc.tool)
+			ad := adapters[tc.tool]
+			ad.parse, ad.sessionCwd = parseGeneric, nil
+			adapters[tc.tool] = ad
+			path := filepath.Join(store, "session.jsonl")
+			if tc.preexisting {
+				appendRaw(t, path, tc.seed)
+			}
+			w := Watch(tc.tool, t.TempDir(), time.Now())
+			appendRaw(t, path, "\n"+
+				`{"output_tokens":10,"input_tokens":20,"thinking_tokens":3,"total_tokens":40}`+"\n"+
+				`{"output_tokens":30,"input_tokens":7,"thinking_tokens":9,"total_tokens":20}`+"\n"+
+				`{"output_tokens":15,"input_tokens":50,"thinking_tokens":2,"total_tokens":60}`)
+			for range 2 {
+				s := w.Poll()
+				got := values{output: s.Output, input: s.Input, thinking: s.Thinking, total: s.Total}
+				if got != tc.want {
+					t.Fatalf("got %+v, want %+v", got, tc.want)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkCollectRecords(b *testing.B) {
+	w := &Watcher{ad: adapter{kind: perMessage, parse: parseGeneric}}
+	line := []byte(`{"output_tokens":3,"input_tokens":5}`)
+	b.ReportAllocs()
+	for b.Loop() {
+		var recs []values
+		for range 10000 {
+			recs = w.collect(recs, line)
+		}
+		if len(recs) == 0 {
+			b.Fatal("no records collected")
+		}
+	}
+}
+
 func TestClaudeUsageIsSummedPerMessage(t *testing.T) {
 	store := withStore(t, "claude")
 	work := t.TempDir()
