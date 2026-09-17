@@ -48,6 +48,41 @@ test("single-coding clients get a body that decompresses to the page", async () 
   }
 });
 
+test("page responses disable Workers automatic body encoding", async () => {
+  const NativeResponse = globalThis.Response;
+  const options = new WeakMap();
+  globalThis.Response = new Proxy(NativeResponse, {
+    construct(target, args) {
+      const response = Reflect.construct(target, args);
+      options.set(response, args[1]);
+      return response;
+    },
+  });
+  try {
+    for (const [coding, format] of [
+      ["gzip", "gzip"],
+      ["br", "brotli"],
+      ["zstd", "zstd"],
+      ["identity", null],
+    ]) {
+      for (const method of ["GET", "HEAD"]) {
+        const res = await call({ "accept-encoding": coding }, { method });
+        expect(options.get(res)?.encodeBody).toBe("manual");
+        const bytes = new Uint8Array(await res.arrayBuffer());
+        expect(res.headers.get("content-encoding")).toBe(format ? coding : null);
+        if (method === "HEAD") {
+          expect(bytes.byteLength).toBe(0);
+        } else {
+          expect(Number(res.headers.get("content-length"))).toBe(bytes.byteLength);
+          expect(format ? await decompress(bytes, format) : new TextDecoder().decode(bytes)).toBe(identityBody);
+        }
+      }
+    }
+  } finally {
+    globalThis.Response = NativeResponse;
+  }
+});
+
 test("brotli-capable clients are served br, not gzip", async () => {
   for (const ae of ["br", "gzip, deflate, br", "gzip, deflate, br, zstd"]) {
     const res = await call({ "accept-encoding": ae });

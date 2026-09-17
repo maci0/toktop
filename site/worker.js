@@ -445,8 +445,8 @@ export default {
     };
     if (chosen.coding) headers["content-encoding"] = chosen.coding;
     if (request.method === "HEAD") {
-      return new Response(null, { headers });
+      return new Response(null, { headers, encodeBody: "manual" });
     }
-    return new Response(chosen.bytes, { headers });
+    return new Response(chosen.bytes, { headers, encodeBody: "manual" });
   },
 };
