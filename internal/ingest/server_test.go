@@ -159,7 +159,9 @@ func TestIngestIdempotencyKeyFillsMissingID(t *testing.T) {
 	if len(rec.evs) != 2 {
 		t.Fatalf("events = %d, want 2 (one per line, retry ignored)", len(rec.evs))
 	}
-	if rec.evs[0].ID != "harness-batch-7:1" || rec.evs[1].ID != "harness-batch-7:2" {
+	if rec.evs[0].ID == "" || rec.evs[1].ID == "" ||
+		rec.evs[0].ID != rec.evs[0].ID[:len(rec.evs[0].ID)-2]+":1" ||
+		rec.evs[1].ID != rec.evs[1].ID[:len(rec.evs[1].ID)-2]+":2" {
 		t.Errorf("ids = %q, %q", rec.evs[0].ID, rec.evs[1].ID)
 	}
 	if rec.evs[0].OutputTokens != 50 || rec.evs[1].OutputTokens != 10 {
@@ -215,6 +217,36 @@ func TestIngestDoesNotMintEventIDFromRequestID(t *testing.T) {
 	awaitEvents(t, rec, 2)
 	if rec.evs[1].ID != "" {
 		t.Fatalf("X-Request-Id became event id %q", rec.evs[1].ID)
+	}
+}
+
+func TestIngestDistinctIdempotencyKeys(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		keys [2]string
+	}{
+		{"suffix space", [2]string{strings.Repeat("k", 126) + "a", strings.Repeat("k", 126) + "b"}},
+		{"header cap", [2]string{strings.Repeat("k", 128) + "a", strings.Repeat("k", 128) + "b"}},
+		{"whitespace", [2]string{"batch  one", "batch one"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &onceRecorder{}
+			s := &Server{rec: rec}
+			for attempt := range 2 {
+				for _, key := range tc.keys {
+					req := httptest.NewRequest(http.MethodPost, "/v1/events", strings.NewReader(`{"agent":"coder","output_tokens":50}`))
+					req.Header.Set("Idempotency-Key", key)
+					w := httptest.NewRecorder()
+					s.handlePost(w, req)
+					if w.Code != http.StatusAccepted {
+						t.Fatalf("attempt %d status = %d", attempt, w.Code)
+					}
+				}
+				if len(rec.evs) != 2 {
+					t.Fatalf("attempt %d events = %d, want 2", attempt, len(rec.evs))
+				}
+			}
+		})
 	}
 }
 

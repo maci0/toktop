@@ -5,6 +5,8 @@ package ingest
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +20,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -159,22 +160,23 @@ func incomingRequestID(r *http.Request) string {
 // reused across distinct sends or minted per attempt, so treating it as an
 // event id would collapse unrelated turns or fail to collapse retries.
 func clientEventKey(r *http.Request) string {
-	return logField(r.Header.Get("Idempotency-Key"), 128)
+	return r.Header.Get("Idempotency-Key")
 }
 
 // derivedEventID maps one line of a POST onto a stable event id so a replay
 // of the same stream (lost 202, retry after a mid-stream 400) lands on the
 // same keys the collector already ignores. seq is 1-based within the POST.
+// The key is kept verbatim and hashed, so two POSTs whose keys differ only
+// after cap truncation or whitespace collapsing stay distinct: replaying one
+// must not swallow the other's events. A collision needs both a 121+ byte
+// key pair and a sha256 prefix match; keyed ids still fit the 128-event cap.
 func derivedEventID(key string, seq int) string {
 	if key == "" || seq < 1 {
 		return ""
 	}
 	suffix := ":" + strconv.Itoa(seq)
-	head := core.ClampField(key, 128-utf8.RuneCountInString(suffix))
-	if head == "" {
-		return ""
-	}
-	return head + suffix
+	sum := sha256.Sum256([]byte(key))
+	return hex.EncodeToString(sum[:8]) + suffix
 }
 
 func requestID(r *http.Request) string {

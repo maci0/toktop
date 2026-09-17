@@ -10,6 +10,14 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+### Changed
+
+- Ingest `Idempotency-Key` ids are now derived by hashing the key with the
+  line's index (`<8-byte-hash>:N`). Long keys no longer truncate into each
+  other and whitespace is no longer collapsed, so two POSTs whose keys
+  differ only past 128 characters record as separate events instead of one
+  replay swallowing the other. Keys keep their exact bytes end to end.
+
 - Recaptured the README and toktop.ai dashboard screenshot from a 0.9.0
   demo frame.
 
