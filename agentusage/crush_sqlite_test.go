@@ -350,9 +350,31 @@ func TestCrushSinceQueryDoesNotWrapUpdatedAt(t *testing.T) {
 	}
 }
 
-// A seconds-timestamped row at the Unix second that contains since must not
-// count: it is strictly before ceil(since_ms/1000), the same as the old
-// (updated_at * 1000 >= since_ms) rule.
+func TestCrushWatchCountsGrowthWithinAttachSecond(t *testing.T) {
+	dir := t.TempDir()
+	since := time.Date(2026, time.September, 18, 12, 0, 0, 500*int(time.Millisecond), time.UTC)
+	crushDB(t, dir, map[string][3]int64{
+		"s": {5000, 2000, since.Unix()},
+	})
+	w := Watch("crush", dir, since)
+	if w == nil {
+		t.Fatal("crush watcher is unavailable")
+	}
+	if got := w.Poll(); !got.Empty() {
+		t.Fatalf("counted pre-attach usage: %+v", got)
+	}
+	updated := since.Add(250 * time.Millisecond)
+	putCrushSession(t, dir, "s", 5100, 2300, updated.Unix())
+	putCrushSession(t, dir, "new", 20, 40, updated.Unix())
+	got := w.Poll()
+	if got.Output != 120 || got.Input != 340 {
+		t.Fatalf("usage %+v, want 120 output and 340 input tokens", got)
+	}
+	if next := w.Poll(); next.Output != got.Output || next.Input != got.Input {
+		t.Fatalf("repeated poll changed usage: %+v, want %+v", next, got)
+	}
+}
+
 func TestCrushSourceSinceBoundaryInSeconds(t *testing.T) {
 	dir := t.TempDir()
 	since := time.Unix(1_700_000_000, 500*int64(time.Millisecond))
@@ -362,8 +384,8 @@ func TestCrushSourceSinceBoundaryInSeconds(t *testing.T) {
 		"millis":      {40, 0, since.UnixMilli()},
 	})
 	out, _, ok := crushSessionSum([]string{dir}, since)
-	if !ok || out != 60 {
-		t.Fatalf("output %d (ok=%v), want 60 (next-second + millis, not same-second)", out, ok)
+	if !ok || out != 70 {
+		t.Fatalf("output %d (ok=%v), want 70 (same-second + next-second + millis)", out, ok)
 	}
 }
 
@@ -391,7 +413,7 @@ func TestCrushSinceQueryCanUseUpdatedAtIndex(t *testing.T) {
 	}
 	since := base.Add(1500 * time.Second)
 	ms := since.UnixMilli()
-	plan := explainQueryPlan(t, db, crushSessionsSinceQuery, ms, crushMillisCutoff, (ms+999)/1000)
+	plan := explainQueryPlan(t, db, crushSessionsSinceQuery, ms, crushMillisCutoff, since.Unix())
 	if !strings.Contains(plan, "idx_sessions_updated_at") {
 		t.Fatalf("sargable predicate did not use updated_at index:\n%s", plan)
 	}

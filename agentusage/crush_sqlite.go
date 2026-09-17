@@ -128,10 +128,6 @@ const crushSessionsQuery = `
 	SELECT id, completion_tokens, prompt_tokens
 	FROM sessions`
 
-// crushSessionsSinceQuery keeps updated_at bare so an index on that column
-// can be used. Millisecond rows are >= since in ms. Second rows sit at or
-// below crushMillisCutoff and are compared in seconds, ceiled so a fractional
-// millisecond still matches (updated_at * 1000 >= since_ms).
 const crushSessionsSinceQuery = crushSessionsQuery + `
 	WHERE updated_at >= ? OR (updated_at <= ? AND updated_at >= ?)`
 
@@ -169,7 +165,7 @@ func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, 
 	if !since.IsZero() {
 		query = crushSessionsSinceQuery
 		ms := since.UnixMilli()
-		args = append(args, ms, crushMillisCutoff, (ms+999)/1000)
+		args = append(args, ms, crushMillisCutoff, since.Unix())
 	}
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
