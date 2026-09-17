@@ -11,9 +11,8 @@ function htmlForWire(source) {
 }
 
 // 1280w covers 3x phones and 1x desktop; 1920w is the 2x desktop slot.
-// sizes matches the .shot column: full viewport under 640px, 76rem max otherwise.
 // The img omits decoding=async so the browser does not postpone the LCP decode.
-const HERO_SIZES = "(max-width: 640px) 100vw, 76rem";
+const HERO_SIZES = "(max-width: 640px) calc(100vw - 1.7rem - 2px), calc(min(76rem, 100vw - 2.5rem) - 2px)";
 const HERO_AVIF_SRCSET = "/dashboard-1280.avif 1280w, /dashboard.avif 1920w";
 const HERO_WEBP_SRCSET = "/dashboard-1280.webp 1280w, /dashboard.webp 1920w";
 

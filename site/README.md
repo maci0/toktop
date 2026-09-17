@@ -36,14 +36,17 @@ so caches never hand a compressed body to a client that cannot decode it.
 ## Performance budget
 
 One request for the page, no JavaScript, no webfonts, inline CSS only. The
-hero is the real dashboard capture: AVIF (~67 KB at 1920px, ~38 KB at 1280px)
-then WebP (~143 KB / ~79 KB) then the PNG share-card original. `srcset` picks
-1280w for phones and 1x desktops; 1920w is the 2x desktop slot. Served from
+hero is the real dashboard capture: AVIF (72,812 bytes at 1920px, 39,708 at
+1280px), then WebP (148,050 / 81,540 bytes), then the PNG share-card original.
+For public visitors, including mobile networks, `sizes` follows the body
+gutters, figure borders, and 76rem column cap rather than declaring a desktop
+width on tablets. Both formats retain their 1280w and 1920w candidates. Served from
 this Worker so a deploy updates share cards and the page together.
 `wrangler.jsonc` sets `run_worker_first` so those image paths hit the Worker
 (cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline. Measured
-against the current source: 6,588 bytes identity / 2,715 gzip / 2,197 brotli
-for the HTML, still inside the ~14 KB initial congestion window. The budget
+against the current source with Bun 1.4.2: 6,696 bytes identity / 2,743 gzip /
+2,224 brotli for the HTML (previously 6,588 / 2,715 / 2,197), still inside the
+~14 KB initial congestion window. The budget
 is pinned by a test, so drift fails `bun test site/`; numbers above are
 re-measurable with it:
 
