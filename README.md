@@ -140,7 +140,8 @@ func main() {
 
 `RegisterSpec` teaches the package about an agent it was not compiled to know.
 `errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on a rejected spec, and
-`ErrInvalidDefinitions` on a malformed definitions file. `Rate` is output
+`ErrInvalidDefinitions` on a malformed definitions file or colliding agent names
+after normalization. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
 prompt tokens.
 

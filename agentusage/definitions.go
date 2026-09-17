@@ -123,8 +123,8 @@ type definitionFile map[string]struct {
 }
 
 // ErrInvalidDefinitions is returned by LoadDefinitions when the file exists
-// but is not valid JSON. The json.SyntaxError (or Decoder error) is wrapped,
-// so errors.As still recovers the parse position.
+// but has invalid JSON or colliding agent names after normalization. JSON
+// errors are wrapped, so errors.As still recovers the parse position.
 var ErrInvalidDefinitions = errors.New("malformed agent definitions")
 
 // errCollidingDefinitions marks an agents.json holding two names that NFC
@@ -141,7 +141,7 @@ var errCollidingDefinitions = errors.New("agent names collide after NFC normaliz
 // A missing file is not an error, since most machines have none. A malformed
 // or unreadable one is: running with a half-loaded agent set is worse than
 // refusing. The error names the file; errors.Is matches ErrInvalidDefinitions
-// when the contents are not valid JSON.
+// for invalid JSON or colliding agent names after normalization.
 //
 // Names are canonicalized before registration, so two spellings that NFC
 // reduces to one key (NFD "café" beside precomposed "café") would silently
@@ -173,8 +173,8 @@ func LoadDefinitions(path string) error {
 			continue // a launch-only definition says nothing about tokens
 		}
 		if prev, dup := seen[canonical]; dup {
-			return fmt.Errorf("%w: %s: %q and %q both reduce to %q",
-				errCollidingDefinitions, path, prev, name, canonical)
+			return fmt.Errorf("%w: %s: %w: %q and %q both reduce to %q",
+				ErrInvalidDefinitions, path, errCollidingDefinitions, prev, name, canonical)
 		}
 		seen[canonical] = name
 		spec := Spec{

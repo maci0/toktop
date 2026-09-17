@@ -253,6 +253,9 @@ func TestLoadDefinitionsRejectsNFCCollisions(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := LoadDefinitions(path)
+	if !errors.Is(err, ErrInvalidDefinitions) {
+		t.Fatalf("colliding names = %v, want ErrInvalidDefinitions", err)
+	}
 	if !errors.Is(err, errCollidingDefinitions) {
 		t.Fatalf("colliding names = %v, want errCollidingDefinitions", err)
 	}
