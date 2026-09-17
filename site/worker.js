@@ -236,10 +236,19 @@ function parseAcceptEncoding(headerValue) {
   return qByCoding;
 }
 
+// The identity branch: listed without a q, implicit accept (RFC 9110 12.5.3);
+// listed with q=0 or the page's encodings all refused means identity must be
+// sendable, so it floors at 0.001 rather than zero. identity;q=0 refuses only
+// the identity bytes themselves, never every encoding on offer.
 function quality(qByCoding, coding) {
+  if (coding === "identity") {
+    const listed = qByCoding.get("identity") ?? qByCoding.get("*");
+    if (listed != null) return listed > 0 ? listed : 0.001;
+    return 1;
+  }
   if (qByCoding.has(coding)) return qByCoding.get(coding);
   if (qByCoding.has("*")) return qByCoding.get("*");
-  return coding === "identity" ? 1 : 0;
+  return 0;
 }
 
 // Content-Encoding token -> CompressionStream format. deflate is omitted on

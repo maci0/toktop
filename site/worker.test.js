@@ -76,6 +76,21 @@ test("accept-encoding variants negotiate correctly", async () => {
   }
 });
 
+// RFC 9110 12.5.3: identity is acceptable by default, so a header naming no
+// page encoding at all (or refusing the listed ones with q=0) falls back to
+// identity bytes. Only identity;q=0 itself refuses the raw bytes.
+test("clients listing no compatible encoding get identity, per accept-encoding rules", async () => {
+  for (const ae of ["deflate", "br;q=0, gzip;q=0, zstd;q=0", "deflate;q=1"]) {
+    const res = await call({ "accept-encoding": ae });
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(await res.text()).toBe(identityBody);
+  }
+  const refused = await call({ "accept-encoding": "identity;q=0" });
+  expect(refused.status).toBe(200);
+  expect(refused.headers.get("content-encoding")).toBeNull();
+  expect((await refused.arrayBuffer()).byteLength).toBeGreaterThan(0);
+});
+
 test("every variant carries Vary: Accept-Encoding", async () => {
   const fresh = await call({ "accept-encoding": "gzip" });
   expect(fresh.headers.get("vary")).toBe("Accept-Encoding");
