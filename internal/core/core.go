@@ -77,13 +77,6 @@ type ProviderSnapshot struct {
 	InHist  []float64
 }
 
-func (p *ProviderSnapshot) PrimaryModel() string {
-	if len(p.Models) > 0 {
-		return p.Models[0].Name
-	}
-	return "-"
-}
-
 // Agent event kinds. Unknown values are accepted on the wire (forward
 // compatible with a harness that invents one) and render as a generic event.
 const (

@@ -807,7 +807,7 @@ func (m Model) providersBody(w int) string {
 		if !p.OK {
 			dot = dotBad
 		}
-		model := shorten(core.SanitizeText(p.PrimaryModel()), w-15)
+		model := shorten(core.SanitizeText(primaryModel(p)), w-15)
 		line1 := dot + " " + kindBadge(p.Kind) + " " + styleValue.Render(model)
 		if p.Version != "" {
 			line1 += " " + dim("v"+shorten(core.SanitizeText(p.Version), 12))

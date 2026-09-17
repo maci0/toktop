@@ -101,7 +101,7 @@ func writeEnginesPlain(b *strings.Builder, s core.Snapshot) {
 			b.WriteString("down " + head + "\n")
 		}
 		var detail []string
-		if model := core.SanitizeText(p.PrimaryModel()); model != "" && model != "-" {
+		if model := core.SanitizeText(primaryModel(p)); model != "" && model != "-" {
 			detail = append(detail, model)
 		}
 		if p.Version != "" {

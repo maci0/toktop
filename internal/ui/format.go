@@ -16,6 +16,13 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+func primaryModel(p core.ProviderSnapshot) string {
+	if len(p.Models) > 0 {
+		return p.Models[0].Name
+	}
+	return "-"
+}
+
 func norm(v, maxV float64) float64 {
 	if maxV <= 0 {
 		return 0

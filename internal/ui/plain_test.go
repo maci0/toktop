@@ -87,6 +87,45 @@ func TestPlainFrameCarriesTheData(t *testing.T) {
 	}
 }
 
+func TestEngineModelLabels(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		models []core.ModelInfo
+		label  string
+	}{
+		{name: "nil", label: "-"},
+		{name: "empty", models: []core.ModelInfo{}, label: "-"},
+		{name: "first", models: []core.ModelInfo{{Name: "first"}, {Name: "second"}}, label: "first"},
+		{name: "empty first", models: []core.ModelInfo{{}, {Name: "second"}}},
+		{name: "sanitized", models: []core.ModelInfo{{Name: "\x1b[31mfirst\x1b[0m"}}, label: "first"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := core.Snapshot{Providers: []core.ProviderSnapshot{{
+				Label: "engine", Kind: core.KindOllama, Models: tc.models,
+			}}}
+			m := Model{snap: snap}
+			row, _, _ := strings.Cut(strip(m.providersBody(80)), "\n")
+			fields := strings.Fields(row)
+			wantFields := 2
+			if tc.label != "" {
+				wantFields++
+			}
+			if len(fields) != wantFields || (tc.label != "" && fields[len(fields)-1] != tc.label) {
+				t.Errorf("dashboard model row = %q, want label %q", row, tc.label)
+			}
+			var plain strings.Builder
+			writeEnginesPlain(&plain, snap)
+			want := "\nENGINES\ndown engine (ollama)\n"
+			if tc.label != "" && tc.label != "-" {
+				want += "       " + tc.label + "\n"
+			}
+			if got := plain.String(); got != want {
+				t.Errorf("plain engines = %q, want %q", got, want)
+			}
+		})
+	}
+}
+
 func TestPlainFrameAllDown(t *testing.T) {
 	snap := core.Snapshot{
 		Providers: []core.ProviderSnapshot{{
