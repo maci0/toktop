@@ -279,6 +279,28 @@ func capModel(name string) string {
 	return core.TruncateClusters(strings.TrimSpace(name), ModelNameMax)
 }
 
+func SelectModel(models []core.ModelInfo) string {
+	var fallback string
+	for _, m := range models {
+		name := capModel(m.Name)
+		if name == "" || skipProbeModel(name) {
+			continue
+		}
+		if m.SizeVRAM > 0 {
+			return name
+		}
+		if fallback == "" {
+			fallback = name
+		}
+	}
+	return fallback
+}
+
+func skipProbeModel(name string) bool {
+	n := strings.ToLower(name)
+	return strings.Contains(n, "embed") || strings.Contains(n, "rerank")
+}
+
 // resolveTokens picks a probe's token count. Engine-reported usage is
 // preferred when it sits in a plausible band around the requested
 // generation; anything outside is ignored in favour of content frames

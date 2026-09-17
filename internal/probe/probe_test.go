@@ -16,6 +16,42 @@ import (
 // firstTokenDelay is one Windows clock tick plus slack.
 const firstTokenDelay = 25 * time.Millisecond
 
+func TestSelectModel(t *testing.T) {
+	cases := []struct {
+		name   string
+		models []core.ModelInfo
+		want   string
+	}{
+		{name: "empty"},
+		{
+			name:   "non-generation models",
+			models: []core.ModelInfo{{Name: "  "}, {Name: "EMBED-large", SizeVRAM: 1}, {Name: "ReRank-v2", SizeVRAM: 1}},
+		},
+		{
+			name:   "first catalog fallback",
+			models: []core.ModelInfo{{Name: "embed"}, {Name: " first "}, {Name: "second"}},
+			want:   "first",
+		},
+		{
+			name:   "first loaded generation model",
+			models: []core.ModelInfo{{Name: "catalog"}, {Name: "embed", SizeVRAM: 1}, {Name: " loaded ", SizeVRAM: 1}, {Name: "other", SizeVRAM: 2}},
+			want:   "loaded",
+		},
+		{
+			name:   "whole grapheme cap",
+			models: []core.ModelInfo{{Name: " " + strings.Repeat("e\u0301", ModelNameMax+1) + " "}},
+			want:   strings.Repeat("e\u0301", ModelNameMax),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := SelectModel(tc.models); got != tc.want {
+				t.Fatalf("SelectModel() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestRunOpenAIStream(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1/chat/completions" {

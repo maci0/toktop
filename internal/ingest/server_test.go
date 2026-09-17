@@ -366,6 +366,23 @@ func TestIngestAcceptsWholeJSONNumberTokenCounts(t *testing.T) {
 	}
 }
 
+func TestIngestRejectsTokenCountOverflow(t *testing.T) {
+	for _, value := range []string{"9223372036854775808", "9223372036854775808.0", "9.223372036854776e18"} {
+		t.Run(value, func(t *testing.T) {
+			for _, field := range []string{"prompt_tokens", "output_tokens", "thinking_tokens"} {
+				t.Run(field, func(t *testing.T) {
+					s := startIngest(t, &memRecorder{})
+					resp := post(t, "http://"+s.Addr()+"/v1/events",
+						`{"agent":"overflow","`+field+`":`+value+`}`)
+					if resp != http.StatusBadRequest {
+						t.Fatalf("status = %d, want %d", resp, http.StatusBadRequest)
+					}
+				})
+			}
+		})
+	}
+}
+
 func TestIngestMethodNotAllowedSetsAllow(t *testing.T) {
 	s := startIngest(t, &memRecorder{})
 

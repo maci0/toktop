@@ -137,7 +137,7 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) && math.Trunc(f) == f {
-		if f > math.MaxInt64 || f < math.MinInt64 {
+		if f >= math.MaxInt64 || f < math.MinInt64 {
 			return 0, fmt.Errorf("bad json: %s is out of range", field)
 		}
 		return int64(f), nil
