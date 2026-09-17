@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
@@ -764,4 +766,62 @@ func TestRunOllamaNonStreamDoneWithResponse(t *testing.T) {
 	if !s.OK || s.Tokens != 1 {
 		t.Fatalf("done-frame content = %+v, want 1 token", s)
 	}
+}
+
+func FuzzReadEngineJSON(f *testing.F) {
+	for _, seed := range []string{
+		`{"choices":[{"message":{"content":"one two three"}}],"usage":{"completion_tokens":3}}`,
+		`{"choices":[{"delta":{"content":"a"}}]}`,
+		`{"error":"quota exceeded"}`,
+		`{"error":{"message":"model 'x' is busy"}}`,
+		`{"error":{"message":"` + strings.Repeat("x", 600) + `"}}`,
+		`data: {"choices":[{"delta":{"content":"He"}}]}`,
+		"{\"usage\":{\"completion_tokens\":9999999999999}}",
+		"{\"usage\":{\"completion_tokens\":-5}}",
+		"{\"choices\":[" + strings.Repeat(`{"delta":{"content":"x"}},`, 40) + `{"delta":{"content":"x"}}]}`,
+		`{"choices":[{"message":{"content":"ok"}}],"error":null}`,
+		"{",
+		"not json",
+		"",
+		"\n\n\n",
+		"{\"choices\":[{\"message\":{\"content\":\"" + strings.Repeat("\xf0\x9f\x8c\x8d", 40) + "\"}}]}",
+		`{"choices":[{"message":{"content":42}}]}`,
+		`{"choices":[{"message":{"content":null,"refusal":"declined"}}]}`,
+		`{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":128}}`,
+		`{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":129}}`,
+		`{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":-1}}`,
+		`{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":1.5}}`,
+		`{"choices":[{"message":{"content":"ok"}}],"error":[{"message":"busy"}]}`,
+		"{\"choices\":[{\"message\":{\"content\":\"\xff\x00\"}}]}",
+		strings.Repeat(" ", probeLineMax-2) + `{}`,
+		strings.Repeat(" ", probeLineMax-1) + `{}`,
+		strings.Repeat("[", 64) + `null` + strings.Repeat("]", 64),
+		"[[[[[[[\"deep\"]]]]]]]",
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, body []byte) {
+		sample := core.ProbeSample{At: time.Now()}
+		before := sample
+		reader := bytes.NewReader(body)
+		tokens, ttft, err := readOpenAIJSON(reader, &sample)
+		if len(body)-reader.Len() > probeLineMax {
+			t.Fatal("decoder exceeded the response byte limit")
+		}
+		if sample != before {
+			t.Fatal("decoder modified the input sample")
+		}
+		if err == nil {
+			if tokens <= 0 || tokens > probeTokenTrust || ttft < 0 {
+				t.Fatalf("invalid successful result: tokens=%d ttft=%v", tokens, ttft)
+			}
+		} else if tokens != 0 || ttft != 0 {
+			t.Fatalf("failed decode returned a measurement: tokens=%d ttft=%v", tokens, ttft)
+		}
+		fragmented := iotest.OneByteReader(bytes.NewReader(body))
+		tokens2, _, err2 := readOpenAIJSON(fragmented, &sample)
+		if tokens2 != tokens || fmt.Sprint(err2) != fmt.Sprint(err) {
+			t.Fatalf("fragmentation changed result: %d/%v then %d/%v", tokens, err, tokens2, err2)
+		}
+	})
 }
