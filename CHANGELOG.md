@@ -10,16 +10,41 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+### Breaking
+
+- `--agents` exits with status 2 instead of warning and continuing when
+  `~/.gauntlet/agents.json` (or `$GAUNTLET_HOME/agents.json`) is malformed
+  or unreadable. Before upgrading from 0.9.0, fix the JSON or permissions,
+  or move the file aside if custom definitions are not needed. A missing
+  file remains valid. `agentusage.LoadDefinitions` already returned errors
+  for malformed or unreadable files; this startup change affects the CLI.
+- `agentusage.LoadDefinitions` now rejects names with `usage` definitions
+  that collide after trimming surrounding whitespace and NFC normalization,
+  rather than silently keeping one definition. For example, merge the
+  entries `"cafe\u0301"` and `"caf\u00e9"` into one name with the intended
+  `usage` settings. Rejection leaves the registry unchanged and matches
+  `ErrInvalidDefinitions` via `errors.Is`; `--agents` also refuses the file.
+
 ### Changed
 
-- Ingest `Idempotency-Key` ids are now derived by hashing the key with the
-  line's index (`<8-byte-hash>:N`). Long keys no longer truncate into each
-  other and whitespace is no longer collapsed, so two POSTs whose keys
-  differ only past 128 characters record as separate events instead of one
-  replay swallowing the other. Keys keep their exact bytes end to end.
+- Ingest `Idempotency-Key` ids now use the first eight bytes of the key's
+  SHA-256 hash as 16 hexadecimal characters, followed by `:N` for the
+  1-based line index, instead of `key:N`. Keys received by the handler are
+  hashed without truncation or whitespace collapsing, avoiding the previous
+  systematic collisions; the truncated hash is not collision-free. Senders
+  retrying the same body with the same header need no change. To control
+  the event id across versions, supply an explicit body `id`, which still
+  takes precedence over the header.
 
 - Recaptured the README and toktop.ai dashboard screenshot from a 0.9.0
   demo frame.
+
+### Fixed
+
+- `agentusage.Sample.Total` now takes the largest context size across
+  watched transcript files instead of adding each file's maximum. Values
+  can be lower than in 0.9.0 when several transcripts are watched; `Input`
+  and `Output` remain accrued token counts, not context sizes.
 
 ## [0.9.0] - 2026-09-13
 

@@ -197,7 +197,7 @@ Event fields are all optional; anything omitted gets the default:
 
 | field | type | default | notes |
 |---|---|---|---|
-| `id` | string | - | caller-chosen key, capped at 128 characters; a repeat of a key still in the retained feed (last 512 events) is ignored. When omitted, a request `Idempotency-Key` header is used, hashed with the line's index (`<hash>:1`, `<hash>:2`, and so on per line in the POST); key bytes are kept exactly, so distinct keys never collide |
+| `id` | string | - | caller-chosen key, capped at 128 characters; a repeat of a key still in the retained feed (last 512 events) is ignored. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key without truncation or whitespace collapsing; hash collisions remain possible |
 | `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); stamps more than two minutes ahead of arrival are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
