@@ -66,7 +66,21 @@ type Collector struct {
 
 // New polls providers every interval. Host vitals come from sysmon; call
 // SetSysFn before Run when merging remote readings onto the local sample.
+// Duplicate non-empty endpoints collapse to their first occurrence: --add
+// can name the same engine twice and the collector keys rate baselines,
+// histories and probe state by endpoint, so a repeat would be polled twice,
+// summed twice by the UI aggregates, and push duplicate history samples.
 func New(providers []provider.Provider, interval time.Duration) *Collector {
+	seen := map[string]bool{}
+	deduped := providers[:0:0]
+	for _, p := range providers {
+		key := providerKey(p)
+		if key != "" && !seen[key] {
+			seen[key] = true
+			deduped = append(deduped, p)
+		}
+	}
+	providers = deduped
 	c := &Collector{
 		providers:     providers,
 		interval:      interval,

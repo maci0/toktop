@@ -687,6 +687,42 @@ func TestPerProviderStateKeyedByEndpoint(t *testing.T) {
 	}
 }
 
+// A duplicate endpoint (the same --add URL twice, or discovery plus an
+// explicit attach of one engine) must collapse to one provider: rate
+// baselines, histories and probe state are keyed by endpoint, so a second
+// entry with the same key would share its baseline, double the UI aggregate
+// and push two history samples per emission.
+func TestDuplicateEndpointsCollapsed(t *testing.T) {
+	m := &provider.Metrics{OutTotal: 100, Models: []core.ModelInfo{{Name: "m"}}}
+	ch := make(chan core.Snapshot, 1)
+	now := time.Unix(1_700_000_000, 0).UTC()
+	dup := (&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8080", m: m}).asProvider()
+	other := (&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8081", m: m}).asProvider()
+	c := New([]provider.Provider{dup, dup, other}, time.Second)
+	c.SetNow(func() time.Time { return now })
+
+	c.emit(context.Background(), ch) // seed baseline
+	snap := <-ch
+	if len(snap.Providers) != 2 {
+		t.Fatalf("providers = %d, want 2 (duplicate endpoint collapsed)", len(snap.Providers))
+	}
+	now = now.Add(time.Second)
+	m.OutTotal = 200 // one engine generated tokens since emit #1
+
+	c.emit(context.Background(), ch)
+	snap = <-ch
+	rates := map[string]float64{}
+	for _, p := range snap.Providers {
+		rates[p.Addr] += p.OutTokPS
+	}
+	if rates["http://127.0.0.1:8080"] != 35 { // 100 tok over 1s, EMA alpha .35 from 0
+		t.Fatalf(":8080 aggregate rate = %v, want 35 (single poll, no double count)", rates)
+	}
+	if len(snap.Providers[0].OutHist) != 2 {
+		t.Fatalf("history samples = %d, want 2 (one per emission)", len(snap.Providers[0].OutHist))
+	}
+}
+
 func TestEmitProcessAttributionRequiresLocalHost(t *testing.T) {
 	for _, tc := range []struct {
 		addr string
