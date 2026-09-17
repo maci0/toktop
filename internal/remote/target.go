@@ -135,13 +135,22 @@ func lookupSSHConfig(name string) *sshConfigEntry {
 		switch strings.ToLower(key) {
 		case "host":
 			inBlock = false
+			negated := false
 			for pat := range strings.FieldsSeq(val) {
-				if patternMatch(strings.ToLower(pat), strings.ToLower(name)) {
+				pat = strings.ToLower(pat)
+				if strings.HasPrefix(pat, "!") {
+					if patternMatch(strings.TrimPrefix(pat, "!"), strings.ToLower(name)) {
+						negated = true
+						break
+					}
+					continue
+				}
+				if patternMatch(pat, strings.ToLower(name)) {
 					inBlock = true
-					matched = true
-					break
 				}
 			}
+			inBlock = inBlock && !negated
+			matched = matched || inBlock
 		case "hostname":
 			if inBlock && entry.HostName == "" {
 				entry.HostName = val
@@ -169,20 +178,19 @@ func lookupSSHConfig(name string) *sshConfigEntry {
 }
 
 // cutConfigField splits an ssh_config line into keyword and argument,
-// handling both "key=value" and space separation plus '#' comments.
+// handling "key=value", space and tab separation, plus '#' comments.
 func cutConfigField(line string) (key, val string, ok bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
 		return "", "", false
 	}
-	if k, v, found := strings.Cut(line, "="); found {
-		return strings.TrimSpace(k), strings.TrimSpace(v), true
-	}
-	k, rest, found := strings.Cut(line, " ")
-	if !found {
+	i := strings.IndexAny(line, " \t=")
+	if i < 0 {
 		return "", "", false
 	}
-	return k, strings.TrimSpace(rest), true
+	rest := strings.TrimSpace(line[i:])
+	rest = strings.TrimPrefix(rest, "=")
+	return line[:i], strings.TrimSpace(rest), true
 }
 
 // patternMatch implements ssh_config glob matching ('*' and '?') through

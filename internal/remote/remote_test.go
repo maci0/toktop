@@ -164,6 +164,51 @@ Host *
 	}
 }
 
+func TestParseTargetSSHConfigTabsAndNegation(t *testing.T) {
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "config")
+	tabbed := "Host\tgpu\n\tHostName\t10.9.8.7\n\tPort\t2022\n"
+	if err := os.WriteFile(cfg, []byte(tabbed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldPath, oldRead := sshConfigPath, configReader
+	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
+	sshConfigPath = func() string { return cfg }
+	configReader = func(path string) ([]byte, error) { return os.ReadFile(path) }
+
+	tgt, err := ParseTarget("ssh://gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tgt.Host != "10.9.8.7" || tgt.Port != 2022 {
+		t.Errorf("tab-separated config ignored: %+v", tgt)
+	}
+
+	for _, patterns := range []string{"* !gpu", "!gpu *", "* !g?u", "* !GPU"} {
+		t.Run(patterns, func(t *testing.T) {
+			body := "Host " + patterns + "\n  User other\n  Port 2022\nHost *\n  User fallback\n  Port 2222\n"
+			if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, tc := range []struct {
+				host, user string
+				port       int
+			}{
+				{"gpu", "fallback", 2222},
+				{"otherbox", "other", 2022},
+			} {
+				got, err := ParseTarget("ssh://" + tc.host)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.User != tc.user || got.Port != tc.port {
+					t.Errorf("host %s = %+v, want user %s port %d", tc.host, got, tc.user, tc.port)
+				}
+			}
+		})
+	}
+}
+
 func TestExpandTildeAcceptsBothSeparators(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -232,6 +277,12 @@ func TestCutConfigField(t *testing.T) {
 	}{
 		{"HostName foo", "HostName", "foo", true},
 		{"  identityfile = ~/keys/id ", "identityfile", "~/keys/id", true},
+		{"Host\tgpu", "Host", "gpu", true},
+		{"Host\t* !gpu", "Host", "* !gpu", true},
+		{"\tport\t2022", "port", "2022", true},
+		{"User\t = admin", "User", "admin", true},
+		{"IdentityFile ~/key=backup", "IdentityFile", "~/key=backup", true},
+		{"IdentityFile=~/key=backup", "IdentityFile", "~/key=backup", true},
 		{"#comment", "", "", false},
 		{"", "", "", false},
 		{"solokeyword", "", "", false},
