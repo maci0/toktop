@@ -14,7 +14,15 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"modernc.org/sqlite"
 )
+
+func init() {
+	sqlite.MustRegisterCollationUtf8("toktop_directory", func(left, right string) int {
+		return strings.Compare(strings.ToLower(left), strings.ToLower(right))
+	})
+}
 
 // opencode keeps its sessions in SQLite rather than the JSONL every other
 // agent here writes: ~/.local/share/opencode/opencode.db, with one row per
@@ -93,10 +101,7 @@ func directoryPred(n int) string {
 	ph := strings.TrimSuffix(strings.Repeat("?,", n), ",")
 	pred := "session.directory IN (" + ph + ")"
 	if foldSessionDirectory {
-		// lower() is ASCII-only, which is enough for drive letters and the
-		// rest of a Windows path; char(92) is backslash so the source file
-		// stays portable when edited on Unix.
-		pred = "(" + pred + " OR lower(replace(session.directory, char(92), '/')) IN (" + ph + "))"
+		pred = "(" + pred + " OR replace(session.directory, char(92), '/') COLLATE toktop_directory IN (" + ph + "))"
 	}
 	return pred
 }

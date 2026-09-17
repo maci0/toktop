@@ -248,6 +248,38 @@ func TestOpenCodeDBFoldsDirectoriesOnThisOS(t *testing.T) {
 	}
 }
 
+// A non-ASCII case difference must survive folding too: on an
+// case-insensitive filesystem an agent can record /work/Équipe while the
+// watcher resolves /work/équipe. Go's strings.ToLower folds É, SQLite's
+// lower() does not, so the stored spelling is folded before it is bound.
+func TestOpenCodeDBFoldsNonASCIICaseDifferences(t *testing.T) {
+	orig := foldSessionDirectory
+	foldSessionDirectory = true
+	t.Cleanup(func() { foldSessionDirectory = orig })
+
+	path := opencodeDB(t)
+	base := t.TempDir()
+	watched := filepath.ToSlash(filepath.Join(base, "équipe"))
+	stored := filepath.ToSlash(filepath.Join(base, "Équipe"))
+	if !strings.EqualFold(watched, stored) || watched == stored {
+		t.Skipf("no foldable non-ASCII pair (%q vs %q)", watched, stored)
+	}
+	addSession(t, path, "s-mine", stored)
+	start := time.Now()
+	addMessage(t, path, "m1", "s-mine", start.Add(time.Second),
+		`{"role":"assistant","tokens":{"output":42}}`)
+	withOpenCodeDB(t, path)
+
+	w := Watch("opencode", watched, start)
+	if w == nil {
+		t.Fatal("the source is registered, so a watcher is expected")
+	}
+	w.poll(nil)
+	if got := w.Sample().Output; got != 42 {
+		t.Fatalf("output tokens %d, want 42: non-ASCII case spelling was not matched", got)
+	}
+}
+
 func TestOpenCodeDBWithoutAStoreReportsNothing(t *testing.T) {
 	withOpenCodeDB(t, filepath.Join(t.TempDir(), "absent.db"))
 	w := Watch("opencode", t.TempDir(), time.Now())
