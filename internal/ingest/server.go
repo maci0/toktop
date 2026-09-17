@@ -249,7 +249,7 @@ func logRemote(addr string) string {
 
 // remoteAddrPat matches the host:port form net.Addr.String uses for TCP:
 // dotted IPv4, or bracketed IPv6 (including zone ids).
-var remoteAddrPat = regexp.MustCompile(`(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9A-Fa-f:.%]+\]):\d{1,5}`)
+var remoteAddrPat = regexp.MustCompile(`(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9A-Fa-f:.]+(?:%[^\]\r\n]+)?\]):\d{1,5}`)
 
 // redactLogAddrs rewrites host:port appearances with logRemote so a line
 // from net/http's ErrorLog cannot carry a peer IP.
@@ -569,6 +569,9 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 // clientJSONError turns an encoding/json decode failure into a sender-facing
 // reason: JSON field names, no Go type names.
 func clientJSONError(err error) string {
+	if _, ok := errors.AsType[*net.OpError](err); ok {
+		return "request body read failed"
+	}
 	if ut, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 		if ut.Field != "" {
 			return fmt.Sprintf("bad json: %s must be %s, not %s", ut.Field, wantJSONType(ut), ut.Value)

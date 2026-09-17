@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 	"unicode/utf8"
 
@@ -1178,6 +1179,21 @@ func TestHTTPErrorLogRedactsPeerAddress(t *testing.T) {
 		t.Errorf("ErrorLog missing redacted remote: %s", got)
 	}
 
+	for _, zone := range []string{"eth0", "enp0s3", "veth-peer.42", "Ethernet 2", "3"} {
+		t.Run(zone, func(t *testing.T) {
+			buf.Reset()
+			peer := &net.TCPAddr{IP: net.ParseIP("fe80::1234"), Port: 54321, Zone: zone}
+			s.srv.ErrorLog.Printf("http: TLS handshake error from %s: EOF", peer)
+			got := buf.String()
+			if strings.Contains(got, "fe80::1234") || strings.Contains(got, "%"+zone) {
+				t.Errorf("ErrorLog leaked peer address: %s", got)
+			}
+			if !strings.Contains(got, "http: TLS handshake error from remote: EOF") {
+				t.Errorf("ErrorLog missing redacted remote: %s", got)
+			}
+		})
+	}
+
 	buf.Reset()
 	s.srv.ErrorLog.Printf("http: panic serving %s: boom", "127.0.0.1:9999")
 	got = buf.String()
@@ -1186,6 +1202,54 @@ func TestHTTPErrorLogRedactsPeerAddress(t *testing.T) {
 	}
 	if !strings.Contains(got, "loopback:9999") {
 		t.Errorf("ErrorLog missing loopback port: %s", got)
+	}
+}
+
+func TestIngestReadErrorOmitsPeerAddress(t *testing.T) {
+	for _, prefix := range []string{"", "{\"agent\":\"coder\"}\n"} {
+		t.Run(fmt.Sprintf("prefix=%d", len(prefix)), func(t *testing.T) {
+			lg, buf := captureLogger()
+			rec := &memRecorder{}
+			s := &Server{rec: rec, log: lg}
+			readErr := &net.OpError{
+				Op:   "read",
+				Net:  "tcp",
+				Addr: &net.TCPAddr{IP: net.ParseIP("203.0.113.9"), Port: 54321},
+				Err:  io.ErrClosedPipe,
+			}
+			body := io.MultiReader(strings.NewReader(prefix), iotest.ErrReader(readErr))
+			r := httptest.NewRequest(http.MethodPost, "/v1/events", body)
+			r.RemoteAddr = readErr.Addr.String()
+			r.Header.Set("X-Request-Id", "read-error-test")
+			w := httptest.NewRecorder()
+			s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(w, r)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", w.Code)
+			}
+			for _, output := range []string{buf.String(), w.Body.String()} {
+				if strings.Contains(output, "203.0.113.9") {
+					t.Errorf("read error leaked peer IP: %s", output)
+				}
+				if !strings.Contains(output, "request body read failed") {
+					t.Errorf("missing read failure: %s", output)
+				}
+			}
+			accepted := 0
+			if prefix != "" {
+				accepted = 1
+				if !strings.Contains(w.Body.String(), "1 earlier event in this stream was recorded") {
+					t.Errorf("missing partial acceptance: %s", w.Body.String())
+				}
+			}
+			if len(rec.evs) != accepted {
+				t.Errorf("events = %d, want %d", len(rec.evs), accepted)
+			}
+			for _, field := range []string{"level=WARN", "status=400", "req=read-error-test", fmt.Sprintf("accepted=%d", accepted)} {
+				if !strings.Contains(buf.String(), field) {
+					t.Errorf("missing log field %s: %s", field, buf.String())
+				}
+			}
+		})
 	}
 }
 
