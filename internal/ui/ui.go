@@ -1110,7 +1110,12 @@ func (m Model) renderEmpty() string {
 	if m.cfg.Agents {
 		lines = append(lines, "", dim("watching local agents; waiting for one to report tokens"))
 	}
-	if m.feedDown == "" && m.cfg.IngestAddr != "" {
+	switch {
+	case m.feedDown != "":
+		lines = append(lines, "")
+		lines = append(lines, m.feedEmptyLines(m.w-8)...)
+		lines = append(lines, dim("q quit, then restart toktop to restore ingest"))
+	case m.cfg.IngestAddr != "":
 		if !m.cfg.Agents {
 			lines = append(lines, "")
 		}

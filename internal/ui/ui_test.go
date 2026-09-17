@@ -754,6 +754,29 @@ func TestStaticFrameEmptyState(t *testing.T) {
 	}
 }
 
+func TestEmptyStateNamesIngestDown(t *testing.T) {
+	for _, width := range []int{minDashW, 90, 110} {
+		for _, agents := range []bool{false, true} {
+			m := New(Config{Version: "t", Agents: agents, IngestAddr: "127.0.0.1:8420"}, nil)
+			m.w, m.h, m.ready = width, minDashH, true
+			nm, _ := m.Update(feedDownMsg("http: Server closed"))
+			m = nm.(Model)
+			out := strip(m.View())
+			for _, want := range []string{"ingest stopped", "http: Server closed", "restart toktop", "q quit"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("width %d, agents %t: missing %q:\n%s", width, agents, want, out)
+				}
+			}
+			if strings.Contains(out, "127.0.0.1:8420") {
+				t.Errorf("dead endpoint still advertised:\n%s", out)
+			}
+			if lipgloss.Width(out) > width || lipgloss.Height(out) > m.h {
+				t.Errorf("failure frame exceeds %dx%d", width, m.h)
+			}
+		}
+	}
+}
+
 // space still pauses on the setup card: without a badge, discovery later
 // finding an engine looks like the dashboard died.
 func TestEmptyStateShowsPaused(t *testing.T) {
