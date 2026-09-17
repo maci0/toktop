@@ -2,6 +2,8 @@ package bearer
 
 import (
 	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 )
 
@@ -75,5 +77,80 @@ func TestAllowScopesByOrigin(t *testing.T) {
 		if len(allowed) != 0 {
 			t.Errorf("Allow(%q) admitted something", bad)
 		}
+	}
+}
+
+func TestCheckRedirectScopesAuthorization(t *testing.T) {
+	t.Cleanup(resetAllowed)
+	for _, tc := range []struct {
+		name   string
+		target string
+		allow  bool
+		want   string
+	}{
+		{"same origin", "https://engine.local/next", true, "Bearer sk-test"},
+		{"default port", "https://ENGINE.local:443/next", true, "Bearer sk-test"},
+		{"other port", "https://engine.local:8443/next", true, ""},
+		{"downgrade", "http://engine.local/next", true, ""},
+		{"subdomain", "https://sub.engine.local/next", true, ""},
+		{"not admitted", "https://engine.local/next", false, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			resetAllowed()
+			if tc.allow {
+				Allow(tc.target)
+			}
+			first, err := http.NewRequest(http.MethodGet, "https://engine.local/", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next, err := http.NewRequest(http.MethodGet, tc.target, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			next.Header.Set("Authorization", "Bearer sk-test")
+			if err := CheckRedirect(next, []*http.Request{first}); err != nil {
+				t.Fatal(err)
+			}
+			if got := next.Header.Get("Authorization"); got != tc.want {
+				t.Errorf("Authorization = %q, want %q", got, tc.want)
+			}
+			if err := CheckRedirect(next, make([]*http.Request, 10)); err == nil {
+				t.Fatal("redirect limit not enforced")
+			}
+		})
+	}
+}
+
+func TestCheckRedirectStripsHeaderOnCrossOriginChain(t *testing.T) {
+	t.Cleanup(func() { Set(""); resetAllowed() })
+	Set("sk-test")
+
+	var sawAuth atomic.Value
+	sawAuth.Store("")
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth.Store(r.Header.Get("Authorization"))
+	}))
+	defer other.Close()
+
+	chain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, other.URL, http.StatusFound)
+	}))
+	defer chain.Close()
+
+	Allow(chain.URL)
+	req, _ := http.NewRequest("GET", chain.URL, nil)
+	Apply(req)
+	if got := req.Header.Get("Authorization"); got != "Bearer sk-test" {
+		t.Fatalf("first hop lost the token: %q", got)
+	}
+	c := &http.Client{CheckRedirect: CheckRedirect}
+	resp, err := c.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if a := sawAuth.Load().(string); a != "" {
+		t.Errorf("Authorization = %q reached the redirect target, want unset", a)
 	}
 }

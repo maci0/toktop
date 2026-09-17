@@ -59,7 +59,7 @@ func CandidatePorts() []int {
 	return out
 }
 
-var scanClient = &http.Client{Timeout: scanTimeout}
+var scanClient = &http.Client{Timeout: scanTimeout, CheckRedirect: bearer.CheckRedirect}
 
 // scanGet issues one identification GET through scanClient with the bearer
 // token applied. The response body, when present, must be closed by the

@@ -272,6 +272,75 @@ func TestPollCarriesBearerAndContextLength(t *testing.T) {
 	}
 }
 
+func TestProviderRedirectAuthorization(t *testing.T) {
+	bearer.Set("sk-test")
+	t.Cleanup(func() { bearer.Set("") })
+	for _, crossOrigin := range []bool{false, true} {
+		for _, fetch := range []struct {
+			name string
+			run  func(string) error
+		}{
+			{"json", func(url string) error {
+				return getJSON(context.Background(), url, &struct{}{})
+			}},
+			{"text", func(url string) error {
+				_, err := getText(context.Background(), httpClient, url)
+				return err
+			}},
+			{"scan text", func(url string) error {
+				_, err := getText(context.Background(), scanClient, url)
+				return err
+			}},
+			{"scan", func(url string) error {
+				resp, err := scanGet(context.Background(), url)
+				if err == nil {
+					resp.Body.Close()
+				}
+				return err
+			}},
+		} {
+			t.Run(fmt.Sprintf("%s/cross=%v", fetch.name, crossOrigin), func(t *testing.T) {
+				var received atomic.Int32
+				final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					received.Add(1)
+					want := "Bearer sk-test"
+					if crossOrigin {
+						want = ""
+					}
+					if got := r.Header.Get("Authorization"); got != want {
+						t.Errorf("redirect Authorization = %q, want %q", got, want)
+					}
+					fmt.Fprint(w, `{}`)
+				})
+				other := httptest.NewServer(final)
+				defer other.Close()
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if r.URL.Path == "/final" {
+						final.ServeHTTP(w, r)
+						return
+					}
+					if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+						t.Errorf("initial Authorization = %q", got)
+					}
+					target := "/final"
+					if crossOrigin {
+						target = other.URL + target
+					}
+					http.Redirect(w, r, target, http.StatusFound)
+				}))
+				defer srv.Close()
+				bearer.Allow(srv.URL)
+				if err := fetch.run(srv.URL); err != nil {
+					t.Fatal(err)
+				}
+				if got := received.Load(); got != 1 {
+					t.Errorf("final requests = %d, want 1", got)
+				}
+			})
+		}
+	}
+}
+
 func TestPollFetchesMetricsAndModelsTogether(t *testing.T) {
 	both := make(chan struct{})
 	var n atomic.Int32

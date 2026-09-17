@@ -52,7 +52,7 @@ type Provider struct {
 	Poll  func(ctx context.Context) (*Metrics, error)
 }
 
-var httpClient = &http.Client{Timeout: PollTimeout}
+var httpClient = &http.Client{Timeout: PollTimeout, CheckRedirect: bearer.CheckRedirect}
 
 func httpStatus(url string, resp *http.Response) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))

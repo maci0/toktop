@@ -10,6 +10,7 @@
 package bearer
 
 import (
+	"errors"
 	"net"
 	"net/http"
 	"net/url"
@@ -52,6 +53,16 @@ func Apply(req *http.Request) {
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+t)
+}
+
+func CheckRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	if len(via) == 0 || originOf(req.URL) != originOf(via[0].URL) || !admits(req.URL) {
+		req.Header.Del("Authorization")
+	}
+	return nil
 }
 
 func admits(u *url.URL) bool {
