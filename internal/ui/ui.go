@@ -599,7 +599,7 @@ func (m Model) renderMidRow() string {
 
 	prov := panel("ENGINES", m.providersBody(pw-4), pw-4, midIn)
 	gaug := panel("ENGINE STATE", m.gaugesBody(gw-4), gw-4, midIn)
-	prb := panel(m.probesTitle(), m.probesBody(rw-4, midIn), rw-4, midIn)
+	prb := panel(clip(m.probesTitle(), rw), m.probesBody(rw-4, midIn), rw-4, midIn)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, prov, gaug, prb)
 }
@@ -884,6 +884,9 @@ func satAddU64(a, b uint64) uint64 {
 
 func (m Model) probesTitle() string {
 	t := "PROBES"
+	if !m.probeReq.IsZero() {
+		return t + "  " + styleWarn.Render("● probing…")
+	}
 	if last, ok := m.lastProbe(); ok {
 		if last.OK {
 			t += " " + dim("last") + " " + fmtMs(last.TTFTms) + " " + styleOK.Render(fmtRate(last.TokPS)+" tok/s")
@@ -892,11 +895,6 @@ func (m Model) probesTitle() string {
 			// color, which reads as a measurement of nothing.
 			t += " " + styleBad.Render("last failed")
 		}
-	}
-	// Pressing p fires real generations that take seconds: acknowledge the
-	// keypress immediately or it reads as dead until the first result lands.
-	if !m.probeReq.IsZero() {
-		t += "  " + styleWarn.Render("● probing…")
 	}
 	return t
 }

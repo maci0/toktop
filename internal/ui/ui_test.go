@@ -985,6 +985,32 @@ func TestProbePressAcknowledgesUntilResult(t *testing.T) {
 	}
 }
 
+func TestProbeStatusKeepsPanelsAligned(t *testing.T) {
+	for _, width := range []int{62, 80, 110, 170} {
+		for _, pending := range []bool{false, true} {
+			m := New(Config{Version: "t", Prober: func() {}}, nil)
+			m.w, m.h, m.ready = width, 36, true
+			m.snap = core.Snapshot{
+				Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+				Probes: []core.ProbeSample{{
+					At: m.clock.Add(-time.Second), OK: true, Model: "llama3", TokPS: 966, TTFTms: 147,
+				}},
+			}
+			if pending {
+				next, _ := m.Update(keyMsg("p"))
+				m = next.(Model)
+			}
+			row := m.renderMidRow()
+			if got := lipgloss.Width(row); got != width {
+				t.Errorf("width %d pending %v: mid-row width = %d", width, pending, got)
+			}
+			if pending && !strings.Contains(strip(m.View()), "probing") {
+				t.Errorf("width %d: previous result hides new probe feedback", width)
+			}
+		}
+	}
+}
+
 func TestProcLineContextIsTokenCount(t *testing.T) {
 	got := strip(procLine(core.ProviderSnapshot{
 		Models: []core.ModelInfo{{Name: "llama", CtxMax: 8192}},
