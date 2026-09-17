@@ -925,6 +925,29 @@ func TestTornRecordIsCountedOnceComplete(t *testing.T) {
 
 // A complete final line without a trailing newline counts now and must not
 // misalign the offset against records appended afterwards.
+func TestFinalLineAtReaderBoundary(t *testing.T) {
+	for _, size := range []int{appendReaderBytes - 1, appendReaderBytes, appendReaderBytes + 1, 2 * appendReaderBytes, maxLineBytes} {
+		t.Run(strconv.Itoa(size), func(t *testing.T) {
+			store := withStore(t, "claude")
+			work := t.TempDir()
+			path := filepath.Join(store, "session.jsonl")
+			w := Watch("claude", work, time.Now())
+			line := claudeLine(work, 100)
+			appendRaw(t, path, strings.Repeat(" ", size-len(line))+line)
+			if got := w.Poll().Output; got != 100 {
+				t.Fatalf("output tokens %d, want 100", got)
+			}
+			if got := w.Poll().Output; got != 100 {
+				t.Fatalf("idle output tokens %d, want 100", got)
+			}
+			appendRaw(t, path, "\n"+claudeLine(work, 250))
+			if got := w.Poll().Output; got != 350 {
+				t.Fatalf("output tokens after append %d, want 350", got)
+			}
+		})
+	}
+}
+
 func TestFinalLineWithoutNewlineSurvivesGrowth(t *testing.T) {
 	store := withStore(t, "claude")
 	work := t.TempDir()

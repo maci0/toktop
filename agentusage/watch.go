@@ -1040,7 +1040,7 @@ func (w *Watcher) consumeAppend(f *os.File, off int64) (recs []values, complete 
 			// omitted the final newline, or half of one mid-write. It counts
 			// only when it parses in full: a torn prefix stays uncommitted
 			// and is re-read whole next poll instead of being lost.
-			if !discard && len(chunk) > 0 {
+			if !discard && (len(line) > 0 || len(chunk) > 0) {
 				line = append(line, chunk...)
 				if len(line) <= maxLineBytes {
 					if _, _, parsed := w.ad.parse(line); parsed {
