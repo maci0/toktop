@@ -379,7 +379,7 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   database (needs a build with the sqlite tag)
 --probe N         auto-probe every N seconds (0=off, max 86400)
 --interval D      poll interval (Go duration such as 1s or 500ms; default 1s;
-                  min 50ms, max 1h; a bare number is nanoseconds and is rejected)
+                  min 50ms, max 1h; nonzero values require a unit)
 --ingest ADDR     agent event listen address, host:port
                   (default 127.0.0.1:8420; empty is rejected)
 --no-ingest       disable the event endpoint (`--ingest` is then ignored)
@@ -435,8 +435,8 @@ or above 180 with `--once`, an empty `--repo`, a malformed `--add` or
 `--ingest`, an `ssh://` URL with a password, path, query, or fragment)
 abort with exit code 2 instead of being silently adjusted; so do
 out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when `--once` renders, and
-a set-but-invalid `TOKTOP_LOG_LEVEL`. A bare `--interval 1` is 1
-nanosecond in Go and is rejected. Startup prints one line of the knobs
+a set-but-invalid `TOKTOP_LOG_LEVEL`. A bare `--interval 1` is rejected
+because it has no unit; use `1s` or `500ms`. Startup prints one line of the knobs
 that apply (`interval`, `ingest`, mode flags); bearer tokens appear only
 as `bearer=set`.
 

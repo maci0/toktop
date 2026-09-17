@@ -822,14 +822,13 @@ func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 	}
 }
 
-// maxProbeSecs is 24h. Larger values overflow time.Duration(n)*time.Second
-// on 64-bit ints (NewTicker then panics) and are not a useful auto-probe.
+// maxProbeSecs caps auto-probe scheduling at 24h, well below the point where
+// time.Duration(n)*time.Second overflows and NewTicker would panic.
 const maxProbeSecs = 24 * 60 * 60
 
-// Poll interval bounds. flag.Duration treats a bare number as nanoseconds, so
-// `--interval 1` would otherwise hammer engines at 1ns. 50ms is already
-// faster than a metrics scrape (PollTimeout is 1.5s); 1h is slower than any
-// live dashboard should sit, and would make --once wait hours per frame.
+// Poll interval bounds apply after flag.Duration parses a unit-bearing value
+// (or zero). The 50ms floor prevents excessive polling; PollTimeout is 1.5s.
+// The 1h ceiling also bounds how long --once waits between frames.
 const (
 	minInterval = 50 * time.Millisecond
 	maxInterval = time.Hour
