@@ -281,8 +281,32 @@ func TestTOFUStore(t *testing.T) {
 		t.Fatalf("first contact rejected: %v", err)
 	}
 
+	key2 := fakePublicKey("other-host")
+	if err := cb1("other:22", nil, key2); err != nil {
+		t.Fatalf("second host rejected: %v", err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(before)), "\n") {
+		if len(strings.Fields(line)) != 3 {
+			t.Fatalf("invalid host record: %q", line)
+		}
+		_, authorizedKey, ok := strings.Cut(line, " ")
+		if !ok {
+			t.Fatalf("invalid host record: %q", line)
+		}
+		if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(authorizedKey)); err != nil {
+			t.Fatalf("invalid stored key: %v", err)
+		}
+	}
+
 	// A fresh callback over the same store accepts the remembered key.
-	cb2, _ := tofu()
+	cb2, err := tofu()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := cb2("h:22", nil, key1); err != nil {
 		t.Fatalf("remembered key rejected: %v", err)
 	}
@@ -293,9 +317,56 @@ func TestTOFUStore(t *testing.T) {
 		t.Errorf("mismatch error should say changed: %v", err)
 	}
 
-	store, _ := readKnownHosts(path)
-	if len(store) != 1 {
+	if err := cb2("other:22", nil, key2); err != nil {
+		t.Fatalf("remembered second host rejected: %v", err)
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(before) {
+		t.Fatal("repeated callbacks changed the store")
+	}
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store) != 2 {
 		t.Errorf("store = %v", store)
+	}
+}
+
+func TestTOFUExistingStore(t *testing.T) {
+	for _, legacy := range []bool{false, true} {
+		t.Run(map[bool]string{false: "standard", true: "legacy"}[legacy], func(t *testing.T) {
+			withKnownHosts(t)
+			path := knownHostsPath()
+			key := fakePublicKey("remembered")
+			line := "h:22 " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+			if legacy {
+				line = "h:22 " + line
+			}
+			if err := os.WriteFile(path, []byte(line+"\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for range 2 {
+				cb, err := tofu()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := cb("h:22", nil, key); err != nil {
+					t.Fatalf("remembered key rejected: %v", err)
+				}
+				if err := cb("other:22", nil, fakePublicKey("other")); err != nil {
+					t.Fatal(err)
+				}
+				if err := cb("h:22", nil, fakePublicKey("changed")); err == nil {
+					t.Fatal("changed key accepted")
+				} else if !strings.Contains(err.Error(), ssh.FingerprintSHA256(key)) {
+					t.Fatalf("stored fingerprint missing: %v", err)
+				}
+			}
+		})
 	}
 }
 

@@ -81,7 +81,9 @@ func readKnownHosts(path string) (map[string]string, error) {
 			continue
 		}
 		if host, rest, ok := strings.Cut(line, " "); ok && rest != "" {
-			out[host] = strings.TrimSpace(rest)
+			rest = strings.TrimSpace(rest)
+			rest = strings.TrimPrefix(rest, host+" ")
+			out[host] = host + " " + strings.TrimSpace(rest)
 		}
 	}
 	return out, nil
@@ -92,8 +94,8 @@ func writeKnownHosts(path string, store map[string]string) error {
 		return err
 	}
 	var b strings.Builder
-	for host, key := range store {
-		b.WriteString(host + " " + key + "\n")
+	for _, line := range store {
+		b.WriteString(line + "\n")
 	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".known_hosts-*")
