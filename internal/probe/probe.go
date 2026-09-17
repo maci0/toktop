@@ -468,9 +468,12 @@ func jsonNotStream(ct string) bool {
 }
 
 func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.Duration, err error) {
-	b, err := io.ReadAll(io.LimitReader(body, probeLineMax))
+	b, err := io.ReadAll(io.LimitReader(body, probeLineMax+1))
 	if err != nil {
 		return 0, 0, err
+	}
+	if len(b) > probeLineMax {
+		return 0, 0, fmt.Errorf("response too large")
 	}
 	var chunk openaiChunk
 	if json.Unmarshal(b, &chunk) != nil {

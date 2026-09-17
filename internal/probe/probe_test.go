@@ -806,6 +806,38 @@ func TestRunOpenAIJSONErrorBody(t *testing.T) {
 	}
 }
 
+func TestRunOpenAIJSONResponseLimit(t *testing.T) {
+	completion := `{"choices":[{"message":{"content":"one"}}],"usage":{"completion_tokens":1}}`
+	atLimit := completion + strings.Repeat(" ", probeLineMax-len(completion))
+	for _, tc := range []struct {
+		name string
+		body string
+		ok   bool
+	}{
+		{"below limit", atLimit[:len(atLimit)-1], true},
+		{"at limit", atLimit, true},
+		{"over limit", atLimit + " ", false},
+		{"hidden trailing object", atLimit + `{"error":"failed"}`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				fmt.Fprint(w, tc.body)
+			}))
+			defer srv.Close()
+
+			s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
+			if tc.ok {
+				if !s.OK || s.Tokens != 1 || s.Err != "" {
+					t.Fatalf("bounded completion rejected: %+v", s)
+				}
+			} else if s.OK || s.Err != "response too large" || s.Tokens != 0 || s.TTFTms != 0 || s.TokPS != 0 {
+				t.Fatalf("oversized response must not produce a measurement: %+v", s)
+			}
+		})
+	}
+}
+
 func TestRunOpenAINonStreamCompletion(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -874,6 +906,7 @@ func FuzzReadEngineJSON(f *testing.F) {
 		"{\"choices\":[{\"message\":{\"content\":\"\xff\x00\"}}]}",
 		strings.Repeat(" ", probeLineMax-2) + `{}`,
 		strings.Repeat(" ", probeLineMax-1) + `{}`,
+		`{"choices":[{"message":{"content":"ok"}}]}` + strings.Repeat(" ", probeLineMax),
 		strings.Repeat("[", 64) + `null` + strings.Repeat("]", 64),
 		"[[[[[[[\"deep\"]]]]]]]",
 	} {
@@ -884,8 +917,11 @@ func FuzzReadEngineJSON(f *testing.F) {
 		before := sample
 		reader := bytes.NewReader(body)
 		tokens, ttft, err := readOpenAIJSON(reader, &sample)
-		if len(body)-reader.Len() > probeLineMax {
-			t.Fatal("decoder exceeded the response byte limit")
+		if len(body)-reader.Len() > probeLineMax+1 {
+			t.Fatal("decoder exceeded the response byte limit and overflow check")
+		}
+		if len(body) > probeLineMax && err == nil {
+			t.Fatal("decoder accepted an oversized response")
 		}
 		if sample != before {
 			t.Fatal("decoder modified the input sample")
