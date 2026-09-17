@@ -24,13 +24,17 @@ func listDarwin() ([]raw, error) {
 	if err != nil {
 		return nil, err
 	}
+	return parseDarwinProcesses(string(out)), nil
+}
+
+func parseDarwinProcesses(out string) []raw {
 	var list []raw
-	for line := range strings.SplitSeq(string(out), "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		fields := strings.SplitN(line, " ", 4)
+		fields := strings.Fields(line)
 		if len(fields) < 4 {
 			continue
 		}
@@ -38,22 +42,16 @@ func listDarwin() ([]raw, error) {
 		if err != nil {
 			continue
 		}
-		cpu, _ := strconv.ParseFloat(strings.TrimSpace(fields[1]), 64)
-		rssKB, _ := strconv.ParseUint(strings.TrimSpace(fields[2]), 10, 64)
+		cpu, _ := strconv.ParseFloat(fields[1], 64)
+		rssKB, _ := strconv.ParseUint(fields[2], 10, 64)
 
-		command := fields[3]
-		args := strings.Fields(command)
-		name := ""
-		if len(args) > 0 {
-			name = args[0]
-		}
 		list = append(list, raw{
 			pid:        pid,
-			name:       name,
-			args:       args,
+			name:       fields[3],
+			args:       fields[3:],
 			rss:        rssKB << 10,
 			cpuPercent: cpu,
 		})
 	}
-	return list, nil
+	return list
 }

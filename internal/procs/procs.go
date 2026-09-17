@@ -117,8 +117,8 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		case r.cpuPercent > 0:
 			info.CPUPct = r.cpuPercent
 		case dt > 0:
-			pticks := s.prev[r.pid]
-			if pticks > 0 && r.ticks >= pticks {
+			pticks, tracked := s.prev[r.pid]
+			if tracked && r.ticks >= pticks {
 				info.CPUPct = clampPct(float64(r.ticks-pticks) / clkTck / dt * 100)
 			}
 		}

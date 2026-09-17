@@ -216,6 +216,29 @@ func TestSnapshotAtUsesGivenTime(t *testing.T) {
 	}
 }
 
+func TestSnapshotAtZeroTickBaseline(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+
+	var ticks uint64
+	platformList = func() ([]raw, error) {
+		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks}}, nil
+	}
+	s := NewSampler()
+	s.minRefresh = 0
+	now := time.Unix(1_000, 0)
+	first := s.SnapshotAt(now)
+	if len(first) != 1 || first[0].CPUPct != 0 {
+		t.Fatalf("first snapshot = %+v, want one process without a rate", first)
+	}
+
+	ticks = clkTck
+	second := s.SnapshotAt(now.Add(time.Second))
+	if len(second) != 1 || second[0].CPUPct != 100 {
+		t.Fatalf("second snapshot = %+v, want 100%% CPU from zero-tick baseline", second)
+	}
+}
+
 func TestSnapshotKeepsLastGoodOnError(t *testing.T) {
 	orig := platformList
 	t.Cleanup(func() { platformList = orig })
