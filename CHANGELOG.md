@@ -37,6 +37,19 @@ support channel (see SECURITY.md).
   rate with `true`. Wait for two timestamped readings and check the boolean
   result before displaying a rate. For a measured zero-counter baseline,
   set `Sample{At: start}` to the actual start time rather than `Sample{}`.
+- Generation probes no longer follow HTTP redirects, including same-origin
+  redirects. In 0.9.0, a 307 or 308 could replay a generation POST at the
+  redirect target. Probes now fail with the redirect's HTTP status instead.
+  Set `--add` to the final engine or gateway URL, or configure that endpoint
+  to serve `/api/generate` or `/v1/chat/completions` without redirecting.
+
+### Security
+
+- Engine discovery and polling strip `Authorization` when redirected to a
+  different origin (scheme, host, or port), including subdomains and HTTPS
+  downgrades. In 0.9.0, some such redirects could receive the bearer token.
+  If an authenticated gateway relies on redirects, set `--add` to its final
+  trusted URL; same-origin redirects still retain the configured token.
 
 ### Changed
 
@@ -58,6 +71,19 @@ support channel (see SECURITY.md).
   watched transcript files instead of adding each file's maximum. Values
   can be lower than in 0.9.0 when several transcripts are watched; `Input`
   and `Output` remain accrued token counts, not context sizes.
+- `agentusage.Agents` includes names added through `RegisterSpec`, so process
+  discovery on Linux and macOS can find those agents. In 0.9.0, only built-in
+  names and names loaded from definitions were listed. Results remain sorted,
+  deduplicated, and safe for callers to modify.
+- `--once`, help, version, and update output paths report stdout write errors
+  with status 1 instead of reporting success. Scripts should check the exit
+  status before treating redirected output as complete; repair the output
+  destination before retrying. An update may already be installed if writing
+  its final confirmation fails.
+- `--add` rejects URLs without a hostname (such as `http://:8080`) and ports
+  above 65535 at startup instead of accepting unusable endpoints. Supply the
+  engine's hostname and listening port; an omitted port still uses the scheme
+  default.
 
 ## [0.9.0] - 2026-09-13
 
