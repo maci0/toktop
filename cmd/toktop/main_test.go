@@ -15,7 +15,66 @@ import (
 
 	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/ui"
 )
+
+type failedOutput struct{}
+
+func (failedOutput) Write([]byte) (int, error) {
+	return 0, errors.New("output unavailable")
+}
+
+func TestOutputFailures(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		run  func(io.Writer) int
+	}{
+		{"help", func(w io.Writer) int { return runHelp(w, nil) }},
+		{"version help", func(w io.Writer) int { return runVersion(w, []string{"--help"}) }},
+		{"version", func(w io.Writer) int { return runVersion(w, nil) }},
+		{"update help", func(w io.Writer) int { return runUpdate(context.Background(), w, []string{"--help"}) }},
+		{"update version", func(w io.Writer) int { return runUpdate(context.Background(), w, []string{"--version"}) }},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var code int
+			stderr := captureStderr(t, func() { code = tt.run(failedOutput{}) })
+			if code != 1 || !strings.Contains(stderr, "write stdout: output unavailable") {
+				t.Fatalf("code = %d, stderr = %q; want 1 and output error", code, stderr)
+			}
+		})
+	}
+}
+
+func TestRunOnceOutput(t *testing.T) {
+	t.Setenv("TOKTOP_COLUMNS", "120")
+	t.Setenv("TOKTOP_LINES", "38")
+	for _, plain := range []bool{false, true} {
+		t.Run(strconv.FormatBool(plain), func(t *testing.T) {
+			cfg := ui.Config{Version: "test", PollEvery: time.Second}
+			snap := core.Snapshot{Uptime: 7 * time.Second}
+			var out bytes.Buffer
+			for _, w := range []io.Writer{&out, failedOutput{}} {
+				ch := make(chan core.Snapshot, 1)
+				ch <- snap
+				var code int
+				stderr := captureStderr(t, func() {
+					code = runOnce(context.Background(), w, cfg, ch, 1, plain)
+				})
+				if w == &out {
+					want := ui.StaticFrame(cfg, snap, 120, 38)
+					if plain {
+						want = ui.PlainTextFrame(cfg, snap)
+					}
+					if code != 0 || stderr != "" || out.String() != want+"\n" {
+						t.Fatalf("code = %d, stderr = %q, stdout = %q", code, stderr, out.String())
+					}
+				} else if code != 1 || !strings.Contains(stderr, "write stdout: output unavailable") {
+					t.Fatalf("code = %d, stderr = %q; want 1 and output error", code, stderr)
+				}
+			}
+		})
+	}
+}
 
 func TestResolveVersion(t *testing.T) {
 	tests := []struct {

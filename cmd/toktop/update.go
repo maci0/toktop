@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/maci0/toktop/internal/selfupdate"
 )
@@ -17,11 +18,12 @@ import (
 // updateUsage prints the subcommand's help screen to w. Error paths send it
 // to stderr; -h/--help sends it to stdout so piping works (`toktop update
 // --help | grep repo`), matching how the top-level command treats --help.
-func updateUsage(w io.Writer, fs *flag.FlagSet) {
+func updateUsage(w io.Writer, fs *flag.FlagSet) error {
+	var buf strings.Builder
 	prev := fs.Output()
-	fs.SetOutput(w)
+	fs.SetOutput(&buf)
 	defer fs.SetOutput(prev)
-	fmt.Fprint(w, `toktop update - install the latest release
+	fmt.Fprint(&buf, `toktop update - install the latest release
 
 Usage:
   toktop update [--check] [--repo owner/name]
@@ -33,9 +35,11 @@ replaced; a mismatch leaves the running binary untouched.
 Flags:
 `)
 	fs.PrintDefaults()
-	fmt.Fprint(w, `
+	fmt.Fprint(&buf, `
 $GITHUB_TOKEN authenticates GitHub API calls past the anonymous rate limit.
 `)
+	_, err := io.WriteString(w, buf.String())
+	return err
 }
 
 // runUpdate implements `toktop update`, which replaces this binary with the
@@ -62,12 +66,11 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 		return 2
 	}
 	if showHelp {
-		updateUsage(out, fs)
-		return 0
+		return outputStatus(updateUsage(out, fs))
 	}
 	if showVer {
-		fmt.Fprintln(out, "toktop", version)
-		return 0
+		_, err := fmt.Fprintln(out, "toktop", version)
+		return outputStatus(err)
 	}
 	if fs.NArg() > 0 {
 		fmt.Fprintf(os.Stderr, "toktop update: unexpected argument %q (see 'toktop update --help')\n", fs.Arg(0))
@@ -84,21 +87,23 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 		return updateErr("cannot check for updates", err)
 	}
 	if !rel.NewerThan(version) {
-		fmt.Fprintf(out, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
-		return 0
+		_, err := fmt.Fprintf(out, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
+		return outputStatus(err)
 	}
-	fmt.Fprintf(out, "New release: %s (running %s)\n", rel.TagName, version)
+	if _, err := fmt.Fprintf(out, "New release: %s (running %s)\n", rel.TagName, version); err != nil {
+		return outputStatus(err)
+	}
 	if *check {
-		fmt.Fprintln(out, rel.HTMLURL)
-		return 0
+		_, err := fmt.Fprintln(out, rel.HTMLURL)
+		return outputStatus(err)
 	}
 	fmt.Fprintf(os.Stderr, "toktop: installing %s...\n", rel.TagName)
 	path, err := selfupdate.Apply(ctx, rel)
 	if err != nil {
 		return updateErr("update failed", err)
 	}
-	fmt.Fprintf(out, "Installed %s to %s\n", rel.TagName, path)
-	return 0
+	_, err = fmt.Fprintf(out, "Installed %s to %s\n", rel.TagName, path)
+	return outputStatus(err)
 }
 
 // updateErr maps a canceled context to the same 130 the --once path uses

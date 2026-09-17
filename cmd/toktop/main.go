@@ -407,7 +407,9 @@ func main() {
 	}
 
 	if f.once {
-		runOnce(ctx, cfg, ch, f.frames, f.plain)
+		if code := runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain); code != 0 {
+			os.Exit(code)
+		}
 		return
 	}
 
@@ -516,7 +518,7 @@ func waitForFrames(ctx context.Context, ch <-chan core.Snapshot, n int, wait tim
 // frame is a linear text report instead of the dashboard layout: the braille
 // chart rows and box-drawing borders of the visual frame read as noise (or
 // silence) through a screen reader.
-func runOnce(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, n int, plain bool) {
+func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.Snapshot, n int, plain bool) int {
 	w, h := 120, 38
 	if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= minFrameColumns && th >= minFrameLines {
 		w, h = min(tw, maxFrameColumns), min(th, maxFrameLines)
@@ -538,15 +540,26 @@ func runOnce(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, n int,
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		if errors.Is(err, errInterrupted) {
-			os.Exit(130) // 128+SIGINT: what an interrupted child would report
+			return 130
 		}
-		os.Exit(1)
+		return 1
 	}
+	var frame string
 	if plain {
-		fmt.Println(ui.PlainTextFrame(cfg, snap))
-		return
+		frame = ui.PlainTextFrame(cfg, snap)
+	} else {
+		frame = ui.StaticFrame(cfg, snap, w, h)
 	}
-	fmt.Println(ui.StaticFrame(cfg, snap, w, h))
+	_, err = fmt.Fprintln(out, frame)
+	return outputStatus(err)
+}
+
+func outputStatus(err error) int {
+	if err == nil {
+		return 0
+	}
+	fmt.Fprintf(os.Stderr, "toktop: write stdout: %v\n", err)
+	return 1
 }
 
 func parseAdd(v string, dst *[]string) error {
@@ -585,12 +598,13 @@ func validateAddURL(raw string) error {
 // worked examples, generated flag docs and where the env fallbacks live.
 // -h/--help sends it to stdout so piping works (`toktop --help | grep
 // probe`); flag-package error paths call it with stderr.
-func usage(w io.Writer) {
+func usage(w io.Writer) error {
 	registerFlags()
+	var buf strings.Builder
 	out := flag.CommandLine.Output()
-	flag.CommandLine.SetOutput(w)
+	flag.CommandLine.SetOutput(&buf)
 	defer flag.CommandLine.SetOutput(out)
-	fmt.Fprint(w, `toktop - btop-style dashboard for LLM inference engines and the agents hammering them
+	fmt.Fprint(&buf, `toktop - btop-style dashboard for LLM inference engines and the agents hammering them
 
 Usage:
   toktop [flags] [ssh://user@host ...]
@@ -611,7 +625,7 @@ Examples:
 Flags:
 `)
 	flag.PrintDefaults()
-	fmt.Fprint(w, `
+	fmt.Fprint(&buf, `
 Positional arguments are ssh:// targets and may repeat; help and version
 are also accepted as commands. http(s) URLs are rejected with an --add hint;
 anything else points at --help. --add URLs must be http(s) with a host and
@@ -622,14 +636,15 @@ explicit --bearer, even empty, wins) and are sent only to --add endpoints.
 The live dashboard needs a terminal; use --once when piping or redirecting.
 See README.md for all environment variables.
 `)
+	_, err := io.WriteString(w, buf.String())
+	return err
 }
 
 // runHelp implements `toktop help [topic]`. Unknown topics are a usage error
 // so a typo does not dump the top-level screen and look like success.
 func runHelp(out io.Writer, args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
-		usage(out)
-		return 0
+		return outputStatus(usage(out))
 	}
 	switch args[0] {
 	case "update":
@@ -643,8 +658,7 @@ func runHelp(out io.Writer, args []string) int {
 			fmt.Fprintf(os.Stderr, "toktop help: unexpected argument %q (see 'toktop --help')\n", args[1])
 			return 2
 		}
-		usage(out)
-		return 0
+		return outputStatus(usage(out))
 	}
 	if strings.HasPrefix(args[0], "-") {
 		fmt.Fprintf(os.Stderr, "toktop: unknown option %q (see 'toktop --help')\n", args[0])
@@ -659,14 +673,13 @@ func runHelp(out io.Writer, args []string) int {
 func runVersion(out io.Writer, args []string) int {
 	if len(args) > 0 {
 		if args[0] == "-h" || args[0] == "--help" {
-			usage(out)
-			return 0
+			return outputStatus(usage(out))
 		}
 		fmt.Fprintf(os.Stderr, "toktop version: unexpected argument %q (see 'toktop --help')\n", args[0])
 		return 2
 	}
-	fmt.Fprintln(out, "toktop", version)
-	return 0
+	_, err := fmt.Fprintln(out, "toktop", version)
+	return outputStatus(err)
 }
 
 // interpretArgs classifies leftovers after flag.Parse. help/version cover
