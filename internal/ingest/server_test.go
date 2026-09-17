@@ -1562,6 +1562,39 @@ type failWriter struct{ http.ResponseWriter }
 
 func (failWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
+type netErrBody struct{ err error }
+
+func (b netErrBody) Read([]byte) (int, error) { return 0, b.err }
+
+func TestIngestLogsBodyReadFailure(t *testing.T) {
+	lg, buf := captureLogger()
+	s := &Server{rec: &memRecorder{}, log: lg}
+
+	peer := &net.OpError{Op: "read", Net: "tcp", Err: io.ErrClosedPipe}
+	r := httptest.NewRequest(http.MethodPost, "/v1/events", netErrBody{err: peer})
+	w := httptest.NewRecorder()
+	s.handlePost(w, r)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", w.Code)
+	}
+	got := buf.String()
+	if countLogLines(got) != 1 {
+		t.Fatalf("read-fail log lines = %d (%q), want 1", countLogLines(got), got)
+	}
+	for _, want := range []string{
+		"level=WARN",
+		"status=400",
+		"accepted=0",
+		`error="request body read failed"`,
+		`body_error="read tcp: io: read/write on closed pipe"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("read-fail log missing %q: %s", want, got)
+		}
+	}
+}
+
 func TestIngestLogsResponseWriteFailure(t *testing.T) {
 	lg, buf := captureLogger()
 	s := &Server{rec: &memRecorder{}, log: lg}

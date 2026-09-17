@@ -455,14 +455,13 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	done := func(status, accepted int, errMsg string, extra ...any) {
 		s.logRequest(r, reqID, status, accepted, time.Since(start), errMsg, extra...)
 	}
-	reject := func(status, accepted int, msg string) {
+	reject := func(status, accepted int, msg string, extra ...any) {
 		sw := &statusWriter{ResponseWriter: w}
 		http.Error(sw, msg, status)
 		if sw.err != nil {
-			done(status, accepted, msg, "response_error", logField(redactLogAddrs(sw.err.Error()), 256))
-			return
+			extra = append(extra, "response_error", logField(redactLogAddrs(sw.err.Error()), 256))
 		}
-		done(status, accepted, msg)
+		done(status, accepted, msg, extra...)
 	}
 
 	// A POST carrying an Origin header is browser-driven: every browser
@@ -492,7 +491,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// so everything before the failing line is already in the feed; saying so
 	// lets senders resume after the failure instead of replaying the whole
 	// stream and duplicating what was kept.
-	fail := func(status int, msg string) {
+	fail := func(status int, msg string, extra ...any) {
 		if n > 0 {
 			if n == 1 {
 				msg += "; 1 earlier event in this stream was recorded"
@@ -501,7 +500,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		armWrite()
-		reject(status, n, msg)
+		reject(status, n, msg, extra...)
 	}
 	for {
 		var raw json.RawMessage
@@ -522,6 +521,11 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 				// distinction to know trimming (not re-encoding) is the fix.
 				fail(http.StatusRequestEntityTooLarge,
 					fmt.Sprintf("event stream exceeds %d byte cap", maxBytes.Limit))
+				return
+			}
+			if _, ok := errors.AsType[*net.OpError](err); ok {
+				fail(http.StatusBadRequest, clientJSONError(err),
+					"body_error", logField(redactLogAddrs(err.Error()), 256))
 				return
 			}
 			fail(http.StatusBadRequest, clientJSONError(err))
