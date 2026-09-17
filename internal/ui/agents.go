@@ -1,20 +1,7 @@
 package ui
 
-// Per-agent throughput, measured from the agent events the collector holds.
-//
-// The engines report their own rate; agents do not, so it is computed here
-// from what they spent and when. Nothing is extrapolated: an agent with a
-// single reading has no rate yet, and one that has gone quiet falls out of
-// the window (and the list) rather than holding its last value forever.
-//
-// An event with ViaEngine set is this agent's share of an engine already on
-// the dashboard. It still appears in the list (who is working) but is left
-// out of header and chart totals so those tokens are not counted twice.
-
 import (
-	"cmp"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -23,102 +10,8 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// agentRate is one agent's measured throughput.
-type agentRate struct {
-	Agent     string
-	TokPS     float64
-	PromptPS  float64
-	Tokens    int64
-	Prompt    int64
-	Thinking  int64
-	Last      time.Time
-	ViaEngine string
-}
-
-// agentRates summarizes the recent event stream, busiest first.
-func agentRates(events []core.AgentEvent, now time.Time) []agentRate {
-	if len(events) == 0 {
-		return nil
-	}
-	type acc struct {
-		tokens   int64
-		prompt   int64
-		thinking int64
-		first    time.Time
-		last     time.Time
-		via      string
-		n        int
-	}
-	by := map[string]*acc{}
-	cutoff := now.Add(-core.AgentRateWindow)
-	for _, ev := range events {
-		if ev.At.Before(cutoff) {
-			continue
-		}
-		if ev.OutputTokens <= 0 && ev.PromptTokens <= 0 && ev.ThinkingTokens <= 0 && ev.ViaEngine == "" {
-			continue
-		}
-		a, ok := by[ev.Agent]
-		if !ok {
-			a = &acc{first: ev.At}
-			by[ev.Agent] = a
-		}
-		a.tokens += ev.OutputTokens
-		a.prompt += ev.PromptTokens
-		a.thinking += ev.ThinkingTokens
-		a.last = ev.At
-		a.via = ev.ViaEngine
-		a.n++
-	}
-
-	out := make([]agentRate, 0, len(by))
-	for name, a := range by {
-		r := agentRate{
-			Agent:     name,
-			Tokens:    a.tokens,
-			Prompt:    a.prompt,
-			Thinking:  a.thinking,
-			Last:      a.last,
-			ViaEngine: a.via,
-		}
-		// A rate needs a span. One event says how much, not how fast, so it
-		// reports tokens without a rate.
-		if span := a.last.Sub(a.first).Seconds(); a.n > 1 && span > 0 {
-			r.TokPS = float64(a.tokens) / span
-			r.PromptPS = float64(a.prompt) / span
-		}
-		out = append(out, r)
-	}
-	slices.SortFunc(out, func(a, b agentRate) int {
-		if c := cmp.Compare(b.TokPS, a.TokPS); c != 0 {
-			return c
-		}
-		return cmp.Compare(a.Agent, b.Agent)
-	})
-	return out
-}
-
-// agentOwnTokPS is the output/prompt rate of tokens not already in an
-// engine's totals. Skip is per event, not per agent: an agent that
-// connects to (or leaves) a monitored engine mid-window still contributes
-// the unattributed slice. The per-agent row keeps the last ViaEngine so
-// it shows who they are talking to now.
-func agentOwnTokPS(events []core.AgentEvent, now time.Time) (outPS, inPS float64) {
-	own := make([]core.AgentEvent, 0, len(events))
-	for _, ev := range events {
-		if ev.ViaEngine == "" {
-			own = append(own, ev)
-		}
-	}
-	for _, r := range agentRates(own, now) {
-		outPS += r.TokPS
-		inPS += r.PromptPS
-	}
-	return
-}
-
 // agentSummary renders the rates as one line, for a panel title.
-func agentSummary(rates []agentRate) string {
+func agentSummary(rates []core.AgentRate) string {
 	if len(rates) == 0 {
 		return ""
 	}
@@ -150,7 +43,7 @@ func agentSummary(rates []agentRate) string {
 // agentRows lays out one row per agent: name, rate, tokens, recency. Cells
 // are padded by visible cells (padTo/padStart), never %-Ns width verbs:
 // styled cells carry ANSI bytes whose rune counts would skew the columns.
-func agentRows(rates []agentRate, now time.Time) []string {
+func agentRows(rates []core.AgentRate, now time.Time) []string {
 	names := make([]string, len(rates))
 	nameW := 10
 	for i, r := range rates {
@@ -187,7 +80,7 @@ func agentRows(rates []agentRate, now time.Time) []string {
 }
 
 // agentMiniLine is the compact-strip counterpart of one agentRows cell.
-func agentMiniLine(r agentRate) string {
+func agentMiniLine(r core.AgentRate) string {
 	name := core.SanitizeText(r.Agent)
 	line := styleValue.Render(name) + " "
 	switch {
@@ -210,7 +103,7 @@ func agentMiniLine(r agentRate) string {
 func (m Model) renderAgentsOnly() string {
 	w := m.w - 4
 	now := m.snapNow()
-	rates := agentRates(m.snap.Agents, now)
+	rates := core.AgentRates(m.snap.Agents, now)
 	_, midIn, feedIn := m.sectionHeights()
 
 	rows := agentRows(rates, now)

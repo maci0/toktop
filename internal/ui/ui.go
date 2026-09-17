@@ -232,7 +232,7 @@ func (m Model) renderHeader() string {
 	segs := []headerSeg{{text: logo}, {text: dim("v" + m.cfg.Version), shed: 40}}
 
 	up, tot := m.upCount()
-	rates := agentRates(m.snap.Agents, m.snapNow())
+	rates := core.AgentRates(m.snap.Agents, m.snapNow())
 	if tot == 0 {
 		n := len(rates)
 		if n == 0 {
@@ -941,7 +941,7 @@ func (m Model) renderFeed() string {
 	w := m.w - 4
 	_, _, feedIn := m.sectionHeights()
 	now := m.snapNow()
-	rates := agentRates(m.snap.Agents, now)
+	rates := core.AgentRates(m.snap.Agents, now)
 	rows := agentRows(rates, now)
 	statsN := 0
 	if len(rows) > 0 && feedIn > 0 {
@@ -967,7 +967,7 @@ func (m Model) renderFeed() string {
 // panel, and JoinVertical pads every other block out to the widest one, so
 // an over-wide title here silently stretches the whole frame past the pane.
 // Optional parts are therefore added only while they fit, most useful first.
-func (m Model) feedTitle(w, statsN, nRows int, rates []agentRate) string {
+func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 	title := "AGENT FEED"
 	add := func(part string) {
 		if lipgloss.Width(title)+lipgloss.Width(part) <= w {
@@ -1211,7 +1211,7 @@ func (m Model) renderMinimal() string {
 		lines = append(lines, clip(styleWarn.Render("‖ PAUSED"), m.w))
 	}
 	if len(m.snap.Providers) == 0 {
-		rates := agentRates(m.snap.Agents, m.snapNow())
+		rates := core.AgentRates(m.snap.Agents, m.snapNow())
 		if len(rates) == 0 {
 			lines = append(lines, clip(styleWarn.Render("no inference engines detected"), m.w))
 			if m.cfg.Agents {
@@ -1242,7 +1242,7 @@ func (m Model) renderMinimal() string {
 		lines = append(lines, clip(line, m.w))
 	}
 	if len(m.snap.Providers) > 0 {
-		for _, r := range agentRates(m.snap.Agents, m.snapNow()) {
+		for _, r := range core.AgentRates(m.snap.Agents, m.snapNow()) {
 			lines = append(lines, clip(agentMiniLine(r), m.w))
 		}
 	}
@@ -1344,7 +1344,7 @@ func aggOutAt(s core.Snapshot, now time.Time) float64 {
 	for _, p := range s.Providers {
 		t += p.OutTokPS
 	}
-	out, _ := agentOwnTokPS(s.Agents, now)
+	out, _ := core.AgentOwnTokPS(s.Agents, now)
 	return t + out
 }
 
@@ -1353,7 +1353,7 @@ func aggInAt(s core.Snapshot, now time.Time) float64 {
 	for _, p := range s.Providers {
 		t += p.InTokPS
 	}
-	_, in := agentOwnTokPS(s.Agents, now)
+	_, in := core.AgentOwnTokPS(s.Agents, now)
 	return t + in
 }
 

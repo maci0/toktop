@@ -17,7 +17,7 @@ import (
 // terminal sanitizer feedLine uses, so an escape payload in a name can never
 // reach the raw terminal.
 func TestAgentSummarySanitizesNames(t *testing.T) {
-	rates := []agentRate{
+	rates := []core.AgentRate{
 		{Agent: "claude\x1b]52;c;QUJD\x07", TokPS: 12, Last: time.Now()},
 		{Agent: "codex\x1b[2J", Tokens: 300, Last: time.Now()},
 	}
@@ -62,7 +62,7 @@ func TestAgentRowsAlignRateColumn(t *testing.T) {
 		ev("a", now.Add(-3*time.Second)), ev("a", now.Add(-2*time.Second)),
 		ev("日本語エージェント", now.Add(-3*time.Second)), ev("日本語エージェント", now.Add(-2*time.Second)),
 	}
-	rows := agentRows(agentRates(events, now), now)
+	rows := agentRows(core.AgentRates(events, now), now)
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
@@ -168,7 +168,7 @@ func TestAggAgentsOnlyUsesAgentRates(t *testing.T) {
 
 func TestAgentRowsShowPromptThinkingAndVia(t *testing.T) {
 	now := time.Now()
-	rates := []agentRate{
+	rates := []core.AgentRate{
 		{Agent: "claude", TokPS: 12, Tokens: 2400, Prompt: 8100, Thinking: 400, Last: now},
 		{Agent: "codex", Tokens: 18000, Prompt: 40000, Last: now, ViaEngine: "127.0.0.1:11434"},
 	}
@@ -192,7 +192,7 @@ func TestAgentRowsShowPromptThinkingAndVia(t *testing.T) {
 
 func TestAgentRowsSanitizeViaEngine(t *testing.T) {
 	now := time.Now()
-	rows := agentRows([]agentRate{{
+	rows := agentRows([]core.AgentRate{{
 		Agent: "claude", Last: now, ViaEngine: "127.0.0.1:11434\x1b]52;c;QUJD\x07",
 	}}, now)
 	if len(rows) != 1 {
