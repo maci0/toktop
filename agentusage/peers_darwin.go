@@ -24,7 +24,7 @@ func Peers(pid int) []netip.AddrPort {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	out, err := commandOutput(ctx, "lsof", "-a", "-w", "-p", strconv.Itoa(pid),
-		"-i", "-FnP", "-n")
+		"-iTCP", "-FnP", "-n")
 	if err != nil {
 		return nil // exited, or another user's process
 	}

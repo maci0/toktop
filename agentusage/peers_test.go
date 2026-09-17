@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func TestParseLsofPeers(t *testing.T) {
@@ -73,15 +74,7 @@ func TestConnectedToSeesARealConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
-	go func() {
-		c, err := ln.Accept()
-		if err == nil {
-			defer c.Close()
-			select {}
-		}
-	}()
-
-	conn, err := net.Dial("tcp", ln.Addr().String())
+	conn, err := net.DialTimeout("tcp", ln.Addr().String(), 5*time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,6 +102,33 @@ func TestConnectedToSeesARealConnection(t *testing.T) {
 	}
 	if _, ok := got[-1]; ok {
 		t.Error("dead pid matched an endpoint")
+	}
+}
+
+func TestPeersExcludesUDP(t *testing.T) {
+	ln, err := net.ListenPacket("udp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	conn, err := net.DialTimeout("udp4", ln.LocalAddr().String(), 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	endpoint := netip.MustParseAddrPort(ln.LocalAddr().String())
+	pid := os.Getpid()
+	for _, peer := range Peers(pid) {
+		if peer == endpoint {
+			t.Errorf("Peers returned a UDP endpoint: %s", peer)
+		}
+	}
+	if ConnectedTo(pid, []netip.AddrPort{endpoint}) {
+		t.Error("a UDP connection was reported as a TCP connection")
+	}
+	if got := MatchingEndpoints([]int{pid}, []netip.AddrPort{endpoint}); len(got) != 0 {
+		t.Errorf("a UDP connection matched a TCP endpoint: %v", got)
 	}
 }
 

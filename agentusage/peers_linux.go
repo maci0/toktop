@@ -119,7 +119,7 @@ func readTCPTable(path string, want map[uint64]bool, into map[uint64]netip.AddrP
 		if err != nil || !want[inode] {
 			continue
 		}
-		if ap, ok := parseHexAddrPort(fields[2]); ok {
+		if ap, ok := parseHexAddrPort(fields[2]); ok && ap.Port() != 0 && !ap.Addr().IsUnspecified() {
 			into[inode] = ap
 		}
 	}
