@@ -1243,6 +1243,7 @@ func waitStay(t *testing.T, window time.Duration, cond func() bool, msg string) 
 // runs per backend, and a finished backend re-arms once its sample lands.
 func TestProbeAllSingleFlightPerBackend(t *testing.T) {
 	release := make(chan struct{})
+	releaseProbes := sync.OnceFunc(func() { close(release) })
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
@@ -1252,6 +1253,7 @@ func TestProbeAllSingleFlightPerBackend(t *testing.T) {
 			"{\"response\":\"two\",\"done\":true,\"eval_count\":2,\"eval_duration\":1000000}\n")
 	}))
 	defer srv.Close()
+	defer releaseProbes()
 
 	oldGap := probeWaveGap
 	probeWaveGap = 0 // isolate single-flight from the wave gate
@@ -1267,15 +1269,37 @@ func TestProbeAllSingleFlightPerBackend(t *testing.T) {
 	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 1 },
 		"second wave started while the first was in flight")
 
-	close(release)
+	c.mu.Lock()
+	c.lastModel[srv.URL] = "replacement"
+	c.mu.Unlock()
+	c.ProbeAll()
+	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 1 },
+		"model change started a second probe on the same backend")
+
+	releaseProbes()
 	waitFor(t, func() bool {
 		c.mu.Lock()
 		defer c.mu.Unlock()
 		return len(c.probes) == 1
 	}, "in-flight probe never recorded")
+	waitFor(t, func() bool {
+		c.probeMu.Lock()
+		defer c.probeMu.Unlock()
+		return len(c.probeInflight) == 0
+	}, "in-flight probe never cleared")
 
 	c.ProbeAll() // completed: a fresh generation is allowed
 	waitFor(t, func() bool { return hits.Load() == 2 }, "re-armed backend was never probed again")
+	waitFor(t, func() bool {
+		c.probeMu.Lock()
+		defer c.probeMu.Unlock()
+		return len(c.probeInflight) == 0
+	}, "replacement probe never cleared")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.probes) != 2 || c.probes[1].Model != "replacement" {
+		t.Fatalf("probes = %+v, want the replacement model after re-arming", c.probes)
+	}
 }
 
 // Rapid-fire triggers (a held 'p', a fast --probe ticker) must not launch
@@ -1527,9 +1551,26 @@ func TestProbeAllHonorsRetryAfter(t *testing.T) {
 	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 1 },
 		"backoff let another POST through")
 
+	c.mu.Lock()
+	c.lastModel[srv.URL] = "replacement"
+	c.mu.Unlock()
+	c.ProbeAll()
+	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 1 },
+		"model change bypassed the backend backoff")
+
 	clockMu.Lock()
 	now = now.Add(31 * time.Second)
 	clockMu.Unlock()
 	c.ProbeAll()
 	waitFor(t, func() bool { return hits.Load() == 2 }, "expired backoff never re-armed")
+	waitFor(t, func() bool {
+		c.probeMu.Lock()
+		defer c.probeMu.Unlock()
+		return len(c.probeInflight) == 0
+	}, "replacement probe never cleared")
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.probes) != 2 || c.probes[1].Model != "replacement" {
+		t.Fatalf("probes = %+v, want the replacement model after backoff", c.probes)
+	}
 }

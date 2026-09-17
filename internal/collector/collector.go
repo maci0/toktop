@@ -56,10 +56,10 @@ type Collector struct {
 	started   time.Time
 	baseCtx   context.Context // set by Run; bounds ad-hoc probes past shutdown
 
-	probeMu       sync.Mutex           // guards the probe fan-out state below
-	lastProbeWave time.Time            // wave gate: see probeWaveGap
-	probeInflight map[string]bool      // "base|model" -> generation running
-	probeBackoff  map[string]time.Time // "base|model" -> earliest next probe (429/503)
+	probeMu       sync.Mutex // guards the probe fan-out state below
+	lastProbeWave time.Time  // wave gate: see probeWaveGap
+	probeInflight map[string]bool
+	probeBackoff  map[string]time.Time
 
 	now func() time.Time // snapshot/probe/event stamps; nil means time.Now
 }
@@ -577,7 +577,7 @@ func (c *Collector) ProbeAll() {
 	c.lastProbeWave = now
 	var live []probe.Request
 	for _, t := range targets {
-		key := t.Base + "|" + t.Model
+		key := t.Base
 		if c.probeInflight[key] { // one generation per backend at a time
 			continue
 		}
@@ -597,7 +597,7 @@ func (c *Collector) ProbeAll() {
 		go func(t probe.Request) {
 			defer func() {
 				c.probeMu.Lock()
-				delete(c.probeInflight, t.Base+"|"+t.Model)
+				delete(c.probeInflight, t.Base)
 				c.probeMu.Unlock()
 			}()
 			// Re-read inside the goroutine: ProbeAll can race Run's first
@@ -613,7 +613,7 @@ func (c *Collector) ProbeAll() {
 			s.At = now
 			if s.RetryAfter > 0 {
 				c.probeMu.Lock()
-				c.probeBackoff[t.Base+"|"+t.Model] = c.instant().Add(s.RetryAfter)
+				c.probeBackoff[t.Base] = c.instant().Add(s.RetryAfter)
 				c.probeMu.Unlock()
 			}
 			c.RecordProbe(s)
