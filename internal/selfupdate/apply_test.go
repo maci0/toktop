@@ -53,7 +53,7 @@ func allowTestAssetURLs(t *testing.T) {
 
 // releaseServer serves one asset and the checksums archive, optionally lying
 // about the hash.
-func releaseServer(t *testing.T, payload []byte, sum string) (*httptest.Server, *Release) {
+func releaseServer(t *testing.T, payload []byte, sum string) *Release {
 	t.Helper()
 	allowTestAssetURLs(t)
 	name := AssetName("9.9.9")
@@ -71,12 +71,12 @@ func releaseServer(t *testing.T, payload []byte, sum string) (*httptest.Server, 
 	if err := json.Unmarshal([]byte(body), rel); err != nil {
 		t.Fatal(err)
 	}
-	return srv, rel
+	return rel
 }
 
 func TestApplyRejectsChecksumMismatch(t *testing.T) {
 	payload := []byte("#!/bin/sh\necho new\n")
-	_, rel := releaseServer(t, payload, strings.Repeat("0", 64))
+	rel := releaseServer(t, payload, strings.Repeat("0", 64))
 
 	target := filepath.Join(t.TempDir(), "toktop")
 	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
@@ -154,7 +154,7 @@ func TestApplyRefusesReleaseWithoutChecksums(t *testing.T) {
 func TestApplyReplacesTargetOnMatch(t *testing.T) {
 	payload := []byte("#!/bin/sh\necho new\n")
 	h := sha256.Sum256(payload)
-	_, rel := releaseServer(t, payload, hex.EncodeToString(h[:]))
+	rel := releaseServer(t, payload, hex.EncodeToString(h[:]))
 
 	target := filepath.Join(t.TempDir(), "toktop")
 	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
