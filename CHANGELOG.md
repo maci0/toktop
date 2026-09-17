@@ -24,6 +24,19 @@ support channel (see SECURITY.md).
   entries `"cafe\u0301"` and `"caf\u00e9"` into one name with the intended
   `usage` settings. Rejection leaves the registry unchanged and matches
   `ErrInvalidDefinitions` via `errors.Is`; `--agents` also refuses the file.
+- `agentusage.LoadDefinitions` now rejects a JSON document that is `null`,
+  or an entry whose value is `null`, with an `ErrInvalidDefinitions` error
+  naming the file; the registry is left unchanged. Before, `null` was
+  accepted and a `null` entry was skipped silently. Replace a `null`
+  document with `{}`, and replace `{"myagent": null}` with
+  `{"myagent": {}}` or remove that entry. `"usage": null` inside an object
+  remains valid. With `--agents`, rejected definitions now exit with status 2.
+- `agentusage.Rate` and `agentusage.InputRate` return `(0, false)` when
+  either sample lacks a timestamp. In 0.9.0, a zero-value previous sample
+  followed by a timestamped, growing counter could return a spurious small
+  rate with `true`. Wait for two timestamped readings and check the boolean
+  result before displaying a rate. For a measured zero-counter baseline,
+  set `Sample{At: start}` to the actual start time rather than `Sample{}`.
 
 ### Changed
 
