@@ -1397,6 +1397,42 @@ func TestIngestLogsHandlerPanic(t *testing.T) {
 	}
 }
 
+type partialPanicRecorder struct{ memRecorder }
+
+func (m *partialPanicRecorder) RecordAgent(ev core.AgentEvent) {
+	if len(m.evs) == 1 {
+		panic("recorder boom")
+	}
+	m.memRecorder.RecordAgent(ev)
+}
+
+func TestIngestPanicLogsPartialProgress(t *testing.T) {
+	lg, buf := captureLogger()
+	rec := &partialPanicRecorder{}
+	s := &Server{rec: rec, log: lg}
+	r := httptest.NewRequest(http.MethodPost, "/v1/events",
+		strings.NewReader("{\"agent\":\"first\"}\n{\"agent\":\"second\"}"))
+	r.Header.Set("X-Request-Id", "partial-stream")
+	w := httptest.NewRecorder()
+	s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(w, r)
+
+	if w.Code != http.StatusInternalServerError || len(rec.evs) != 1 {
+		t.Fatalf("status = %d, recorded = %d; want 500, 1", w.Code, len(rec.evs))
+	}
+	got := buf.String()
+	if countLogLines(got) != 1 {
+		t.Fatalf("panic log lines = %d (%q), want 1", countLogLines(got), got)
+	}
+	for _, want := range []string{
+		"level=ERROR", "status=500", "accepted=1", "req=partial-stream",
+		"duration=", "stack=", `error="panic: recorder boom"`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("partial panic log missing %q: %s", want, got)
+		}
+	}
+}
+
 type failWriter struct{ http.ResponseWriter }
 
 func (failWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }

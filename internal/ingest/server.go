@@ -76,7 +76,12 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 	return s, nil
 }
 
-type ctxReqID struct{}
+type ctxRequest struct{}
+
+type requestState struct {
+	id       string
+	accepted int
+}
 
 func setSecurityHeaders(h http.Header) {
 	h.Set("X-Content-Type-Options", "nosniff")
@@ -95,7 +100,8 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 		setSecurityHeaders(w.Header())
 		id := incomingRequestID(r)
 		w.Header().Set("X-Request-Id", id)
-		r = r.WithContext(context.WithValue(r.Context(), ctxReqID{}, id))
+		state := &requestState{id: id}
+		r = r.WithContext(context.WithValue(r.Context(), ctxRequest{}, state))
 
 		start := time.Now()
 		defer func() {
@@ -106,7 +112,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			if recov == http.ErrAbortHandler {
 				panic(recov)
 			}
-			s.logRequest(r, requestID(r), http.StatusInternalServerError, 0, time.Since(start),
+			s.logRequest(r, state.id, http.StatusInternalServerError, state.accepted, time.Since(start),
 				fmt.Sprintf("panic: %v", recov),
 				"stack", logField(string(debug.Stack()), 2048))
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -172,8 +178,8 @@ func derivedEventID(key string, seq int) string {
 }
 
 func requestID(r *http.Request) string {
-	if v, ok := r.Context().Value(ctxReqID{}).(string); ok && v != "" {
-		return v
+	if state, ok := r.Context().Value(ctxRequest{}).(*requestState); ok && state.id != "" {
+		return state.id
 	}
 	return incomingRequestID(r)
 }
@@ -435,6 +441,7 @@ func (b *progressBody) Read(p []byte) (int, error) {
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	reqID := requestID(r)
+	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
 	if w.Header().Get("X-Request-Id") == "" {
 		w.Header().Set("X-Request-Id", reqID)
 	}
@@ -539,6 +546,9 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		}
 		s.rec.RecordAgent(ev)
 		n++
+		if state != nil {
+			state.accepted = n
+		}
 	}
 	armWrite()
 	w.Header().Set("Content-Type", "application/json")
