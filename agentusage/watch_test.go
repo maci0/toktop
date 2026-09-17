@@ -948,6 +948,44 @@ func TestFinalLineAtReaderBoundary(t *testing.T) {
 	}
 }
 
+func TestFinalLineParsedOnce(t *testing.T) {
+	for _, mine := range []bool{true, false} {
+		t.Run(strconv.FormatBool(mine), func(t *testing.T) {
+			store := withStore(t, "claude")
+			work := t.TempDir()
+			cwd := work
+			if !mine {
+				cwd = t.TempDir()
+			}
+			path := filepath.Join(store, "session.jsonl")
+			w := Watch("claude", work, time.Now())
+			parse := w.ad.parse
+			calls := 0
+			w.ad.parse = func(line []byte) (values, string, bool) {
+				calls++
+				return parse(line)
+			}
+			line := claudeLine(cwd, 100)
+			appendRaw(t, path, line)
+			want := 0
+			if mine {
+				want = 100
+			}
+			for range 2 {
+				if got := w.Poll().Output; got != want {
+					t.Fatalf("output = %d, want %d", got, want)
+				}
+			}
+			if calls != 1 {
+				t.Fatalf("parsed one final record %d times", calls)
+			}
+			if w.offsets[path] != int64(len(line)) {
+				t.Fatalf("offset = %d, want %d", w.offsets[path], len(line))
+			}
+		})
+	}
+}
+
 func TestFinalLineWithoutNewlineSurvivesGrowth(t *testing.T) {
 	store := withStore(t, "claude")
 	work := t.TempDir()

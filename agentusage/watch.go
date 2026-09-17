@@ -1043,8 +1043,8 @@ func (w *Watcher) consumeAppend(f *os.File, off int64) (recs []values, complete 
 			if !discard && (len(line) > 0 || len(chunk) > 0) {
 				line = append(line, chunk...)
 				if len(line) <= maxLineBytes {
-					if _, _, parsed := w.ad.parse(line); parsed {
-						recs = w.collect(recs, line)
+					if v, cwd, parsed := w.ad.parse(line); parsed {
+						recs = w.collectValue(recs, v, cwd)
 						complete = pos
 					}
 				}
@@ -1068,6 +1068,10 @@ func (w *Watcher) collect(recs []values, line []byte) []values {
 	if !ok {
 		return recs
 	}
+	return w.collectValue(recs, v, cwd)
+}
+
+func (w *Watcher) collectValue(recs []values, v values, cwd string) []values {
 	// A transcript that names a different working directory belongs to
 	// another process, or another project entirely.
 	if cwd != "" && !w.sameDir(cwd) {
