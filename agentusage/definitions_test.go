@@ -82,8 +82,50 @@ func TestAgentsIncludesRegisteredSpecs(t *testing.T) {
 	}
 }
 
-// A machine without agent definitions is ordinary; the loader must say so by
-// succeeding quietly.
+func TestLoadDefinitionsRejectsNull(t *testing.T) {
+	for _, body := range []string{
+		`null`,
+		`{"null-agent": null}`,
+		`{"null-agent": null, "existing-agent": {"usage": {"roots": ["/replacement"]}}}`,
+	} {
+		t.Run(body, func(t *testing.T) {
+			addDef(t, "existing-agent", Spec{Roots: []string{"/original"}})
+			path := filepath.Join(t.TempDir(), "agents.json")
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			err := LoadDefinitions(path)
+			if !errors.Is(err, ErrInvalidDefinitions) {
+				t.Fatalf("LoadDefinitions() = %v, want ErrInvalidDefinitions", err)
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Fatalf("error = %v, want path %q", err, path)
+			}
+			spec, ok := definedSpec("existing-agent")
+			if !ok || !slices.Equal(spec.Roots, []string{"/original"}) {
+				t.Fatalf("rejected file changed registry: %+v", spec)
+			}
+		})
+	}
+}
+
+func TestLoadDefinitionsEmptyObjects(t *testing.T) {
+	for _, body := range []string{`{}`, `{"launchonly": {}}`, `{"launchonly": {"usage": null}}`} {
+		t.Run(body, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "agents.json")
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if err := LoadDefinitions(path); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := definedSpec("launchonly"); ok {
+				t.Fatal("launch-only definition registered")
+			}
+		})
+	}
+}
+
 func TestLoadDefinitionsMissingFileIsNotAnError(t *testing.T) {
 	if err := LoadDefinitions(filepath.Join(t.TempDir(), "absent.json")); err != nil {
 		t.Fatalf("missing file = %v, want nil", err)

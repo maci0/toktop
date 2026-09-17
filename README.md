@@ -87,6 +87,8 @@ Reading is done by this repo's own `agentusage` package, which gauntlet also
 imports, so both tools report the same numbers. Agents defined in
 `~/.gauntlet/agents.json` are picked up here too; a malformed file is reported
 at startup rather than silently shrinking the watch to the built-in agents.
+The file and each agent entry must be JSON objects, not `null`; use `{}`
+for an empty definitions file. Invalid files leave the loaded registry unchanged.
 Set `GAUNTLET_HOME` to read that file from somewhere else. Only the `usage`
 block matters here (launch fields are ignored):
 

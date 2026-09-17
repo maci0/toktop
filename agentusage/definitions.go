@@ -114,7 +114,7 @@ func definedSpec(tool string) (Spec, bool) {
 // ~/.gauntlet/agents.json. Only the transcript location matters here: the rest
 // of that file describes how to launch an agent, which is not this package's
 // business.
-type definitionFile map[string]struct {
+type definitionFile map[string]*struct {
 	Usage *struct {
 		Roots      []string `json:"roots"`
 		Suffix     string   `json:"suffix,omitempty"`
@@ -162,6 +162,9 @@ func LoadDefinitions(path string) error {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("%w: %s: %w", ErrInvalidDefinitions, path, err)
 	}
+	if file == nil {
+		return fmt.Errorf("%w: %s: expected an object, not null", ErrInvalidDefinitions, path)
+	}
 	type pendingSpec struct {
 		name string
 		spec Spec
@@ -169,6 +172,9 @@ func LoadDefinitions(path string) error {
 	var pending []pendingSpec
 	seen := make(map[string]string, len(file))
 	for name, def := range file {
+		if def == nil {
+			return fmt.Errorf("%w: %s: agent %q must be an object, not null", ErrInvalidDefinitions, path, name)
+		}
 		canonical := canonicalTool(name)
 		if canonical == "" || def.Usage == nil {
 			continue // a launch-only definition says nothing about tokens
