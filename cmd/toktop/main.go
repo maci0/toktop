@@ -208,6 +208,13 @@ func main() {
 		f.sshKey = resolved
 	}
 
+	if f.agents {
+		if err := loadAgentDefs(); err != nil {
+			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
+			os.Exit(2)
+		}
+	}
+
 	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(remoteTargets))
 
 	if !f.once && !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -344,9 +351,6 @@ func main() {
 	// Opt-in, because it means scanning this machine's processes and reading
 	// files the operator never pointed at toktop. Watching engines does not
 	// imply consent to that.
-	if f.agents {
-		loadAgentDefs()
-	}
 	if f.agents && f.opencode && !agentusage.EnableOpenCodeDB(true) {
 		// Silence here would look like an agent that generates nothing.
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
@@ -1008,16 +1012,15 @@ func warnUnknownEnv() {
 // loadAgentDefs pulls in ~/.gauntlet/agents.json so --agents can follow
 // agents toktop was not built to know (in-house wrappers, the pi family),
 // including where they keep their transcripts. A missing file is the normal
-// case; a malformed one is reported instead of swallowed, because agents
-// silently missing from the watch look exactly like agents doing nothing.
-func loadAgentDefs() {
+// case; a malformed or unreadable one is returned so the caller can refuse to
+// start: agents silently missing from the watch look exactly like agents
+// doing nothing.
+func loadAgentDefs() error {
 	path := agentusage.DefinitionsPath()
 	if path == "" {
-		return
+		return nil
 	}
-	if err := agentusage.LoadDefinitions(path); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %v; watching only the built-in agents\n", err)
-	}
+	return agentusage.LoadDefinitions(path)
 }
 
 // attachRemote connects to an ssh target, discovers engines, relays their

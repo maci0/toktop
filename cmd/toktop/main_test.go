@@ -227,26 +227,30 @@ func writeAgentsJSON(t *testing.T, body string) string {
 func TestLoadAgentDefs(t *testing.T) {
 	t.Run("missing file is silent", func(t *testing.T) {
 		t.Setenv("GAUNTLET_HOME", writeAgentsJSON(t, ""))
-		if got := captureStderr(t, loadAgentDefs); got != "" {
-			t.Fatalf("loadAgentDefs() printed %q, want silence", got)
+		if err := loadAgentDefs(); err != nil {
+			t.Fatalf("loadAgentDefs() = %v, want nil for an absent agents.json", err)
 		}
 	})
 
-	t.Run("malformed file names itself and names the consequence", func(t *testing.T) {
+	t.Run("malformed file aborts startup naming the file", func(t *testing.T) {
 		t.Setenv("GAUNTLET_HOME", writeAgentsJSON(t, "{oops"))
-		got := captureStderr(t, loadAgentDefs)
-		for _, want := range []string{"agents.json", "built-in agents"} {
-			if !strings.Contains(got, want) {
-				t.Fatalf("loadAgentDefs() printed %q, want mention of %q", got, want)
-			}
+		err := loadAgentDefs()
+		if err == nil {
+			t.Fatal("loadAgentDefs() = nil, want an error for a malformed agents.json")
+		}
+		if !errors.Is(err, agentusage.ErrInvalidDefinitions) {
+			t.Fatalf("loadAgentDefs() = %v, want ErrInvalidDefinitions", err)
+		}
+		if !strings.Contains(err.Error(), "agents.json") {
+			t.Fatalf("loadAgentDefs() = %v, want the file named", err)
 		}
 	})
 
 	t.Run("valid file loads quietly", func(t *testing.T) {
 		t.Setenv("GAUNTLET_HOME", writeAgentsJSON(t,
 			`{"deftest-agent":{"usage":{"roots":["~/.deftest/sessions"]}}}`))
-		if got := captureStderr(t, loadAgentDefs); got != "" {
-			t.Fatalf("loadAgentDefs() printed %q, want silence", got)
+		if err := loadAgentDefs(); err != nil {
+			t.Fatalf("loadAgentDefs() = %v, want nil", err)
 		}
 		if !slices.Contains(agentusage.Agents(), "deftest-agent") {
 			t.Fatalf("defined agent missing from %v", agentusage.Agents())

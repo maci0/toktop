@@ -242,6 +242,9 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 		})
 	}
 	wg.Wait()
+	if ctx.Err() != nil {
+		return
+	}
 
 	now := c.instant()
 	snap := core.Snapshot{At: now, Uptime: now.Sub(c.started)}

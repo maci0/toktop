@@ -816,7 +816,12 @@ func TestEmitCancelsPollsOnContext(t *testing.T) {
 	fp := &blockingProvider{started: started}
 	ch := make(chan core.Snapshot, 1)
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
+	c.SetSysFn(func() core.SysSample {
+		t.Error("host sampling started after cancellation")
+		return core.SysSample{}
+	})
 	done := make(chan struct{})
 	go func() { defer close(done); c.emit(ctx, ch) }()
 	select {
