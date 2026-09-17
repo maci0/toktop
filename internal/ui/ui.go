@@ -61,7 +61,7 @@ func StaticFrame(cfg Config, s core.Snapshot, w, h int) string {
 	m.snap = s
 	m.w, m.h = w, h
 	m.ready = true
-	m.clock = frameNow(s, m.clock)
+	m.clock = frameNow(s, time.Time{})
 	if agg := aggOutAt(s, m.clock); agg > 0 {
 		m.lastAgg = agg
 		m.maxAgg = agg

@@ -1266,6 +1266,25 @@ func TestStaticFrameUsesSnapshotTime(t *testing.T) {
 	}
 }
 
+func TestStaticFrameReplayIgnoresWallClock(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		for _, at := range []time.Time{{}, time.Unix(1_700_000_000, 0).UTC()} {
+			snap := core.Snapshot{
+				At: at,
+				Providers: []core.ProviderSnapshot{{
+					Label: "engine", OK: true, OutTokPS: 10,
+				}},
+			}
+			cfg := Config{Version: "t"}
+			first := StaticFrame(cfg, snap, 110, 36)
+			time.Sleep(time.Minute)
+			if replay := StaticFrame(cfg, snap, 110, 36); replay != first {
+				t.Fatalf("static frame changed with wall time for At=%v:\nfirst:\n%s\nreplay:\n%s", at, first, replay)
+			}
+		}
+	})
+}
+
 func TestFrameNowDoesNotReadWallClock(t *testing.T) {
 	if got := frameNow(core.Snapshot{}, time.Time{}); !got.IsZero() {
 		t.Fatalf("zero snapshot and fallback produced %v, want zero", got)
