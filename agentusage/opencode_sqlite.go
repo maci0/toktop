@@ -57,6 +57,8 @@ func openCodeDBPath() string {
 // prompt. tokens.input, when present, is billed prompt and is summed.
 // Only assistant messages carry tokens; other roles are prompts. The directory
 // list is spliced in by usageQueryFor, since SQL has no placeholder for a set.
+// MAX(CAST(…), 0) floors a negative stored counter at zero so one malformed
+// row cannot subtract from sessions that read fine.
 //
 // Sessions are the outer loop, then messages via message_session_idx
 // (session_id). CROSS JOIN stops SQLite from reversing that into a scan of
@@ -65,10 +67,10 @@ func openCodeDBPath() string {
 // TEXT, and SQLite ranks TEXT above INTEGER, so MAX('9', 100) would be '9'.
 const usageQuery = `
 	SELECT
-		COALESCE(SUM(CAST(json_extract(m.data, '$.tokens.output') AS INTEGER)), 0),
-		COALESCE(SUM(CAST(json_extract(m.data, '$.tokens.reasoning') AS INTEGER)), 0),
+		COALESCE(SUM(MAX(CAST(json_extract(m.data, '$.tokens.output') AS INTEGER), 0)), 0),
+		COALESCE(SUM(MAX(CAST(json_extract(m.data, '$.tokens.reasoning') AS INTEGER), 0)), 0),
 		COALESCE(MAX(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER)), 0),
-		COALESCE(SUM(CAST(json_extract(m.data, '$.tokens.input') AS INTEGER)), 0)
+		COALESCE(SUM(MAX(CAST(json_extract(m.data, '$.tokens.input') AS INTEGER), 0)), 0)
 	FROM session
 	CROSS JOIN message m
 	WHERE m.session_id = session.id

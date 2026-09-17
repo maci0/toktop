@@ -420,6 +420,31 @@ func TestOpenCodeDBRejectsAbsurdCounts(t *testing.T) {
 	}
 }
 
+func TestOpenCodeDBNegativeCounters(t *testing.T) {
+	for _, valid := range []bool{false, true} {
+		t.Run(fmt.Sprintf("valid_message_%t", valid), func(t *testing.T) {
+			path := opencodeDB(t)
+			dir := t.TempDir()
+			start := time.Now()
+			addSession(t, path, "s", dir)
+			addMessage(t, path, "negative", "s", start.Add(time.Second),
+				`{"role":"assistant","tokens":{"output":-10,"reasoning":-10,"input":-10}}`)
+			want := 0
+			if valid {
+				addMessage(t, path, "valid", "s", start.Add(time.Second),
+					`{"role":"assistant","tokens":{"output":42,"reasoning":42,"input":42}}`)
+				want = 42
+			}
+			withOpenCodeDB(t, path)
+			w := Watch("opencode", dir, start)
+			got := w.Poll()
+			if got.Output != want || got.Thinking != want || got.Input != want {
+				t.Fatalf("usage = %+v, want each counter %d", got, want)
+			}
+		})
+	}
+}
+
 func TestEnableOpenCodeDBReportsAvailability(t *testing.T) {
 	if !EnableOpenCodeDB(false) {
 		t.Fatal("a build with -tags sqlite can read the database")
