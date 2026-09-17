@@ -1577,6 +1577,48 @@ func TestIngestLogsResponseWriteFailure(t *testing.T) {
 	}
 }
 
+func TestIngestLogsRejectedResponseWriteFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		body     string
+		origin   string
+		status   int
+		accepted int
+		reason   string
+	}{
+		{"empty", "", "", http.StatusBadRequest, 0, "empty body"},
+		{"partial", "{\"agent\":\"first\"}\nnull", "", http.StatusBadRequest, 1, "bad json"},
+		{"origin", `{"agent":"first"}`, "https://example.test", http.StatusForbidden, 0, "browser-originated requests"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lg, buf := captureLogger()
+			rec := &memRecorder{}
+			s := &Server{rec: rec, log: lg}
+			r := httptest.NewRequest(http.MethodPost, "/v1/events", strings.NewReader(tc.body))
+			r.Header.Set("X-Request-Id", "failed-rejection")
+			r.Header.Set("Origin", tc.origin)
+			w := httptest.NewRecorder()
+			s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(failWriter{w}, r)
+			if w.Code != tc.status || len(rec.evs) != tc.accepted {
+				t.Fatalf("status = %d, recorded = %d; want %d, %d", w.Code, len(rec.evs), tc.status, tc.accepted)
+			}
+			got := buf.String()
+			if countLogLines(got) != 1 {
+				t.Fatalf("log lines = %d (%q), want 1", countLogLines(got), got)
+			}
+			for _, want := range []string{
+				"level=WARN", "req=failed-rejection", "duration=", "method=POST", "path=/v1/events",
+				fmt.Sprintf("status=%d", tc.status), fmt.Sprintf("accepted=%d", tc.accepted),
+				`error="` + tc.reason, `response_error="` + io.ErrClosedPipe.Error() + `"`,
+			} {
+				if !strings.Contains(got, want) {
+					t.Errorf("rejection log missing %q: %s", want, got)
+				}
+			}
+		})
+	}
+}
+
 func TestIngestUnknownPathStaysOneLogLine(t *testing.T) {
 	lg, buf := captureLogger()
 	s, err := newServer("127.0.0.1:0", &memRecorder{}, lg)

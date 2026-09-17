@@ -332,6 +332,7 @@ func skipUnhandledLog(r *http.Request) bool {
 type statusWriter struct {
 	http.ResponseWriter
 	status int
+	err    error
 }
 
 func (w *statusWriter) WriteHeader(code int) {
@@ -343,7 +344,11 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 	if w.status == 0 {
 		w.status = http.StatusOK
 	}
-	return w.ResponseWriter.Write(p)
+	n, err := w.ResponseWriter.Write(p)
+	if err != nil {
+		w.err = err
+	}
+	return n, err
 }
 
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
@@ -447,8 +452,17 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	if w.Header().Get("X-Request-Id") == "" {
 		w.Header().Set("X-Request-Id", reqID)
 	}
-	done := func(status, accepted int, errMsg string) {
-		s.logRequest(r, reqID, status, accepted, time.Since(start), errMsg)
+	done := func(status, accepted int, errMsg string, extra ...any) {
+		s.logRequest(r, reqID, status, accepted, time.Since(start), errMsg, extra...)
+	}
+	reject := func(status, accepted int, msg string) {
+		sw := &statusWriter{ResponseWriter: w}
+		http.Error(sw, msg, status)
+		if sw.err != nil {
+			done(status, accepted, msg, "response_error", logField(sw.err.Error(), 256))
+			return
+		}
+		done(status, accepted, msg)
 	}
 
 	// A POST carrying an Origin header is browser-driven: every browser
@@ -464,8 +478,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Origin") != "" {
 		msg := "browser-originated requests are not accepted; post from a script or agent without an Origin header"
 		armWrite()
-		http.Error(w, msg, http.StatusForbidden)
-		done(http.StatusForbidden, 0, msg)
+		reject(http.StatusForbidden, 0, msg)
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)
@@ -488,8 +501,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		armWrite()
-		http.Error(w, msg, status)
-		done(status, n, msg)
+		reject(status, n, msg)
 	}
 	for {
 		var raw json.RawMessage
