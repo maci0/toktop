@@ -268,9 +268,8 @@ func classify(fam map[string]float64, m *Metrics) {
 				m.KVPct = v * 100
 				m.HasKV = true
 			}
-		case strings.Contains(n, "request") && containsAny(n, "run", "process", "active", "inflight"),
-			containsAny(n, "req") && containsAny(n, "run", "process", "active", "inflight") &&
-				!containsAny(n, "time", "duration", "second"):
+		case strings.Contains(n, "req") && containsAny(n, "run", "process", "active", "inflight") &&
+			!containsAny(n, "time", "duration", "second"):
 			m.Running = satInt(v)
 		case containsAny(n, "req") && containsAny(n, "wait", "queue", "pend") &&
 			!containsAny(n, "time", "duration", "second"):

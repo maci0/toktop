@@ -104,6 +104,23 @@ func TestClassifyVLLM(t *testing.T) {
 	}
 }
 
+func TestClassifyRunningIgnoresDurations(t *testing.T) {
+	for _, name := range []string{
+		"request_processing_duration_seconds_sum",
+		"request_processing_time_sum",
+		"request_processing_seconds_count",
+		"req_processing_duration_seconds_sum",
+	} {
+		t.Run(name, func(t *testing.T) {
+			var m Metrics
+			classify(parseProm("num_requests_running 3\n"+name+" 12\n"), &m)
+			if m.Running != 3 {
+				t.Errorf("running = %d, want 3", m.Running)
+			}
+		})
+	}
+}
+
 func TestClassifyRatioVsPercentCache(t *testing.T) {
 	var ratio Metrics
 	classify(map[string]float64{"llamacpp:kv_cache_usage_ratio": 0.75}, &ratio)
