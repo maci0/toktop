@@ -769,16 +769,28 @@ func TestIngestClampsOversizedFields(t *testing.T) {
 	s := startIngest(t, rec)
 
 	huge := strings.Repeat("x", 10_000)
-	body := fmt.Sprintf(`{"id":%q,"agent":%q,"model":%q,"note":%q}`, huge, huge, huge, huge)
+	body := fmt.Sprintf(`{"id":%q,"agent":%q,"model":%q,"note":%q,"via_engine":%q,"kind":%q}`, huge, huge, huge, huge, huge, huge)
 	resp := post(t, "http://"+s.Addr()+"/v1/events", body)
 	if resp != http.StatusAccepted {
 		t.Fatalf("status = %d", resp)
 	}
 	awaitEvents(t, rec, 1)
 	ev := rec.evs[0]
-	if len(ev.ID) > 128 || len(ev.Agent) > 64 || len(ev.Model) > 128 || utf8.RuneCountInString(ev.Note) > 512 {
-		t.Errorf("oversized fields retained: id=%d agent=%d model=%d note=%d",
-			len(ev.ID), len(ev.Agent), len(ev.Model), utf8.RuneCountInString(ev.Note))
+	for _, field := range []struct {
+		name string
+		got  string
+		cap  int
+	}{
+		{"id", ev.ID, 128},
+		{"agent", ev.Agent, 64},
+		{"model", ev.Model, 128},
+		{"note", ev.Note, 512},
+		{"via_engine", ev.ViaEngine, 128},
+		{"kind", ev.Kind, 24},
+	} {
+		if want := strings.Repeat("x", field.cap); field.got != want {
+			t.Errorf("%s = %q, want %q", field.name, field.got, want)
+		}
 	}
 }
 
@@ -789,33 +801,33 @@ func TestIngestClampKeepsCharactersWhole(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
-	agent := strings.Repeat("\U0001F1E9\U0001F1EA", 48) // 96 flags: past the 64-character cap
-	note := strings.Repeat("👩‍💻", 300)                  // ZWJ sequences: past the 512-character cap
-	body := fmt.Sprintf(`{"agent":%q,"note":%q}`, agent, note)
-	resp := post(t, "http://"+s.Addr()+"/v1/events", body)
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 1)
-	ev := rec.evs[0]
-
-	// The first n whole grapheme clusters, which is what a character-safe cap
-	// must retain.
-	wholeClusters := func(v string, n int) string {
-		var b strings.Builder
-		state := -1
-		for rest := v; n > 0 && rest != ""; n-- {
-			var c string
-			c, rest, _, state = uniseg.FirstGraphemeClusterInString(rest, state)
-			b.WriteString(c)
-		}
-		return b.String()
-	}
-	if want := wholeClusters(agent, 64); ev.Agent != want {
-		t.Errorf("retained agent was cut mid-character: got %q, want the whole clusters %q", ev.Agent, want)
-	}
-	if want := wholeClusters(note, 512); ev.Note != want {
-		t.Errorf("retained note was cut mid-character: got %q, want the whole clusters %q", ev.Note, want)
+	for _, tc := range []struct {
+		name                  string
+		agents, notes         int
+		wantAgents, wantNotes int
+	}{
+		{"below cap", 63, 511, 63, 511},
+		{"at cap", 64, 512, 64, 512},
+		{"above cap", 65, 513, 64, 512},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			agent := strings.Repeat("\U0001F1E9\U0001F1EA", tc.agents)
+			note := strings.Repeat("\U0001F469\u200d\U0001F4BB", tc.notes)
+			before := len(rec.evs)
+			body := fmt.Sprintf(`{"agent":%q,"note":%q}`, agent, note)
+			resp := post(t, "http://"+s.Addr()+"/v1/events", body)
+			if resp != http.StatusAccepted {
+				t.Fatalf("status = %d", resp)
+			}
+			awaitEvents(t, rec, before+1)
+			ev := rec.evs[before]
+			if want := strings.Repeat("\U0001F1E9\U0001F1EA", tc.wantAgents); ev.Agent != want {
+				t.Errorf("agent = %q, want %q", ev.Agent, want)
+			}
+			if want := strings.Repeat("\U0001F469\u200d\U0001F4BB", tc.wantNotes); ev.Note != want {
+				t.Errorf("note = %q, want %q", ev.Note, want)
+			}
+		})
 	}
 }
 
