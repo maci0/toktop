@@ -53,6 +53,11 @@ jobs:
             exit 1
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          prerelease=false
+          if [[ "${VERSION%%+*}" == *-* ]]; then
+            prerelease=true
+          fi
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
           # Platform list, checksum generation and deterministic archive
           # metadata live in the Makefile so local and CI releases cannot
           # drift apart.
@@ -84,6 +89,7 @@ jobs:
         uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           generate_release_notes: true
+          prerelease: ${{ steps.build.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
           files: |
             dist/toktop_${{ env.VERSION }}_linux_amd64

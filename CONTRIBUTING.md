@@ -174,7 +174,10 @@ not a leftover `0.1.0`.
 
 Push a tag `v*`: GitHub Actions tests (both halves of the sqlite tag gate),
 cross-compiles every platform, generates checksums and a CycloneDX SBOM, and
-attaches binaries to the release. The host-platform artifact is smoke-tested
+attaches binaries to the release. Versions with a prerelease suffix, such as
+`v0.6.0-rc.1`, are marked as prereleases and excluded from the stable
+`toktop update` channel. Hyphens in build metadata do not mark a prerelease.
+The host-platform artifact is smoke-tested
 for `--version` and for the sqlite driver actually being linked. Locally,
 `make release VERSION=x.y.z` reproduces the same artifacts in `dist/`. The
 checksums tarball is built deterministically: members are sorted,
