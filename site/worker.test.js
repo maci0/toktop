@@ -27,6 +27,42 @@ async function decompress(bytes, format) {
   return new TextDecoder().decode(out);
 }
 
+test("compression starts in a request and only completed bytes are reused", async () => {
+  const NativeCompressionStream = globalThis.CompressionStream;
+  let inRequest = false;
+  let constructions = 0;
+  globalThis.CompressionStream = new Proxy(NativeCompressionStream, {
+    construct(target, args) {
+      constructions++;
+      if (!inRequest) throw new Error("compression outside a request");
+      return Reflect.construct(target, args);
+    },
+  });
+  try {
+    const { default: freshWorker } = await import("./worker.js?request-context");
+    expect(constructions).toBe(0);
+    inRequest = true;
+    const request = () => new Request(ORIGIN, {
+      headers: { "accept-encoding": "gzip" },
+    });
+    const [first, concurrent] = await Promise.all([
+      freshWorker.fetch(request()),
+      freshWorker.fetch(request()),
+    ]);
+    expect(first.headers.get("content-encoding")).toBe("gzip");
+    const bytes = new Uint8Array(await first.arrayBuffer());
+    expect(await decompress(bytes, "gzip")).toBe(identityBody);
+    expect(new Uint8Array(await concurrent.arrayBuffer())).toEqual(bytes);
+    const afterFirst = constructions;
+    expect(afterFirst).toBe(6);
+    const second = await freshWorker.fetch(request());
+    expect(new Uint8Array(await second.arrayBuffer())).toEqual(bytes);
+    expect(constructions).toBe(afterFirst);
+  } finally {
+    globalThis.CompressionStream = NativeCompressionStream;
+  }
+});
+
 test("no accept-encoding: identity body, no content-encoding", async () => {
   const res = await call();
   expect(res.status).toBe(200);

@@ -269,12 +269,10 @@ async function compressFormat(format) {
 
 const IDENTITY = new TextEncoder().encode(HTML);
 
-// Each coding is compressed once when the isolate starts, not once per
-// request: the bytes change only at deploy time, so the effort belongs
-// where they are produced. Formats the runtime cannot construct are skipped,
-// so a gzip-only isolate still answers gzip clients and everyone else gets
-// identity.
-const representations = (async () => {
+let representations;
+
+async function pageRepresentations() {
+  if (representations) return representations;
   const out = [{ coding: null, bytes: IDENTITY }];
   for (const [coding, format] of COMPRESSIBLE) {
     try {
@@ -283,14 +281,15 @@ const representations = (async () => {
       // Runtime lacks this format.
     }
   }
+  representations = out;
   return out;
-})();
+}
 
 // Highest q the client offered, then the smallest body at that q. A Chrome
 // `gzip, deflate, br, zstd` request therefore gets brotli rather than gzip,
 // and a `br;q=0.1, gzip` request still gets gzip.
 async function representationFor(acceptEncoding) {
-  const reps = await representations;
+  const reps = await pageRepresentations();
   const qByCoding = parseAcceptEncoding(acceptEncoding);
   let best = null;
   for (const rep of reps) {

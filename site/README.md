@@ -24,9 +24,12 @@ not span.
 
 ## Encoding
 
-Clients that advertise brotli, zstd, or gzip get a body that was compressed
-once when the isolate started, not once per request; clients that advertise
-none of those get the identity bytes. Among the encodings a client accepts,
+Clients that advertise brotli, zstd, or gzip get a cached compressed body.
+Compression starts inside a request, not during module initialization, so
+Worker stream APIs run in a request context. Only completed bytes are shared
+across requests; simultaneous cold requests compress independently rather
+than sharing request-owned stream work. Clients that advertise none of those
+get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
