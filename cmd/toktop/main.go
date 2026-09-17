@@ -585,8 +585,14 @@ func validateAddURL(raw string) error {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return fmt.Errorf("URL must be http:// or https://, got %q", raw)
 	}
-	if u.Host == "" {
+	if u.Hostname() == "" {
 		return fmt.Errorf("URL missing host, got %q", raw)
+	}
+	if port := u.Port(); port != "" {
+		n, convErr := strconv.Atoi(port)
+		if convErr != nil || n < 0 || n > 65535 {
+			return fmt.Errorf("URL port must be 0-65535, got %q", port)
+		}
 	}
 	if u.User != nil {
 		return errors.New("URL must not contain userinfo; set --bearer or $TOKTOP_BEARER")
