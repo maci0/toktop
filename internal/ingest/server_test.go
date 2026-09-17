@@ -1503,7 +1503,7 @@ func TestIngestLogsResponseWriteFailure(t *testing.T) {
 		"level=WARN",
 		"status=202",
 		"accepted=1",
-		`error="response write failed"`,
+		`error="response write failed: ` + io.ErrClosedPipe.Error() + `"`,
 		"method=POST",
 		"path=/v1/events",
 	} {

@@ -556,7 +556,10 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
 	if _, err := fmt.Fprintf(w, `{"accepted":%d}`+"\n", n); err != nil {
-		done(http.StatusAccepted, n, "response write failed")
+		// The events are already recorded, so the status stands. The reason
+		// still belongs in the audit line: without it a vanished sender and a
+		// timeout mid-body are indistinguishable from success.
+		done(http.StatusAccepted, n, "response write failed: "+err.Error())
 		return
 	}
 	_ = rc.SetWriteDeadline(time.Time{}) // keep-alive must not inherit the write cap
