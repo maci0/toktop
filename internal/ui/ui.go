@@ -835,7 +835,7 @@ func (m Model) gaugesBody(w int) string {
 		name := styleDim.Render(clip(shorten(core.SanitizeText(p.Label), w-6), w-6))
 		kv := "kv  " + GaugeBar(p.KVPct, clampi(w-10, 4, 20), kvHeat)
 		third := procLine(p)
-		row := clip(name+"\n"+kv+"\n"+third, w)
+		row := clipBlock(name+"\n"+kv+"\n"+third, w, -1)
 		b.WriteString(row + "\n\n")
 	}
 	if b.Len() == 0 {

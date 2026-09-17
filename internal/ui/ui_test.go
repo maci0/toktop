@@ -1089,6 +1089,30 @@ func TestEnginesPanelLabelsKVAndQueue(t *testing.T) {
 	}
 }
 
+func TestEngineStateKeepsRowsWhenDetailsOverflow(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{
+		Label: "engine-a", OK: true, KVPct: 55,
+		Models:  []core.ModelInfo{{SizeVRAM: 8 << 30}},
+		ProcRSS: 4 << 30, ProcCPU: 75, TTFTms: 150,
+	}, {
+		Label: "engine-b", OK: true, KVPct: 20,
+	}}}
+	for _, w := range []int{15, 20, 33} {
+		lines := strings.Split(m.gaugesBody(w), "\n")
+		for i, want := range map[int]string{0: "engine-a", 1: "kv ", 2: "mem ", 4: "engine-b", 5: "kv "} {
+			if i >= len(lines) || !strings.Contains(strip(lines[i]), want) {
+				t.Errorf("width %d: row %d missing %q in %q", w, i, want, lines)
+			}
+		}
+		for i, line := range lines {
+			if got := lipgloss.Width(line); got > w {
+				t.Errorf("width %d: row %d occupies %d columns", w, i, got)
+			}
+		}
+	}
+}
+
 // All backends down: ENGINE STATE must say so instead of promising telemetry
 // that will never arrive.
 func TestEngineStateNamesAllDownEngines(t *testing.T) {
