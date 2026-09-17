@@ -129,8 +129,10 @@ func (c *Collector) SetSysFn(fn func() core.SysSample) {
 // startSysPoller refreshes host vitals in the background; emit never blocks
 // on it (GPU vendor CLIs can take seconds and would stall every frame). Run
 // warms the cache before emitting, so this first pass is a cache hit.
-func (c *Collector) startSysPoller(ctx context.Context) {
+func (c *Collector) startSysPoller(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		t := time.NewTicker(c.interval)
 		defer t.Stop()
 		c.sampleSys(false) // skip when Run already warmed the cache
@@ -139,10 +141,14 @@ func (c *Collector) startSysPoller(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				if ctx.Err() != nil {
+					return
+				}
 				c.sampleSys(true)
 			}
 		}
 	}()
+	return done
 }
 
 // sampleSys runs the vitals sampler. Concurrent callers serialize on
@@ -182,8 +188,10 @@ func (c *Collector) sysSnapshot() *core.SysSample {
 
 // startProcPoller refreshes the process table in the background; emit never
 // blocks on it (Windows CIM enumeration takes seconds).
-func (c *Collector) startProcPoller(ctx context.Context) {
+func (c *Collector) startProcPoller(ctx context.Context) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		t := time.NewTicker(c.interval)
 		defer t.Stop()
 		refresh := func() {
@@ -199,10 +207,14 @@ func (c *Collector) startProcPoller(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
+				if ctx.Err() != nil {
+					return
+				}
 				refresh()
 			}
 		}
 	}()
+	return done
 }
 
 // procSnapshot returns the latest cached engine processes, detached from the
@@ -218,12 +230,14 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
 	c.mu.Lock()
 	c.baseCtx = ctx
 	c.mu.Unlock()
-	c.startProcPoller(ctx)
+	procDone := c.startProcPoller(ctx)
+	defer func() { <-procDone }()
 	// Warm the vitals cache before the first emit so that frame is a cache
 	// hit. GPU vendor CLIs can take seconds; sampling them inside emit
 	// would delay it. RecordAgent is not pinned: sysSnapshot runs outside c.mu.
 	c.sampleSys(false)
-	c.startSysPoller(ctx)
+	sysDone := c.startSysPoller(ctx)
+	defer func() { <-sysDone }()
 	t := time.NewTicker(c.interval)
 	defer t.Stop()
 	c.emit(ctx, out) // immediate first frame

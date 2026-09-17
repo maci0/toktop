@@ -381,6 +381,62 @@ func TestRecordAgentZeroAtUsesClock(t *testing.T) {
 	}
 }
 
+func TestRunWaitsForPollers(t *testing.T) {
+	for _, first := range []string{"sys", "proc"} {
+		t.Run(first, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				ctx, cancel := context.WithCancel(t.Context())
+				defer cancel()
+				c := New(nil, time.Second)
+				sysRelease, procRelease := make(chan struct{}), make(chan struct{})
+				procStarted, sysStarted := make(chan struct{}), make(chan struct{})
+				var procOnce sync.Once
+				c.procFn = func() []procs.Info {
+					procOnce.Do(func() { close(procStarted) })
+					<-procRelease
+					return nil
+				}
+				calls := 0
+				c.SetSysFn(func() core.SysSample {
+					calls++
+					if calls == 2 {
+						close(sysStarted)
+						<-sysRelease
+					}
+					return core.SysSample{}
+				})
+				done := make(chan struct{})
+				go func() {
+					defer close(done)
+					c.Run(ctx, make(chan core.Snapshot, 4))
+				}()
+				<-procStarted
+				<-sysStarted
+				cancel()
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Error("Run returned with both pollers still sampling")
+				default:
+				}
+				firstRelease, lastRelease := sysRelease, procRelease
+				if first == "proc" {
+					firstRelease, lastRelease = procRelease, sysRelease
+				}
+				close(firstRelease)
+				synctest.Wait()
+				select {
+				case <-done:
+					t.Error("Run returned with one poller still sampling")
+				default:
+				}
+				close(lastRelease)
+				<-done
+			})
+		})
+	}
+}
+
 // Run is the production loop: it must start the background proc+sys pollers,
 // emit one snapshot per interval (including the immediate first frame) and
 // stop promptly on ctx cancellation without stranding the emit goroutine.
