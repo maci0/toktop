@@ -54,6 +54,34 @@ func TestAgentsMergesBuiltinsAndDefinitions(t *testing.T) {
 	}
 }
 
+func TestAgentsIncludesRegisteredSpecs(t *testing.T) {
+	const tool = "registered-agent"
+	t.Cleanup(func() {
+		adaptersMu.Lock()
+		delete(adapters, tool)
+		adaptersMu.Unlock()
+	})
+	if err := RegisterSpec("  "+tool+"  ", Spec{Roots: []string{t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	got := Agents()
+	if !slices.Contains(got, tool) {
+		t.Fatalf("registered agent missing from %v", got)
+	}
+	if !slices.IsSorted(got) {
+		t.Fatalf("agent list not sorted: %v", got)
+	}
+	addDef(t, tool, Spec{Roots: []string{t.TempDir()}})
+	got = Agents()
+	if !slices.Equal(got, slices.Compact(slices.Clone(got))) {
+		t.Fatalf("agent list contains duplicates: %v", got)
+	}
+	got[0] = "changed-by-caller"
+	if slices.Contains(Agents(), "changed-by-caller") {
+		t.Fatal("mutating the returned list changed the registry")
+	}
+}
+
 // A machine without agent definitions is ordinary; the loader must say so by
 // succeeding quietly.
 func TestLoadDefinitionsMissingFileIsNotAnError(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 
@@ -31,18 +30,20 @@ var knownAgents = []string{
 
 // Agents lists every agent name this package knows, built in and defined.
 func Agents() []string {
+	out := slices.Clone(knownAgents)
 	defsMu.RLock()
-	extra := make([]string, 0, len(defs))
 	for name := range defs {
-		if !slices.Contains(knownAgents, name) {
-			extra = append(extra, name)
-		}
+		out = append(out, name)
 	}
 	defsMu.RUnlock()
+	adaptersMu.RLock()
+	for name := range adapters {
+		out = append(out, name)
+	}
+	adaptersMu.RUnlock()
 
-	out := append(append([]string(nil), knownAgents...), extra...)
-	sort.Strings(out)
-	return out
+	slices.Sort(out)
+	return slices.Compact(out)
 }
 
 // Spec describes where a defined agent keeps its transcripts, so live usage
