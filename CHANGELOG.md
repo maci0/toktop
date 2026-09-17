@@ -51,13 +51,22 @@ support channel (see SECURITY.md).
 Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.9.0).
 
-### Changed
+### Breaking
 
-- Ingest `ts` is RFC 3339 with an offset (`2026-01-02T03:04:05Z`). Naive
-  stamps, colon-less offsets, SQL-style spaces, and Unix epoch numbers
-  now 400. Harnesses you own can send RFC 3339.
-- Ingest dropped `GET /v1/events`. The schema lives in the README; the
-  live endpoints are `POST /v1/events` and `GET /healthz`.
+- Ingest `ts` now requires an RFC 3339 string with an offset. Values accepted
+  in 0.8.0 without a zone, with colon-less offsets or SQL-style spaces, or as
+  Unix epoch numbers (including numeric strings) now return HTTP 400 and stop
+  processing the remaining events in that request. Update senders before
+  upgrading: `"2026-01-02 03:04:05"` becomes `"2026-01-02T03:04:05Z"` to
+  preserve the previous UTC interpretation; `"2026-01-02T03:04:05+0200"`
+  becomes `"2026-01-02T03:04:05+02:00"`. Convert epoch values to an RFC 3339
+  string representing the same instant. Omitting `ts` still uses arrival
+  time when the original event time is not needed.
+- Ingest removed the schema hint at `GET /v1/events`; it and
+  `HEAD /v1/events` now return HTTP 405 instead of 200. Read the event fields
+  in [README.md](README.md#agent-feed-api) instead. Switch liveness probes to
+  `GET /healthz`, which answers `ok`; event submission remains
+  `POST /v1/events`.
 
 ## [0.8.0] - 2026-09-02
 
