@@ -129,9 +129,58 @@ func TestRatesZeroElapsedHoldsPriorRate(t *testing.T) {
 func TestRatesHonorDirectThroughput(t *testing.T) {
 	c := New(nil, time.Second)
 	c.rates("p", &provider.Metrics{OutTotal: 10}, time.Now())
-	out, _ := c.rates("p", &provider.Metrics{OutTotal: 10, DirectOutPS: 300}, time.Now().Add(time.Second))
+	out, _ := c.rates("p", &provider.Metrics{OutTotal: 10, DirectOutPS: 300, HasDirectOutPS: true}, time.Now().Add(time.Second))
 	if out < 104 || out > 106 { // ema(0, 300)
 		t.Fatalf("direct rate = %v", out)
+	}
+}
+
+func TestEmitHonorsZeroThroughputGauge(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		gauge string
+		want  float64
+	}{
+		{"zero", "sglang:gen_throughput 0\n", 0},
+		{"absent", "", 105},
+		{"positive", "sglang:gen_throughput 200\n", 70},
+		{"negative", "sglang:gen_throughput -1\n", 105},
+		{"nan", "sglang:gen_throughput NaN\n", 105},
+		{"infinite", "sglang:gen_throughput +Inf\n", 105},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var total atomic.Int64
+			total.Store(100)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/metrics":
+					fmt.Fprintf(w, "sglang:generation_tokens_total %d\n%s", total.Load(), tc.gauge)
+				case "/v1/models":
+					io.WriteString(w, `{"data":[]}`)
+				case "/api/version":
+					io.WriteString(w, `{"version":"test"}`)
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			defer srv.Close()
+
+			p := provider.NewOpenAICompat(srv.URL, "engine", core.KindSGLang)
+			c := New([]provider.Provider{p}, time.Second)
+			c.SetSysFn(nil)
+			now := time.Unix(1000, 0)
+			c.SetNow(func() time.Time { return now })
+			out := make(chan core.Snapshot, 1)
+			c.emit(context.Background(), out)
+			<-out
+			total.Store(400)
+			now = now.Add(time.Second)
+			c.emit(context.Background(), out)
+			snap := <-out
+			if got := snap.Providers[0].OutTokPS; got != tc.want {
+				t.Fatalf("output rate = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

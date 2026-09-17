@@ -51,6 +51,9 @@ func FuzzParsePromClassify(f *testing.F) {
 		if m.HasKV && (m.KVPct < 0 || m.KVPct > 100) {
 			t.Fatalf("HasKV with KVPct outside 0..100: %v", m.KVPct)
 		}
+		if m.HasDirectOutPS && m.DirectOutPS < 0 {
+			t.Fatalf("HasDirectOutPS with a negative gauge: %v", m.DirectOutPS)
+		}
 		for name, v := range map[string]float64{
 			"InTotal": m.InTotal, "OutTotal": m.OutTotal,
 			"TTFTms": m.TTFTms, "DirectOutPS": m.DirectOutPS,
@@ -68,7 +71,8 @@ func FuzzParsePromClassify(f *testing.F) {
 		if again.InTotal != m.InTotal || again.OutTotal != m.OutTotal ||
 			again.Running != m.Running || again.Waiting != m.Waiting ||
 			again.KVPct != m.KVPct || again.HasKV != m.HasKV ||
-			again.TTFTms != m.TTFTms || again.DirectOutPS != m.DirectOutPS {
+			again.TTFTms != m.TTFTms || again.DirectOutPS != m.DirectOutPS ||
+			again.HasDirectOutPS != m.HasDirectOutPS {
 			t.Fatalf("classify is not deterministic: %+v vs %+v", m, again)
 		}
 	})

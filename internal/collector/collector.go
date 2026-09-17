@@ -368,7 +368,7 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 	}
 	rawOut := max((m.OutTotal-pv.outTotal)/dt, 0) // clamp on counter reset
 	rawIn := max((m.InTotal-pv.inTotal)/dt, 0)
-	if m.DirectOutPS > 0 { // trust the engine's own tok/s gauge when present
+	if m.HasDirectOutPS { // trust the engine's own tok/s gauge when present
 		rawOut = m.DirectOutPS
 	}
 	outPS = ema(pv.outEMA, rawOut)

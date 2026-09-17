@@ -39,8 +39,9 @@ type Metrics struct {
 	HasKV    bool
 	TTFTms   float64 // engine-reported mean TTFT if it publishes one
 
-	DirectOutPS float64 // engine-reported instantaneous tok/s, if it publishes one
-	Version     string  // engine software version, best effort
+	DirectOutPS    float64 // engine-reported instantaneous tok/s, if it publishes one
+	HasDirectOutPS bool
+	Version        string // engine software version, best effort
 }
 
 // Provider is one inference backend the collector can poll.
@@ -291,8 +292,9 @@ func classify(fam map[string]float64, m *Metrics) {
 				}
 			}
 		case strings.Contains(n, "throughput") && containsAny(n, "gen", "generation", "decode"):
-			if v > 0 { // engines publishing instantaneous tok/s (SGLang, TRT-LLM)
+			if v >= 0 {
 				m.DirectOutPS = v
+				m.HasDirectOutPS = true
 			}
 		}
 	}
