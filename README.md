@@ -111,7 +111,9 @@ read the token counts they already write:
 package main
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/maci0/toktop/agentusage"
@@ -126,19 +128,27 @@ func main() {
 		fmt.Println("opencode: build without -tags sqlite")
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
 	for _, p := range agentusage.Discover() {
 		w := p.Watch(time.Now())
 		if w == nil {
-			continue // this agent keeps no readable transcript
-		}
-		s := w.Poll()
-		if s.Empty() {
 			continue
 		}
-		fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, s.Output, s.Input)
+		wg.Go(func() {
+			w.Run(ctx, 250*time.Millisecond, func(s agentusage.Sample) {
+				fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, s.Output, s.Input)
+			})
+		})
 	}
+	wg.Wait()
 }
 ```
+
+The example watches the discovered processes concurrently for ten seconds.
+Only usage written after attachment is reported; existing transcript counts
+are skipped. Keep an agent generating during that window to see output.
 
 `RegisterSpec` teaches the package about an agent it was not compiled to know.
 `errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on a rejected spec, and

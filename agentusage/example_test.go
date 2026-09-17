@@ -4,7 +4,9 @@
 package agentusage_test
 
 import (
+	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/maci0/toktop/agentusage"
@@ -19,17 +21,25 @@ func Example() {
 	// EnableOpenCodeDB reports whether this build can read opencode's store.
 	// Call it before Watch; a false return is a build without -tags sqlite.
 
+	if !agentusage.EnableOpenCodeDB(true) {
+		fmt.Println("opencode: build without -tags sqlite")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var wg sync.WaitGroup
 	for _, p := range agentusage.Discover() {
 		w := p.Watch(time.Now())
 		if w == nil {
-			continue // this agent keeps no readable transcript
-		}
-		s := w.Poll()
-		if s.Empty() {
 			continue
 		}
-		fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, s.Output, s.Input)
+		wg.Go(func() {
+			w.Run(ctx, 250*time.Millisecond, func(s agentusage.Sample) {
+				fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, s.Output, s.Input)
+			})
+		})
 	}
+	wg.Wait()
 }
 
 func ExampleRate() {
@@ -53,7 +63,7 @@ func ExampleInputRate() {
 func ExampleProcess_Watch() {
 	for _, p := range agentusage.Discover() {
 		if w := p.Watch(time.Now()); w != nil {
-			fmt.Println(w.Tool(), w.Poll().Output)
+			fmt.Println(w.Tool(), w.Dir())
 		}
 	}
 }
