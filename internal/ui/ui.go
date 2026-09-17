@@ -79,7 +79,13 @@ type tickMsg time.Time
 type feedDownMsg string
 
 func waitSnap(ch <-chan core.Snapshot) tea.Cmd {
-	return func() tea.Msg { return snapMsg(<-ch) }
+	return func() tea.Msg {
+		snap, ok := <-ch
+		if !ok {
+			return nil
+		}
+		return snapMsg(snap)
+	}
 }
 
 // waitFeedErr blocks until the feed dies; re-issued after each delivery so a

@@ -14,6 +14,30 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+func TestClosedSnapshotChannelStopsScheduling(t *testing.T) {
+	ch := make(chan core.Snapshot, 1)
+	ch <- core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "engine", OK: true}}}
+	close(ch)
+	m := New(Config{Version: "t"}, ch)
+
+	next, cmd := m.Update(waitSnap(ch)())
+	m = next.(Model)
+	if len(m.snap.Providers) != 1 || m.snap.Providers[0].Label != "engine" {
+		t.Fatal("buffered snapshot was not delivered")
+	}
+	if cmd == nil {
+		t.Fatal("snapshot delivery did not schedule the next read")
+	}
+	next, again := m.Update(cmd())
+	if again != nil {
+		t.Fatal("closed snapshot channel scheduled another read")
+	}
+	m = next.(Model)
+	if len(m.snap.Providers) != 1 || m.snap.Providers[0].Label != "engine" {
+		t.Fatal("closed snapshot channel replaced the last snapshot")
+	}
+}
+
 func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case " ":
