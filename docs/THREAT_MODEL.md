@@ -5,7 +5,8 @@ with file references so each claim can be re-verified against code. Individual
 vulnerabilities and their fixes belong to sec-review; this file records where
 they live and what already stands in their way.
 
-- **Last reviewed:** 2026-09-02
+- **Last reviewed:** 2026-09-18 (ingest audit coverage only; other sections retain
+  their earlier verification dates and may contain stale line references)
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -26,7 +27,7 @@ targets, the static site worker at site/worker.js). Out of scope: the
 | 3 | Self-update installs whatever binary the named GitHub repo published: integrity rests on the release's own checksums.txt over TLS; no external signature exists | runtime -> update channel | internal/selfupdate/selfupdate.go:215-301, .github/workflows/release.yml | Checksum + size + GitHub-host URL verification present; owner/name validated (M18); signing absent |
 | 4 | SSH engine relays bind loopback listeners (`127.0.0.1:0`); any local process can reach the remote engines those listeners front | local processes -> remote engines | internal/remote/client.go:369-410 | Bound loopback-only; no listener auth |
 | 5 | Hot-reload re-execs whatever binary occupies the exe path when its identity changes (Unix); PATH-based vendor CLI lookup executes tools from `$PATH` | build -> runtime, host -> process | internal/selfreload/exec_unix.go:15-19; internal/gpu/gpu.go:55-69 | Windows Restart does not exec (exec_windows.go:12-14); `--no-hot-reload` exists |
-| 6 | Ingest bodies are not persisted; a poisoning incident after process exit cannot be reconstructed from event content | response readiness | internal/ingest/server.go:250-278 (req/method/path/status/accepted/duration/remote/error; bodies stay off the log) | HTTP audit line present; payload is still only in the in-memory feed |
+| 6 | Low: ingest poisoning cannot be reconstructed from retained payloads; raising the log floor also hides successful submissions | B1, response readiness | internal/ingest/server.go:193-218,283-311,561-578; internal/collector/collector.go:461-474 | Request metadata logs at info by default; warn/error suppress successes. No authenticated sender identity or durable event store |
 
 Resolved since 2026-08-25: the previous ranking's "bearer token sent to every
 probed endpoint" is closed by origin-scoped token application
@@ -208,12 +209,14 @@ Deployment surface:
 
 - **B1: local processes -> ingest server.** Any process running as any local
   user who can reach the socket can POST events. There is no named
-  authentication or validation-of-origin point; sanitization happens
-  (server.go:572-626) and browser-driven requests are refused by the
-  Origin-header check (server.go:473-478). POSTs are attributed on stderr
-  by remote and request id (server.go:250-278), not by an authenticated
-  origin. Non-loopback peer addresses are logged as `"remote"` rather than
-  the IP (logRemote, server.go:202-215).
+  authentication point; fields are sanitized and clamped
+  (internal/ingest/event.go:18-71), and POSTs with a nonempty Origin header
+  are refused (internal/ingest/server.go:478-483). Request metadata goes to
+  stderr subject to `TOKTOP_LOG_LEVEL` (server.go:193-218,283-311).
+  Remote address and request id are not authenticated sender identities:
+  `X-Request-Id` is caller-controlled, sanitized, and capped at 64 characters
+  (server.go:151-156,231-233); non-loopback addresses become `"remote"`
+  (server.go:238-247).
   When `--ingest` binds a non-loopback address this boundary widens to the
   network; the widening is announced at startup (main.go:375-376) but not
   prevented.
@@ -289,10 +292,15 @@ ports that are then exposed on local loopback (client.go:388-410).
   time beyond a 2-minute skew (server.go:423,548-550), so the "live" marker
   cannot be pinned by a claimed far-future stamp. Mixed Latin+Cyrillic/Greek
   agent names collapse to `anonymous` (server.go:600-607).
-- *Repudiation*: each POST logs remote, request id, status, and accepted
-  count (server.go:250-278); event bodies are not, so content-level
-  attribution still depends on the live feed. Non-loopback IPs are not
-  written to the log (logRemote).
+- *Repudiation*: POST handlers emit remote, request id, status, and accepted
+  count at info on success, warn for rejection/write errors, and error for
+  5xx (internal/ingest/server.go:283-311,455-465,570-578). A warn/error log
+  floor suppresses successes; error also suppresses 4xx rejections. Request
+  ids are caller-supplied correlation labels, not evidence of identity
+  (server.go:151-156). Event bodies are excluded, non-loopback IPs are
+  redacted, and the accepted count describes decoded submissions rather
+  than unique retained events (server.go:238-247,561-565;
+  internal/collector/collector.go:461-474).
 - *Information disclosure*: none beyond presence (`/healthz` answers any
   requester, server.go:70-74). Residual: a routable bind would otherwise have
   put peer IPs on stderr; logRemote drops them.
@@ -447,7 +455,7 @@ Controls verified in code, with the threats they cover:
 | M22: Remote discovery ports parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go:93-114; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go:109-110,340-348; agentusage/source.go:70-81; crush_sqlite.go:34-40 |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go:67-82; crush_sqlite.go:42-45,73-88; watch.go:152,164-171; opencode_sqlite.go:90-100,109 |
-| M25: Structured ingest audit log (req, method, path, status, accepted, duration, remote, error) with X-Request-Id; bodies excluded; 404/405 and handler panics share the line | B1 repudiation of the HTTP exchange; reconstructing whether a POST (or a missed one) happened after the fact | server.go logRequest/wrap; tests internal/ingest/server_test.go |
+| M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go:99-156,193-218,283-311; internal/ingest/server_test.go:1092,1797 |
 | M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'`, CORP same-origin, no-store) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go:76-79,88-104 |
 | M27: logRemote rewrites non-loopback peer addresses to `"remote"` on the audit line and on http.Server.ErrorLog | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | server.go:202-239 |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go:139-155 |
@@ -559,15 +567,18 @@ Recorded as threats with locations; fixes do not happen in this document:
 
 ## Response readiness (notes only)
 
-- **Audit trail:** each ingest request that can fail invisibly on the
-  dashboard (POST /v1/events, 404, 405, panics) writes one structured
-  stderr line (req id, method, path, status, accepted count, duration,
-  remote; failures add the same short error the client saw). Event
-  bodies, notes, and token counts are not logged. Credentials are never
-  logged (verified: the token leaves the process only through bearer.Apply).
-  Nothing survives process exit except what the operator captured from
-  stderr, so payload reconstruction after a poisoning still requires the
-  live feed.
+- **Audit trail:** POST /v1/events, 404/405, and recovered handler panics
+  emit structured stderr metadata, subject to `TOKTOP_LOG_LEVEL`
+  (internal/ingest/server.go:99-148,193-218,283-311,455-465,570-578).
+  Default info includes successful POSTs; warn/error suppress them, and
+  error also suppresses 4xx rejections. Successful health checks are not
+  logged (server.go:322-329). Request ids can be supplied by callers
+  (server.go:151-156), so they provide correlation, not sender identity.
+  Event bodies, notes, and token counts are not audit attributes; there is
+  no credential-redaction guarantee for arbitrary caller-supplied log
+  fields (server.go:231-233,283-303). The feed is bounded in-memory state
+  (internal/collector/collector.go:461-474). After exit, only captured stderr
+  remains, without enough payload data to reconstruct poisoning.
 - **Reported-vulnerability-to-fix path:** undocumented. SECURITY.md exists
   and states that no dedicated disclosure contact or supported-version
   matrix is published; it invents no SLA. CONTRIBUTING.md covers CI gates
