@@ -160,8 +160,8 @@ def main() -> None:
 def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
     try:
         # Imported here so `screenshot.py --help` works without pyte/pillow.
-        import pyte  # noqa: PLC0415
-        from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
+        import pyte
+        from PIL import Image, ImageDraw, ImageFont
     except ImportError as e:
         print(f"screenshot.py: missing dependency ({e})", file=sys.stderr)
         print(

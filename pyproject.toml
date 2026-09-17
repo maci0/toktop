@@ -18,4 +18,8 @@ src = ["scripts"]
 required-version = ">=0.16.4"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = [
+    "ANN", "ARG", "ASYNC", "B", "C4", "DTZ", "E", "F", "FA", "FLY", "I",
+    "ICN", "ISC", "PERF", "PIE", "PLE", "PLW", "PYI", "RSE", "RUF", "S",
+    "SIM", "SLOT", "TC", "YTT",
+]
