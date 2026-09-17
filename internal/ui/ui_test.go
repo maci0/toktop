@@ -5,6 +5,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -124,6 +125,10 @@ func TestUpdateKeyMap(t *testing.T) {
 // silently pauses (space) or fires real probe generations (p) with no
 // feedback until the overlay is dismissed.
 func TestHelpOverlayMutesActionKeys(t *testing.T) {
+	synctest.Test(t, testHelpOverlayMutesActionKeys)
+}
+
+func testHelpOverlayMutesActionKeys(t *testing.T) {
 	var probes atomic.Int32
 	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
 	key := func(s string) tea.Cmd {
@@ -131,6 +136,11 @@ func TestHelpOverlayMutesActionKeys(t *testing.T) {
 		m = nm.(Model)
 		return cmd
 	}
+
+	nm, _ := m.Update(snapMsg(core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "engine", OK: true}},
+	}))
+	m = nm.(Model)
 
 	key("?")
 	if !m.help {
@@ -145,9 +155,15 @@ func TestHelpOverlayMutesActionKeys(t *testing.T) {
 	if m.chartCompressed != before {
 		t.Error("t toggled the timescale while help was open")
 	}
-	key("p")
-	if probes.Load() != 0 {
-		t.Error("p fired probes while help was open")
+	for _, k := range []string{"p", "P"} {
+		key(k)
+		synctest.Wait()
+		if got := probes.Load(); got != 0 {
+			t.Errorf("%s fired %d probes while help was open", k, got)
+		}
+		if !m.probeReq.IsZero() {
+			t.Errorf("%s set the probing marker while help was open", k)
+		}
 	}
 	if key("esc") != nil {
 		t.Error("esc with help open must close help, not quit")
@@ -158,6 +174,16 @@ func TestHelpOverlayMutesActionKeys(t *testing.T) {
 	// Dismissed, the same keys work again.
 	if key(" "); !m.paused {
 		t.Error("space did not pause after help closed")
+	}
+	for i, k := range []string{"p", "P"} {
+		key(k)
+		synctest.Wait()
+		if got := probes.Load(); got != int32(i+1) {
+			t.Errorf("%s after help closed: probes = %d, want %d", k, got, i+1)
+		}
+		if m.probeReq.IsZero() {
+			t.Errorf("%s did not set the probing marker after help closed", k)
+		}
 	}
 }
 
@@ -1392,17 +1418,21 @@ func TestHeaderSessionMatchesPlain(t *testing.T) {
 }
 
 func TestProbeKeyNoopsWithoutEngines(t *testing.T) {
-	var probes atomic.Int32
-	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
-	nm, _ := m.Update(keyMsg("p"))
-	m = nm.(Model)
-	time.Sleep(20 * time.Millisecond)
-	if probes.Load() != 0 {
-		t.Error("p fired probes with no engines attached")
-	}
-	if !m.probeReq.IsZero() {
-		t.Error("p set the probing marker with no engines attached")
-	}
+	synctest.Test(t, func(t *testing.T) {
+		var probes atomic.Int32
+		m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
+		for _, k := range []string{"p", "P"} {
+			nm, _ := m.Update(keyMsg(k))
+			m = nm.(Model)
+			synctest.Wait()
+			if got := probes.Load(); got != 0 {
+				t.Errorf("%s fired %d probes with no engines attached", k, got)
+			}
+			if !m.probeReq.IsZero() {
+				t.Errorf("%s set the probing marker with no engines attached", k)
+			}
+		}
+	})
 }
 
 func TestHelpFitsCompactPane(t *testing.T) {
