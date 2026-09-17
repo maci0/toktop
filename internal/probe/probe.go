@@ -19,7 +19,12 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-var client = &http.Client{Timeout: 30 * time.Second}
+var client = &http.Client{
+	Timeout: 30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error {
+		return http.ErrUseLastResponse
+	},
+}
 
 // probeTokens sizes a probe: a few dozen tokens are plenty to time
 // first-token latency and decode rate without turning a benchmark into an

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -163,6 +164,29 @@ func TestRunRejectsUsageWithoutContent(t *testing.T) {
 				t.Fatalf("usage without content must not produce a measurement: %+v", s)
 			}
 		})
+	}
+}
+
+func TestRunDoesNotReplayRedirects(t *testing.T) {
+	for _, kind := range []string{core.KindVLLM, core.KindOllama} {
+		for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+			t.Run(fmt.Sprintf("%s/%d", kind, status), func(t *testing.T) {
+				var requests atomic.Int32
+				srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					requests.Add(1)
+					http.Redirect(w, r, r.URL.Path, status)
+				}))
+				defer srv.Close()
+
+				s := Run(context.Background(), Request{Kind: kind, Base: srv.URL, Model: "m"})
+				if got := requests.Load(); got != 1 {
+					t.Fatalf("generation request sent %d times, want 1", got)
+				}
+				if s.OK || !strings.Contains(s.Err, fmt.Sprintf("http %d", status)) {
+					t.Fatalf("redirect must surface its HTTP status: %+v", s)
+				}
+			})
+		}
 	}
 }
 
