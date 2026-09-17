@@ -43,6 +43,22 @@ func TestParsePromSumsLabeledSeries(t *testing.T) {
 	}
 }
 
+func TestParsePromTimestampedSamples(t *testing.T) {
+	for _, suffix := range []string{"", " 1700000000000", "\t1700000001000"} {
+		t.Run(suffix, func(t *testing.T) {
+			text := "vllm:generation_tokens_total{model=\"qwen\"} 100" + suffix + "\n" +
+				"vllm:generation_tokens_total{model=\"other\"}\t50" + suffix + "\n" +
+				"vllm:prompt_tokens_total 200" + suffix + "\n" +
+				"vllm:num_requests_running\t3" + suffix + "\n"
+			var m Metrics
+			classify(parseProm(text), &m)
+			if m.OutTotal != 150 || m.InTotal != 200 || m.Running != 3 {
+				t.Fatalf("timestamp changed measurements: %+v", m)
+			}
+		})
+	}
+}
+
 func TestParsePromSkipsCommentsAndBuckets(t *testing.T) {
 	fam := parseProm("# comment\nm_bucket{le=\"1\"} 2\nother 3\n")
 	if len(fam) != 1 || fam["other"] != 3 {
@@ -172,12 +188,28 @@ func TestSatCoercions(t *testing.T) {
 }
 
 func TestSplitMetric(t *testing.T) {
-	name, val, ok := splitMetric(`a:b_c{label="x,y z"} 1.5e2`)
-	if !ok || name != "a:b_c" || val != 150 {
-		t.Fatalf("got %q %v %v", name, val, ok)
+	for _, line := range []string{
+		`a:b_c{label="x,y z"} 1.5e2`,
+		`a:b_c{label="x,y z"} 1.5e2 1700000000000`,
+		`a:b_c{label="x\"} y",path="z\\"} 1.5e2 1700000000000`,
+		"a:b_c\t1.5e2\t1700000000000",
+		"a:b_c{} \t 1.5e2 \t 1700000000000",
+	} {
+		t.Run(line, func(t *testing.T) {
+			name, val, ok := splitMetric(line)
+			if !ok || name != "a:b_c" || val != 150 {
+				t.Fatalf("got %q %v %v", name, val, ok)
+			}
+		})
 	}
-	if _, _, ok := splitMetric("garbage"); ok {
-		t.Fatal("valueless line parsed")
+	for _, line := range []string{
+		"garbage", "garbage \t", `a:b_c{label="unfinished 150`,
+		"a:b_c NaN 1700000000000", "a:b_c +Inf 1700000000000",
+		"a:b_c invalid 1700000000000",
+	} {
+		if _, _, ok := splitMetric(line); ok {
+			t.Errorf("invalid sample parsed: %q", line)
+		}
 	}
 }
 

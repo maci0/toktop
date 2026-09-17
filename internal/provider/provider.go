@@ -220,12 +220,46 @@ func parseProm(text string) map[string]float64 {
 func finite(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func splitMetric(line string) (string, float64, bool) {
-	sp := strings.LastIndexByte(line, ' ')
+	sp := -1
+	var labels, quoted, escaped bool
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if quoted {
+			switch {
+			case escaped:
+				escaped = false
+			case ch == '\\':
+				escaped = true
+			case ch == '"':
+				quoted = false
+			}
+			continue
+		}
+		switch ch {
+		case '{':
+			labels = true
+		case '}':
+			labels = false
+		case '"':
+			quoted = labels
+		case ' ', '\t':
+			if !labels {
+				sp = i
+			}
+		}
+		if sp >= 0 {
+			break
+		}
+	}
 	if sp < 0 {
 		return "", 0, false
 	}
-	name := strings.TrimSpace(line[:sp])
-	v, err := strconv.ParseFloat(strings.TrimSpace(line[sp+1:]), 64)
+	name := line[:sp]
+	fields := strings.Fields(line[sp:])
+	if len(fields) == 0 {
+		return "", 0, false
+	}
+	v, err := strconv.ParseFloat(fields[0], 64)
 	if err != nil || name == "" {
 		return "", 0, false
 	}
