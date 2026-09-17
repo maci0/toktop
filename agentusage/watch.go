@@ -709,7 +709,7 @@ func (w *Watcher) poll(onChange func(Sample)) {
 			input = satAdd(input, v.input)
 		}
 		for _, v := range w.total {
-			total = satAdd(total, v)
+			total = max(total, v)
 		}
 	}
 	w.mu.Lock()

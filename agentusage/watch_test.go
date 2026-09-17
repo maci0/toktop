@@ -274,6 +274,30 @@ func TestQwenUsageMetadataIsSummed(t *testing.T) {
 	}
 }
 
+func TestContextMaximumAcrossTranscripts(t *testing.T) {
+	store := withStore(t, "claude")
+	work, other := t.TempDir(), t.TempDir()
+	w := Watch("claude", work, time.Now())
+	first := filepath.Join(store, "first.jsonl")
+	second := filepath.Join(store, "second.jsonl")
+
+	append_(t, first, claudeLine(work, 100), claudeLine(other, 9000))
+	append_(t, second, claudeLine(work, 250), claudeLine(other, 8000))
+	s := w.Poll()
+	if s.Output != 350 || s.Input != 204 || s.Total != 352 {
+		t.Fatalf("sample = %+v, want output=350 input=204 total=352", s)
+	}
+
+	append_(t, first, claudeLine(work, 400))
+	s = w.Poll()
+	if s.Output != 750 || s.Input != 306 || s.Total != 502 {
+		t.Fatalf("sample = %+v, want output=750 input=306 total=502", s)
+	}
+	if got := w.Poll(); got != s {
+		t.Fatalf("unchanged transcripts changed sample: %+v -> %+v", s, got)
+	}
+}
+
 func TestUnsupportedAgentYieldsNoWatcher(t *testing.T) {
 	// gemini's transcripts on the machines checked carry no usage records.
 	if Supported("gemini") {
