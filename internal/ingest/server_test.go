@@ -1631,6 +1631,73 @@ func TestIngestLogsRejectedResponseWriteFailure(t *testing.T) {
 	}
 }
 
+type networkErrorWriter struct {
+	http.ResponseWriter
+	err error
+}
+
+func (w networkErrorWriter) Write([]byte) (int, error) { return 0, w.err }
+
+func TestIngestResponseWriteErrorsRedactPeerAddresses(t *testing.T) {
+	for _, peer := range []struct {
+		addr string
+		want string
+	}{
+		{"203.0.113.17:49152", "remote"},
+		{"[2001:db8::17]:49152", "remote"},
+		{"[fe80::17%eth0]:49152", "remote"},
+		{"127.0.0.1:49152", "loopback:49152"},
+	} {
+		for _, tc := range []struct {
+			name     string
+			body     string
+			status   int
+			accepted int
+			attr     string
+		}{
+			{"accepted", `{"agent":"x"}`, http.StatusAccepted, 1, `error="response write failed: `},
+			{"rejected", "", http.StatusBadRequest, 0, `response_error="`},
+			{"partial", "{\"agent\":\"x\"}\nnull", http.StatusBadRequest, 1, `response_error="`},
+		} {
+			t.Run(peer.addr+"/"+tc.name, func(t *testing.T) {
+				addr, err := net.ResolveTCPAddr("tcp", peer.addr)
+				if err != nil {
+					t.Fatal(err)
+				}
+				writeErr := &net.OpError{
+					Op: "write", Net: "tcp",
+					Source: &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: 8420},
+					Addr:   addr, Err: io.ErrClosedPipe,
+				}
+				lg, buf := captureLogger()
+				rec := &memRecorder{}
+				s := &Server{rec: rec, log: lg}
+				r := httptest.NewRequest(http.MethodPost, "/v1/events", strings.NewReader(tc.body))
+				r.RemoteAddr = peer.addr
+				r.Header.Set("X-Request-Id", "write-failure")
+				w := httptest.NewRecorder()
+				s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(networkErrorWriter{w, writeErr}, r)
+				if w.Code != tc.status || len(rec.evs) != tc.accepted {
+					t.Fatalf("status = %d, recorded = %d; want %d, %d", w.Code, len(rec.evs), tc.status, tc.accepted)
+				}
+				got := buf.String()
+				if countLogLines(got) != 1 || strings.Contains(got, addr.IP.String()) {
+					t.Fatalf("peer address leaked or log split: %q", got)
+				}
+				for _, want := range []string{
+					"level=WARN", "req=write-failure", "method=POST", "path=/v1/events", "duration=",
+					fmt.Sprintf("status=%d", tc.status), fmt.Sprintf("accepted=%d", tc.accepted),
+					tc.attr + "write tcp loopback:8420->" + peer.want + ": " + io.ErrClosedPipe.Error() + `"`,
+				} {
+					if !strings.Contains(got, want) {
+						t.Errorf("write-failure log missing %q: %s", want, got)
+					}
+				}
+			})
+		}
+	}
+}
+
 func TestIngestUnknownPathStaysOneLogLine(t *testing.T) {
 	lg, buf := captureLogger()
 	s, err := newServer("127.0.0.1:0", &memRecorder{}, lg)

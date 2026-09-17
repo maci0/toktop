@@ -459,7 +459,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		sw := &statusWriter{ResponseWriter: w}
 		http.Error(sw, msg, status)
 		if sw.err != nil {
-			done(status, accepted, msg, "response_error", logField(sw.err.Error(), 256))
+			done(status, accepted, msg, "response_error", logField(redactLogAddrs(sw.err.Error()), 256))
 			return
 		}
 		done(status, accepted, msg)
@@ -571,7 +571,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		// The events are already recorded, so the status stands. The reason
 		// still belongs in the audit line: without it a vanished sender and a
 		// timeout mid-body are indistinguishable from success.
-		done(http.StatusAccepted, n, "response write failed: "+err.Error())
+		done(http.StatusAccepted, n, "response write failed: "+redactLogAddrs(err.Error()))
 		return
 	}
 	_ = rc.SetWriteDeadline(time.Time{}) // keep-alive must not inherit the write cap
