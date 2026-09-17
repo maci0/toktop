@@ -272,6 +272,8 @@ func (c *Client) probe(wait time.Duration) bool {
 	}
 }
 
+const stderrBufferBytes = 4096
+
 // stderrBuf collects a remote command's stderr. x/crypto/ssh copies it from
 // a background goroutine that is only drained when Session.Output's Wait
 // finishes, so on the timeout and cancellation paths below that goroutine can
@@ -279,19 +281,29 @@ func (c *Client) probe(wait time.Duration) bool {
 // locking: reading it concurrently with a Write is a data race.
 type stderrBuf struct {
 	mu  sync.Mutex
-	buf bytes.Buffer
+	buf [stderrBufferBytes]byte
+	n   int
 }
 
 func (b *stderrBuf) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	n := len(p)
+	if n >= len(b.buf) {
+		b.n = copy(b.buf[:], p[n-len(b.buf):])
+	} else {
+		if overflow := b.n + n - len(b.buf); overflow > 0 {
+			b.n = copy(b.buf[:], b.buf[overflow:b.n])
+		}
+		b.n += copy(b.buf[b.n:], p)
+	}
+	return n, nil
 }
 
 func (b *stderrBuf) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.String()
+	return string(b.buf[:b.n])
 }
 
 // Run executes script in the remote login shell and returns stdout. On

@@ -624,7 +624,7 @@ func TestClientRunFailureCarriesStderr(t *testing.T) {
 	}
 	defer cli.Close()
 
-	_, err = cli.Run(t.Context(), "echo boom >&2; exit 3")
+	_, err = cli.Run(t.Context(), "i=0; while [ \"$i\" -lt 1000 ]; do echo diagnostic >&2; i=$((i+1)); done; echo boom >&2; exit 3")
 	if err == nil {
 		t.Fatal("expected failure")
 	}
@@ -831,8 +831,23 @@ func TestConnLostClassification(t *testing.T) {
 	}
 }
 
-// stderrTail appends a bounded tail of remote stderr to command failures;
-// nothing beyond 300 bytes may ride along.
+func TestStderrBufRetainsBoundedTail(t *testing.T) {
+	var b stderrBuf
+	var all string
+	for _, size := range []int{0, 100, 4090, 32, 8192, 1, 0} {
+		p := bytes.Repeat([]byte{byte('a' + size%26)}, size)
+		n, err := b.Write(p)
+		if n != len(p) || err != nil {
+			t.Fatalf("Write = %d, %v; want %d, nil", n, err, len(p))
+		}
+		all += string(p)
+		want := all[max(0, len(all)-4096):]
+		if got := b.String(); got != want {
+			t.Fatalf("retained stderr length = %d, want tail length %d", len(got), len(want))
+		}
+	}
+}
+
 func TestStderrTailTruncatesToTail(t *testing.T) {
 	if got := stderrTail("   \n "); got != "" {
 		t.Errorf("blank stderr = %q, want empty", got)
