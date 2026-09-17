@@ -28,7 +28,12 @@ Clients that advertise brotli, zstd, or gzip get a body that was compressed
 once when the isolate started, not once per request; clients that advertise
 none of those get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
-br, zstd` request is answered with brotli rather than gzip. Source comments
+br, zstd` request is answered with brotli rather than gzip. Unlisted identity
+is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
+transfers 2,743 bytes rather than 6,696 bytes in the local Worker response test.
+An explicit identity preference is respected. Refusing all available encodings
+returns an uncacheable 406, including conditional requests; HEAD has no body.
+Source comments
 in the HTML and CSS stay in `worker.js` and are stripped before the page is
 hashed, compressed, or sent. Every response carries `Vary: Accept-Encoding`,
 so caches never hand a compressed body to a client that cannot decode it.

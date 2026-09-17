@@ -240,15 +240,10 @@ function parseAcceptEncoding(headerValue) {
   return qByCoding;
 }
 
-// The identity branch: listed without a q, implicit accept (RFC 9110 12.5.3);
-// listed with q=0 or the page's encodings all refused means identity must be
-// sendable, so it floors at 0.001 rather than zero. identity;q=0 refuses only
-// the identity bytes themselves, never every encoding on offer.
 function quality(qByCoding, coding) {
   if (coding === "identity") {
-    const listed = qByCoding.get("identity") ?? qByCoding.get("*");
-    if (listed != null) return listed > 0 ? listed : 0.001;
-    return 1;
+    if (qByCoding.has("identity")) return qByCoding.get("identity");
+    return qByCoding.get("*") === 0 ? 0 : Number.EPSILON;
   }
   if (qByCoding.has(coding)) return qByCoding.get(coding);
   if (qByCoding.has("*")) return qByCoding.get("*");
@@ -309,7 +304,7 @@ async function representationFor(acceptEncoding) {
       best = { ...rep, q };
     }
   }
-  return best ?? reps[0];
+  return best;
 }
 
 // Fresh for five minutes, then served from the browser's copy while a cheap
@@ -426,6 +421,12 @@ export default {
     }
     // One page: anything else is that page too, rather than a 404 nobody
     // learns anything from.
+    const chosen = await representationFor(request.headers.get("accept-encoding"));
+    if (chosen == null) {
+      return errorResponse(406, request.method === "HEAD" ? null : "not acceptable", {
+        vary: VARY,
+      });
+    }
     if (ifNoneMatchMatches(request.headers.get("if-none-match"))) {
       // Revalidation answers keep the validator and policy headers but no body.
       return new Response(null, {
@@ -438,7 +439,6 @@ export default {
         },
       });
     }
-    const chosen = await representationFor(request.headers.get("accept-encoding"));
     const headers = {
       ...PAGE_HEADERS,
       "content-length": String(chosen.bytes.byteLength),

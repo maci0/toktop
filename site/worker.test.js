@@ -85,10 +85,41 @@ test("clients listing no compatible encoding get identity, per accept-encoding r
     expect(res.headers.get("content-encoding")).toBeNull();
     expect(await res.text()).toBe(identityBody);
   }
-  const refused = await call({ "accept-encoding": "identity;q=0" });
-  expect(refused.status).toBe(200);
-  expect(refused.headers.get("content-encoding")).toBeNull();
-  expect((await refused.arrayBuffer()).byteLength).toBeGreaterThan(0);
+});
+
+test("implicit identity does not outweigh an accepted compressed representation", async () => {
+  for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
+    const res = await call({ "accept-encoding": ae });
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect(bytes.byteLength).toBe(2743);
+    expect(res.headers.get("content-encoding")).toBe("gzip");
+    expect(await decompress(bytes, "gzip")).toBe(identityBody);
+  }
+  const preferred = await call({ "accept-encoding": "identity;q=1, gzip;q=0.5" });
+  expect(preferred.headers.get("content-encoding")).toBeNull();
+  expect(await preferred.text()).toBe(identityBody);
+});
+
+test("unacceptable encodings return an uncacheable 406, including conditional requests", async () => {
+  const etag = (await call()).headers.get("etag");
+  for (const ae of ["identity;q=0", "*;q=0", "deflate, identity;q=0"]) {
+    for (const method of ["GET", "HEAD"]) {
+      for (const conditional of [{}, { "if-none-match": etag }]) {
+        const res = await call({ "accept-encoding": ae, ...conditional }, { method });
+        expect(res.status).toBe(406);
+        expect(res.headers.get("cache-control")).toBe("no-store");
+        expect(res.headers.get("vary")).toBe("Accept-Encoding");
+        expect(res.headers.get("content-encoding")).toBeNull();
+        for (const name of SECURITY_HEADER_NAMES) {
+          expect(res.headers.get(name)).not.toBeNull();
+        }
+        if (method === "HEAD") expect(await res.text()).toBe("");
+      }
+    }
+  }
+  const accepted = await call({ "accept-encoding": "*;q=0, gzip;q=0.5" });
+  expect(accepted.status).toBe(200);
+  expect(accepted.headers.get("content-encoding")).toBe("gzip");
 });
 
 test("every variant carries Vary: Accept-Encoding", async () => {
