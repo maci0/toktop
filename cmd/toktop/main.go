@@ -1082,7 +1082,12 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 	for i, kind := range kinds {
 		if kind != "" {
 			label := fmt.Sprintf("%s:%d", tgt.Host, rports[i])
-			providers = append(providers, provider.NewOpenAICompat(bases[i], label, kind))
+			p := provider.NewOpenAICompat(bases[i], label, kind)
+			if kind == core.KindOllama {
+				p = provider.NewOllama(bases[i])
+				p.Label = label
+			}
+			providers = append(providers, p)
 			continue
 		}
 		skipped = append(skipped, rports[i])
