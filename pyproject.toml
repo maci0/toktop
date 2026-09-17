@@ -19,7 +19,8 @@ required-version = ">=0.16.4"
 
 [tool.ruff.lint]
 select = [
-    "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "DTZ", "E", "EM", "F",
-    "FA", "FLY", "I", "ICN", "ISC", "PERF", "PGH", "PIE", "PLE", "PLR091", "PLW",
-    "PYI", "RET", "RSE", "RUF", "S", "SIM", "SLOT", "TC", "TRY", "UP", "YTT",
+    "A", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "DTZ", "E", "EM", "EXE", "F",
+    "FA", "FLY", "I", "ICN", "INT", "ISC", "LOG", "PERF", "PGH", "PIE", "PLE",
+    "PLR091", "PLW", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLOT", "T10",
+    "TC", "TRY", "UP", "W", "YTT",
 ]
