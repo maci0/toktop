@@ -251,7 +251,7 @@ scripts-check: ## black and ruff over scripts/ (same pins as CI)
 
 .PHONY: check
 check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)
-	@unformatted=$$(git ls-files -z '*.go' | xargs -0 $(GOFMT) -s -l); \
+	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
 			echo "needs gofmt:" >&2; echo "$$unformatted" >&2; exit 1; \
 		fi
