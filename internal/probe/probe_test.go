@@ -113,6 +113,59 @@ func TestRunOllamaStream(t *testing.T) {
 	}
 }
 
+func TestRunRejectsUsageWithoutContent(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		kind        string
+		contentType string
+		body        string
+	}{
+		{
+			name:        "stream usage only",
+			kind:        core.KindVLLM,
+			contentType: "text/event-stream",
+			body:        "data: {\"usage\":{\"completion_tokens\":32}}\n\ndata: [DONE]\n\n",
+		},
+		{
+			name:        "stream malformed content",
+			kind:        core.KindVLLM,
+			contentType: "text/event-stream",
+			body:        "data: {\"choices\":[{\"delta\":{\"content\":42}}]}\n\ndata: {\"usage\":{\"completion_tokens\":32}}\n\ndata: [DONE]\n\n",
+		},
+		{
+			name:        "json usage only",
+			kind:        core.KindVLLM,
+			contentType: "application/json",
+			body:        `{"usage":{"completion_tokens":32}}`,
+		},
+		{
+			name:        "json refusal",
+			kind:        core.KindVLLM,
+			contentType: "application/json",
+			body:        `{"choices":[{"message":{"content":null,"refusal":"declined"}}],"usage":{"completion_tokens":32}}`,
+		},
+		{
+			name:        "ollama usage only",
+			kind:        core.KindOllama,
+			contentType: "application/x-ndjson",
+			body:        `{"response":"","done":true,"eval_count":32,"eval_duration":1000000000}` + "\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				fmt.Fprint(w, tc.body)
+			}))
+			defer srv.Close()
+
+			s := Run(context.Background(), Request{Kind: tc.kind, Base: srv.URL, Model: "m"})
+			if s.OK || s.Err != "empty stream" || s.Tokens != 0 || s.TTFTms != 0 || s.TokPS != 0 {
+				t.Fatalf("usage without content must not produce a measurement: %+v", s)
+			}
+		})
+	}
+}
+
 func TestRunHTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)

@@ -307,6 +307,9 @@ func skipProbeModel(name string) bool {
 // actually observed. Observed counts are capped at probeTokens because
 // the client stops reading there.
 func resolveTokens(observed, reported int) (tokens int, trustReported bool) {
+	if observed <= 0 {
+		return 0, false
+	}
 	if reported > 0 && reported <= probeTokenTrust {
 		return reported, true
 	}
