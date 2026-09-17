@@ -15,6 +15,7 @@ ifeq ($(GO_VERSION),)
 $(error go.mod has no 'go' line; cannot pin GOTOOLCHAIN)
 endif
 export GOTOOLCHAIN := go$(GO_VERSION)
+export GOWORK := off
 # Instruction-set baselines: an ambient GOAMD64=v3 would change amd64 artifacts.
 export GOAMD64 := v1
 export GOARM64 := v8.0
