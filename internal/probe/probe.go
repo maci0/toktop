@@ -52,6 +52,8 @@ const probeContentBytes = probeTokens * 32
 // the hang-up after the line is fully read.
 const probeLineMax = 16 << 10
 
+const probeStreamMax = 128 << 10
+
 // ModelNameMax caps the engine-supplied model id interpolated into the
 // generation request. /v1/models can return megabyte strings; HuggingFace
 // ids fit in well under this.
@@ -144,7 +146,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		return 0, 0, 0, err
 	}
 	defer resp.Body.Close()
-	sc := bufio.NewScanner(resp.Body)
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, 4<<10), probeLineMax)
 	var reported, contentBytes int
 	for sc.Scan() {
@@ -219,7 +221,7 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	if jsonNotStream(resp.Header.Get("Content-Type")) {
 		return readOpenAIJSON(resp.Body, s)
 	}
-	sc := bufio.NewScanner(resp.Body)
+	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, 4<<10), probeLineMax)
 	var reported, contentBytes int
 	for sc.Scan() {

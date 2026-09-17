@@ -507,6 +507,48 @@ func TestRunOllamaStopsAfterProbeTokens(t *testing.T) {
 	}
 }
 
+func TestRunOpenAIStopsOnStreamBytes(t *testing.T) {
+	frame := "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"r\"}}]}\n\n"
+	prefix := strings.Repeat(frame, 2*probeStreamMax/len(frame)+1)
+	if len(prefix) <= probeStreamMax {
+		t.Fatal("test prefix must exceed the stream byte limit")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		fmt.Fprint(w, prefix+"data: {\"choices\":[{\"delta\":{\"content\":\"late\"}}]}\n\ndata: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
+	if s.OK {
+		t.Fatalf("reasoning-only flood should fail, got %+v", s)
+	}
+	if !strings.Contains(s.Err, "empty stream") {
+		t.Errorf("err = %q, want empty stream", s.Err)
+	}
+}
+
+func TestRunOllamaStopsOnStreamBytes(t *testing.T) {
+	frame := `{"thinking":"r"}` + "\n"
+	prefix := strings.Repeat(frame, 2*probeStreamMax/len(frame)+1)
+	if len(prefix) <= probeStreamMax {
+		t.Fatal("test prefix must exceed the stream byte limit")
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		fmt.Fprint(w, prefix+`{"response":"late","done":true}`+"\n")
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	if s.OK {
+		t.Fatalf("thinking-only flood should fail, got %+v", s)
+	}
+	if !strings.Contains(s.Err, "empty stream") {
+		t.Errorf("err = %q, want empty stream", s.Err)
+	}
+}
+
 // A usage field far past the requested generation is engine junk, not a
 // measurement. Fall back to the content frames actually observed.
 func TestRunOpenAIRejectsUnboundedUsage(t *testing.T) {
