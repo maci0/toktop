@@ -687,9 +687,37 @@ func TestPerProviderStateKeyedByEndpoint(t *testing.T) {
 	}
 }
 
-// emit copies PID/RSS/CPU from the process whose listen port matches the
-// backend URL. Two processes on the same port keep the first sample; a
-// provider with no match stays zeroed.
+func TestEmitProcessAttributionRequiresLocalHost(t *testing.T) {
+	for _, tc := range []struct {
+		addr string
+		pid  int
+	}{
+		{"http://127.0.0.1:11434", 42},
+		{"http://127.0.0.2:11434", 42},
+		{"http://[::1]:11434", 42},
+		{"http://localhost:11434", 42},
+		{"http://192.0.2.1:11434", 0},
+		{"http://[2001:db8::1]:11434", 0},
+		{"http://engine.example:11434", 0},
+	} {
+		t.Run(tc.addr, func(t *testing.T) {
+			p := fakeProvider{label: "engine", addr: tc.addr, m: &provider.Metrics{}}
+			c := New([]provider.Provider{p.asProvider()}, time.Second)
+			c.SetSysFn(func() core.SysSample { return core.SysSample{} })
+			c.procCache = []procs.Info{{PID: 42, RSS: 1000, CPUPct: 12.5, PortHint: 11434}}
+			ch := make(chan core.Snapshot, 1)
+			c.emit(context.Background(), ch)
+			got := (<-ch).Providers[0]
+			if got.PID != tc.pid {
+				t.Errorf("PID = %d, want %d", got.PID, tc.pid)
+			}
+			if tc.pid == 0 && (got.ProcRSS != 0 || got.ProcCPU != 0) {
+				t.Errorf("remote provider inherited local process metrics: RSS %d, CPU %v", got.ProcRSS, got.ProcCPU)
+			}
+		})
+	}
+}
+
 func TestEmitAttachesProcessByListenPort(t *testing.T) {
 	ollama := fakeProvider{label: "ollama", addr: "http://127.0.0.1:11434", m: &provider.Metrics{
 		Models: []core.ModelInfo{{Name: "m"}},

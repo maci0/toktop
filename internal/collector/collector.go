@@ -279,7 +279,7 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			ps.Running = r.m.Running
 			ps.Waiting = r.m.Waiting
 			ps.TTFTms = r.m.TTFTms
-			if port := urlPort(p.Addr); port > 0 {
+			if port := urlPort(p.Addr); port > 0 && isLoopbackURL(p.Addr) {
 				if proc, ok := byPort[port]; ok {
 					ps.PID, ps.ProcRSS, ps.ProcCPU = proc.PID, proc.RSS, proc.CPUPct
 				}
@@ -601,6 +601,15 @@ func cloneSys(s *core.SysSample) *core.SysSample {
 	out.GPUs = slices.Clone(s.GPUs)
 	out.NPUs = slices.Clone(s.NPUs)
 	return &out
+}
+
+func isLoopbackURL(addr string) bool {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return false
+	}
+	host := u.Hostname()
+	return strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
 }
 
 // urlPort extracts the TCP port from a backend URL. Non-http(s) addresses
