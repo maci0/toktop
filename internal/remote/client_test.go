@@ -373,6 +373,9 @@ func TestClientConnectRunForward(t *testing.T) {
 	if got := cli.Err(); got != nil {
 		t.Errorf("deliberate Close recorded a loss: %v", got)
 	}
+	if ports, err := cli.Forward([]int{rport}); !errors.Is(err, net.ErrClosed) || len(ports) != 0 {
+		t.Fatalf("Forward after Close = %v, %v; want no ports and net.ErrClosed", ports, err)
+	}
 }
 
 // The keepalive goroutine must exit promptly when the client is torn down,
@@ -720,6 +723,37 @@ func TestClientHostKeyChangeRefused(t *testing.T) {
 	}
 }
 
+func TestForwardCannotRestartAfterListenerTeardown(t *testing.T) {
+	cli := &Client{closed: make(chan struct{})}
+	defer cli.closeListeners()
+	if _, err := cli.Forward([]int{8000}); err != nil {
+		t.Fatal(err)
+	}
+	cli.closeListeners()
+
+	select {
+	case <-cli.Done():
+		t.Fatal("Done closed before connection teardown")
+	default:
+	}
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Go(func() {
+			if ports, err := cli.Forward([]int{8000}); !errors.Is(err, net.ErrClosed) || len(ports) != 0 {
+				t.Errorf("Forward after listener teardown = %v, %v; want no ports and an error", ports, err)
+			}
+		})
+	}
+	wg.Wait()
+	cli.mu.Lock()
+	left := len(cli.listeners)
+	cli.mu.Unlock()
+	if left != 0 {
+		t.Errorf("%d listeners registered after teardown", left)
+	}
+}
+
 // An abnormal drop must reclaim the forward listeners. After an unattended
 // loss nobody calls Close (the attach-site watcher only reports it), so
 // listeners left bound would hold an fd and a relay goroutine apiece for the
@@ -765,6 +799,9 @@ func TestDropReclaimsForwardListeners(t *testing.T) {
 	}
 	if got := cli.Err(); got == nil || !strings.Contains(got.Error(), "lost") {
 		t.Fatalf("drop reported %v, want the loss reason", got)
+	}
+	if ports, err := cli.Forward([]int{rport}); !errors.Is(err, net.ErrClosed) || len(ports) != 0 {
+		t.Fatalf("Forward after drop = %v, %v; want no ports and net.ErrClosed", ports, err)
 	}
 }
 

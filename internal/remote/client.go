@@ -43,6 +43,7 @@ type Client struct {
 
 	mu        sync.Mutex
 	listeners []net.Listener
+	stopped   bool
 
 	keepaliveDone chan struct{} // closed when the keepalive goroutine exits
 }
@@ -420,6 +421,9 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 	out := make(map[int]int, len(rports))
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.stopped {
+		return nil, net.ErrClosed
+	}
 	for _, rp := range rports {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -464,6 +468,7 @@ func (c *Client) relay(l net.Listener, rport int) {
 func (c *Client) closeListeners() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.stopped = true
 	for _, l := range c.listeners {
 		l.Close()
 	}
