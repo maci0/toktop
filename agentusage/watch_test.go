@@ -422,6 +422,35 @@ func TestRateNeedsPositiveSpanAndGrowth(t *testing.T) {
 	}
 }
 
+func TestRatesRequireTwoReadings(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	for name, rate := range map[string]func(Sample, Sample) (float64, bool){
+		"output": Rate,
+		"input":  InputRate,
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				name string
+				prev Sample
+				cur  Sample
+				want float64
+				ok   bool
+			}{
+				{"no previous reading", Sample{}, Sample{Output: 120, Input: 120, At: t0}, 0, false},
+				{"previous timestamp missing", Sample{Output: 20, Input: 20}, Sample{Output: 120, Input: 120, At: t0}, 0, false},
+				{"current timestamp missing", Sample{At: time.Time{}.Add(-time.Second)}, Sample{Output: 120, Input: 120}, 0, false},
+				{"explicit zero baseline", Sample{At: t0}, Sample{Output: 120, Input: 120, At: t0.Add(time.Second)}, 120, true},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if got, ok := rate(tc.prev, tc.cur); got != tc.want || ok != tc.ok {
+						t.Fatalf("rate = %v,%v, want %v,%v", got, ok, tc.want, tc.ok)
+					}
+				})
+			}
+		})
+	}
+}
+
 // onChange may Poll for a final read. Holding pollMu across the callback
 // deadlocks that path.
 func TestOnChangeMayPoll(t *testing.T) {

@@ -71,20 +71,26 @@ func (s Sample) Empty() bool {
 }
 
 // Rate returns output tokens per second between two samples, and whether it
-// could be computed at all. It never extrapolates: without two readings and a
-// positive span there is no rate to report. Prompt growth is InputRate.
+// could be computed at all. Both samples need a timestamp: a missing one is
+// not a reading, and treating it as the zero instant would invent a rate off
+// a first sample whose counter has already grown. It never extrapolates:
+// without two readings and a positive span there is no rate to report.
+// Prompt growth is InputRate.
 func Rate(prev, cur Sample) (float64, bool) {
 	return deltaRate(prev.At, cur.At, prev.Output, cur.Output)
 }
 
 // InputRate returns billed prompt tokens per second between two samples, and
-// whether it could be computed. Same rules as Rate: no positive span or no
-// growth means no rate, not a zero.
+// whether it could be computed. Same rules as Rate: both samples need a
+// timestamp, and no positive span or no growth means no rate, not a zero.
 func InputRate(prev, cur Sample) (float64, bool) {
 	return deltaRate(prev.At, cur.At, prev.Input, cur.Input)
 }
 
 func deltaRate(prevAt, curAt time.Time, prevN, curN int) (float64, bool) {
+	if prevAt.IsZero() || curAt.IsZero() {
+		return 0, false
+	}
 	span := curAt.Sub(prevAt).Seconds()
 	if span <= 0 || curN <= prevN {
 		return 0, false
