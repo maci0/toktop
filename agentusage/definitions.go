@@ -127,6 +127,11 @@ type definitionFile map[string]struct {
 // so errors.As still recovers the parse position.
 var ErrInvalidDefinitions = errors.New("malformed agent definitions")
 
+// errCollidingDefinitions marks an agents.json holding two names that NFC
+// reduces to one canonical key, an overlap the per-name checks in
+// LoadDefinitions cannot see.
+var errCollidingDefinitions = errors.New("agent names collide after NFC normalization")
+
 // LoadDefinitions reads agent definitions from a JSON file, teaching this
 // package about agents it was not compiled to know, including where they keep
 // their transcripts:
@@ -137,6 +142,13 @@ var ErrInvalidDefinitions = errors.New("malformed agent definitions")
 // or unreadable one is: running with a half-loaded agent set is worse than
 // refusing. The error names the file; errors.Is matches ErrInvalidDefinitions
 // when the contents are not valid JSON.
+//
+// Names are canonicalized before registration, so two spellings that NFC
+// reduces to one key (NFD "café" beside precomposed "café") would silently
+// overwrite each other in defs. That overlap is refused instead: the file is
+// ambiguous about which spec the surviving key should hold, and silently
+// keeping whichever entry iterates last makes the loaded agent set depend on
+// map order. The registry is left untouched.
 func LoadDefinitions(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -149,11 +161,22 @@ func LoadDefinitions(path string) error {
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("%w: %s: %w", ErrInvalidDefinitions, path, err)
 	}
+	type pendingSpec struct {
+		name string
+		spec Spec
+	}
+	var pending []pendingSpec
+	seen := make(map[string]string, len(file))
 	for name, def := range file {
-		name = canonicalTool(name)
-		if name == "" || def.Usage == nil {
+		canonical := canonicalTool(name)
+		if canonical == "" || def.Usage == nil {
 			continue // a launch-only definition says nothing about tokens
 		}
+		if prev, dup := seen[canonical]; dup {
+			return fmt.Errorf("%w: %s: %q and %q both reduce to %q",
+				errCollidingDefinitions, path, prev, name, canonical)
+		}
+		seen[canonical] = name
 		spec := Spec{
 			Roots:      def.Usage.Roots,
 			Suffix:     def.Usage.Suffix,
@@ -163,9 +186,12 @@ func LoadDefinitions(path string) error {
 		if len(specRoots(spec)) == 0 {
 			continue
 		}
-		defsMu.Lock()
-		defs[name] = spec
-		defsMu.Unlock()
+		pending = append(pending, pendingSpec{name: canonical, spec: spec})
+	}
+	defsMu.Lock()
+	defer defsMu.Unlock()
+	for _, p := range pending {
+		defs[p.name] = p.spec
 	}
 	return nil
 }

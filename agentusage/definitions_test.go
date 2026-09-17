@@ -207,6 +207,67 @@ func TestLoadDefinitionsNormalizesNamesToNFC(t *testing.T) {
 	}
 }
 
+// NFD spellings are canonicalized per name, not merged across names: an
+// NFD-keyed definition beside a different NFC-keyed one registers two
+// distinct agents.
+func TestLoadDefinitionsKeepsDistinctNFDSpellingSeparate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents.json")
+	body := `{"cafe\u0301": {"usage": {"roots": ["~/.nfd/sessions"]}},
+		"caf\u00e9d": {"usage": {"roots": ["~/.nfc/sessions"]}}}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		defsMu.Lock()
+		delete(defs, "caf\u00e9")
+		delete(defs, "cafe\u0301")
+		delete(defs, "caf\u00e9d")
+		defsMu.Unlock()
+	})
+
+	nfd, nfdOK := definedSpec("cafe\u0301")
+	if !nfdOK {
+		t.Fatal("NFD-spelled agent not registered")
+	}
+	nfc, nfcOK := definedSpec("caf\u00e9d")
+	if !nfcOK {
+		t.Fatal("NFC-spelled agent not registered")
+	}
+	if slices.Equal(nfd.Roots, nfc.Roots) {
+		t.Fatalf("two distinct spellings collapsed to one spec: %+v", nfd)
+	}
+}
+
+// Two names that NFC reduces to one key (NFD beside precomposed) would
+// silently overwrite each other in defs, leaving whichever entry iterated
+// last. The loader must refuse the ambiguous file without registering
+// anything.
+func TestLoadDefinitionsRejectsNFCCollisions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agents.json")
+	body := `{"cafe\u0301": {"usage": {"roots": ["~/.nfd/sessions"]}},
+		"caf\u00e9": {"usage": {"roots": ["~/.nfc/sessions"]}}}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := LoadDefinitions(path)
+	if !errors.Is(err, errCollidingDefinitions) {
+		t.Fatalf("colliding names = %v, want errCollidingDefinitions", err)
+	}
+	if !strings.Contains(err.Error(), path) {
+		t.Fatalf("collision error = %v, want the path %q in the message", err, path)
+	}
+	defsMu.RLock()
+	_, nfdStored := defs["cafe\u0301"]
+	_, nfcStored := defs["caf\u00e9"]
+	defsMu.RUnlock()
+	if nfdStored || nfcStored {
+		t.Fatal("refused file must not leave either spelling registered")
+	}
+}
+
 // DefinitionsPath follows gauntlet's file so one definition serves both tools;
 // GAUNTLET_HOME wins over the home-relative default.
 func TestDefinitionsPathPrefersGauntletHome(t *testing.T) {
