@@ -297,7 +297,9 @@ func (b *stderrBuf) String() string {
 // Run executes script in the remote login shell and returns stdout. On
 // failure the error carries the tail of stderr so problems are diagnosable.
 func (c *Client) Run(ctx context.Context, script string) (string, error) {
-	sess, err := c.conn.NewSession()
+	ctx, cancel := context.WithTimeout(ctx, runTimeout)
+	defer cancel()
+	sess, err := c.openSession(ctx)
 	if err != nil {
 		return "", fmt.Errorf("ssh session: %w", connLost(err))
 	}
@@ -318,20 +320,50 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 		done <- result{string(out), oerr}
 	}()
 
-	timer := time.NewTimer(runTimeout)
-	defer timer.Stop()
 	select {
 	case r := <-done:
 		if r.err != nil {
 			return r.out, fmt.Errorf("remote command failed: %w%s", r.err, stderrTail(stderr.String()))
 		}
 		return r.out, nil
-	case <-timer.C:
-		sess.Close() // unblock Output; the defer is a second close, which is safe
-		return "", fmt.Errorf("remote command timed out after %s%s", runTimeout, stderrTail(stderr.String()))
 	case <-ctx.Done():
 		sess.Close()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			return "", fmt.Errorf("remote command timed out: %w%s", ctx.Err(), stderrTail(stderr.String()))
+		}
 		return "", ctx.Err()
+	}
+}
+
+func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	var (
+		sess *ssh.Session
+		err  error
+	)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sess, err = c.conn.NewSession()
+	}()
+	select {
+	case <-done:
+		if ctx.Err() != nil {
+			if sess != nil {
+				sess.Close()
+			}
+			return nil, ctx.Err()
+		}
+		return sess, err
+	case <-ctx.Done():
+		c.conn.Close()
+		<-done
+		if sess != nil {
+			sess.Close()
+		}
+		return nil, ctx.Err()
 	}
 }
 

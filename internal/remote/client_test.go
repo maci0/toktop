@@ -2,6 +2,7 @@ package remote
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/sha256"
@@ -567,6 +568,49 @@ func TestConnectFailsOnPartialBanner(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("partial-banner host took %v to fail, want ~bannerTimeout", d)
+	}
+}
+
+func TestClientRunBoundsSessionOpen(t *testing.T) {
+	for _, cancelCall := range []bool{false, true} {
+		t.Run(fmt.Sprintf("cancel=%v", cancelCall), func(t *testing.T) {
+			withKnownHosts(t)
+			old := runTimeout
+			runTimeout = 100 * time.Millisecond
+			t.Cleanup(func() { runTimeout = old })
+			srv := newSilentSSHServer(t)
+			cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer cli.Close()
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			if cancelCall {
+				runTimeout = time.Minute
+				timer := time.AfterFunc(50*time.Millisecond, cancel)
+				defer timer.Stop()
+			}
+			done := make(chan error, 1)
+			go func() {
+				_, err := cli.Run(ctx, "true")
+				done <- err
+			}()
+			select {
+			case err := <-done:
+				want := context.DeadlineExceeded
+				if cancelCall {
+					want = context.Canceled
+				}
+				if !errors.Is(err, want) {
+					t.Fatalf("Run error = %v, want %v", err, want)
+				}
+			case <-time.After(2 * time.Second):
+				cli.Close()
+				<-done
+				t.Fatal("session open ignored timeout or cancellation")
+			}
+		})
 	}
 }
 
