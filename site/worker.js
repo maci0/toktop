@@ -188,6 +188,10 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
 // under one URL, and RFC 9110 forbids one strong ETag spanning multiple
 // representations. If-None-Match compares weakly for GET revalidation either
 // way, so nothing is lost: no ranges are offered on a page this small.
+// Caches that pre-compress also match the stored coding by the identity tag:
+// an accept-encoding transform that selects zstd (a newer, smaller coding)
+// must not serve the older brotli or gzip copy as a cache hit while claiming
+// its own ETag, so a zstd accept-encoding forces a full 200.
 const ETAG_HASH = (() => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < HTML.length; i++) {
