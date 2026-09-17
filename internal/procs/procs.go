@@ -201,7 +201,7 @@ func baseName(n string) string {
 	if i := strings.LastIndexByte(n, '\\'); i >= 0 {
 		n = n[i+1:]
 	}
-	return strings.ToLower(strings.TrimSuffix(n, ".exe"))
+	return strings.TrimSuffix(strings.ToLower(n), ".exe")
 }
 
 func anyArgContains(args []string, subs ...string) bool {

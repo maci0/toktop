@@ -60,6 +60,10 @@ func TestMatchEngine(t *testing.T) {
 		ok     bool
 	}{
 		{"ollama", []string{"ollama", "serve"}, "ollama", 11434, true},
+		{"OLLAMA.EXE", []string{`C:\Program Files\Ollama\OLLAMA.EXE`, "serve"}, "ollama", 11434, true},
+		{`C:/Apps/JAN.ExE`, nil, "jan", 1337, true},
+		{"python.exe", []string{`C:\Python\Scripts\LITELLM.EXE`, "--port", "4000"}, "litellm", 4000, true},
+		{"OLLAMA.EXE.BAK", []string{"OLLAMA.EXE.BAK"}, "", 0, false},
 		{"llama-server", []string{"/usr/bin/llama-server", "--port", "8081"}, "llama.cpp", 8080, true}, // def; hint overrides separately
 		{"llamafile", []string{"llamafile", "--port", "8080"}, "llama.cpp", 8080, true},
 		{"python3", []string{"python3", "-m", "vllm.entrypoints.openai.api_server"}, "vllm", 8000, true},
