@@ -655,6 +655,41 @@ func TestRunUpdateInterrupted(t *testing.T) {
 	}
 }
 
+func TestInformationalCommandsRejectExtraArguments(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		run  func(io.Writer, []string) int
+		args []string
+	}{
+		{"help help", runHelp, []string{"help", "extra"}},
+		{"help short flag", runHelp, []string{"-h", "extra"}},
+		{"help long flag", runHelp, []string{"--help", "extra"}},
+		{"version short help", runVersion, []string{"-h", "extra"}},
+		{"version long help", runVersion, []string{"--help", "extra"}},
+		{"update help", func(w io.Writer, args []string) int {
+			return runUpdate(context.Background(), w, args)
+		}, []string{"--help", "extra"}},
+		{"update short help", func(w io.Writer, args []string) int {
+			return runUpdate(context.Background(), w, args)
+		}, []string{"-h", "extra"}},
+		{"update version", func(w io.Writer, args []string) int {
+			return runUpdate(context.Background(), w, args)
+		}, []string{"--version", "extra"}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out bytes.Buffer
+			var code int
+			stderr := captureStderr(t, func() { code = tt.run(&out, tt.args) })
+			if code != 2 || out.Len() != 0 {
+				t.Fatalf("code = %d, stdout = %q; want 2 and no stdout", code, out.String())
+			}
+			if !strings.Contains(stderr, `unexpected argument "extra"`) || !strings.Contains(stderr, "--help") {
+				t.Fatalf("stderr = %q; want unexpected argument and help hint", stderr)
+			}
+		})
+	}
+}
+
 func TestRunHelp(t *testing.T) {
 	t.Run("no topic prints top-level help", func(t *testing.T) {
 		var out bytes.Buffer

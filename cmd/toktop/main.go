@@ -644,6 +644,9 @@ See README.md for all environment variables.
 // so a typo does not dump the top-level screen and look like success.
 func runHelp(out io.Writer, args []string) int {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+		if len(args) > 1 {
+			return rejectExtra("toktop help", args[1])
+		}
 		return outputStatus(usage(out))
 	}
 	switch args[0] {
@@ -668,11 +671,19 @@ func runHelp(out io.Writer, args []string) int {
 	return 2
 }
 
+func rejectExtra(cmd, arg string) int {
+	fmt.Fprintf(os.Stderr, "%s: unexpected argument %q (see '%s --help')\n", cmd, arg, cmd)
+	return 2
+}
+
 // runVersion implements `toktop version`. --help prints top-level usage;
 // any other extra argument is a usage error.
 func runVersion(out io.Writer, args []string) int {
 	if len(args) > 0 {
 		if args[0] == "-h" || args[0] == "--help" {
+			if len(args) > 1 {
+				return rejectExtra("toktop version", args[1])
+			}
 			return outputStatus(usage(out))
 		}
 		fmt.Fprintf(os.Stderr, "toktop version: unexpected argument %q (see 'toktop --help')\n", args[0])

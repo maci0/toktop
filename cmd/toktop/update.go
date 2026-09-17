@@ -65,16 +65,15 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	if fs.NArg() > 0 {
+		return rejectExtra("toktop update", fs.Arg(0))
+	}
 	if showHelp {
 		return outputStatus(updateUsage(out, fs))
 	}
 	if showVer {
 		_, err := fmt.Fprintln(out, "toktop", version)
 		return outputStatus(err)
-	}
-	if fs.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "toktop update: unexpected argument %q (see 'toktop update --help')\n", fs.Arg(0))
-		return 2
 	}
 
 	if err := selfupdate.ValidateRepo(*repo); err != nil {
