@@ -10,10 +10,44 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
-## [0.10.0] - 2026-09-18
+## [0.11.0] - 2026-09-19
 
 Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
-[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.10.0).
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.11.0).
+
+### Breaking
+
+- `--opencode-db` is on by default with `--agents`: a binary built with the
+  `sqlite` driver reads opencode's session database without an extra flag.
+  Pass `--opencode-db=false` to leave it alone. A build without the driver
+  still reports nothing for opencode, and only an explicit `--opencode-db`
+  prints the note saying so.
+
+### Changed
+
+- Frame rendering is roughly 45% cheaper and allocates about 63% fewer
+  objects: the chart age fade no longer parses a hex color with
+  `fmt.Sscanf` for every bisection step of every chart column, reads the
+  background's luminance once instead of per comparison, and assembles the
+  faded hex without `fmt.Sprintf`. Rendered output is unchanged.
+
+### Fixed
+
+- `agentusage` reads dsh's v3 session logs. The provider's counts are nested
+  under `data.usage` on the `assistant/message` record; the reader accepted
+  only a top-level `usage` object that no released dsh writes, so every real
+  dsh session reported no tokens. Cached input (`cacheReadTokens`,
+  `cacheWriteTokens`) now counts as billed prompt tokens, the same fold the
+  Claude reader applies, and `totalTokens` supplies the per-call context
+  size. `compaction/summary` is still left out, matching what dsh itself
+  reports as durable session usage.
+- `agentusage` resolves an agent's provider and transcript adapter on every
+  poll instead of trusting the binding made at attach. `EnableOpenCodeDB(false)`
+  now stops a running watcher from reading opencode's store (it keeps its last
+  sample), a definition reloaded with `LoadDefinitions` reaches watchers that
+  are already running, and `Watch` no longer writes the adapter registry.
+
+## [0.10.0] - 2026-09-18
 
 ### Breaking
 
@@ -411,7 +445,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/maci0/toktop/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/maci0/toktop/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/maci0/toktop/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/maci0/toktop/compare/v0.7.0...v0.8.0
