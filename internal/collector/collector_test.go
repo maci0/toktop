@@ -490,6 +490,7 @@ func TestRunEmitsUntilCancel(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		c := New([]provider.Provider{fp.asProvider()}, 5*time.Millisecond)
 		c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 9} })
+		c.procFn = func() []procs.Info { return nil }
 
 		done := make(chan struct{})
 		go func() { defer close(done); c.Run(ctx, ch) }()
@@ -529,6 +530,9 @@ func TestRunWarmsSysCacheBeforeFirstEmit(t *testing.T) {
 		<-release // hold the sampler as long as a hung vendor CLI would
 		return core.SysSample{MemTotal: 5}
 	})
+	// Run waits for the proc poller after cancel. The live Windows CIM
+	// listing takes seconds, which is longer than this test's shutdown wait.
+	c.procFn = func() []procs.Info { return nil }
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	ch := make(chan core.Snapshot)
