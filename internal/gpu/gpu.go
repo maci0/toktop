@@ -199,7 +199,7 @@ func ParseNvidiaSMI(b []byte) []core.GPUDevice {
 			Vendor:   "nvidia",
 			Index:    index,
 			Name:     strings.TrimSpace(name),
-			MilliC:   satInt(flexF(tail[0]) * 1000),
+			MilliC:   core.SatInt(flexF(tail[0]) * 1000),
 			MemUsed:  mibBytes(flexF(tail[1])),
 			MemTotal: mibBytes(flexF(tail[2])),
 			UtilPct:  flexF(tail[3]),
@@ -261,12 +261,12 @@ func ParseRocmSMI(b []byte) []core.GPUDevice {
 			switch {
 			case strings.Contains(lk, "temperature"):
 				if strings.Contains(lk, "edge") || d.MilliC == 0 {
-					d.MilliC = satInt(flexAny(val) * 1000)
+					d.MilliC = core.SatInt(flexAny(val) * 1000)
 				}
 			case strings.Contains(lk, "used memory"):
-				d.MemUsed = satUint(flexAny(val))
+				d.MemUsed = core.SatUint(flexAny(val))
 			case strings.Contains(lk, "total memory"):
-				d.MemTotal = satUint(flexAny(val))
+				d.MemTotal = core.SatUint(flexAny(val))
 			case strings.Contains(lk, "gpu use"):
 				d.UtilPct = flexAny(val)
 			}
@@ -329,13 +329,13 @@ func parseXpuMetrics(b []byte, index int) (core.GPUDevice, bool) {
 		val := flatten(raw.Metrics[k])
 		switch {
 		case strings.Contains(lk, "temperature"):
-			d.MilliC = satInt(flexAny(val) * 1000)
+			d.MilliC = core.SatInt(flexAny(val) * 1000)
 		case lk == "gpu_utilization":
 			d.UtilPct = flexAny(val)
 		case strings.Contains(lk, "memory_used"):
-			d.MemUsed = satUint(flexAny(val))
+			d.MemUsed = core.SatUint(flexAny(val))
 		case strings.Contains(lk, "memory_size"), strings.Contains(lk, "memory_total"):
-			d.MemTotal = satUint(flexAny(val))
+			d.MemTotal = core.SatUint(flexAny(val))
 		case lk == "gpu_power":
 			d.PowerW = flexAny(val)
 		}
@@ -379,33 +379,6 @@ func flexAny(v any) float64 {
 		return flexF(t)
 	}
 	return 0
-}
-
-// satInt coerces a vendor-reported number to int. A plain conversion is
-// implementation-defined outside the type's range (a broken CLI or JSON
-// feed reporting 1e300 would surface as a huge negative temperature):
-// junk and negatives collapse to zero, huge values saturate. Pairs with
-// flexF/flexAny, which already filter NaN/Inf/negatives at the parse.
-func satInt(v float64) int {
-	if !(v > 0) {
-		return 0
-	}
-	if v >= math.MaxInt {
-		return math.MaxInt
-	}
-	return int(v)
-}
-
-// satUint is satInt for the unsigned counts vendor tools report as floats;
-// same rationale.
-func satUint(v float64) uint64 {
-	if !(v > 0) {
-		return 0
-	}
-	if v >= float64(math.MaxUint64) {
-		return math.MaxUint64
-	}
-	return uint64(v)
 }
 
 // mibBytes converts a vendor-reported MiB count to bytes, capping below the

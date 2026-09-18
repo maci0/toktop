@@ -37,7 +37,17 @@ import (
 // opt-in switch for the same reason, unlike opencode's operator-wide store.
 type crushDBSource struct{}
 
-func init() { registerSource("crush", tokenSource{session: crushDBSource{}}) }
+// builtinSource returns the sources this build links in. crush is one because
+// its database lives inside the project being watched, so there is nothing for
+// the operator to opt into; opencode is not, because its machine-wide store
+// needs the EnableOpenCodeDB gate. A function rather than an init-time
+// registry write, so nothing is installed at module load.
+func builtinSource(tool string) (tokenSource, bool) {
+	if tool == "crush" {
+		return tokenSource{session: crushDBSource{}}, true
+	}
+	return tokenSource{}, false
+}
 
 const (
 	// crushMaxWalkUp bounds the search for the project root, so a watcher

@@ -141,14 +141,11 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	return out
 }
 
+// clampPct bounds a derived CPU percentage. Counter resets must not read as
+// negative load, and a runaway multiplier must stay bounded; many-core boxes
+// legitimately exceed 100% of one core.
 func clampPct(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 100*1024 { // many-core boxes can exceed 100 by design
-		v = 100 * 1024
-	}
-	return v
+	return min(max(v, 0), 100*1024)
 }
 
 // ExtractPort scans argv for explicit listen-port flags. Exported so the

@@ -167,26 +167,6 @@ func TestClassifySaturatesAbsurdGauges(t *testing.T) {
 	}
 }
 
-func TestSatCoercions(t *testing.T) {
-	if got := satInt(2.7); got != 2 {
-		t.Errorf("satInt(2.7) = %d, want 2", got)
-	}
-	if got := satUint(8192); got != 8192 {
-		t.Errorf("satUint(8192) = %d", got)
-	}
-	for _, v := range []float64{0, -5} {
-		if got := satInt(v); got != 0 {
-			t.Errorf("satInt(%v) = %d, want 0", v, got)
-		}
-		if got := satUint(v); got != 0 {
-			t.Errorf("satUint(%v) = %d, want 0", v, got)
-		}
-	}
-	if satInt(1e300) != math.MaxInt || satUint(1e300) != math.MaxUint64 {
-		t.Error("huge magnitudes must saturate, not wrap")
-	}
-}
-
 func TestSplitMetric(t *testing.T) {
 	for _, line := range []string{
 		`a:b_c{label="x,y z"} 1.5e2`,

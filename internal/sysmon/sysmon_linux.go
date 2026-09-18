@@ -417,7 +417,7 @@ func listHwmon(root string) []sensorInput {
 		if err != nil {
 			continue
 		}
-		isGPUChip := containsAny(chipName, gpuChips...)
+		isGPUChip := core.ContainsAny(chipName, gpuChips...)
 		inputs, _ := filepath.Glob(filepath.Join(chip, "temp*_input"))
 		for _, in := range inputs {
 			label := chipName
@@ -425,7 +425,7 @@ func listHwmon(root string) []sensorInput {
 			if lb, err := os.ReadFile(filepath.Join(chip, base+"_label")); err == nil {
 				label = strings.ToLower(strings.TrimSpace(string(lb)))
 			}
-			gpu := isGPUChip || containsAny(label, "gpu", "junction", "hotspot", "edge")
+			gpu := isGPUChip || core.ContainsAny(label, "gpu", "junction", "hotspot", "edge")
 			out = append(out, sensorInput{path: in, label: label, gpu: gpu})
 		}
 	}
@@ -447,7 +447,7 @@ func listThermalZones(root string) []sensorInput {
 		out = append(out, sensorInput{
 			path:  filepath.Join(z, "temp"),
 			label: typ,
-			gpu:   containsAny(typ, "gpu"),
+			gpu:   core.ContainsAny(typ, "gpu"),
 		})
 	}
 	return out
@@ -463,13 +463,4 @@ func readMilliC(path string) (int, bool) {
 		return 0, false
 	}
 	return v, true
-}
-
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
 }

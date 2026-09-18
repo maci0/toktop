@@ -310,6 +310,10 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 // running. Windows refuses to replace a running image but does allow renaming
 // it out of the way first, so that is what happens there; the displaced file
 // is removed on the next update, since it is still locked during this one.
+//
+// cordis-boundary: emission, compensate by verifying the download against the
+// release checksum before any rename and by restoring the displaced binary
+// when the second rename fails; the installed file itself is not reverted.
 func install(tmpName, self string) error {
 	if runtime.GOOS != "windows" {
 		return os.Rename(tmpName, self)

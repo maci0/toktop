@@ -60,10 +60,19 @@ var (
 	sources   = map[string]tokenSource{}
 )
 
+// builtinSource returns a source compiled into this build, or false. It is a
+// build-tagged function rather than a registry row so no source is installed
+// at module load: a built-in cannot be left behind by a runtime switch meant
+// for another agent, and it needs no owner to dispose it. The registry holds
+// only what a runtime switch put there (opencode).
 func sourceFor(tool string) (tokenSource, bool) {
 	sourcesMu.RLock()
-	defer sourcesMu.RUnlock()
-	s, ok := sources[tool]
+	s, registered := sources[tool]
+	sourcesMu.RUnlock()
+	if registered {
+		return s, s.present()
+	}
+	s, ok := builtinSource(tool)
 	return s, ok && s.present()
 }
 

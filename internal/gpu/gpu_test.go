@@ -197,18 +197,6 @@ func TestSaturatesAbsurdVendorNumbers(t *testing.T) {
 	if devs[1].MemUsed != math.MaxUint64 {
 		t.Errorf("MemUsed = %d, want saturation", devs[1].MemUsed)
 	}
-
-	if got := satInt(2.7); got != 2 {
-		t.Errorf("satInt(2.7) = %d, want 2", got)
-	}
-	for _, v := range []float64{0, -5} {
-		if satInt(v) != 0 || satUint(v) != 0 {
-			t.Errorf("satInt/satUint(%v) must collapse to zero", v)
-		}
-	}
-	if satInt(1e300) != math.MaxInt || satUint(1e300) != math.MaxUint64 {
-		t.Error("huge magnitudes must saturate, not wrap")
-	}
 }
 
 func TestVendorOrdering(t *testing.T) {

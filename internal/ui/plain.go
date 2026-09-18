@@ -11,7 +11,8 @@ package ui
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -192,7 +193,7 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 			}
 			ident = append(ident, osPart)
 		}
-		for _, k := range sortedKeys(sy.Drivers) {
+		for _, k := range slices.Sorted(maps.Keys(sy.Drivers)) {
 			ident = append(ident, core.SanitizeText(k)+" "+core.SanitizeText(sy.Drivers[k]))
 		}
 		if len(sy.NPUs) > 0 {
@@ -214,15 +215,6 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 			fmtTempC(t.MilliC)))
 		shown++
 	}
-}
-
-func sortedKeys(m map[string]string) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	return keys
 }
 
 // writeProbesPlain lists the most recent probe results newest-first, with the

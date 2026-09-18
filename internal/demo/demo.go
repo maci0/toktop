@@ -369,7 +369,7 @@ func (s *Source) snapshot(now time.Time) core.Snapshot {
 	return snap
 }
 
-func clamp(v, lo, hi float64) float64 { return math.Max(lo, math.Min(hi, v)) }
+func clamp(v, lo, hi float64) float64 { return min(max(v, lo), hi) }
 
 func tail(h []float64) float64 {
 	if len(h) == 0 {

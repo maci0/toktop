@@ -522,17 +522,7 @@ func parseRetryAfter(resp *http.Response) time.Duration {
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
-		return clampRetryAfter(time.Until(t))
+		return min(max(time.Until(t), defaultRetryAfter), maxRetryAfter)
 	}
 	return defaultRetryAfter
-}
-
-func clampRetryAfter(d time.Duration) time.Duration {
-	if d < defaultRetryAfter {
-		return defaultRetryAfter
-	}
-	if d > maxRetryAfter {
-		return maxRetryAfter
-	}
-	return d
 }

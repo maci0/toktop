@@ -290,8 +290,8 @@ func classify(fam map[string]float64, m *Metrics) {
 		hasTok := strings.Contains(n, "token")
 		switch {
 		case hasTok && strings.Contains(n, "total"):
-			outish := containsAny(n, "generat", "predict", "complet", "eval")
-			inish := containsAny(n, "prompt", "input")
+			outish := core.ContainsAny(n, "generat", "predict", "complet", "eval")
+			inish := core.ContainsAny(n, "prompt", "input")
 			switch {
 			case inish:
 				m.InTotal = max(v, 0) // counters are unsigned; a negative gauge is junk
@@ -303,13 +303,13 @@ func classify(fam map[string]float64, m *Metrics) {
 				m.KVPct = v * 100
 				m.HasKV = true
 			}
-		case strings.Contains(n, "req") && containsAny(n, "run", "process", "active", "inflight") &&
-			!containsAny(n, "time", "duration", "second"):
-			m.Running = satInt(v)
-		case containsAny(n, "req") && containsAny(n, "wait", "queue", "pend") &&
-			!containsAny(n, "time", "duration", "second"):
-			m.Waiting = satInt(v) // covers vLLM requests_waiting and SGLang num_queue_reqs
-		case strings.Contains(n, "cache") && containsAny(n, "usage", "util", "ratio", "perc"):
+		case strings.Contains(n, "req") && core.ContainsAny(n, "run", "process", "active", "inflight") &&
+			!core.ContainsAny(n, "time", "duration", "second"):
+			m.Running = core.SatInt(v)
+		case core.ContainsAny(n, "req") && core.ContainsAny(n, "wait", "queue", "pend") &&
+			!core.ContainsAny(n, "time", "duration", "second"):
+			m.Waiting = core.SatInt(v) // covers vLLM requests_waiting and SGLang num_queue_reqs
+		case strings.Contains(n, "cache") && core.ContainsAny(n, "usage", "util", "ratio", "perc"):
 			pct := v
 			if pct <= 1.0 {
 				pct *= 100
@@ -325,46 +325,11 @@ func classify(fam map[string]float64, m *Metrics) {
 					m.TTFTms = ms
 				}
 			}
-		case strings.Contains(n, "throughput") && containsAny(n, "gen", "generation", "decode"):
+		case strings.Contains(n, "throughput") && core.ContainsAny(n, "gen", "generation", "decode"):
 			if v >= 0 {
 				m.DirectOutPS = v
 				m.HasDirectOutPS = true
 			}
 		}
 	}
-}
-
-func containsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
-}
-
-// satInt coerces an engine-published gauge to int. A plain conversion is
-// implementation-defined outside the type's range (a broken or lying
-// /metrics endpoint publishing 1e300 would render as a huge negative queue
-// depth): junk and negatives collapse to zero, huge values saturate.
-func satInt(v float64) int {
-	if !(v > 0) { // also catches NaN: every comparison with it is false
-		return 0
-	}
-	if v >= math.MaxInt {
-		return math.MaxInt
-	}
-	return int(v)
-}
-
-// satUint is satInt for the unsigned counts engines publish as floats
-// (ctx_size, VRAM sizes); same rationale.
-func satUint(v float64) uint64 {
-	if !(v > 0) {
-		return 0
-	}
-	if v >= float64(math.MaxUint64) {
-		return math.MaxUint64
-	}
-	return uint64(v)
 }

@@ -193,10 +193,16 @@ var adapters = map[string]adapter{
 		parse:  parseQwen,
 	},
 	// dsh (DeepSeek Harness) writes one session log per run under
-	// ~/.dsh/sessions/--<normalized-cwd>--/<id>/session.jsonl.zstd (or
-	// session.jsonl when compression is off), with the cwd in an opening
-	// header record. Default encoding is concatenated zstd frames; the
-	// counts are the provider's, on the completed assistant/message record.
+	// ~/.dsh/sessions/--<normalized-cwd>--/<id>/, named session.v<N>.jsonl.zstd
+	// (session.jsonl.zstd for generation zero, and .jsonl when compression is
+	// off), with the cwd in an opening header record. Default encoding is
+	// concatenated zstd frames; the counts are the provider's, nested under
+	// data.usage on the completed assistant/message record.
+	//
+	// The store is machine-wide, so ownership follows the session's recorded
+	// cwd, like opencode's directory column and every other adapter here. A
+	// `dsh web` server launched in one directory therefore reads the sessions
+	// of that directory, not the ones it hosts for other projects.
 	"dsh": {
 		roots:      func(string) []string { return []string{home(".dsh", "sessions")} },
 		suffix:     dshZstdSuffix,
@@ -244,19 +250,15 @@ var (
 	ErrNoRoots = errors.New("usage spec has no roots")
 )
 
-// RegisterSpec adds a transcript adapter for a defined agent. It returns
-// ErrEmptyTool or an error wrapping ErrNoRoots when the spec cannot be used.
-func RegisterSpec(tool string, spec Spec) error {
-	tool = canonicalTool(tool)
-	if tool == "" {
-		return ErrEmptyTool
-	}
+// specAdapter builds the file adapter a definition's spec describes. Pure: it
+// writes nothing, so both RegisterSpec and adapterFor can use it.
+func specAdapter(spec Spec) (adapter, bool) {
 	// {dir} lets a definition point at a store inside the agent's working
 	// directory, the way clanker keeps its own. Blank roots are dropped
 	// rather than becoming empty WalkDir targets.
 	patterns := specRoots(spec)
 	if len(patterns) == 0 {
-		return fmt.Errorf("usage spec for %q has no roots: %w", tool, ErrNoRoots)
+		return adapter{}, false
 	}
 	rootsFor := func(dir string) []string {
 		out := make([]string, 0, len(patterns))
@@ -282,10 +284,64 @@ func RegisterSpec(tool string, spec Spec) error {
 	if spec.HeaderCwd {
 		ad.sessionCwd = genericSessionCwd
 	}
+	return ad, true
+}
+
+// RegisterSpec adds a transcript adapter for a defined agent. It returns
+// ErrEmptyTool or an error wrapping ErrNoRoots when the spec cannot be used.
+func RegisterSpec(tool string, spec Spec) error {
+	tool = canonicalTool(tool)
+	if tool == "" {
+		return ErrEmptyTool
+	}
+	ad, ok := specAdapter(spec)
+	if !ok {
+		return fmt.Errorf("usage spec for %q has no roots: %w", tool, ErrNoRoots)
+	}
 	adaptersMu.Lock()
 	adapters[tool] = ad
 	adaptersMu.Unlock()
 	return nil
+}
+
+// registeredAdapter returns the adapter explicitly registered for an agent.
+func registeredAdapter(tool string) (adapter, bool) {
+	adaptersMu.RLock()
+	defer adaptersMu.RUnlock()
+	ad, ok := adapters[tool]
+	return ad, ok
+}
+
+// adapterFor returns the file adapter for an agent: the one registered for it,
+// or the one its loaded definition describes. Deriving rather than registering
+// keeps a reader from writing the registry, and lets a definition reloaded at
+// runtime reach watchers that are already running.
+func adapterFor(tool string) (adapter, bool) {
+	if ad, ok := registeredAdapter(tool); ok {
+		return ad, true
+	}
+	spec, defined := definedSpec(tool)
+	if !defined {
+		return adapter{}, false
+	}
+	return specAdapter(spec)
+}
+
+// refreshAdapter re-derives a definition-backed watcher's adapter, so a
+// reloaded definition reaches a watcher that is already running. A registered
+// adapter (a built-in, or an explicit RegisterSpec) is fixed for the process
+// and is left alone, which also keeps a test's patched adapter in place.
+func (w *Watcher) refreshAdapter() {
+	if _, registered := registeredAdapter(w.tool); registered {
+		return
+	}
+	spec, defined := definedSpec(w.tool)
+	if !defined {
+		return
+	}
+	if ad, ok := specAdapter(spec); ok {
+		w.ad = ad
+	}
 }
 
 func expandHome(p string) string {
@@ -309,18 +365,12 @@ func Supported(tool string) bool {
 	if _, ok := sourceFor(tool); ok {
 		return true
 	}
-	adaptersMu.RLock()
-	_, ok := adapters[tool]
-	adaptersMu.RUnlock()
-	if ok {
-		return true
-	}
 	// A definition that names a transcript root is readable even before a
 	// watcher has been built for it, and callers ask this to decide whether a
-	// rate is possible at all. Blank-only roots match RegisterSpec: not
-	// readable, so this must not return true for an agent Watch would reject.
-	spec, defined := definedSpec(tool)
-	return defined && len(specRoots(spec)) > 0
+	// rate is possible at all. adapterFor rejects the blank-root spec
+	// RegisterSpec rejects, so this cannot promise a rate Watch would refuse.
+	_, ok := adapterFor(tool)
+	return ok
 }
 
 func home(parts ...string) string {
@@ -423,24 +473,9 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 		}
 		return w
 	}
-	adaptersMu.RLock()
-	ad, ok := adapters[tool]
-	adaptersMu.RUnlock()
+	ad, ok := adapterFor(tool)
 	if !ok {
-		// A defined agent carries its own transcript location. Reading it here
-		// means live tokens work for it everywhere the definition is loaded,
-		// with nothing to wire up at the call site.
-		if spec, defined := definedSpec(tool); defined {
-			if err := RegisterSpec(tool, spec); err != nil {
-				return nil
-			}
-			adaptersMu.RLock()
-			ad, ok = adapters[tool]
-			adaptersMu.RUnlock()
-		}
-		if !ok {
-			return nil
-		}
+		return nil
 	}
 	w := &Watcher{
 		ad: ad, tool: tool, dir: resolveDir(dir), since: since,
@@ -614,12 +649,15 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 // snapshotted at attach (or on the first successful poll if that read
 // failed), so only growth since then is counted. A usageSource (opencode)
 // reports this attach's usage in full each time via a timestamp filter.
-func (w *Watcher) readSource() (values, bool) {
-	if w.source.session != nil {
-		return w.readSessionSource(w.source.session)
+//
+// src is the source registered for this agent right now, which poll resolves
+// each time so a withdrawn provider stops being read.
+func (w *Watcher) readSource(src tokenSource) (values, bool) {
+	if src.session != nil {
+		return w.readSessionSource(src.session)
 	}
-	if w.source.usage != nil {
-		return w.source.usage.read(w.dirs, w.since)
+	if src.usage != nil {
+		return src.usage.read(w.dirs, w.since)
 	}
 	return values{}, false
 }
@@ -699,13 +737,26 @@ func (w *Watcher) poll(onChange func(Sample)) {
 	w.pollMu.Lock()
 	var out, thinking, total, input int
 	if w.source.present() {
-		v, ok := w.readSource()
+		// The provider is resolved per poll rather than trusted from attach:
+		// EnableOpenCodeDB(false) withdraws it, and a watcher that kept the
+		// binding it was built with would go on reading the operator's
+		// database after the opt-out. A withdrawn provider reports nothing,
+		// so the sample stays where it was instead of jumping.
+		src, ok := sourceFor(w.tool)
+		if !ok {
+			w.pollMu.Unlock()
+			return
+		}
+		v, ok := w.readSource(src)
 		if !ok {
 			w.pollMu.Unlock()
 			return
 		}
 		out, thinking, total, input = v.output, v.thinking, v.total, v.input
 	} else {
+		// A definition can be reloaded under a running watcher, so its adapter
+		// is re-derived each poll; the same reason the source is re-resolved.
+		w.refreshAdapter()
 		for _, path := range w.candidates() {
 			w.readNew(path)
 		}

@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // addDef registers a definition directly and removes it when the test ends.
@@ -358,5 +359,30 @@ func TestDefinitionsPathPrefersGauntletHome(t *testing.T) {
 	if !strings.HasSuffix(got, filepath.Join(".gauntlet", "agents.json")) ||
 		!strings.HasPrefix(got, home) {
 		t.Errorf("DefinitionsPath() = %q, want the home-relative default under %q", got, home)
+	}
+}
+
+// The definition a watcher reads from is a coeffect resolved on every poll,
+// not a fact fixed at attach: a definition reloaded with a different root must
+// reach a watcher that is already running.
+func TestWatcherPicksUpReloadedDefinition(t *testing.T) {
+	const tool = "zz-reload-def"
+	oldRoot, newRoot := t.TempDir(), t.TempDir()
+	addDef(t, tool, Spec{Roots: []string{oldRoot}})
+
+	w := Watch(tool, t.TempDir(), time.Now())
+	if w == nil {
+		t.Fatal("a defined agent with roots should be watchable")
+	}
+	append_(t, filepath.Join(oldRoot, "session.jsonl"), `{"output_tokens":5,"input_tokens":5}`)
+	if got := w.Poll().Output; got != 5 {
+		t.Fatalf("output %d, want 5 from the root attached with", got)
+	}
+
+	addDef(t, tool, Spec{Roots: []string{newRoot}})
+	// Poll forces the fresh walk the periodic path would take a second later.
+	append_(t, filepath.Join(newRoot, "session.jsonl"), `{"output_tokens":7,"input_tokens":7}`)
+	if got := w.Poll().Output; got != 12 {
+		t.Fatalf("output %d, want 12: the reloaded definition was not read", got)
 	}
 }

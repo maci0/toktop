@@ -178,7 +178,7 @@ func parseIoregNum(s string) uint64 {
 }
 
 // parseSizeString reads vendor sizes like "128 GB", "8192 MB". The scaled
-// magnitude goes through satUint: junk input ("1e300 GB") must saturate
+// magnitude goes through core.SatUint: junk input ("1e300 GB") must saturate
 // rather than convert out of range, since the result sits in the
 // process-lifetime identity cache
 // identity cache for the whole process.
@@ -202,5 +202,5 @@ func parseSizeString(s string) uint64 {
 	default:
 		return 0
 	}
-	return satUint(n * mult)
+	return core.SatUint(n * mult)
 }

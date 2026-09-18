@@ -46,15 +46,23 @@ func codexTokens(out, total int) string {
 		`{"input_tokens":10,"output_tokens":` + strconv.Itoa(out) + `,"total_tokens":` + strconv.Itoa(total) + `}}}}`
 }
 
-// withStore points an adapter at a temporary transcript directory.
+// withStore points an adapter at a temporary transcript directory. The
+// registry is shared with watcher goroutines, so the row is read and restored
+// under its lock: a watcher re-resolves its adapter on every poll.
 func withStore(t *testing.T, tool string) string {
 	t.Helper()
 	dir := t.TempDir()
+	adaptersMu.Lock()
 	orig := adapters[tool]
 	patched := orig
 	patched.roots = func(string) []string { return []string{dir} }
 	adapters[tool] = patched
-	t.Cleanup(func() { adapters[tool] = orig })
+	adaptersMu.Unlock()
+	t.Cleanup(func() {
+		adaptersMu.Lock()
+		adapters[tool] = orig
+		adaptersMu.Unlock()
+	})
 	return dir
 }
 
@@ -107,9 +115,11 @@ func TestFoldedTranscriptCounts(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := withStore(t, tc.tool)
+			adaptersMu.Lock()
 			ad := adapters[tc.tool]
 			ad.parse, ad.sessionCwd = parseGeneric, nil
 			adapters[tc.tool] = ad
+			adaptersMu.Unlock()
 			path := filepath.Join(store, "session.jsonl")
 			if tc.preexisting {
 				appendRaw(t, path, tc.seed)

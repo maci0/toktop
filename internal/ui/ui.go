@@ -384,8 +384,8 @@ func (m Model) systemStripRows() int {
 // the header. Minimums reshuffle the split but never change the sum.
 func (m Model) sectionHeights() (outH, midIn, feedIn int) {
 	f := max(m.h-17-m.systemStripRows(), 10)
-	outH = clampi(int(float64(f)*0.42), 3, 99)
-	feedIn = clampi(int(float64(f)*0.22), 2, 12)
+	outH = min(max(int(float64(f)*0.42), 3), 99)
+	feedIn = min(max(int(float64(f)*0.22), 2), 12)
 	midIn = f - outH - feedIn
 	if midIn < 5 { // mid-row panels need room for three detail lines
 		outH -= 5 - midIn
@@ -622,7 +622,7 @@ func (m Model) renderSystem() string {
 	default:
 		memPct := float64(sy.MemUsed) / float64(sy.MemTotal) * 100
 		vitals = append(vitals,
-			"mem "+GaugeBar(memPct, clampi(w/6, 8, 18), memHeat)+
+			"mem "+GaugeBar(memPct, min(max(w/6, 8), 18), memHeat)+
 				" "+dim(humanBytesShort(sy.MemUsed)+"/"+humanBytesShort(sy.MemTotal)))
 		if sy.SwapTotal > 0 {
 			swPct := float64(sy.SwapUsed) / float64(sy.SwapTotal) * 100
@@ -816,7 +816,7 @@ func (m Model) providersBody(w int) string {
 		if !p.OK {
 			b.WriteString(styleBad.Render("  "+clip(shorten(core.SanitizeText(p.Err), w-3), w-3)) + "\n")
 		} else {
-			kvg := "kv " + GaugeBar(p.KVPct, clampi(w-30, 4, 14), kvHeat)
+			kvg := "kv " + GaugeBar(p.KVPct, min(max(w-30, 4), 14), kvHeat)
 			stats := fmt.Sprintf("▲%s ▼%s run %d wait %d",
 				fmtRate(p.OutTokPS), fmtRate(p.InTokPS), p.Running, p.Waiting)
 			line2 := "  " + kvg + " " + styleDim.Render(stats)
@@ -833,7 +833,7 @@ func (m Model) gaugesBody(w int) string {
 			continue
 		}
 		name := styleDim.Render(clip(shorten(core.SanitizeText(p.Label), w-6), w-6))
-		kv := "kv  " + GaugeBar(p.KVPct, clampi(w-10, 4, 20), kvHeat)
+		kv := "kv  " + GaugeBar(p.KVPct, min(max(w-10, 4), 20), kvHeat)
 		third := procLine(p)
 		row := clipBlock(name+"\n"+kv+"\n"+third, w, -1)
 		b.WriteString(row + "\n\n")
@@ -907,7 +907,7 @@ func (m Model) probesTitle() string {
 
 func (m Model) probesBody(w, h int) string {
 	vals := probeSeries(m.snap, w, m.chartCadence())
-	chartH := clampi(h-3-len(m.snap.Providers), 2, 8)
+	chartH := min(max(h-3-len(m.snap.Providers), 2), 8)
 	var out strings.Builder
 	out.WriteString(BrailleChart(vals, w, chartH, ChartStyle{Heat: heatColor}) + "\n")
 	shown := 0

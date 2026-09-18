@@ -198,13 +198,3 @@ func joinSpreadLeft(segs []string, w int) string {
 }
 
 func dim(s string) string { return styleDim.Render(s) }
-
-func clampi(v, lo, hi int) int {
-	if v < lo {
-		return lo
-	}
-	if v > hi {
-		return hi
-	}
-	return v
-}
