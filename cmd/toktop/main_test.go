@@ -1018,7 +1018,7 @@ func TestLogActiveConfig(t *testing.T) {
 	t.Run("defaults name interval and ingest", func(t *testing.T) {
 		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420"}
 		var buf strings.Builder
-		logActiveConfig(&buf, f, map[string]bool{}, 0, 0)
+		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
 		got := buf.String()
 		if !strings.Contains(got, "interval=1s") || !strings.Contains(got, "ingest=127.0.0.1:8420") {
 			t.Fatalf("logActiveConfig() = %q, want interval and ingest", got)
@@ -1027,7 +1027,7 @@ func TestLogActiveConfig(t *testing.T) {
 	t.Run("no-ingest is named off", func(t *testing.T) {
 		f := &cliFlags{interval: time.Second, noIngest: true}
 		var buf strings.Builder
-		logActiveConfig(&buf, f, map[string]bool{}, 0, 0)
+		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
 		if !strings.Contains(buf.String(), "ingest=off") {
 			t.Fatalf("logActiveConfig() = %q, want ingest=off", buf.String())
 		}
@@ -1035,7 +1035,7 @@ func TestLogActiveConfig(t *testing.T) {
 	t.Run("bearer value is never printed", func(t *testing.T) {
 		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", bearer: "sk-secret"}
 		var buf strings.Builder
-		logActiveConfig(&buf, f, map[string]bool{"bearer": true}, 1, 0)
+		logActiveConfig(&buf, f, map[string]bool{"bearer": true}, 1, 0, false)
 		got := buf.String()
 		if strings.Contains(got, "sk-secret") {
 			t.Fatalf("logActiveConfig() leaked bearer: %q", got)
@@ -1047,12 +1047,36 @@ func TestLogActiveConfig(t *testing.T) {
 	t.Run("unused bearer is omitted", func(t *testing.T) {
 		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", bearer: "sk-secret"}
 		var buf strings.Builder
-		logActiveConfig(&buf, f, map[string]bool{"bearer": true}, 0, 0)
+		logActiveConfig(&buf, f, map[string]bool{"bearer": true}, 0, 0, false)
 		got := buf.String()
 		if strings.Contains(got, "bearer") || strings.Contains(got, "sk-secret") {
 			t.Fatalf("logActiveConfig() = %q, want no bearer without --add", got)
 		}
 	})
+	// The startup line must name opencode only when its gate actually
+	// resolved: the flag defaults on, but a build without the sqlite driver
+	// reads nothing, and claiming otherwise would misreport the knob.
+	t.Run("opencode named only when its gate resolved", func(t *testing.T) {
+		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", agents: true, opencode: true}
+		var buf strings.Builder
+		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, true)
+		if got := buf.String(); !strings.Contains(got, " agents opencode-db") {
+			t.Fatalf("logActiveConfig() = %q, want agents opencode-db", got)
+		}
+		buf.Reset()
+		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
+		if got := buf.String(); strings.Contains(got, "opencode-db") {
+			t.Fatalf("logActiveConfig() = %q, want no opencode-db when the gate did not resolve", got)
+		}
+	})
+}
+
+// --opencode-db is on by default: --agents reads opencode's store without
+// being asked, and --opencode-db=false is the opt-out.
+func TestOpenCodeDBDefaultsOn(t *testing.T) {
+	if f := registerFlags(); !f.opencode {
+		t.Fatal("--opencode-db must default to true")
+	}
 }
 
 func TestResolveBearer(t *testing.T) {

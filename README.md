@@ -64,7 +64,8 @@ added on top of the engine's own numbers.
 Once asked for, nothing else has to be configured and the agent does not have
 to cooperate: claude, codex, qwen, copilot, pi, prime-agent, feynman, clanker,
 and dsh all keep transcripts that carry the provider's own counts. dsh's
-default log is concatenated zstd frames; uncompressed JSONL is read too.
+default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
+`session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 Agents that report nothing show no rate rather than a zero.
 
 Two agents keep databases instead of transcripts, and both need the `sqlite`
@@ -73,7 +74,9 @@ binaries and `make build` carry it; `make build TAGS=` leaves it out).
 
 opencode keeps one session store for the whole machine, so it is gated twice:
 the tag links the driver, and `--opencode-db` decides whether a binary that has
-it opens the operator's database. Asking for it in a build without the driver
+it opens the operator's database. `--opencode-db` is on by default with
+`--agents`; pass `--opencode-db=false` to leave the store alone. A build
+without the driver reports nothing for opencode, and asking for it explicitly
 says so on stderr rather than reporting a silent zero.
 
 crush keeps its database inside the project it is working on
@@ -375,8 +378,9 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   keys etc. (env: OMNIROUTE_API_KEY, then TOKTOP_BEARER;
                   an explicit --bearer, even empty, wins)
 --agents          watch AI coding agents on this machine (session logs)
---opencode-db     with --agents: also read opencode's SQLite session
-                  database (needs a build with the sqlite tag)
+--opencode-db     with --agents: read opencode's SQLite session database
+                  (default on; needs a build with the sqlite tag; pass
+                  --opencode-db=false to skip it)
 --probe N         auto-probe every N seconds (0=off, max 86400)
 --interval D      poll interval (Go duration such as 1s or 500ms; default 1s;
                   min 50ms, max 1h; nonzero values require a unit)
@@ -408,7 +412,7 @@ Password auth for ssh targets: interactive prompt, or `TOKTOP_SSH_PASSWORD`.
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`) |
-| `XDG_DATA_HOME` | with `--opencode-db`: directory under which `opencode/opencode.db` is read (default `~/.local/share`) |
+| `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`) |
 | `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`) |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset |
 | `NO_COLOR` | strips terminal styling when set to any value (honored by the renderer) |

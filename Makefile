@@ -48,10 +48,11 @@ SHELL := /bin/bash
 
 # crush and opencode keep sessions in SQLite rather than JSONL, so reading
 # them means linking a database driver. Released binaries carry it (pure Go,
-# so cross-compilation is unaffected). opencode still does nothing until
-# --opencode-db asks for it; crush is read whenever the tag is on, because
-# its database lives inside the watched project. Build with TAGS= to leave
-# the driver out entirely.
+# so cross-compilation is unaffected). opencode is read when the tag is on and
+# --opencode-db, on by default, has not been disabled with
+# --opencode-db=false; crush is read whenever the tag is on, because its
+# database lives inside the watched project. Build with TAGS= to leave the
+# driver out entirely.
 TAGS    ?= sqlite
 GOTAGS  := $(if $(TAGS),-tags $(TAGS),)
 # Race detector is on by default so the loop matches `make test` / CI.

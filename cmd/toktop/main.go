@@ -106,7 +106,7 @@ func registerFlags() *cliFlags {
 		flag.StringVar(&cli.ingest, "ingest", "127.0.0.1:8420", "agent event ingest listen address (host:port)")
 		flag.BoolVar(&cli.noIngest, "no-ingest", false, "disable the agent event HTTP endpoint")
 		flag.BoolVar(&cli.agents, "agents", false, "watch AI coding agents on this machine by reading their session transcripts")
-		flag.BoolVar(&cli.opencode, "opencode-db", false, "with --agents: also read opencode's SQLite session database (needs a build with -tags sqlite)")
+		flag.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (default on; needs a build with -tags sqlite; --opencode-db=false skips it)")
 		flag.BoolVar(&cli.once, "once", false, "render one frame and exit (non-interactive; use when piping)")
 		flag.BoolVar(&cli.plain, "plain", false, "with --once: render a linear text report instead of the dashboard frame (screen-reader friendly)")
 		flag.IntVar(&cli.frames, "frames", 2, fmt.Sprintf("with --once: snapshots to accumulate before rendering (max %d)", core.HistoryLen))
@@ -189,6 +189,15 @@ func main() {
 
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	// Both halves of opencode's gate, resolved once before the config line:
+	// the sqlite build tag decides whether the driver is linked in, and
+	// --opencode-db (on unless explicitly disabled) whether it is opened.
+	// EnableOpenCodeDB must run before any watcher for opencode is built.
+	opencodeOn := f.agents && f.opencode && agentusage.EnableOpenCodeDB(true)
+	if f.agents && f.opencode && !opencodeOn && explicit["opencode-db"] {
+		// Silence here would look like an agent that generates nothing.
+		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
+	}
 	warnUnknownEnv()
 	warnIgnoredFlags(explicit, f.demo, f.once, f.agents, f.noIngest, len(f.adds), len(remoteTargets))
 	warnIgnoredFrameEnv(f.once)
@@ -215,7 +224,7 @@ func main() {
 		}
 	}
 
-	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(remoteTargets))
+	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(remoteTargets), opencodeOn)
 
 	if !f.once && !term.IsTerminal(int(os.Stdout.Fd())) {
 		// The live dashboard paints with alt-screen sequences; piped or
@@ -351,10 +360,6 @@ func main() {
 	// Opt-in, because it means scanning this machine's processes and reading
 	// files the operator never pointed at toktop. Watching engines does not
 	// imply consent to that.
-	if f.agents && f.opencode && !agentusage.EnableOpenCodeDB(true) {
-		// Silence here would look like an agent that generates nothing.
-		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
-	}
 	if f.agents && recorder != nil {
 		// engineAddrs is nil in demo mode, where nothing real is measured.
 		aw := agentwatch.New(recorder, engineAddrs)
@@ -624,7 +629,8 @@ Examples:
   toktop ssh://maci@box        watch another host's engines over ssh
   toktop --add http://10.0.0.5:8000   attach an endpoint (repeatable)
   toktop --agents              also watch coding agents on this machine
-  toktop --agents --opencode-db  ...including opencode's session database
+                               (opencode's session database included)
+  toktop --agents --opencode-db=false   ...without opencode's session database
   toktop --once >frame.txt     render one static frame and exit
   toktop --once --plain        one frame as a linear text report (screen readers)
 
@@ -968,7 +974,9 @@ func validateOnceEnv() error {
 // logActiveConfig writes one startup line of the knobs that will actually
 // apply. Secrets are named as set/unset, never printed. The live dashboard
 // hides stderr under the alt screen; --once and a journal after quit keep it.
-func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, nRemote int) {
+// opencodeOn is the resolved gate, not the flag: a build without the sqlite
+// driver reads no opencode database however the flag is set.
+func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, nRemote int, opencodeOn bool) {
 	var b strings.Builder
 	b.WriteString("toktop: interval=")
 	b.WriteString(f.interval.String())
@@ -983,7 +991,7 @@ func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, n
 	}
 	if f.agents {
 		b.WriteString(" agents")
-		if f.opencode {
+		if opencodeOn {
 			b.WriteString(" opencode-db")
 		}
 	}
