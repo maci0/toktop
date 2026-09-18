@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -139,26 +140,65 @@ func heatColor(f float64) lipgloss.Color {
 // wordmark is TOKTOP in the site accent. Static: built once, reused every frame.
 var wordmark = lipgloss.NewStyle().Bold(true).Foreground(cGreen).Render("TOKTOP")
 
+// linearChannel maps an 8-bit channel to its WCAG linear value. A table,
+// because the chart fade recomputes luminance thousands of times per frame
+// and math.Pow was the bulk of that path's CPU.
+var linearChannel = func() [256]float64 {
+	var t [256]float64
+	for i := range t {
+		f := float64(i) / 255
+		if f <= 0.03928 {
+			t[i] = f / 12.92
+		} else {
+			t[i] = math.Pow((f+0.055)/1.055, 2.4)
+		}
+	}
+	return t
+}()
+
 // relLuminance computes the WCAG 2.x relative luminance of a #rrggbb hex
 // color. ok is false for any other encoding (256-color names): callers must
 // treat those as already visible rather than guessing at their brightness.
+//
+// This runs inside the chart fade, which bisects a blend against the contrast
+// floor for every column of every chart, so it parses with strconv: the
+// fmt.Sscanf spelling of the same parse allocated a scanner per call and was
+// the single largest source of per-frame garbage.
 func relLuminance(c lipgloss.Color) (lum float64, ok bool) {
 	s := string(c)
 	if len(s) != 7 || s[0] != '#' {
 		return 0, false
 	}
-	var v uint32
-	if _, err := fmt.Sscanf(s[1:], "%06x", &v); err != nil {
+	v, err := strconv.ParseUint(s[1:], 16, 32)
+	if err != nil {
 		return 0, false
 	}
-	lin := func(ch uint32) float64 {
-		f := float64(ch) / 255
-		if f <= 0.03928 {
-			return f / 12.92
-		}
-		return math.Pow((f+0.055)/1.055, 2.4)
+	return 0.2126*linearChannel[v>>16&0xff] +
+		0.7152*linearChannel[v>>8&0xff] +
+		0.0722*linearChannel[v&0xff], true
+}
+
+// baseLum is cBase's luminance, which is constant: the fade compares every
+// blend against it. It is not in a var block with cBase, whose file placement
+// keeps the palette together.
+var baseLum = func() float64 {
+	l, _ := relLuminance(cBase)
+	return l
+}()
+
+// contrastAgainstBase is the WCAG contrast of c against the panel
+// background, with the background's luminance read from baseLum instead of
+// recomputed per call. A non-hex color reports 0, the same "not measurable"
+// answer contrastRatio gives, so the fade treats it as full strength.
+func contrastAgainstBase(c lipgloss.Color) float64 {
+	lc, ok := relLuminance(c)
+	if !ok {
+		return 0
 	}
-	return 0.2126*lin(v>>16&0xff) + 0.7152*lin(v>>8&0xff) + 0.0722*lin(v&0xff), true
+	if lc < baseLum {
+		return (baseLum + 0.05) / (lc + 0.05)
+	}
+	return (lc + 0.05) / (baseLum + 0.05)
 }
 
 // contrastRatio returns the WCAG contrast ratio between two colors; ok is

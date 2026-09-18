@@ -46,6 +46,10 @@ type ChartStyle struct {
 
 // fadeColor blends a hex color toward black by factor f (0..1). Non-hex
 // colors pass through untouched.
+//
+// The chart fade calls this per bisection step, so the hex is assembled by
+// hand: fmt.Sprintf here allocated several objects per step for one 7-byte
+// string.
 func fadeColor(c lipgloss.Color, f float64) string {
 	s := string(c)
 	if !strings.HasPrefix(s, "#") || len(s) != 7 {
@@ -58,8 +62,16 @@ func fadeColor(c lipgloss.Color, f float64) string {
 	r := uint64(float64(v>>16&0xff) * f)
 	g := uint64(float64(v>>8&0xff) * f)
 	b := uint64(float64(v&0xff) * f)
-	return fmt.Sprintf("#%02x%02x%02x", r, g, b)
+	var out [7]byte
+	out[0] = '#'
+	for i, ch := range [3]uint64{r, g, b} {
+		out[1+i*2] = hexDigits[ch>>4&0xf]
+		out[2+i*2] = hexDigits[ch&0xf]
+	}
+	return string(out[:])
 }
+
+const hexDigits = "0123456789abcdef"
 
 // minGraphicContrast is the WCAG 2.2 AA non-text floor (SC 1.4.11): a
 // data-bearing chart mark must keep at least this ratio against the panel
@@ -73,7 +85,7 @@ const minGraphicContrast = 3.0
 // come back at full strength rather than half-hidden.
 func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
 	out := fadeColor(c, f)
-	if r, ok := contrastRatio(lipgloss.Color(out), cBase); ok && r >= min {
+	if contrastAgainstBase(lipgloss.Color(out)) >= min {
 		return lipgloss.Color(out)
 	}
 	// fadeColor is monotonic (less factor = darker = lower ratio), so the
@@ -81,7 +93,7 @@ func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
 	lo, hi := f, 1.0
 	for range 16 {
 		mid := (lo + hi) / 2
-		if r, ok := contrastRatio(lipgloss.Color(fadeColor(c, mid)), cBase); ok && r >= min {
+		if contrastAgainstBase(lipgloss.Color(fadeColor(c, mid))) >= min {
 			hi = mid
 		} else {
 			lo = mid
