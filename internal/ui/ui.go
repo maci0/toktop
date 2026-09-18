@@ -41,6 +41,7 @@ type Model struct {
 	ready           bool
 	paused          bool
 	help            bool
+	focusAgents     bool // agents get the panel estate; engines keep header, charts, strip
 	clock           time.Time
 	maxAgg          float64
 	lastAgg         float64 // most recent aggregate output rate across engines
@@ -185,6 +186,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t", "T":
 			m.chartCompressed = !m.chartCompressed
 			return m, nil
+		case "a", "A":
+			// Which side gets the panel estate. The other side keeps the
+			// header, the shared throughput chart and the host strip, so the
+			// frame never hides half the machine to show the other half.
+			m.focusAgents = !m.focusAgents
+			return m, nil
 		case "?", "h":
 			m.help = !m.help
 			return m, nil
@@ -208,13 +215,18 @@ func (m Model) View() string {
 		return m.renderMinimal()
 	}
 	if len(m.snap.Providers) == 0 {
-		if len(m.snap.Agents) > 0 {
-			// Engines are not the only thing that burns tokens: an agent
-			// running here is real activity, and hiding it behind the
-			// setup screen would be the dashboard lying by omission.
+		// Agents reporting over the ingest endpoint are real activity even
+		// without --agents, and a run that asked for --agents gets the agents
+		// dashboard before the first event lands: the setup card complains
+		// about engines nobody asked for, while the waiting panel says so
+		// itself.
+		if len(m.snap.Agents) > 0 || m.cfg.Agents {
 			return m.renderAgentsOnly()
 		}
 		return m.renderEmpty()
+	}
+	if m.focusAgents {
+		return m.renderAgentsOnly()
 	}
 	body := lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
@@ -1083,6 +1095,16 @@ func (m Model) renderFooter() string {
 	if len(m.snap.Providers) > 0 || len(m.snap.Agents) > 0 {
 		foot += styleInfo.Render("t") + dim(" timescale  ")
 	}
+	// a swaps which side gets the panel estate. Advertised only where it
+	// changes something: without engines the agents view is already the
+	// view, and the key stays live so a focus left on agents can be undone.
+	if len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.focusAgents) {
+		label := " agents"
+		if m.focusAgents {
+			label = " engines"
+		}
+		foot += styleInfo.Render("a") + dim(label+"  ")
+	}
 	foot += styleInfo.Render("?") + dim(" help")
 	tag := ""
 	if m.cfg.Demo {
@@ -1186,6 +1208,7 @@ func (m Model) helpRows() [][2]string {
 		{"space", "pause / resume streaming"},
 		{"p", "probe every engine with a real generation"},
 		{"t", "toggle compressed timescale + grid"},
+		{"a", "focus engines or agents"},
 		{"? / h", "toggle this help"},
 		{"", ""},
 		{"(flags)", "quit, then re-run with these"},
@@ -1213,10 +1236,12 @@ func (m Model) renderMinimal() string {
 	if len(m.snap.Providers) == 0 {
 		rates := core.AgentRates(m.snap.Agents, m.snapNow())
 		if len(rates) == 0 {
-			lines = append(lines, clip(styleWarn.Render("no inference engines detected"), m.w))
 			if m.cfg.Agents {
+				// This run asked for agents; leading with the engines it was
+				// told not to need reads as a failure instead of a wait.
 				lines = append(lines, dim(clip("watching local agents…", m.w)))
 			} else {
+				lines = append(lines, clip(styleWarn.Render("no inference engines detected"), m.w))
 				// "or" so this is not read as one command with every flag.
 				lines = append(lines, dim(clip("try --demo, --add URL, or --agents", m.w)))
 			}

@@ -119,6 +119,11 @@ func (m Model) renderAgentsOnly() string {
 	feed := feedLines(m.snap.Agents, feedIn, w)
 	if len(feed) == 0 {
 		feed = append(feed, m.feedEmptyLines(w)...)
+		if m.feedDown != "" {
+			// The line above says why; this is the way out, and the agents
+			// view has no setup card to carry it.
+			feed = append(feed, dim("q quit, then restart toktop to restore ingest"))
+		}
 	}
 
 	body := lipgloss.JoinVertical(lipgloss.Left,

@@ -349,3 +349,85 @@ func TestAgentDenseHistRoundsHalfCadenceBeforeStartIntoColumnZero(t *testing.T) 
 		t.Fatalf("hist = %v, want 80 tok/s in column 0 (0.4s before start is nearer to start)", got)
 	}
 }
+
+// 'a' swaps which side gets the panel estate: the engines keep the header,
+// the shared throughput chart and the host strip, and the agents get the tall
+// panel; pressing it again hands the panels back.
+func TestAgentsFocusToggleSwapsEstate(t *testing.T) {
+	now := time.Now()
+	snap := core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", Kind: core.KindOllama, OK: true,
+			OutTokPS: 42, OutT0: now, OutHist: []float64{1, 2, 3}, Models: []core.ModelInfo{{Name: "llama3"}}}},
+		Agents: []core.AgentEvent{
+			{At: now.Add(-2 * time.Second), Agent: "claude", Kind: "turn", OutputTokens: 40},
+			{At: now.Add(-time.Second), Agent: "claude", Kind: "turn", OutputTokens: 40},
+		},
+		Sys: &core.SysSample{MemTotal: 32 << 30, MemUsed: 16 << 30, Load1: 1.5},
+	}
+	m := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420", Agents: true}, nil)
+	m.snap, m.w, m.h, m.ready, m.clock = snap, 120, 40, true, now
+
+	engines := strip(m.View())
+	for _, want := range []string{"ENGINES", "ENGINE STATE", "AGENT FEED", "a agents"} {
+		if !strings.Contains(engines, want) {
+			t.Errorf("engines focus missing %q:\n%s", want, engines)
+		}
+	}
+
+	nm, _ := m.Update(keyMsg("a"))
+	m = nm.(Model)
+	agents := strip(m.View())
+	for _, want := range []string{"AGENTS", "THROUGHPUT", "SYS", "claude", "a engines"} {
+		if !strings.Contains(agents, want) {
+			t.Errorf("agents focus missing %q:\n%s", want, agents)
+		}
+	}
+	for _, gone := range []string{"ENGINE STATE", "PROBES"} {
+		if strings.Contains(agents, gone) {
+			t.Errorf("agents focus still draws the %s panel:\n%s", gone, agents)
+		}
+	}
+
+	nm, _ = m.Update(keyMsg("a"))
+	m = nm.(Model)
+	if back := strip(m.View()); !strings.Contains(back, "ENGINE STATE") {
+		t.Errorf("second press did not restore the engines panels:\n%s", back)
+	}
+}
+
+// A pane too small for the dashboard keeps the compact strip, which must not
+// lead with missing engines on a run that asked for agents.
+func TestMinimalAgentsViewDropsEngineComplaint(t *testing.T) {
+	m := New(Config{Version: "t", Agents: true}, nil)
+	m.w, m.h, m.ready = 44, 12, true
+	out := strip(m.View())
+	if !strings.Contains(out, "watching local agents") {
+		t.Errorf("minimal --agents view lost the wait hint:\n%s", out)
+	}
+	if strings.Contains(out, "no inference engines detected") {
+		t.Errorf("minimal --agents view still complains about engines:\n%s", out)
+	}
+}
+
+// The agents focus draws the agents-only layout while engine data is present,
+// at the scale the engine dashboard runs at: it must still fit the pane.
+func TestAgentsFocusFrameFitsPane(t *testing.T) {
+	snap := perfSnap()
+	for _, sz := range [][2]int{{62, 30}, {80, 32}, {120, 40}, {200, 50}} {
+		w, h := sz[0], sz[1]
+		m := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420", Agents: true}, nil)
+		m.snap, m.w, m.h, m.ready, m.clock = snap, w, h, true, snap.At
+		nm, _ := m.Update(keyMsg("a"))
+		m = nm.(Model)
+		out := m.View()
+		if got := lipgloss.Height(out); got > h {
+			t.Errorf("%dx%d: agents focus is %d lines, overflows pane", w, h, got)
+		}
+		for i, ln := range strings.Split(out, "\n") {
+			if lw := lipgloss.Width(ln); lw > w {
+				t.Fatalf("%dx%d: line %d renders %d cells, want <= %d:\n%s",
+					w, h, i, lw, w, ln)
+			}
+		}
+	}
+}

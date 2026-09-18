@@ -10,6 +10,14 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- The dashboard opens on the agents view when `--agents` is on and no engines
+  were found, instead of the setup card complaining about engines nobody asked
+  for. `a` toggles which side gets the panel estate: engines (the default) or
+  agents. The side not in focus keeps the header, the shared throughput chart
+  and the host strip, so neither half of the machine disappears.
+
 ## [0.11.0] - 2026-09-19
 
 Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on

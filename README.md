@@ -193,6 +193,10 @@ prompt tokens.
 - **Braille charts** - dot-matrix rendering with btop-style fading bloom;
   timescale compresses leftward (`t` toggles) with faint grid marks showing
   where each doubling begins.
+- **Agents view** - `--agents` with no engines found opens on the agents
+  themselves instead of the engines setup card, and `a` swaps the panel
+  estate between engines and agents on a machine running both; the side not
+  in focus keeps the header, the shared throughput chart and the host strip.
 - **Hot reload** - on Unix, rebuild the binary while it runs and toktop
   re-execs into the fresh build (`--no-hot-reload` to disable). Windows
   cannot replace a running image: the dashboard exits and asks you to
@@ -309,6 +313,7 @@ the OpenSSH named pipe is used when that variable is unset.
 | `space` | pause / resume streaming |
 | `p` | probe every engine with a real generation |
 | `t` | toggle compressed timescale + grid |
+| `a` | focus engines or agents (whichever gets the panel estate) |
 | `?` / `h` | toggle help |
 
 ## Accessibility

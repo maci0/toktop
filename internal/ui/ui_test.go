@@ -798,8 +798,11 @@ func TestEmptyStateGuidesByMode(t *testing.T) {
 		return strip(m.View())
 	}
 	on := view(Config{Version: "t", Agents: true})
-	if !strings.Contains(on, "watching local agents") {
-		t.Errorf("--agents on, but empty state does not say so:\n%s", on)
+	if !strings.Contains(on, "AGENTS") || !strings.Contains(on, "waiting for an agent to report tokens") {
+		t.Errorf("--agents run without engines should show the agents dashboard:\n%s", on)
+	}
+	if strings.Contains(on, "no inference engines detected") {
+		t.Errorf("--agents run still complains about missing engines:\n%s", on)
 	}
 	if strings.Contains(on, "toktop --agents") {
 		t.Errorf("empty state still tells an --agents run to pass --agents:\n%s", on)
