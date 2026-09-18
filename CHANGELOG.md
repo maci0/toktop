@@ -10,18 +10,20 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-09-19
+
+Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.12.0).
+
 ### Added
 
 - The dashboard opens on the agents view when `--agents` is on and no engines
   were found, instead of the setup card complaining about engines nobody asked
   for. `a` toggles which side gets the panel estate: engines (the default) or
   agents. The side not in focus keeps the header, the shared throughput chart
-  and the host strip, so neither half of the machine disappears.
-
-## [0.11.0] - 2026-09-19
-
-Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
-[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.11.0).
+  and the host strip, so neither half of the machine disappears. The compact
+  strip for panes too small for the dashboard drops the missing-engines line
+  on an `--agents` run too.
 
 ### Breaking
 
@@ -453,7 +455,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/maci0/toktop/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/maci0/toktop/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/maci0/toktop/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/maci0/toktop/compare/v0.8.0...v0.9.0
