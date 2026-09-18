@@ -73,47 +73,75 @@ func isDshZstd(path string) bool {
 	return strings.HasSuffix(path, dshZstdSuffix)
 }
 
-// parseDsh reads one session-log line. Usage lives on the completed
-// `assistant/message` record (camelCase, the provider's own counts). The
-// streaming `assistant/chunk` with `chunk.type=usage` repeats the same
-// numbers, so counting both would double every turn. The older test
-// spelling `assistant-message` with snake_case fields is accepted too.
+// dshUsage is one model call's own counts. They are disjoint:
+// inputTokens holds uncached input only, cached input arrives separately in
+// cacheReadTokens/cacheWriteTokens, and totalTokens is the whole call. The
+// snake_case fields are the older `assistant-message` spelling, still read
+// for logs written by earlier builds.
+type dshUsage struct {
+	InputTokens      int `json:"inputTokens"`
+	OutputTokens     int `json:"outputTokens"`
+	TotalTokens      int `json:"totalTokens"`
+	CacheReadTokens  int `json:"cacheReadTokens"`
+	CacheWriteTokens int `json:"cacheWriteTokens"`
+	ReasoningTokens  int `json:"reasoningTokens"`
+
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	ReasoningSnake   int `json:"reasoning_tokens"`
+}
+
+// parseDsh reads one session-log line. A v3 log nests the provider's counts
+// under data.usage on the completed `assistant/message` record; earlier
+// builds wrote them at the top level of an `assistant-message` record, which
+// is read too.
+//
+// Only the completed message is counted. The streaming `assistant/chunk`
+// whose chunk.type is usage repeats the same numbers, so counting it as well
+// would double every turn. `compaction/summary` carries usage too, but the
+// harness's own usage fold leaves it out of durable session totals, so
+// counting it here would disagree with what dsh itself reports.
 func parseDsh(line []byte) (values, string, bool) {
 	var rec struct {
-		Type  string `json:"type"`
-		Usage *struct {
-			InputTokens      int `json:"inputTokens"`
-			OutputTokens     int `json:"outputTokens"`
-			ReasoningTokens  int `json:"reasoningTokens"`
-			PromptTokens     int `json:"prompt_tokens"`
-			CompletionTokens int `json:"completion_tokens"`
-			ReasoningSnake   int `json:"reasoning_tokens"`
-		} `json:"usage"`
+		Type  string    `json:"type"`
+		Usage *dshUsage `json:"usage"`
+		Data  struct {
+			Usage *dshUsage `json:"usage"`
+		} `json:"data"`
 	}
-	if err := json.Unmarshal(line, &rec); err != nil || rec.Usage == nil {
+	if err := json.Unmarshal(line, &rec); err != nil {
 		return values{}, "", false
 	}
 	if rec.Type != "assistant/message" && rec.Type != "assistant-message" {
 		return values{}, "", false
 	}
-	u := rec.Usage
+	u := rec.Data.Usage
+	if u == nil {
+		u = rec.Usage
+	}
+	if u == nil {
+		return values{}, "", false
+	}
 	out := counter(u.OutputTokens)
 	if out == 0 {
 		out = counter(u.CompletionTokens)
-	}
-	in := counter(u.InputTokens)
-	if in == 0 {
-		in = counter(u.PromptTokens)
 	}
 	think := counter(u.ReasoningTokens)
 	if think == 0 {
 		think = counter(u.ReasoningSnake)
 	}
-	tot := in
-	if in > 0 {
-		tot = satAdd(in, out)
+	uncached := counter(u.InputTokens)
+	if uncached == 0 {
+		uncached = counter(u.PromptTokens)
 	}
-	v := values{output: out, thinking: think, total: tot, input: in}
+	// Billed prompt tokens: cached input was charged for too, the same fold
+	// parseClaude applies.
+	prompt := satAdd(uncached, satAdd(counter(u.CacheReadTokens), counter(u.CacheWriteTokens)))
+	tot := counter(u.TotalTokens)
+	if tot == 0 {
+		tot = satAdd(prompt, out)
+	}
+	v := values{output: out, thinking: think, total: tot, input: prompt}
 	if !v.present() {
 		return values{}, "", false
 	}

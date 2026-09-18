@@ -15,14 +15,33 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+// dshHeader is the opening record of a session log, where the working
+// directory of the run is recorded.
 func dshHeader(cwd string) string {
-	return `{"type":"session","version":0,"id":"s","cwd":` + jsonPath(cwd) + `,"delegationDepth":0}`
+	return `{"type":"session","version":3,"id":"session-1","createdAt":1789581724239,"cwd":` +
+		jsonPath(cwd) + `,"isSeeded":false,"delegationDepth":0,"agentPreset":"standard"}`
 }
 
+// dshMessage is a completed model call in the shape a v3 log writes: the
+// provider's counts nested under data.usage, beside the assistant message.
 func dshMessage(out, think, in int) string {
-	return `{"type":"assistant/message","usage":{"inputTokens":` +
-		strconv.Itoa(in) + `,"outputTokens":` + strconv.Itoa(out) + `,"reasoningTokens":` + strconv.Itoa(think) +
-		`,"cacheReadTokens":900}}`
+	return dshMessageUsage(out, think, in, 0, 0)
+}
+
+// dshMessageUsage adds the cache buckets. They are billed input, and
+// totalTokens includes them along with the output.
+func dshMessageUsage(out, think, in, cacheRead, cacheWrite int) string {
+	total := in + cacheRead + cacheWrite + out
+	return `{"type":"assistant/message","seq":18,"time":1789275997979,"data":{` +
+		`"turn":1,"step":1,` +
+		`"message":{"role":"assistant","content":[{"type":"text","text":"ok"}]},` +
+		`"usage":{"inputTokens":` + strconv.Itoa(in) +
+		`,"outputTokens":` + strconv.Itoa(out) +
+		`,"totalTokens":` + strconv.Itoa(total) +
+		`,"cacheReadTokens":` + strconv.Itoa(cacheRead) +
+		`,"cacheWriteTokens":` + strconv.Itoa(cacheWrite) +
+		`,"reasoningTokens":` + strconv.Itoa(think) +
+		`}}}`
 }
 
 func dshUsageChunk(out, think, in int) string {
@@ -76,18 +95,60 @@ func TestParseDshCountsAssistantMessageOnly(t *testing.T) {
 	if !ok {
 		t.Fatal("assistant/message with usage was rejected")
 	}
-	if v.output != 260 || v.thinking != 90 || v.input != 1200 {
-		t.Fatalf("got %+v, want output 260 thinking 90 input 1200", v)
+	if v.output != 260 || v.thinking != 90 || v.input != 1200 || v.total != 1460 {
+		t.Fatalf("got %+v, want output 260 thinking 90 input 1200 total 1460", v)
 	}
 
 	if _, _, ok := parseDsh([]byte(dshUsageChunk(260, 90, 1200))); ok {
 		t.Fatal("usage chunk must not count: it repeats the message")
 	}
 
+	// compaction/summary reports its own call, which dsh's durable usage fold
+	// leaves out; counting it here would disagree with what dsh reports.
+	summary := `{"type":"compaction/summary","seq":2652,"time":1,"data":{"usage":` +
+		`{"inputTokens":751302,"outputTokens":4012,"totalTokens":786034,"cacheReadTokens":30720}}}`
+	if _, _, ok := parseDsh([]byte(summary)); ok {
+		t.Fatal("compaction summary must not count")
+	}
+
+	// Cache buckets are billed input, and totalTokens includes them.
+	v, _, ok = parseDsh([]byte(dshMessageUsage(100, 10, 1000, 500, 300)))
+	if !ok || v.input != 1800 || v.output != 100 || v.thinking != 10 || v.total != 1900 {
+		t.Fatalf("cache buckets not folded into input: ok=%v %+v", ok, v)
+	}
+
 	legacy := `{"type":"assistant-message","usage":{"prompt_tokens":50,"completion_tokens":12,"reasoning_tokens":4}}`
 	v, _, ok = parseDsh([]byte(legacy))
-	if !ok || v.output != 12 || v.thinking != 4 || v.input != 50 {
+	if !ok || v.output != 12 || v.thinking != 4 || v.input != 50 || v.total != 62 {
 		t.Fatalf("snake_case spelling lost: ok=%v %+v", ok, v)
+	}
+}
+
+// TestParseDshV3RecordReadsNestedUsage drives one record with the exact shape
+// of a dsh v3 session line: the counts sit under data.usage, the cache read is
+// billed input, and totalTokens is the call's full total. Before this, only a
+// top-level usage object was read, so every real dsh log reported nothing.
+func TestParseDshV3RecordReadsNestedUsage(t *testing.T) {
+	line := `{"type":"assistant/message","seq":18,"time":1789275997979,"data":{` +
+		`"turn":1,"step":1,` +
+		`"message":{"role":"assistant","content":[{"type":"reasoning","text":"x"},{"type":"text","text":"y"}],` +
+		`"source":{"kind":"model","provider":"deepseek-official","model":"deepseek-flash"},` +
+		`"id":"22b2b763-cb7d-451d-86ad-d883d84c04d2"},` +
+		`"usage":{"inputTokens":1739,"outputTokens":100,"totalTokens":29743,` +
+		`"cacheReadTokens":27904,"reasoningTokens":42},"stream":{"chunks":[]}}}`
+
+	v, cwd, ok := parseDsh([]byte(line))
+	if !ok {
+		t.Fatal("real v3 assistant/message was rejected")
+	}
+	if cwd != "" {
+		t.Fatalf("usage line reported cwd %q, want none (the header owns it)", cwd)
+	}
+	if v.input != 1739+27904 {
+		t.Fatalf("input %d, want 29643 (uncached plus cache read)", v.input)
+	}
+	if v.output != 100 || v.thinking != 42 || v.total != 29743 {
+		t.Fatalf("got %+v, want output 100 thinking 42 total 29743", v)
 	}
 }
 
@@ -115,7 +176,7 @@ func TestDshZstdSessionLog(t *testing.T) {
 		t.Fatalf("input %d, want 800", got)
 	}
 
-	second := zstdFrame(t, dshMessage(150, 50, 200)+"\n")
+	second := zstdFrame(t, dshMessageUsage(150, 50, 200, 900, 0)+"\n")
 	appendBytes(t, path, second)
 	w.poll(nil)
 	if got := w.Sample().Output; got != 260 {
@@ -123,6 +184,12 @@ func TestDshZstdSessionLog(t *testing.T) {
 	}
 	if got := w.Sample().Thinking; got != 90 {
 		t.Fatalf("thinking %d, want 90 after second frame", got)
+	}
+	if got := w.Sample().Input; got != 1900 {
+		t.Fatalf("input %d, want 1900 after the cached second call", got)
+	}
+	if got := w.Sample().Total; got != 1250 {
+		t.Fatalf("total %d, want 1250: the largest call total, not a sum", got)
 	}
 }
 
