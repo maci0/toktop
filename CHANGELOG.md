@@ -10,6 +10,11 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-18
+
+Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.10.0).
+
 ### Breaking
 
 - `--agents` exits with status 2 instead of warning and continuing when
@@ -42,6 +47,8 @@ support channel (see SECURITY.md).
   redirect target. Probes now fail with the redirect's HTTP status instead.
   Set `--add` to the final engine or gateway URL, or configure that endpoint
   to serve `/api/generate` or `/v1/chat/completions` without redirecting.
+- `toktop help extra` and `toktop version --help extra` exit 2 instead of
+  printing help. `toktop help update extra` was already a usage error.
 
 ### Security
 
@@ -50,6 +57,7 @@ support channel (see SECURITY.md).
   downgrades. In 0.9.0, some such redirects could receive the bearer token.
   If an authenticated gateway relies on redirects, set `--add` to its final
   trusted URL; same-origin redirects still retain the configured token.
+- Ingest error and write-failure logs no longer include the peer address.
 
 ### Changed
 
@@ -61,7 +69,6 @@ support channel (see SECURITY.md).
   retrying the same body with the same header need no change. To control
   the event id across versions, supply an explicit body `id`, which still
   takes precedence over the header.
-
 - Recaptured the README and toktop.ai dashboard screenshot from a 0.9.0
   demo frame.
 
@@ -84,10 +91,41 @@ support channel (see SECURITY.md).
   above 65535 at startup instead of accepting unusable endpoints. Supply the
   engine's hostname and listening port; an omitted port still uses the scheme
   default.
+- OpenCode session directories on macOS and Windows match with a Unicode-aware
+  case-insensitive collation instead of ASCII `lower()`. Crush usage in the
+  attach second is counted. A trailing JSONL record at a reader buffer
+  boundary is counted. Negative sqlite counters no longer subtract from
+  totals. Non-TCP and listening sockets are excluded from peer matching.
+- `~/.ssh/config` honors tab and `=` separators and `Host !pattern`
+  exclusions. Remembered host keys are accepted on reconnect. Forwards do
+  not reopen after teardown. Session creation is bound by the command
+  deadline. Remote stderr is kept to a 4k tail. Loaded Ollama models
+  survive an SSH hop.
+- Windows engine discovery matches names such as `OLLAMA.EXE`. macOS process
+  listing splits columns on any whitespace. Process CPU sampling treats a
+  newly seen PID as a baseline rather than a delta from zero.
+- Prometheus samples parse the value before an optional timestamp. Duration
+  metrics are not counted as running requests. A zero tok/s gauge is shown
+  rather than treated as missing. The first sample can show a direct tok/s
+  gauge. Duplicate provider endpoints collapse to one poller. Remote engines
+  no longer inherit local process metrics.
+- Generation probes reject oversized non-stream bodies, cap total stream
+  bytes, bound reasoning output, fail when a stream reports usage with no
+  generation, keep backend token limits across model changes, and refuse
+  overflowing token counts. A `Retry-After` duration that would overflow
+  uses the maximum backoff.
+- The empty dashboard reports an ingest failure. Engine state rows remain
+  when details overflow the panel. Probe feedback stays visible on a narrow
+  pane. `--once` frames do not depend on wall clock.
+- Ingest audit logs record body-read errors, name write-failure causes, and
+  keep ingestion progress in panic logs. `toktop update` error text omits
+  the home directory.
+- The toktop.ai worker honors `Accept-Encoding` and does not double-encode
+  precompressed pages.
 
 ## [0.9.0] - 2026-09-13
 
-Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
+Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.9.0).
 
 ### Breaking
@@ -373,7 +411,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/maci0/toktop/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/maci0/toktop/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/maci0/toktop/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/maci0/toktop/compare/v0.6.1...v0.7.0

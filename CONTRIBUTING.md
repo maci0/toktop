@@ -64,7 +64,7 @@ exec over a running image, so the dashboard exits instead.
 and rendered by `scripts/screenshot.py`:
 
 ```
-make build VERSION=0.9.0
+make build VERSION=0.10.0
 tmux new-session -d -c "$PWD" -x 180 -y 50 -s shot './toktop --demo --seed 7 --no-hot-reload'
 sleep 60 && tmux send-keys -t shot p   # let the charts fill, then probe
 sleep 40                               # and let the probes answer
