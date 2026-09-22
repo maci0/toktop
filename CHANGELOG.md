@@ -10,6 +10,17 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-09-22
+
+### Changed
+
+- Frame rendering does one agent-rate pass instead of two where both
+  directions are needed, filters via-engine events in place instead of
+  copying the feed, and pre-sizes the chart series buffer. Rendered output
+  is unchanged.
+- The `!sqlite` build stubs for the database-backed agent sources live in
+  one file instead of two. No behavior change.
+
 ## [0.12.0] - 2026-09-19
 
 Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on

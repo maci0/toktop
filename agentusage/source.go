@@ -42,10 +42,14 @@ type sessionSource interface {
 	sessions(dirs []string, since time.Time) (map[string]map[string]sessionCounts, bool)
 }
 
-// tokenSource is a non-file usage reader. Exactly one field is set:
-// usageSource (opencode) sums this attach's tokens; sessionSource (crush)
-// snapshots per-session counters so a continued session contributes only
-// growth.
+// tokenSource is a non-file usage reader. One struct, two shapes: usage
+// (opencode) sums this attach's tokens via read; session (crush) snapshots
+// per-session counters via sessions so a continued session contributes only
+// growth. Exactly one shape is set per tool, decided by read/session below:
+// usageSource/sessionSource stay separate interfaces because the two shapes
+// have different methods and callers, and merging them would force every
+// source to implement both. Kept, not cut: the audit's merge saves no lines
+// once both method sets still exist.
 type tokenSource struct {
 	usage   usageSource
 	session sessionSource

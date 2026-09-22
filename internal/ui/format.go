@@ -96,7 +96,8 @@ func humanBytes(b uint64) string {
 	return fmt.Sprintf("%.0fMiB", float64(b)/(1<<20))
 }
 
-// humanBytesShort is the compact form used in the system strip.
+// humanBytesShort is the compact form used in the system strip. Same unit,
+// shorter suffix: the strip has no room for "iB".
 func humanBytesShort(b uint64) string {
 	const m = 1 << 20
 	if b >= 10<<30 {
@@ -114,11 +115,36 @@ func humanBytesShort(b uint64) string {
 // The cut also only ever lands between grapheme clusters (user-perceived
 // characters): slicing a flag emoji into lone regional indicators or an
 // accented letter off its combining mark would print garbage in the pane.
+// asciiWidth returns the visible width of s when s is plain ASCII without
+// ANSI escapes, else -1. The Width fast path: every frame calls Width on
+// dozens of short ASCII labels ("TOKTOP", "engine-0", "v0.12.0"), and Width
+// splits on "\n" (genSplit alloc) then walks graphemes. Printable ASCII is
+// one cell per byte, so len(s) is exact.
+func asciiWidth(s string) int {
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c >= 0x7f {
+			return -1
+		}
+	}
+	return len(s)
+}
+
+func widthOf(s string) int {
+	if w := asciiWidth(s); w >= 0 {
+		return w
+	}
+	return lipgloss.Width(s)
+}
+
 func shorten(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
-	if lipgloss.Width(s) <= n {
+	// Probe first: most inputs fit, and the probe is one grapheme walk
+	// without building output. The builder below only runs on overflow,
+	// where its cost is unavoidable. A single-scan variant built on every
+	// call and raised per-frame allocs (8316 to 8682 at 200x50).
+	if widthOf(s) <= n {
 		return s
 	}
 	var b strings.Builder
@@ -144,19 +170,20 @@ func clip(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if lipgloss.Width(s) <= w {
+	if widthOf(s) <= w {
 		return s
 	}
 	return shorten(strip(s), w)
 }
 
-// strip removes ANSI escapes and control characters so clip can cut safely.
-// Untrusted strings (engine-supplied names, agent events) must never reach
-// the raw terminal; SanitizeText is the same guard applied at render time.
+// strip is core.SanitizeText at render width: untrusted strings
+// (engine-supplied names, agent events) must never reach the raw terminal.
+// Kept as a named alias because clip's cut path and the header's engine
+// count both need it and the name reads shorter at those call sites.
 func strip(s string) string { return core.SanitizeText(s) }
 
 func padTo(s string, w int) string {
-	if gap := w - lipgloss.Width(s); gap > 0 {
+	if gap := w - widthOf(s); gap > 0 {
 		return s + strings.Repeat(" ", gap)
 	}
 	return s
@@ -164,7 +191,7 @@ func padTo(s string, w int) string {
 
 // padStart right-aligns s within w visible cells.
 func padStart(s string, w int) string {
-	if gap := w - lipgloss.Width(s); gap > 0 {
+	if gap := w - widthOf(s); gap > 0 {
 		return strings.Repeat(" ", gap) + s
 	}
 	return s
@@ -172,8 +199,8 @@ func padStart(s string, w int) string {
 
 // joinSpread places a left segment row and right segment on one padded line.
 func joinSpread(left, right string, width int) string {
-	lw := lipgloss.Width(left)
-	rw := lipgloss.Width(right)
+	lw := widthOf(left)
+	rw := widthOf(right)
 	gap := max(width-lw-rw, 1)
 	return left + strings.Repeat(" ", gap) + right
 }
@@ -187,7 +214,7 @@ func joinSpreadLeft(segs []string, w int) string {
 		if i == 0 {
 			seg = s
 		}
-		sw := lipgloss.Width(seg)
+		sw := widthOf(seg)
 		if used+sw > w {
 			break
 		}

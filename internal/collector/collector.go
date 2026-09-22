@@ -98,7 +98,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 	// CPU tick deltas use this clock, not a second wall-clock read inside
 	// the sampler: a frozen or stepped now must move dt the same way emit's
 	// snapshot stamp does.
-	c.procFn = func() []procs.Info { return procSampler.SnapshotAt(c.instant()) }
+	c.procFn = func() []procs.Info { return procSampler.SnapshotAt(c.now()) }
 	return c
 }
 
@@ -112,6 +112,9 @@ func (c *Collector) SetNow(fn func() time.Time) {
 	c.started = fn()
 }
 
+// instant is the collector clock with c.now inlined by hand at the hot
+// call sites (procFn above, emit, RecordAgent, ProbeAll): one method call
+// less per snapshot. Kept for the remaining sites below.
 func (c *Collector) instant() time.Time { return c.now() }
 
 // procSampler is the shared engine-process sampler; nil-safe when the

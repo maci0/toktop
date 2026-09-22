@@ -66,8 +66,9 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 		state += " (partial)"
 	}
 	now := frameNow(s, time.Time{})
+	outAgg, inAgg := aggBothAt(s, now)
 	fmt.Fprintf(&b, "%s · out %s tok/s · in %s tok/s",
-		state, fmtRate(aggOutAt(s, now)), fmtRate(aggInAt(s, now)))
+		state, fmtRate(outAgg), fmtRate(inAgg))
 	if n := len(core.AgentRates(s.Agents, now)); n > 0 {
 		b.WriteString(fmt.Sprintf(" · %d agents", n))
 	}

@@ -100,6 +100,9 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	w.now = fn
 }
 
+// instant reads w.now. Kept as a method so poll/record sites stay one short
+// call instead of repeating the field dereference.
+
 func (w *Watcher) instant() time.Time { return w.now() }
 
 // Run follows agents until the context is canceled. Call LoadDefinitions

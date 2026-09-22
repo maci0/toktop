@@ -31,6 +31,10 @@ type AgentRate struct {
 
 // AgentRates summarizes the recent event stream, busiest first.
 func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
+	return agentRatesFiltered(events, now, false)
+}
+
+func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []AgentRate {
 	if len(events) == 0 {
 		return nil
 	}
@@ -46,6 +50,9 @@ func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
 	by := map[string]*acc{}
 	cutoff := now.Add(-AgentRateWindow)
 	for _, ev := range events {
+		if ownOnly && ev.ViaEngine != "" {
+			continue
+		}
 		if ev.At.Before(cutoff) {
 			continue
 		}
@@ -98,13 +105,7 @@ func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
 // the unattributed slice. The per-agent row keeps the last ViaEngine so
 // it shows who they are talking to now.
 func AgentOwnTokPS(events []AgentEvent, now time.Time) (outPS, inPS float64) {
-	own := make([]AgentEvent, 0, len(events))
-	for _, ev := range events {
-		if ev.ViaEngine == "" {
-			own = append(own, ev)
-		}
-	}
-	for _, r := range AgentRates(own, now) {
+	for _, r := range agentRatesFiltered(events, now, true) {
 		outPS += r.TokPS
 		inPS += r.PromptPS
 	}

@@ -6,6 +6,7 @@ import (
 	"maps"
 	"math/bits"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -475,8 +476,16 @@ type timedVal struct {
 // timedSeries flattens every provider's history onto absolute timestamps
 // spaced one cadence apart, tagging each sample with its engine: compressed
 // buckets must tell engines apart to average within one and sum across all.
+//
+// The slice is pre-sized: the caller replays this every frame, and growing
+// it from nil reallocated per provider row.
 func timedSeries(s core.Snapshot, cadence time.Duration) []timedVal {
-	var tv []timedVal
+	n := 0
+	for i := range s.Providers {
+		n += len(s.Providers[i].OutHist)
+	}
+	n += core.AgentHistoryLen + core.HistoryLen
+	tv := make([]timedVal, 0, n)
 	var end time.Time
 	for i := range s.Providers {
 		p := &s.Providers[i]
@@ -553,6 +562,15 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 	for _, sample := range tv {
 		nEngines = max(nEngines, sample.engine+1)
 	}
+	// cum[j] is the age of bucket j's newest edge, cum[0] = 0. The linear
+	// scan this replaces kept the first bucket with offset >= e[j+1],
+	// i.e. the smallest j with cum[j+1] >= total-offset; the binary search
+	// below tests exactly that predicate, so bucketing is unchanged while
+	// the per-sample walk drops from O(w) to O(log w).
+	cum := make([]time.Duration, w+1)
+	for j := range w {
+		cum[j+1] = cum[j] + spans[j]
+	}
 	// Per-engine bucket sums and counts; rows materialize only for buckets
 	// samples actually land in.
 	sums := make([][]float64, w)
@@ -562,15 +580,10 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 		if offset < 0 || offset >= total {
 			continue
 		}
-		j := 0
-		acc := total
-		for j < w-1 {
-			if offset < acc-spans[j] {
-				acc -= spans[j]
-				j++
-				continue
-			}
-			break
+		x := total - offset
+		j := sort.Search(w, func(j int) bool { return cum[j+1] >= x })
+		if j >= w {
+			j = w - 1
 		}
 		if sums[j] == nil {
 			sums[j] = make([]float64, nEngines)
@@ -1365,21 +1378,27 @@ func frameNow(s core.Snapshot, fallback time.Time) time.Time {
 }
 
 func aggOutAt(s core.Snapshot, now time.Time) float64 {
-	t := 0.0
-	for _, p := range s.Providers {
-		t += p.OutTokPS
-	}
-	out, _ := core.AgentOwnTokPS(s.Agents, now)
-	return t + out
+	out, _ := aggBothAt(s, now)
+	return out
 }
 
+// aggInAt is the input-side half of aggBothAt, for call sites needing one
+// direction only: same single AgentOwnTokPS pass, no duplicate scan.
 func aggInAt(s core.Snapshot, now time.Time) float64 {
-	t := 0.0
+	_, in := aggBothAt(s, now)
+	return in
+}
+
+// aggBothAt sums provider rates with unattributed agent rates in one pass.
+// renderHeader and PlainTextFrame need both directions; two separate calls
+// each run AgentRates (map + sort) over the same feed.
+func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
 	for _, p := range s.Providers {
-		t += p.InTokPS
+		out += p.OutTokPS
+		in += p.InTokPS
 	}
-	_, in := core.AgentOwnTokPS(s.Agents, now)
-	return t + in
+	aOut, aIn := core.AgentOwnTokPS(s.Agents, now)
+	return out + aOut, in + aIn
 }
 
 func uniqueAgents(events []core.AgentEvent) int {
@@ -1418,6 +1437,8 @@ func aggHist(s core.Snapshot, out bool, w int, cadence time.Duration) []float64 
 			end = last
 		}
 	}
+	// Timed and uniform paths both end at the newest sample anywhere; the
+	// scan is one helper so the two modes cannot disagree about "newest".
 	if aend := agentHistEnd(s.Agents); aend.After(end) {
 		end = aend
 	}
