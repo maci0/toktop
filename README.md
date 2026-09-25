@@ -63,7 +63,9 @@ added on top of the engine's own numbers.
 
 Once asked for, nothing else has to be configured and the agent does not have
 to cooperate: claude, codex, qwen, copilot, pi, prime-agent, feynman, clanker,
-and dsh all keep transcripts that carry the provider's own counts. dsh's
+crush, opencode, and dsh all keep records carrying the provider's own counts
+(JSONL transcripts, except opencode and crush which keep SQLite stores).
+dsh's
 default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 Agents that report nothing show no rate rather than a zero.

@@ -33,7 +33,7 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 2,743 bytes rather than 6,696 bytes in the local Worker response test.
+transfers 3,698 bytes rather than 10,027 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 Source comments
@@ -52,8 +52,8 @@ width on tablets. Both formats retain their 1280w and 1920w candidates. Served f
 this Worker so a deploy updates share cards and the page together.
 `wrangler.jsonc` sets `run_worker_first` so those image paths hit the Worker
 (cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline. Measured
-against the current source with Bun 1.4.2: 6,696 bytes identity / 2,743 gzip /
-2,224 brotli for the HTML (previously 6,588 / 2,715 / 2,197), still inside the
+against the current source with Bun 1.4.2: 10,027 bytes identity / 3,698 gzip /
+3,086 brotli for the HTML (previously 6,696 / 2,743 / 2,224), still inside the
 ~14 KB initial congestion window. The budget
 is pinned by a test, so drift fails `bun test site/`; numbers above are
 re-measurable with it:

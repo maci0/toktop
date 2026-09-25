@@ -162,7 +162,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(2743);
+    expect(bytes.byteLength).toBe(3698);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -395,9 +395,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   const brotli = new Uint8Array(
     await (await call({ "accept-encoding": "br" })).arrayBuffer(),
   ).byteLength;
-  expect(identity).toBe(6696);
-  expect(gzipped).toBe(2743);
-  expect(brotli).toBe(2224);
+  expect(identity).toBe(10027);
+  expect(gzipped).toBe(3698);
+  expect(brotli).toBe(3086);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);

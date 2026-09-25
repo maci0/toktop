@@ -55,12 +55,23 @@ const HTML = htmlForWire(`<!doctype html>
     }
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    margin: 0; padding: 3rem 1.25rem 5rem;
+    margin: 0; padding: 0 1.25rem 5rem;
     background: var(--bg); color: var(--fg);
     font-family: var(--mono); font-size: 15px; line-height: 1.6;
   }
   main { max-width: 76rem; margin: 0 auto; }
+  /* Anchor bar: brand + section jumps, sticky. */
+  .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 1.25rem;
+    align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
+    background: var(--bg); border-bottom: 1px solid var(--line); }
+  .brand { font-weight: 700; font-size: 1.1rem; text-decoration: none; color: var(--fg);
+    border-bottom: 0; white-space: nowrap; }
+  .brand .cursor { color: var(--accent); }
+  nav { display: flex; gap: 1.1rem; font-size: 13.5px; margin-left: auto; }
+  nav a { color: var(--dim); white-space: nowrap; }
+  .hero { padding-top: 2.6rem; }
   h1 { font-size: 2.6rem; margin: 0; }
   /* Blinking content that starts automatically must be pausable/stoppable
      (WCAG 2.2.2); honoring prefers-reduced-motion is the static-page remedy,
@@ -69,7 +80,7 @@ const HTML = htmlForWire(`<!doctype html>
     h1 .cursor { color: var(--accent); animation: blink 1.2s step-end infinite; }
     @keyframes blink { 50% { opacity: 0; } }
   }
-  .tag { color: var(--dim); margin: .6rem 0 2.4rem; font-size: 1.05rem; }
+  .tag { color: var(--dim); margin: .6rem 0 2rem; font-size: 1.05rem; max-width: 62ch; }
   /* Sentence-case titles on the tagline size, not uppercase micro-labels.
      Install/Run sit tight under the capture; the manifesto heading after
      the list keeps the larger gap. */
@@ -91,6 +102,22 @@ const HTML = htmlForWire(`<!doctype html>
   ul { padding-left: 1.1rem; margin: 0; }
   li { margin-bottom: .5rem; }
   li b { font-weight: 600; }
+  /* Feature grid: four panes, each a name, a job, a specimen. */
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem;
+    max-width: none; margin: 0 0 1rem; padding: 0; list-style: none; }
+  .grid li { margin: 0; background: var(--panel); border: 1px solid var(--line);
+    border-top: 2px solid var(--accent); padding: .9rem 1rem; }
+  .grid li:nth-child(2n) { border-top-color: var(--warm); }
+  .grid b { display: block; font-size: .95rem; margin-bottom: .3rem; }
+  .grid p { margin: 0 0 .5rem; font-size: 13.5px; color: var(--dim); max-width: none; }
+  .grid code { display: block; font-size: 12.5px; white-space: normal; }
+  /* Key table: chips left, action right. */
+  .keys { display: grid; grid-template-columns: auto 1fr; gap: .3rem .9rem;
+    max-width: 62ch; margin: 0 0 1rem; font-size: 13.5px; }
+  .keys dt, .keys dd { margin: 0; }
+  .keys dd { color: var(--dim); }
+  kbd { border: 1px solid var(--line); border-radius: 4px;
+    padding: 0 .4rem; font-family: inherit; font-size: 12.5px; background: var(--bg); }
   /* Links must not be identified by color alone (WCAG 1.4.1): underline at
      rest, not just on hover. */
   a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px;
@@ -113,17 +140,34 @@ const HTML = htmlForWire(`<!doctype html>
     color: #7d8895; background: #11161d; border-bottom: 1px solid #222b36;
   }
   .shot img { display: block; width: 100%; height: auto; }
+  section { scroll-margin-top: 4rem; }
   @media (max-width: 640px) {
-    body { padding: 2rem .85rem 4rem; }
+    body { padding: 0 .85rem 4rem; }
+    .bar { margin: 0 -.85rem; padding-inline: .85rem; gap: .8rem; }
+    nav { gap: .8rem; font-size: 12.5px; overflow-x: auto; }
     h1 { font-size: 2rem; }
+    .hero { padding-top: 2rem; }
+    .grid { grid-template-columns: 1fr; }
   }
 </style>
 </head>
 <body>
-<main>
+<header class="bar">
+  <a class="brand" href="#top">toktop<span class="cursor" aria-hidden="true">_</span></a>
+  <nav aria-label="Sections">
+    <a href="#install">Install</a>
+    <a href="#shows">Shows</a>
+    <a href="#keys">Keys</a>
+    <a href="#feed">Feed</a>
+  </nav>
+</header>
+<main id="top">
+  <div class="hero">
   <h1>toktop<span class="cursor" aria-hidden="true">_</span></h1>
   <p class="tag"><code>btop</code> for AI: a terminal dashboard for LLM inference
-  engines and the coding agents hammering them.</p>
+  engines and the coding agents hammering them. One static binary, no daemon,
+  no telemetry, no account.</p>
+  </div>
 
   <figure class="shot">
     <figcaption><span class="dim">$</span> toktop --demo</figcaption>
@@ -136,37 +180,63 @@ const HTML = htmlForWire(`<!doctype html>
     </picture>
   </figure>
 
+  <section id="install">
   <h2>Install</h2>
 <pre tabindex="0"><code>go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
-<span class="dim"># or grab a binary: linux / macos / windows, amd64 + arm64</span></code></pre>
+<span class="dim"># or a binary: linux / macos / windows, amd64 + arm64</span></code></pre>
+  <p class="dim">The <code>sqlite</code> tag matches the release binaries: without it
+  crush and opencode stores are unreadable.
+  <a href="https://github.com/maci0/toktop/releases">Releases</a> ·
+  <code>toktop update</code> self-updates.</p>
+  </section>
 
+  <section id="run">
   <h2>Run</h2>
 <pre tabindex="0"><code>toktop --demo             <span class="dim"># simulated fleet, works instantly</span>
 toktop                    <span class="dim"># auto-discovers local engines</span>
 toktop --agents           <span class="dim"># also watch coding agents on this machine</span>
 toktop ssh://you@box      <span class="dim"># watch another host over ssh</span></code></pre>
+  </section>
 
+  <section id="shows">
   <h2>What it shows</h2>
-  <ul>
-    <li><b>Engines</b> found by port and process: Ollama, llama.cpp, vLLM,
-      SGLang, TRT-LLM, LM Studio, MLX, KoboldCpp, LocalAI, TGI, LiteLLM,
-      GPUStack, Lemonade, OmniRoute, plus a generic OpenAI-compatible
-      fallback so nothing is missed.</li>
-    <li><b>Agents</b> without any cooperation from them: claude, codex, qwen,
-      copilot, opencode, pi, prime-agent, feynman, clanker and dsh all keep
-      session logs carrying the provider's own token counts.</li>
-    <li><b>Probes</b> that measure real time-to-first-token and decode speed,
-      instead of guessing from averages.</li>
-    <li><b>System</b> context: GPU/NPU enumeration, VRAM, temps, power, and
-      KV-cache pressure next to the throughput that caused it.</li>
+  <ul class="grid">
+    <li><b>Engines</b><p>Found by port and process, fingerprinted by HTTP.</p><code>Ollama · vLLM · llama.cpp · SGLang · LM Studio · MLX · +9</code></li>
+    <li><b>Agents</b><p>Read from their own session logs. No cooperation needed.</p><code>claude · codex · qwen · copilot · dsh · +2 stores</code></li>
+    <li><b>Probes</b><p>Real generations measuring TTFT and decode speed.</p><code>press p · or --probe N to auto-probe</code></li>
+    <li><b>System</b><p>GPU/NPU, VRAM, temps, power beside the throughput.</p><code>nv0 82° 69% · vram 57G/80G · 397W</code></li>
   </ul>
+  <p class="dim">Agents read from transcripts: claude, codex,
+  qwen, copilot, pi, prime-agent, feynman, clanker and dsh keep JSONL;
+  opencode and crush keep SQLite (needs the <code>sqlite</code> tag).
+  Agents on a watched engine show <code>via &lt;engine&gt;</code>, counted once.</p>
+  </section>
+
+  <section id="keys">
+  <h2>Keys</h2>
+  <dl class="keys">
+    <dt><kbd>space</kbd></dt><dd>pause / resume</dd>
+    <dt><kbd>p</kbd></dt><dd>probe every engine</dd>
+    <dt><kbd>t</kbd></dt><dd>toggle compressed timescale</dd>
+    <dt><kbd>a</kbd></dt><dd>focus engines or agents</dd>
+    <dt><kbd>q</kbd></dt><dd>quit</dd>
+  </dl>
+  </section>
+
+  <section id="feed">
+  <h2>Agent feed</h2>
+<pre tabindex="0"><code>curl -X POST localhost:8420/v1/events -d \
+  '{"agent":"coder","output_tokens":310,"prompt_tokens":4200}'</code></pre>
+  <p class="dim">Any harness can POST usage to the ingest endpoint
+  (<code>127.0.0.1:8420</code>, <code>--no-ingest</code> disables it).
+  <code>--once --plain</code> prints a linear report for screen readers:
+  no braille, no borders, no columns.</p>
+  </section>
 
   <h2>Measured, or nothing</h2>
-  <p class="dim">Every number here is one an engine or an agent actually
-  reported. Nothing is estimated, interpolated, or inferred from character
-  counts. An agent that reports nothing shows no rate, rather than a zero that
-  reads like a measurement. An agent generating through an engine that is
-  already being watched is counted once, not twice.</p>
+  <p class="dim">Every number is one an engine or an agent actually
+  reported. Nothing estimated or inferred. An agent that reports nothing
+  shows no rate, not a zero. An agent on a watched engine is counted once.</p>
 
   <footer>
     <a href="https://github.com/maci0/toktop">github.com/maci0/toktop</a>
