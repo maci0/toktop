@@ -10,7 +10,45 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- `toktop update --help` shows subcommand help, and `toktop help` and
+  `toktop version` accept standard Go help flag variants (`-h`, `--h`,
+  `-help`, `--help`).
+- Web site accessibility improvements: skip-to-content navigation link,
+  landmark regions, motion preference checks for smooth scrolling, and
+  focus-visible styling.
+
+### Changed
+
+- SBOM generation omits timestamps and serial numbers for byte-reproducible
+  CycloneDX output, and the SBOM is generated as part of `make release`.
+
+### Fixed
+
+- `toktop` treats broken pipes (`EPIPE` and `io.ErrClosedPipe`) on stdout as
+  clean exits with code 0 instead of reporting write errors when piped to
+  utilities like `head` or `grep`.
+- Prevented potential cache aliasing and stale state by cloning cached
+  slices in process and system monitoring, pruning expired transcript
+  listings on cache hits in `agentusage`, and clearing cached KV percentages
+  when a provider model is unloaded.
+- Hardened input validation and credential handling across packages: reject
+  mixed-script identities in `agentwatch` to prevent homograph spoofing,
+  disallow CRLF in bearer tokens to prevent HTTP header injection, strip
+  authorization headers and reject userinfo on `toktop update` HTTP
+  redirects, and validate remote target hostnames and user names.
+- Fixed baseline seeding for zstd-compressed dsh session logs in
+  `agentusage`.
+- Added integer overflow saturation and handled NaN/infinite values in
+  duration, memory, rate, and UI percentage conversions.
+- Safeguarded background ticker loops against non-positive intervals to
+  prevent invalid timers.
+
 ## [0.13.0] - 2026-09-22
+
+Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.13.0).
 
 ### Changed
 
@@ -23,7 +61,7 @@ support channel (see SECURITY.md).
 
 ## [0.12.0] - 2026-09-19
 
-Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
+Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.12.0).
 
 ### Added
@@ -35,6 +73,11 @@ Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
   and the host strip, so neither half of the machine disappears. The compact
   strip for panes too small for the dashboard drops the missing-engines line
   on an `--agents` run too.
+
+## [0.11.0] - 2026-09-19
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.11.0).
 
 ### Breaking
 
@@ -466,7 +509,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/maci0/toktop/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/maci0/toktop/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/maci0/toktop/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/maci0/toktop/compare/v0.9.0...v0.10.0

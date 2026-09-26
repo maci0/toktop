@@ -5,6 +5,10 @@ VERSION ?= dev
 # VERSION is interpolated into -ldflags and dist filenames. Refuse values
 # that would break the shell, the linker flag, or the artifact name.
 CHECK_VERSION = printf '%s' '$(VERSION)' | grep -qE '^[A-Za-z0-9._+-]+$$' || { echo "make: VERSION must match [A-Za-z0-9._+-]+ (got '$(VERSION)')" >&2; exit 1; }
+CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
+	grep -qF '\#\# [$(VERSION)]' CHANGELOG.md || { echo "make: CHANGELOG.md missing '\#\# [$(VERSION)]' section" >&2; exit 1; }; \
+	grep -qF '[$(VERSION)]:' CHANGELOG.md || { echo "make: CHANGELOG.md missing '[$(VERSION)]:' link reference" >&2; exit 1; }; \
+fi
 
 GO          ?= go
 # go.mod's go line is the compiler pin. GOTOOLCHAIN=auto would keep a newer
@@ -284,8 +288,13 @@ pr: ## every PR merge gate except the OS matrix: ci + site-check + scripts-check
 clean: ## remove build artifacts
 	rm -rf $(DIST) $(BINARY) coverage.out *.test
 
+.PHONY: check-changelog
+check-changelog: ## verify CHANGELOG.md contains release section and link for VERSION
+	@$(CHECK_VERSION)
+	@$(CHECK_CHANGELOG)
+
 .PHONY: release
-release: checksums sbom ## build every release platform and SBOM into dist/ with reproducible checksums
+release: check-changelog checksums sbom ## build every release platform and SBOM into dist/ with reproducible checksums
 
 .PHONY: checksums
 checksums: test-dist ## checksum the dist/ binaries into a byte-reproducible tarball

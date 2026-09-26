@@ -128,6 +128,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
 | `make site-check` | `bun test site/` |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
+| `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 
 ## Before opening a PR
 
