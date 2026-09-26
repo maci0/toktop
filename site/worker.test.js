@@ -162,7 +162,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(3698);
+    expect(bytes.byteLength).toBe(3909);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -381,6 +381,14 @@ test("section titles are sentence case on the body scale, not marketing labels",
   expect(identityBody.includes("max-width: 62ch")).toBe(true);
 });
 
+test("accessibility contracts: skip link, motion preferences, focus indicators, and landmarks", () => {
+  expect(identityBody.includes('class="skip-link"')).toBe(true);
+  expect(identityBody.includes("prefers-reduced-motion: no-preference")).toBe(true);
+  expect(identityBody.includes(":focus-visible")).toBe(true);
+  expect(identityBody.includes('role="region"')).toBe(true);
+  expect(identityBody.includes('aria-labelledby="install-heading"')).toBe(true);
+});
+
 // RFC 6928 initcwnd: ten ~1460-byte segments (~14 KB). Identity bytes plus
 // inline CSS are everything there is, so staying under this keeps first paint
 // at one round trip. Exact sizes are the record: a copy or compression
@@ -395,9 +403,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   const brotli = new Uint8Array(
     await (await call({ "accept-encoding": "br" })).arrayBuffer(),
   ).byteLength;
-  expect(identity).toBe(10027);
-  expect(gzipped).toBe(3698);
-  expect(brotli).toBe(3086);
+  expect(identity).toBe(11063);
+  expect(gzipped).toBe(3909);
+  expect(brotli).toBe(3262);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);

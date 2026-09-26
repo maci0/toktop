@@ -51,17 +51,28 @@ const HTML = htmlForWire(`<!doctype html>
   @media (prefers-color-scheme: light) {
     :root {
       --bg: #fbfbf9; --panel: #f3f3ee; --line: #e3e3de;
-      --fg: #1b1f24; --dim: #5c6570; --accent: #1a7f4b; --warm: #9a6b00;
+      --fg: #1b1f24; --dim: #5c6570; --accent: #1a7f4b; --warm: #8c5f00;
     }
   }
   * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
   body {
     margin: 0; padding: 0 1.25rem 5rem;
     background: var(--bg); color: var(--fg);
     font-family: var(--mono); font-size: 15px; line-height: 1.6;
   }
+  .skip-link {
+    position: absolute; top: -100px; left: 1.25rem; z-index: 100;
+    padding: .5rem 1rem; background: var(--panel); color: var(--fg);
+    border: 1px solid var(--accent); text-decoration: none; font-size: 13.5px;
+  }
+  .skip-link:focus, .skip-link:focus-visible {
+    top: .7rem; outline: 2px solid var(--accent); outline-offset: 2px;
+  }
   main { max-width: 76rem; margin: 0 auto; }
+  main:focus { outline: none; }
   /* Anchor bar: brand + section jumps, sticky. */
   .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 1.25rem;
     align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
@@ -70,7 +81,7 @@ const HTML = htmlForWire(`<!doctype html>
     border-bottom: 0; white-space: nowrap; }
   .brand .cursor { color: var(--accent); }
   nav { display: flex; gap: 1.1rem; font-size: 13.5px; margin-left: auto; }
-  nav a { color: var(--dim); white-space: nowrap; }
+  nav a { color: var(--dim); white-space: nowrap; padding: .3rem 0; }
   .hero { padding-top: 2.6rem; }
   h1 { font-size: 2.6rem; margin: 0; }
   /* Blinking content that starts automatically must be pausable/stoppable
@@ -92,7 +103,7 @@ const HTML = htmlForWire(`<!doctype html>
   }
   /* Narrow viewports clip code lines into a scroll container; a mouse-only
      scrollbar would lock keyboard users out (WCAG 2.1.1). */
-  pre:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   code { color: inherit; }
   .up { color: var(--accent); }
   .warm { color: var(--warm); }
@@ -152,16 +163,17 @@ const HTML = htmlForWire(`<!doctype html>
 </style>
 </head>
 <body>
+<a class="skip-link" href="#top">Skip to content</a>
 <header class="bar">
   <a class="brand" href="#top">toktop<span class="cursor" aria-hidden="true">_</span></a>
   <nav aria-label="Sections">
     <a href="#install">Install</a>
-    <a href="#shows">Shows</a>
+    <a href="#shows" aria-label="What it shows">Shows</a>
     <a href="#keys">Keys</a>
     <a href="#feed">Feed</a>
   </nav>
 </header>
-<main id="top">
+<main id="top" tabindex="-1">
   <div class="hero">
   <h1>toktop<span class="cursor" aria-hidden="true">_</span></h1>
   <p class="tag"><code>btop</code> for AI: a terminal dashboard for LLM inference
@@ -180,9 +192,9 @@ const HTML = htmlForWire(`<!doctype html>
     </picture>
   </figure>
 
-  <section id="install">
-  <h2>Install</h2>
-<pre tabindex="0"><code>go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
+  <section id="install" aria-labelledby="install-heading">
+  <h2 id="install-heading">Install</h2>
+<pre tabindex="0" role="region" aria-label="Install commands"><code>go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
 <span class="dim"># or a binary: linux / macos / windows, amd64 + arm64</span></code></pre>
   <p class="dim">The <code>sqlite</code> tag matches the release binaries: without it
   crush and opencode stores are unreadable.
@@ -190,16 +202,16 @@ const HTML = htmlForWire(`<!doctype html>
   <code>toktop update</code> self-updates.</p>
   </section>
 
-  <section id="run">
-  <h2>Run</h2>
-<pre tabindex="0"><code>toktop --demo             <span class="dim"># simulated fleet, works instantly</span>
+  <section id="run" aria-labelledby="run-heading">
+  <h2 id="run-heading">Run</h2>
+<pre tabindex="0" role="region" aria-label="Run commands"><code>toktop --demo             <span class="dim"># simulated fleet, works instantly</span>
 toktop                    <span class="dim"># auto-discovers local engines</span>
 toktop --agents           <span class="dim"># also watch coding agents on this machine</span>
 toktop ssh://you@box      <span class="dim"># watch another host over ssh</span></code></pre>
   </section>
 
-  <section id="shows">
-  <h2>What it shows</h2>
+  <section id="shows" aria-labelledby="shows-heading">
+  <h2 id="shows-heading">What it shows</h2>
   <ul class="grid">
     <li><b>Engines</b><p>Found by port and process, fingerprinted by HTTP.</p><code>Ollama · vLLM · llama.cpp · SGLang · LM Studio · MLX · +9</code></li>
     <li><b>Agents</b><p>Read from their own session logs. No cooperation needed.</p><code>claude · codex · qwen · copilot · dsh · +2 stores</code></li>
@@ -212,8 +224,8 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
   Agents on a watched engine show <code>via &lt;engine&gt;</code>, counted once.</p>
   </section>
 
-  <section id="keys">
-  <h2>Keys</h2>
+  <section id="keys" aria-labelledby="keys-heading">
+  <h2 id="keys-heading">Keys</h2>
   <dl class="keys">
     <dt><kbd>space</kbd></dt><dd>pause / resume</dd>
     <dt><kbd>p</kbd></dt><dd>probe every engine</dd>
@@ -223,9 +235,9 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
   </dl>
   </section>
 
-  <section id="feed">
-  <h2>Agent feed</h2>
-<pre tabindex="0"><code>curl -X POST localhost:8420/v1/events -d \
+  <section id="feed" aria-labelledby="feed-heading">
+  <h2 id="feed-heading">Agent feed</h2>
+<pre tabindex="0" role="region" aria-label="Agent feed event payload"><code>curl -X POST localhost:8420/v1/events -d \
   '{"agent":"coder","output_tokens":310,"prompt_tokens":4200}'</code></pre>
   <p class="dim">Any harness can POST usage to the ingest endpoint
   (<code>127.0.0.1:8420</code>, <code>--no-ingest</code> disables it).
@@ -233,10 +245,12 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
   no braille, no borders, no columns.</p>
   </section>
 
-  <h2>Measured, or nothing</h2>
+  <section id="measured" aria-labelledby="measured-heading">
+  <h2 id="measured-heading">Measured, or nothing</h2>
   <p class="dim">Every number is one an engine or an agent actually
   reported. Nothing estimated or inferred. An agent that reports nothing
   shows no rate, not a zero. An agent on a watched engine is counted once.</p>
+  </section>
 
   <footer>
     <a href="https://github.com/maci0/toktop">github.com/maci0/toktop</a>
