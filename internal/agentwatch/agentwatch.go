@@ -19,6 +19,7 @@ package agentwatch
 import (
 	"cmp"
 	"context"
+	"maps"
 	"net"
 	"net/netip"
 	"net/url"
@@ -232,12 +233,8 @@ func (w *Watcher) discover(ctx context.Context) {
 	}
 
 	w.mu.Lock()
-	pids := make([]int, 0, len(w.tracked))
-	for pid := range w.tracked {
-		pids = append(pids, pid)
-	}
+	pids := slices.Sorted(maps.Keys(w.tracked))
 	w.mu.Unlock()
-	slices.Sort(pids)
 
 	// Re-checked every pass rather than once at discovery: an agent connects
 	// to its engine after it starts, and may switch engines mid-session.
@@ -332,12 +329,9 @@ func parseEngineAddr(addr string) (netip.AddrPort, string, bool) {
 // sequences must not depend on map iteration, or equal-timestamp events
 // land in a different order across replays. Caller holds w.mu.
 func (w *Watcher) trackedList() []*tracked {
-	out := make([]*tracked, 0, len(w.tracked))
-	for _, t := range w.tracked {
-		out = append(out, t)
-	}
-	sortTracked(out)
-	return out
+	return slices.SortedFunc(maps.Values(w.tracked), func(a, b *tracked) int {
+		return cmp.Compare(a.proc.PID, b.proc.PID)
+	})
 }
 
 func sortTracked(ts []*tracked) {

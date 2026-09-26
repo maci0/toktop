@@ -2,6 +2,8 @@ package remote
 
 import (
 	"context"
+	"maps"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -140,14 +142,13 @@ func (s *Stats) Merge(into *core.SysSample) {
 	if len(s.last.GPUs) > 0 {
 		// Copy: s.last is rewritten on the next poll, and the merged
 		// sample is published to the UI goroutine.
-		into.GPUs = append([]core.GPUDevice(nil), s.last.GPUs...)
+		into.GPUs = slices.Clone(s.last.GPUs)
 	}
 	if len(s.last.Drivers) > 0 {
-		for k, v := range s.last.Drivers {
-			if into.Drivers == nil {
-				into.Drivers = map[string]string{}
-			}
-			into.Drivers[k] = v
+		if into.Drivers == nil {
+			into.Drivers = maps.Clone(s.last.Drivers)
+		} else {
+			maps.Copy(into.Drivers, s.last.Drivers)
 		}
 	}
 	into.RemoteHost = s.last.RemoteHost

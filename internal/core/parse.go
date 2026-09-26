@@ -5,6 +5,7 @@ package core
 
 import (
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -12,12 +13,7 @@ import (
 // parsers match the same field-name vocabulary, so the helper lives here
 // rather than once per package.
 func ContainsAny(s string, subs ...string) bool {
-	for _, sub := range subs {
-		if strings.Contains(s, sub) {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(subs, func(sub string) bool { return strings.Contains(s, sub) })
 }
 
 // SatInt coerces a float a vendor reported into an int, saturating at the

@@ -167,7 +167,7 @@ func hostInfoLinux(s *core.SysSample) {
 	if h.amdgpu != "" {
 		s.Drivers["amdgpu"] = h.amdgpu
 	}
-	s.NPUs = append([]string(nil), h.npus...)
+	s.NPUs = slices.Clone(h.npus)
 }
 
 func prettyOSName() string {

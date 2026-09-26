@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"maps"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -47,7 +46,7 @@ func (d *Discovery) ForwardSet(wellKnown []int) []int {
 			add(p)
 		}
 	}
-	sort.Ints(out)
+	slices.Sort(out)
 	return out
 }
 
@@ -182,6 +181,6 @@ func enginePorts(infos []procs.Info) []int {
 			out = append(out, port)
 		}
 	}
-	sort.Ints(out)
+	slices.Sort(out)
 	return out
 }

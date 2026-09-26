@@ -6,6 +6,7 @@ import (
 	"context"
 	"math"
 	"math/rand/v2"
+	"slices"
 	"sort"
 	"sync"
 	"time"
@@ -342,8 +343,8 @@ func (s *Source) snapshot(now time.Time) core.Snapshot {
 		At:     now,
 		Uptime: now.Sub(s.start),
 		Sys:    &sys,
-		Agents: append([]core.AgentEvent(nil), s.agents...),
-		Probes: append([]core.ProbeSample(nil), s.probes...),
+		Agents: slices.Clone(s.agents),
+		Probes: slices.Clone(s.probes),
 	}
 	for i, b := range s.backends {
 		ps := core.ProviderSnapshot{
@@ -359,8 +360,8 @@ func (s *Source) snapshot(now time.Time) core.Snapshot {
 
 			Running: 1 + i%3 + int(clamp(math.Sin(s.t/7+float64(i))*1.5+1.5, 0, 4)),
 			Waiting: int(clamp(math.Sin(s.t/13+float64(i*2))*3+3, 0, 24)),
-			OutHist: append([]float64(nil), s.histOut[b.label]...),
-			InHist:  append([]float64(nil), s.histIn[b.label]...),
+			OutHist: slices.Clone(s.histOut[b.label]),
+			InHist:  slices.Clone(s.histIn[b.label]),
 			OutT0:   s.t0[b.label],
 			InT0:    s.t0[b.label],
 		}

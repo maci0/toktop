@@ -1,7 +1,10 @@
 // Package core defines the shared data model flowing from collectors to the UI.
 package core
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 const HistoryLen = 180 // rolling samples per provider (~3 min at 1s poll)
 
@@ -110,15 +113,7 @@ type AgentEvent struct {
 // never matches, so events without an id are not treated as duplicates of
 // each other.
 func HasAgentID(events []AgentEvent, id string) bool {
-	if id == "" {
-		return false
-	}
-	for i := range events {
-		if events[i].ID == id {
-			return true
-		}
-	}
-	return false
+	return id != "" && slices.ContainsFunc(events, func(e AgentEvent) bool { return e.ID == id })
 }
 
 // ProbeSample is one generation-probe result (TTFT and decode rate).

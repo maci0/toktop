@@ -5,6 +5,7 @@ package procs
 
 import (
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -326,12 +327,7 @@ var engineMatchers = []engineMatcher{
 }
 
 func baseNameEq(args []string, want string) bool {
-	for _, a := range args {
-		if baseName(a) == want {
-			return true
-		}
-	}
-	return false
+	return slices.ContainsFunc(args, func(a string) bool { return baseName(a) == want })
 }
 
 // MatchEngine finds the well-known engine behind a process, if any. The

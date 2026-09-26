@@ -286,8 +286,8 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	byPort := procsByPort(c.procSnapshot())
 
 	c.mu.Lock()
-	snap.Agents = append([]core.AgentEvent(nil), c.agents...)
-	snap.Probes = append([]core.ProbeSample(nil), c.probes...)
+	snap.Agents = slices.Clone(c.agents)
+	snap.Probes = slices.Clone(c.probes)
 	snap.Sys = cloneSys(sys)
 	for i, r := range results {
 		p := c.providers[i]

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,7 +52,7 @@ func init() {
 		// Hand out a copy: samples are published to the UI goroutine, and a
 		// later Sample overlaying live ioreg numbers onto the shared identity
 		// slice would data-race with a render of an earlier snapshot.
-		devs := append([]core.GPUDevice(nil), idents...)
+		devs := slices.Clone(idents)
 		applyIOAccelStats(ctx, devs)
 		return devs
 	}
