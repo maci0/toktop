@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -69,5 +70,26 @@ func TestShortenWithinBudgetUnchanged(t *testing.T) {
 		if got := shorten(s, 40); got != s {
 			t.Errorf("shorten(%q, 40) = %q, want unchanged", s, got)
 		}
+	}
+}
+
+func TestNorm(t *testing.T) {
+	if got := norm(50, 100); got != 0.5 {
+		t.Errorf("norm(50, 100) = %v, want 0.5", got)
+	}
+	if got := norm(150, 100); got != 1.0 {
+		t.Errorf("norm(150, 100) = %v, want 1.0", got)
+	}
+	if got := norm(-10, 100); got != 0 {
+		t.Errorf("norm(-10, 100) = %v, want 0", got)
+	}
+	if got := norm(50, 0); got != 0 {
+		t.Errorf("norm(50, 0) = %v, want 0", got)
+	}
+	if got := norm(math.NaN(), 100); got != 0 {
+		t.Errorf("norm(NaN, 100) = %v, want 0", got)
+	}
+	if got := norm(50, math.NaN()); got != 0 {
+		t.Errorf("norm(50, NaN) = %v, want 0", got)
 	}
 }

@@ -80,7 +80,7 @@ func ParseMeminfo(b []byte, s *core.SysSample) {
 // saturate rather than wrap to a small byte count in the shift.
 func kibBytes(kib uint64) uint64 {
 	const capKib = ^uint64(0) >> 10
-	if kib >= capKib {
+	if kib > capKib {
 		return ^uint64(0)
 	}
 	return kib << 10
@@ -164,15 +164,19 @@ func durationFromClock(sec, nsec int64) time.Duration {
 	if sec < 0 || (sec == 0 && nsec <= 0) {
 		return 0
 	}
+	if nsec < 0 {
+		nsec = 0
+	}
 	const maxSec = int64(math.MaxInt64 / int64(time.Second))
 	if sec >= maxSec {
 		return time.Duration(math.MaxInt64)
 	}
-	d := time.Duration(sec)*time.Second + time.Duration(nsec)*time.Nanosecond
-	if d < 0 {
-		return 0
+	d := time.Duration(sec) * time.Second
+	rem := time.Duration(math.MaxInt64) - d
+	if time.Duration(nsec) >= rem {
+		return time.Duration(math.MaxInt64)
 	}
-	return d
+	return d + time.Duration(nsec)
 }
 
 // parseSwapUsage decodes a vm.swapusage string into bytes:

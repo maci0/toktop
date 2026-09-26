@@ -145,7 +145,13 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 // negative load, and a runaway multiplier must stay bounded; many-core boxes
 // legitimately exceed 100% of one core.
 func clampPct(v float64) float64 {
-	return min(max(v, 0), 100*1024)
+	if !(v > 0) { // also catches NaN: every comparison with it is false
+		return 0
+	}
+	if v > 100*1024 {
+		return 100 * 1024
+	}
+	return v
 }
 
 // ExtractPort scans argv for explicit listen-port flags. Exported so the

@@ -123,9 +123,10 @@ func kindBadge(kind string) string {
 // invisible to low-vision users exactly when the rate it labels is small
 // next to the session peak.
 func heatColor(f float64) lipgloss.Color {
-	switch {
-	case f <= 0.02:
+	if math.IsNaN(f) || f <= 0.02 {
 		return cDim
+	}
+	switch {
 	case f < 0.30:
 		return cCyan
 	case f < 0.58:

@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -315,6 +316,12 @@ func TestNearestCadenceIndexFloorsNegatives(t *testing.T) {
 	}
 	if got := nearestCadenceIndex(half, sec); got != 1 {
 		t.Errorf("+0.5 cadences = %d, want 1 (tie rounds toward later)", got)
+	}
+	if got := nearestCadenceIndex(math.MaxInt64, sec); got != math.MaxInt {
+		t.Errorf("max duration = %d, want math.MaxInt", got)
+	}
+	if got := nearestCadenceIndex(10*sec, 0); got != 0 {
+		t.Errorf("zero cadence = %d, want 0", got)
 	}
 }
 

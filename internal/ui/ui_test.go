@@ -560,6 +560,50 @@ func TestProbeSeriesStepHold(t *testing.T) {
 			t.Fatalf("probeSeries = %v, want %v", got, want)
 		}
 	}
+	if got := probeSeries(s, 0, time.Second); got != nil {
+		t.Fatalf("probeSeries(w=0) = %v, want nil", got)
+	}
+	if got := probeSeries(s, -5, time.Second); got != nil {
+		t.Fatalf("probeSeries(w=-5) = %v, want nil", got)
+	}
+}
+
+func TestSpanCapBounds(t *testing.T) {
+	if got := spanCap(0); got != 0 {
+		t.Errorf("spanCap(0) = %d, want 0", got)
+	}
+	if got := spanCap(-1); got != 0 {
+		t.Errorf("spanCap(-1) = %d, want 0", got)
+	}
+	if got := spanCap(100); got <= 0 || got > 63 {
+		t.Errorf("spanCap(100) = %d, want positive <= 63", got)
+	}
+	if got := spanCap(math.MaxInt); got != 0 {
+		t.Errorf("spanCap(MaxInt) = %d, want 0", got)
+	}
+}
+
+func TestCompressSeriesZeroBlock(t *testing.T) {
+	end := time.Unix(1_000_000_000, 0)
+	tv := []timedVal{{at: end, rate: 100, engine: 0}}
+	if grid, bounds := compressSeries(tv, 24, 0); grid != nil || bounds != nil {
+		t.Errorf("compressSeries with block=0 must return nil, got %v %v", grid, bounds)
+	}
+	if grid, bounds := compressSeries(tv, 24, -1); grid != nil || bounds != nil {
+		t.Errorf("compressSeries with block=-1 must return nil, got %v %v", grid, bounds)
+	}
+}
+
+func TestHeatFunctionsNaN(t *testing.T) {
+	if got := tempColor(math.NaN()); got == cRed {
+		t.Errorf("tempColor(NaN) returned cRed")
+	}
+	if got := memHeat(math.NaN()); got == cRed {
+		t.Errorf("memHeat(NaN) returned cRed")
+	}
+	if got := kvHeat(math.NaN()); got == cRed {
+		t.Errorf("kvHeat(NaN) returned cRed")
+	}
 }
 
 func TestStaticFrameRenders(t *testing.T) {

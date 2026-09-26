@@ -145,6 +145,21 @@ func TestSatAddSaturates(t *testing.T) {
 	}
 }
 
+func TestCounter64RejectsOverflow(t *testing.T) {
+	if got := counter64(math.MaxInt64); got != 0 {
+		t.Fatalf("counter64(MaxInt64) = %d, want 0", got)
+	}
+	if got := counter64(-1); got != 0 {
+		t.Fatalf("counter64(-1) = %d, want 0", got)
+	}
+	if got := clampSane(3_000_000_000); got != 3_000_000_000 {
+		t.Fatalf("clampSane(3e9) = %d, want 3e9", got)
+	}
+	if got := clampSane(math.MaxInt64); got != 0 {
+		t.Fatalf("clampSane(MaxInt64) = %d, want 0", got)
+	}
+}
+
 func TestDeeplyNestedPayloadDoesNotRunAway(t *testing.T) {
 	// A tool result can nest arbitrarily; the walk must stop and stay quiet.
 	line := `{"type":"tool_result","content":` + strings.Repeat(`{"a":`, 40) + `"deep"` + strings.Repeat(`}`, 40) + `}`

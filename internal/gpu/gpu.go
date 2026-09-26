@@ -381,17 +381,8 @@ func flexAny(v any) float64 {
 	return 0
 }
 
-// mibBytes converts a vendor-reported MiB count to bytes, capping below the
-// shift so an absurd magnitude saturates instead of wrapping to a small
-// byte count.
+// mibBytes converts a vendor-reported MiB count to bytes, saturating on
+// absurd magnitudes and preserving fractional MiB.
 func mibBytes(mib float64) uint64 {
-	const capMib = math.MaxUint64 >> 20
-	switch {
-	case !(mib > 0):
-		return 0
-	case mib >= capMib:
-		return math.MaxUint64
-	default:
-		return uint64(mib) << 20
-	}
+	return core.SatUint(mib * (1 << 20))
 }

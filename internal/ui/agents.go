@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -175,10 +176,20 @@ func nearestCadenceIndex(d, cadence time.Duration) int {
 	if cadence <= 0 {
 		return 0
 	}
-	shifted := d + cadence/2
+	half := cadence / 2
+	if d > math.MaxInt64-half {
+		return math.MaxInt
+	}
+	shifted := d + half
 	q := shifted / cadence
 	if shifted%cadence < 0 {
 		q--
+	}
+	if q > math.MaxInt {
+		return math.MaxInt
+	}
+	if q < math.MinInt {
+		return math.MinInt
 	}
 	return int(q)
 }

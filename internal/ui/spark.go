@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -18,7 +19,9 @@ func tailCols(vals []float64, w int) ([]float64, float64) {
 	}
 	maxV := 0.0
 	for _, v := range vs {
-		maxV = max(maxV, v)
+		if !math.IsNaN(v) && v > maxV {
+			maxV = v
+		}
 	}
 	if maxV <= 0 {
 		maxV = 1

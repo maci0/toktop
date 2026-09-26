@@ -190,7 +190,7 @@ func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, 
 		if err := rows.Scan(&id, &n, &in); err != nil {
 			return nil, false
 		}
-		c := sessionCounts{output: int64(counter64(n.Int64)), input: int64(counter64(in.Int64))}
+		c := sessionCounts{output: clampSane(n.Int64), input: clampSane(in.Int64)}
 		if c.output > 0 || c.input > 0 {
 			out[id] = c
 		}

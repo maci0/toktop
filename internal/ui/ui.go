@@ -4,6 +4,7 @@ package ui
 import (
 	"fmt"
 	"maps"
+	"math"
 	"math/bits"
 	"slices"
 	"sort"
@@ -536,7 +537,7 @@ func timedSeries(s core.Snapshot, cadence time.Duration) []timedVal {
 // sample count instead would scale the chart down by the engine count and
 // make the two timescale modes disagree about what a column means.
 func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
-	if len(tv) == 0 || w <= 0 {
+	if len(tv) == 0 || w <= 0 || block <= 0 {
 		return nil, nil
 	}
 	end := tv[len(tv)-1].at
@@ -607,6 +608,9 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 // window, inside a time.Duration: past it the leftward timescale stops
 // doubling instead of wrapping negative and collapsing the chart's buckets.
 func spanCap(w int) int {
+	if w <= 0 || uint64(w) > uint64(math.MaxInt64)/uint64(time.Second) {
+		return 0
+	}
 	maxLevel := 63 - bits.Len64(uint64(w)*uint64(time.Second))
 	if maxLevel < 0 {
 		return 0
@@ -800,9 +804,10 @@ func sysCPUTemps(sy *core.SysSample) []core.TempReading {
 }
 
 func tempColor(celsius float64) lipgloss.Color {
-	switch {
-	case celsius < 60:
+	if math.IsNaN(celsius) || celsius < 60 {
 		return cGreen
+	}
+	switch {
 	case celsius < 80:
 		return cYellow
 	default:
@@ -811,9 +816,10 @@ func tempColor(celsius float64) lipgloss.Color {
 }
 
 func memHeat(v float64) lipgloss.Color {
-	switch {
-	case v < 70:
+	if math.IsNaN(v) || v < 70 {
 		return cGreen
+	}
+	switch {
 	case v < 90:
 		return cYellow
 	default:
@@ -1348,9 +1354,10 @@ func (m Model) lastProbe() (core.ProbeSample, bool) {
 }
 
 func kvHeat(v float64) lipgloss.Color {
-	switch {
-	case v < 60:
+	if math.IsNaN(v) || v < 60 {
 		return cGreen
+	}
+	switch {
 	case v < 85:
 		return cYellow
 	default:
@@ -1474,7 +1481,7 @@ func aggHist(s core.Snapshot, out bool, w int, cadence time.Duration) []float64 
 // on a uniform grid ending at the newest probe: each bucket carries the most
 // recently measured tok/s.
 func probeSeries(s core.Snapshot, w int, cadence time.Duration) []float64 {
-	if len(s.Probes) == 0 {
+	if len(s.Probes) == 0 || w <= 0 || cadence <= 0 {
 		return nil
 	}
 	end := s.Probes[len(s.Probes)-1].At

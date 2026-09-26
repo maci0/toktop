@@ -169,10 +169,17 @@ func counter(n int) int {
 // column, so a magnitude that does not fit in int is rejected before the
 // conversion rather than wrapping.
 func counter64(n int64) int {
-	if n < 0 || n > maxSaneTokens {
+	if n < 0 || n > maxSaneTokens || n > math.MaxInt {
 		return 0
 	}
 	return int(n)
+}
+
+func clampSane(n int64) int64 {
+	if n < 0 || n > maxSaneTokens {
+		return 0
+	}
+	return n
 }
 
 var adaptersMu sync.RWMutex

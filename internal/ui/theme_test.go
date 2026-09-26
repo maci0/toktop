@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"math"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -104,5 +105,11 @@ func TestHeatRampMeetsContrastFloors(t *testing.T) {
 		if f <= 0.02 && got < 4.5 {
 			t.Errorf("heatColor(%.2f) styles text too: %.2f:1 on cBase, want >= 4.5:1", f, got)
 		}
+	}
+}
+
+func TestHeatColorNaN(t *testing.T) {
+	if got := heatColor(math.NaN()); got != cDim {
+		t.Errorf("heatColor(NaN) = %v, want cDim (%v)", got, cDim)
 	}
 }

@@ -106,6 +106,13 @@ func TestDurationFromClock(t *testing.T) {
 	if got := durationFromClock(maxSec, 0); got != time.Duration(math.MaxInt64) {
 		t.Errorf("huge clock = %v, want saturation", got)
 	}
+	if got := durationFromClock(maxSec-1, 2_000_000_000); got != time.Duration(math.MaxInt64) {
+		t.Errorf("overflow clock = %v, want saturation", got)
+	}
+	const capKib = ^uint64(0) >> 10
+	if got := kibBytes(capKib); got != capKib<<10 {
+		t.Errorf("kibBytes(capKib) = %d, want %d", got, capKib<<10)
+	}
 }
 
 func TestParseUptimeSecs(t *testing.T) {

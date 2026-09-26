@@ -24,10 +24,10 @@ func primaryModel(p core.ProviderSnapshot) string {
 }
 
 func norm(v, maxV float64) float64 {
-	if maxV <= 0 {
+	if maxV <= 0 || math.IsNaN(maxV) || !(v > 0) {
 		return 0
 	}
-	return v / maxV
+	return clamp01(v / maxV)
 }
 
 func fmtRate(v float64) string {

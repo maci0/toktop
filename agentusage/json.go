@@ -6,6 +6,7 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"strings"
 )
 
@@ -172,7 +173,7 @@ func asInt(v any) (int, bool) {
 	// arm64 saturates to the maximum). A counter outside int, or past
 	// maxSaneTokens, is not a measurement: report nothing rather than
 	// a platform-dependent lie or a total that later wraps.
-	if !(n >= 1) || n > float64(maxSaneTokens) {
+	if !(n >= 1) || n > float64(maxSaneTokens) || n > float64(math.MaxInt) {
 		return 0, false
 	}
 	// JSON numbers are float64. A fractional remainder (1.5, 99.9) would

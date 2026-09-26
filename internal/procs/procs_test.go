@@ -2,6 +2,7 @@ package procs
 
 import (
 	"errors"
+	"math"
 	"os"
 	"strings"
 	"testing"
@@ -274,5 +275,8 @@ func TestClampPctBounds(t *testing.T) {
 		if got := clampPct(in); got != want {
 			t.Errorf("clampPct(%v) = %v, want %v", in, got, want)
 		}
+	}
+	if got := clampPct(math.NaN()); got != 0 {
+		t.Errorf("clampPct(NaN) = %v, want 0", got)
 	}
 }

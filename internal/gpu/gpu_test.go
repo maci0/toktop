@@ -148,6 +148,21 @@ func TestFlexAnyRejectsNonFinite(t *testing.T) {
 	}
 }
 
+func TestMibBytesFractional(t *testing.T) {
+	if got := mibBytes(1.5); got != 1572864 {
+		t.Errorf("mibBytes(1.5) = %d, want 1572864", got)
+	}
+	if got := mibBytes(0.5); got != 524288 {
+		t.Errorf("mibBytes(0.5) = %d, want 524288", got)
+	}
+	if got := mibBytes(0); got != 0 {
+		t.Errorf("mibBytes(0) = %d, want 0", got)
+	}
+	if got := mibBytes(math.NaN()); got != 0 {
+		t.Errorf("mibBytes(NaN) = %d, want 0", got)
+	}
+}
+
 func TestParseNvidiaSMIInfUtilIsZero(t *testing.T) {
 	devs := ParseNvidiaSMI([]byte("0, GPU, 55, 100, 200, inf, inf, 550.54.14\n"))
 	if len(devs) != 1 {
