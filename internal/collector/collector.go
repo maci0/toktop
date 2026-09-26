@@ -252,6 +252,9 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+			if ctx.Err() != nil {
+				return
+			}
 			c.emit(ctx, out)
 		}
 	}

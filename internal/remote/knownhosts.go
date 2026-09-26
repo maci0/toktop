@@ -40,7 +40,10 @@ func tofu() (ssh.HostKeyCallback, error) {
 	}
 	// Fail at Connect, not mid-handshake, if the store is unreadable.
 	// A missing file is fine; the callback creates it on first contact.
-	if _, err := readKnownHosts(path); err != nil {
+	knownHostsMu.Lock()
+	_, err := readKnownHosts(path)
+	knownHostsMu.Unlock()
+	if err != nil {
 		return nil, err
 	}
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {

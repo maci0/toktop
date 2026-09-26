@@ -655,6 +655,10 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 			w.poll(onChange) // one last read, so the tail of a run is not lost
 			return
 		case <-t.C:
+			if ctx.Err() != nil {
+				w.poll(onChange)
+				return
+			}
 			w.poll(onChange)
 		}
 	}

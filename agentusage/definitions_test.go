@@ -198,6 +198,11 @@ func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
 		spec.Cumulative != want.Cumulative || spec.HeaderCwd != want.HeaderCwd {
 		t.Errorf("spec = %+v, want %+v", spec, want)
 	}
+	spec.Roots[0] = "mutated"
+	spec2, _ := definedSpec("full")
+	if spec2.Roots[0] == "mutated" {
+		t.Fatal("definedSpec published mutable internal slice")
+	}
 }
 
 // Names with surrounding whitespace are the same agent Discover reports, and

@@ -346,6 +346,9 @@ func main() {
 				case <-ctx.Done():
 					return
 				case <-t.C:
+					if ctx.Err() != nil {
+						return
+					}
 					prober()
 				}
 			}
@@ -505,8 +508,12 @@ func waitForFrames(ctx context.Context, ch <-chan core.Snapshot, n int, wait tim
 	for range n { // several ticks so charts carry some history
 		t := time.NewTimer(wait)
 		select {
-		case snap = <-ch:
+		case s, ok := <-ch:
 			t.Stop()
+			if !ok {
+				return snap, errors.New("snapshot channel closed waiting for telemetry")
+			}
+			snap = s
 		case <-ctx.Done():
 			t.Stop()
 			return snap, errInterrupted

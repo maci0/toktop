@@ -107,6 +107,9 @@ func definedSpec(tool string) (Spec, bool) {
 	defsMu.RLock()
 	defer defsMu.RUnlock()
 	s, ok := defs[tool]
+	if ok {
+		s.Roots = slices.Clone(s.Roots)
+	}
 	return s, ok
 }
 
@@ -185,7 +188,7 @@ func LoadDefinitions(path string) error {
 		}
 		seen[canonical] = name
 		spec := Spec{
-			Roots:      def.Usage.Roots,
+			Roots:      slices.Clone(def.Usage.Roots),
 			Suffix:     def.Usage.Suffix,
 			Cumulative: def.Usage.Cumulative,
 			HeaderCwd:  def.Usage.HeaderCwd,

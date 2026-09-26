@@ -562,6 +562,13 @@ func TestWaitForFrames(t *testing.T) {
 			t.Fatalf("waitForFrames() took %s after cancellation, want prompt return", elapsed)
 		}
 	})
+	t.Run("closed channel reports an error", func(t *testing.T) {
+		ch := make(chan core.Snapshot)
+		close(ch)
+		if _, err := waitForFrames(context.Background(), ch, 2, time.Second); err == nil {
+			t.Fatal("waitForFrames() succeeded on closed channel, want error")
+		}
+	})
 }
 
 func TestWarnIgnoredFrameEnv(t *testing.T) {
