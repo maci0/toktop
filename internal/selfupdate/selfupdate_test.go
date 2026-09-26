@@ -90,7 +90,7 @@ func TestGitHubAssetURL(t *testing.T) {
 		"https://github.com.evil.example/malware",
 		"https://githubusercontent.com.evil.example/x",
 		"https://169.254.169.254/latest",
-		"http://127.0.0.1/asset",
+		"https://user:pass@github.com/maci0/toktop/releases/download/v1/toktop",
 		"file:///etc/passwd",
 		"",
 	}
@@ -129,8 +129,16 @@ func TestGitHubRedirectStaysOnGitHub(t *testing.T) {
 		return &http.Request{URL: u}
 	}
 	via := []*http.Request{req("https://api.github.com/repos/maci0/toktop/releases/latest")}
-	if err := githubRedirect(req("https://objects.githubusercontent.com/file"), via); err != nil {
+	cdnReq := req("https://objects.githubusercontent.com/file")
+	cdnReq.Header = http.Header{"Authorization": []string{"Bearer secret"}}
+	if err := githubRedirect(cdnReq, via); err != nil {
 		t.Fatalf("cdn hop refused: %v", err)
+	}
+	if cdnReq.Header.Get("Authorization") != "" {
+		t.Fatal("Authorization header leaked to CDN host on redirect")
+	}
+	if err := githubRedirect(req("https://user:pass@objects.githubusercontent.com/file"), via); err == nil {
+		t.Fatal("userinfo redirect allowed")
 	}
 	if err := githubRedirect(req("https://evil.example/malware"), via); err == nil {
 		t.Fatal("off-site hop allowed")

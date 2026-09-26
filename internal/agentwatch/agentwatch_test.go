@@ -779,3 +779,22 @@ func TestLoadDefinitions(t *testing.T) {
 		}
 	})
 }
+
+func TestReportMixedScriptToolName(t *testing.T) {
+	rec := &recorder{}
+	w := New(rec, nil)
+	tr := &tracked{
+		proc: agentusage.Process{
+			PID:  1234,
+			Tool: "\u0441laude", // Cyrillic \u0441 + laude
+		},
+	}
+	w.report(tr, agentusage.Sample{Output: 100})
+	events := rec.all()
+	if len(events) != 1 {
+		t.Fatalf("got %d events, want 1", len(events))
+	}
+	if events[0].Agent != "anonymous" {
+		t.Errorf("Agent = %q, want %q for mixed-script name", events[0].Agent, "anonymous")
+	}
+}

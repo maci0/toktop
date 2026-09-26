@@ -361,6 +361,9 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 		return
 	}
 	agent := core.ClampField(core.SanitizeText(proc.Tool), 64)
+	if core.MixedScriptIdentity(agent) {
+		agent = ""
+	}
 	if agent == "" {
 		agent = "anonymous"
 	}

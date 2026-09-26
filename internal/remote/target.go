@@ -50,6 +50,12 @@ func ParseTarget(raw string) (Target, error) {
 	if t.Port == 0 {
 		t.Port = 22
 	}
+	if strings.ContainsAny(t.Host, " \t\r\n\x00") {
+		return Target{}, fmt.Errorf("bad ssh host %q", t.Host)
+	}
+	if strings.ContainsAny(t.User, " \t\r\n\x00") {
+		return Target{}, fmt.Errorf("bad ssh user %q", t.User)
+	}
 	return t, nil
 }
 

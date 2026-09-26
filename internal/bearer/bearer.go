@@ -24,8 +24,13 @@ var (
 	allowed = map[string]bool{}
 )
 
-// Set stores the token applied to allowed engine requests.
+// Set stores the token applied to allowed engine requests. Tokens containing
+// CRLF or newline characters are refused to prevent HTTP header injection.
 func Set(token string) {
+	token = strings.TrimSpace(token)
+	if strings.ContainsAny(token, "\r\n") {
+		token = ""
+	}
 	mu.Lock()
 	tok = token
 	mu.Unlock()

@@ -75,6 +75,10 @@ func TestParseTarget(t *testing.T) {
 		{"ssh://box/opt/engines", "", "", 0, true},
 		{"ssh://box?jump=1", "", "", 0, true},
 		{"ssh://box#frag", "", "", 0, true},
+		{"ssh://bad\nhost", "", "", 0, true},
+		{"ssh://bad\rhost", "", "", 0, true},
+		{"ssh://bad user@host", "", "", 0, true},
+		{"ssh://user\nname@host", "", "", 0, true},
 	}
 	for _, c := range cases {
 		got, err := ParseTarget(c.raw)
@@ -332,6 +336,12 @@ func TestTOFUStore(t *testing.T) {
 	key1 := fakePublicKey("first")
 	if err := cb1("h:22", nil, key1); err != nil {
 		t.Fatalf("first contact rejected: %v", err)
+	}
+	if err := cb1("h\nhost:22", nil, key1); err == nil {
+		t.Fatal("tofu accepted hostname with newline")
+	}
+	if err := cb1("h host:22", nil, key1); err == nil {
+		t.Fatal("tofu accepted hostname with space")
 	}
 
 	key2 := fakePublicKey("other-host")

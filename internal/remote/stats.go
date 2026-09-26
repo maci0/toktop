@@ -184,13 +184,13 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 			s.HostUptime = sysmon.ParseUptimeSecs(f[0])
 		}
 	}
-	if cpu := strings.TrimSpace(section(3)); cpu != "" {
+	if cpu := firstLine(section(3)); cpu != "" {
 		s.CPUModel = cpu
 	}
-	if osName := trimQuotes(strings.TrimSpace(section(4))); osName != "" {
+	if osName := trimQuotes(firstLine(section(4))); osName != "" {
 		s.OsName = osName
 	}
-	if kern := strings.TrimSpace(section(5)); kern != "" {
+	if kern := firstLine(section(5)); kern != "" {
 		s.Kernel = kern
 	}
 	if devs := parseGPUs(section(6)); len(devs) > 0 {

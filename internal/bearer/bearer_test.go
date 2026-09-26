@@ -38,6 +38,17 @@ func TestSetAndApply(t *testing.T) {
 	}
 }
 
+func TestSetRejectsCRLF(t *testing.T) {
+	t.Cleanup(func() { Set(""); resetAllowed() })
+	Set("sk-test\r\nInjected-Header: value")
+	Allow("http://x")
+	req, _ := http.NewRequest("GET", "http://x/metrics", nil)
+	Apply(req)
+	if req.Header.Get("Authorization") != "" {
+		t.Errorf("Authorization must be unset for token with CRLF, got %q", req.Header.Get("Authorization"))
+	}
+}
+
 func TestAllowScopesByOrigin(t *testing.T) {
 	t.Cleanup(func() { Set(""); resetAllowed() })
 	Set("sk-test")

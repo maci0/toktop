@@ -143,7 +143,7 @@ func githubDownloadHost(host string) bool {
 
 func githubAssetURL(raw string) bool {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 		return false
 	}
 	return githubDownloadHost(u.Hostname())
@@ -151,13 +151,18 @@ func githubAssetURL(raw string) bool {
 
 // githubRedirect refuses hops off GitHub's download hosts, including
 // http downgrades and SSRF via a hostile browser_download_url. Replaces
-// the client's default policy, so it also caps the hop count.
+// the client's default policy, so it also caps the hop count. It also strips
+// the Authorization header on hops off api.github.com so GITHUB_TOKEN never
+// leaks to CDN or storage hosts.
 func githubRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	if req.URL.Scheme != "https" || !githubDownloadHost(req.URL.Hostname()) {
+	if req.URL.Scheme != "https" || req.URL.User != nil || !githubDownloadHost(req.URL.Hostname()) {
 		return fmt.Errorf("refusing redirect to %s", req.URL.Redacted())
+	}
+	if strings.ToLower(req.URL.Hostname()) != "api.github.com" && req.Header != nil {
+		req.Header.Del("Authorization")
 	}
 	return nil
 }

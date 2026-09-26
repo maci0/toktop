@@ -4,9 +4,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -42,6 +44,9 @@ func tofu() (ssh.HostKeyCallback, error) {
 		return nil, err
 	}
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
+		if strings.ContainsAny(hostname, " \t\r\n\x00") {
+			return fmt.Errorf("invalid hostname %q: contains whitespace or newline", hostname)
+		}
 		line := hostname + " " + string(ssh.MarshalAuthorizedKey(key))
 		line = strings.TrimSpace(line)
 		knownHostsMu.Lock()
@@ -94,8 +99,8 @@ func writeKnownHosts(path string, store map[string]string) error {
 		return err
 	}
 	var b strings.Builder
-	for _, line := range store {
-		b.WriteString(line + "\n")
+	for _, host := range slices.Sorted(maps.Keys(store)) {
+		b.WriteString(store[host] + "\n")
 	}
 	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, ".known_hosts-*")
