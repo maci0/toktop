@@ -100,7 +100,9 @@ func hostStaticInfo() hostStatic {
 		hostStaticVal = mergeHostStatic(hostStaticVal, loadHostStatic())
 		hostStaticAt = time.Now()
 	}
-	return hostStaticVal
+	res := hostStaticVal
+	res.npus = slices.Clone(hostStaticVal.npus)
+	return res
 }
 
 func hostStaticFilled(h hostStatic) bool {
@@ -378,13 +380,13 @@ func sensorLayout(key, root string, build func(string) []sensorInput) []sensorIn
 	sensorLayoutMu.Lock()
 	defer sensorLayoutMu.Unlock()
 	now := time.Now()
-	if c, ok := sensorLayouts[key]; ok && now.Sub(c.at) < sensorLayoutTTL {
-		return c.inputs
-	}
 	for k, c := range sensorLayouts {
 		if now.Sub(c.at) >= sensorLayoutTTL {
 			delete(sensorLayouts, k)
 		}
+	}
+	if c, ok := sensorLayouts[key]; ok && now.Sub(c.at) < sensorLayoutTTL {
+		return c.inputs
 	}
 	// Build under the lock so concurrent samples share one walk and a
 	// slower empty result cannot overwrite a newer fill.

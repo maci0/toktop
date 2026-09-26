@@ -45,9 +45,10 @@ const clkTck = 100
 // Sampler turns raw process listings into Infos, deriving CPU percentage on
 // linux from tick deltas between samples.
 type Sampler struct {
-	mu   sync.Mutex
-	prev map[int]uint64
-	last time.Time
+	mu         sync.Mutex
+	prev       map[int]uint64
+	last       time.Time // last poll attempt (for minRefresh throttling)
+	lastSample time.Time // last successful poll (for CPU tick delta dt)
 
 	// minRefresh throttles expensive OS tooling (PowerShell CIM on Windows
 	// takes seconds); within the window the previous snapshot is returned.
@@ -87,14 +88,18 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	defer s.mu.Unlock()
 
 	if s.minRefresh > 0 && !s.last.IsZero() && now.Sub(s.last) < s.minRefresh {
-		return s.cached
+		return slices.Clone(s.cached)
 	}
 	list, err := platformList()
-	if err != nil {
-		return s.cached // last good snapshot; a transient listing error is not "no processes"
-	}
-	dt := now.Sub(s.last).Seconds() // elapsed time (monotonic) since previous successful poll
 	s.last = now
+	if err != nil {
+		return slices.Clone(s.cached) // last good snapshot; a transient listing error is not "no processes"
+	}
+	var dt float64
+	if !s.lastSample.IsZero() {
+		dt = now.Sub(s.lastSample).Seconds()
+	}
+	s.lastSample = now
 
 	self := os.Getpid()
 	out := make([]Info, 0, len(list))
@@ -139,7 +144,7 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		}
 	}
 	s.cached = out
-	return out
+	return slices.Clone(out)
 }
 
 // clampPct bounds a derived CPU percentage. Counter resets must not read as

@@ -280,3 +280,38 @@ func TestClampPctBounds(t *testing.T) {
 		t.Errorf("clampPct(NaN) = %v, want 0", got)
 	}
 }
+
+func TestSnapshotDetachedFromCache(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+
+	platformList = func() ([]raw, error) {
+		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}}}, nil
+	}
+	s := NewSampler()
+	first := s.Snapshot()
+	first[0].Name = "mutated"
+	second := s.Snapshot()
+	if second[0].Name != "ollama" {
+		t.Fatalf("snapshot aliased the cache: %+v", second)
+	}
+}
+
+func TestSnapshotErrorThrottled(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+
+	calls := 0
+	platformList = func() ([]raw, error) {
+		calls++
+		return nil, errors.New("timeout")
+	}
+	s := NewSampler()
+	s.minRefresh = 10 * time.Second
+	now := time.Now()
+	_ = s.SnapshotAt(now)
+	_ = s.SnapshotAt(now.Add(time.Second))
+	if calls != 1 {
+		t.Fatalf("error was not throttled by minRefresh: calls = %d, want 1", calls)
+	}
+}

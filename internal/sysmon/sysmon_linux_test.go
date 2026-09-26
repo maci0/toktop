@@ -219,6 +219,55 @@ func TestSensorLayoutDropsExpiredKeys(t *testing.T) {
 	}
 }
 
+func TestSensorLayoutDropsExpiredOnHit(t *testing.T) {
+	sensorLayoutMu.Lock()
+	sensorLayouts = map[string]cachedSensors{
+		"stale": {inputs: []sensorInput{{path: "gone"}}, at: time.Now().Add(-sensorLayoutTTL - time.Second)},
+		"warm":  {inputs: []sensorInput{{path: "ok"}}, at: time.Now()},
+	}
+	sensorLayoutMu.Unlock()
+	t.Cleanup(func() {
+		sensorLayoutMu.Lock()
+		sensorLayouts = map[string]cachedSensors{}
+		sensorLayoutMu.Unlock()
+	})
+
+	got := sensorLayout("warm", "", func(string) []sensorInput {
+		t.Fatal("unexpected build call on cache hit")
+		return nil
+	})
+	if len(got) != 1 || got[0].path != "ok" {
+		t.Fatalf("warm layout = %+v, want ok", got)
+	}
+
+	sensorLayoutMu.Lock()
+	_, still := sensorLayouts["stale"]
+	sensorLayoutMu.Unlock()
+	if still {
+		t.Fatal("expired sensor layout still in the cache after a cache hit")
+	}
+}
+
+func TestHostStaticNPUsDetached(t *testing.T) {
+	orig := loadHostStatic
+	t.Cleanup(func() { loadHostStatic = orig })
+
+	loadHostStatic = func() hostStatic {
+		return hostStatic{osName: "Debian", kernel: "6.1", npus: []string{"accel0"}}
+	}
+	hostStaticMu.Lock()
+	hostStaticAt = time.Time{}
+	hostStaticVal = hostStatic{}
+	hostStaticMu.Unlock()
+
+	h1 := hostStaticInfo()
+	h1.npus[0] = "mutated"
+	h2 := hostStaticInfo()
+	if h2.npus[0] != "accel0" {
+		t.Fatalf("hostStaticInfo aliased npus cache: %+v", h2.npus)
+	}
+}
+
 func TestParseCPUModel(t *testing.T) {
 	cases := map[string]string{
 		"processor\t: 0\nmodel name\t: Intel(R) Core(TM) i7-12700K\n": "Intel(R) Core(TM) i7-12700K",

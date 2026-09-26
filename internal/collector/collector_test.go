@@ -1638,3 +1638,33 @@ func TestProviderKey(t *testing.T) {
 		t.Errorf("providerKey without Addr = %q, want gpu-monitor", got)
 	}
 }
+
+func TestUnloadedModelClearsCachedKVPct(t *testing.T) {
+	fp := &fakeProvider{
+		label: "test",
+		addr:  "fake://test",
+		m: &provider.Metrics{
+			Models: []core.ModelInfo{{Name: "llama3"}},
+			HasKV:  true,
+			KVPct:  75.0,
+		},
+	}
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
+	out := make(chan core.Snapshot, 2)
+	c.emit(context.Background(), out)
+	snap1 := <-out
+	if snap1.Providers[0].KVPct != 75.0 {
+		t.Fatalf("first emit KVPct = %v, want 75.0", snap1.Providers[0].KVPct)
+	}
+
+	// Model is unloaded, engine no longer reports KV
+	fp.m = &provider.Metrics{
+		Models: nil,
+		HasKV:  false,
+	}
+	c.emit(context.Background(), out)
+	snap2 := <-out
+	if snap2.Providers[0].KVPct != 0 {
+		t.Fatalf("second emit KVPct = %v, want 0 after model unloaded", snap2.Providers[0].KVPct)
+	}
+}

@@ -75,3 +75,30 @@ func TestRootListCacheDropsExpiredKeys(t *testing.T) {
 		t.Fatal("expired listing still in the cache")
 	}
 }
+
+func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
+	dir := t.TempDir()
+	rootListMu.Lock()
+	rootLists = map[string]rootListing{
+		"stale\x00.jsonl":          {files: []string{"gone"}, at: time.Now().Add(-rescanEvery - time.Second)},
+		rootListKey(dir, ".jsonl"): {files: []string{"fresh.jsonl"}, at: time.Now()},
+	}
+	rootListMu.Unlock()
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		rootLists = map[string]rootListing{}
+		rootListMu.Unlock()
+	})
+
+	got := listTranscripts(dir, ".jsonl", time.Now().Add(-recencyWindow), false)
+	if len(got) != 1 || got[0] != "fresh.jsonl" {
+		t.Fatalf("cached hit = %+v, want [fresh.jsonl]", got)
+	}
+
+	rootListMu.Lock()
+	_, still := rootLists["stale\x00.jsonl"]
+	rootListMu.Unlock()
+	if still {
+		t.Fatal("expired listing still in cache after cache hit")
+	}
+}

@@ -318,18 +318,20 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			if r.m.Version != "" {
 				ps.Version = r.m.Version
 			}
+			if name := probe.SelectModel(r.m.Models); name != "" {
+				c.lastModel[key] = name
+			} else {
+				// Successful poll with nothing loaded: a stale id would
+				// make the next 'p' JIT-load (or bill) a cold model, and
+				// an unloaded engine has no KV cache in use.
+				delete(c.lastModel, key)
+				delete(c.kvPct, key)
+			}
 			if r.m.HasKV {
 				ps.KVPct = r.m.KVPct
 				c.kvPct[key] = ps.KVPct
 			} else {
 				ps.KVPct = c.kvPct[key]
-			}
-			if name := probe.SelectModel(r.m.Models); name != "" {
-				c.lastModel[key] = name
-			} else {
-				// Successful poll with nothing loaded: a stale id would
-				// make the next 'p' JIT-load (or bill) a cold model.
-				delete(c.lastModel, key)
 			}
 			outPS, inPS := c.rates(key, r.m, now)
 			ps.OutTokPS = outPS

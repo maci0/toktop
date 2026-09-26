@@ -136,28 +136,31 @@ func ticksSinceBoot(ticks uint64) (time.Duration, bool) {
 }
 
 var (
-	bootTimeOnce sync.Once
-	bootTimeVal  time.Time
+	bootTimeMu  sync.Mutex
+	bootTimeVal time.Time
 )
 
 func linuxBootTime() time.Time {
-	bootTimeOnce.Do(func() {
-		b, err := os.ReadFile("/proc/stat")
-		if err != nil {
-			return
+	bootTimeMu.Lock()
+	defer bootTimeMu.Unlock()
+	if !bootTimeVal.IsZero() {
+		return bootTimeVal
+	}
+	b, err := os.ReadFile("/proc/stat")
+	if err != nil {
+		return time.Time{}
+	}
+	for line := range strings.SplitSeq(string(b), "\n") {
+		secStr, ok := strings.CutPrefix(line, "btime ")
+		if !ok {
+			continue
 		}
-		for line := range strings.SplitSeq(string(b), "\n") {
-			secStr, ok := strings.CutPrefix(line, "btime ")
-			if !ok {
-				continue
-			}
-			sec, err := strconv.ParseInt(strings.TrimSpace(secStr), 10, 64)
-			if err != nil || sec <= 0 {
-				return
-			}
-			bootTimeVal = time.Unix(sec, 0)
-			return
+		sec, err := strconv.ParseInt(strings.TrimSpace(secStr), 10, 64)
+		if err != nil || sec <= 0 {
+			return time.Time{}
 		}
-	})
-	return bootTimeVal
+		bootTimeVal = time.Unix(sec, 0)
+		return bootTimeVal
+	}
+	return time.Time{}
 }

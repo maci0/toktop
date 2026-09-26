@@ -852,13 +852,12 @@ func listTranscripts(root, suffix string, cutoff time.Time, force bool) []string
 	rootListMu.Lock()
 	defer rootListMu.Unlock()
 	now := time.Now()
+	pruneRootListsLocked(now, rescanEvery)
 	if !force {
-		pruneRootListsLocked(now, recencyWindow)
 		if c, ok := rootLists[key]; ok && now.Sub(c.at) < rescanEvery {
 			return append([]string(nil), c.files...)
 		}
 	}
-	pruneRootListsLocked(now, rescanEvery)
 	out := walkTranscripts(root, suffix, cutoff)
 	rootLists[key] = rootListing{files: out, at: now}
 	return append([]string(nil), out...)

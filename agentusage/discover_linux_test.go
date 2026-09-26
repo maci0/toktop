@@ -103,3 +103,24 @@ func TestTicksSinceBootSaturates(t *testing.T) {
 		t.Error("overflowing tick count must not convert")
 	}
 }
+
+func TestLinuxBootTimeRetriesFailure(t *testing.T) {
+	bootTimeMu.Lock()
+	saved := bootTimeVal
+	bootTimeVal = time.Time{}
+	bootTimeMu.Unlock()
+	t.Cleanup(func() {
+		bootTimeMu.Lock()
+		bootTimeVal = saved
+		bootTimeMu.Unlock()
+	})
+
+	bt := linuxBootTime()
+	if bt.IsZero() {
+		t.Fatal("linuxBootTime returned zero time on Linux host")
+	}
+	bt2 := linuxBootTime()
+	if !bt2.Equal(bt) {
+		t.Fatalf("linuxBootTime changed across calls: %v vs %v", bt, bt2)
+	}
+}
