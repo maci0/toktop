@@ -17,19 +17,19 @@ func tailCols(vals []float64, w int) ([]float64, float64) {
 	if len(vs) > w {
 		vs = vs[len(vs)-w:]
 	}
-	maxV := 0.0
+	vMax := 0.0
 	for _, v := range vs {
-		if !math.IsNaN(v) && v > maxV {
-			maxV = v
+		if !math.IsNaN(v) && v > vMax {
+			vMax = v
 		}
 	}
-	if maxV <= 0 {
-		maxV = 1
+	if vMax <= 0 {
+		vMax = 1
 	}
 	pad := max(w-len(vs), 0)
 	cols := make([]float64, pad+len(vs))
 	copy(cols[pad:], vs)
-	return cols, maxV
+	return cols, vMax
 }
 
 // brailleBits maps (sub-row, sub-column) within a braille cell to its Unicode

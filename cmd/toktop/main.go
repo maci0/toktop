@@ -101,7 +101,7 @@ var (
 func registerFlags() *cliFlags {
 	flagsOnce.Do(func() {
 		flag.BoolVar(&cli.demo, "demo", false, "run against a simulated fleet instead of real backends")
-		flag.IntVar(&cli.probeSecs, "probe", 0, fmt.Sprintf("auto-probe every N seconds (0=off, max %d)", maxProbeSecs))
+		flag.IntVar(&cli.probeSecs, "probe", 0, fmt.Sprintf("auto-probe every N seconds (0=off, max %d)", probeSecsMax))
 		flag.DurationVar(&cli.interval, "interval", time.Second, "poll interval as a Go duration such as 1s or 500ms (min 50ms, max 1h)")
 		flag.StringVar(&cli.ingest, "ingest", "127.0.0.1:8420", "agent event ingest listen address (host:port)")
 		flag.BoolVar(&cli.noIngest, "no-ingest", false, "disable the agent event HTTP endpoint")
@@ -532,13 +532,13 @@ func waitForFrames(ctx context.Context, ch <-chan core.Snapshot, n int, wait tim
 // silence) through a screen reader.
 func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.Snapshot, n int, plain bool) int {
 	w, h := 120, 38
-	if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= minFrameColumns && th >= minFrameLines {
-		w, h = min(tw, maxFrameColumns), min(th, maxFrameLines)
+	if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= frameColumnsMin && th >= frameLinesMin {
+		w, h = min(tw, frameColumnsMax), min(th, frameLinesMax)
 	}
-	if v, set, err := frameEnv("TOKTOP_COLUMNS", minFrameColumns, maxFrameColumns); err == nil && set {
+	if v, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax); err == nil && set {
 		w = v
 	}
-	if v, set, err := frameEnv("TOKTOP_LINES", minFrameLines, maxFrameLines); err == nil && set {
+	if v, set, err := frameEnv("TOKTOP_LINES", frameLinesMin, frameLinesMax); err == nil && set {
 		h = v
 	}
 	// Snapshots land one poll interval apart, so a slow-polling host needs a
@@ -574,7 +574,7 @@ func outputStatus(err error) int {
 	return 1
 }
 
-func parseAdd(v string, dst *[]string) error {
+func parseAdd(v string, target *[]string) error {
 	v = strings.TrimSpace(v)
 	if v == "" {
 		return errors.New("empty URL")
@@ -582,7 +582,7 @@ func parseAdd(v string, dst *[]string) error {
 	if err := validateAddURL(v); err != nil {
 		return err
 	}
-	*dst = append(*dst, v)
+	*target = append(*target, v)
 	return nil
 }
 
@@ -840,16 +840,16 @@ func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 	}
 }
 
-// maxProbeSecs caps auto-probe scheduling at 24h, well below the point where
+// probeSecsMax caps auto-probe scheduling at 24h, well below the point where
 // time.Duration(n)*time.Second overflows and NewTicker would panic.
-const maxProbeSecs = 24 * 60 * 60
+const probeSecsMax = 24 * 60 * 60
 
 // Poll interval bounds apply after flag.Duration parses a unit-bearing value
 // (or zero). The 50ms floor prevents excessive polling; PollTimeout is 1.5s.
 // The 1h ceiling also bounds how long --once waits between frames.
 const (
-	minInterval = 50 * time.Millisecond
-	maxInterval = time.Hour
+	intervalMin = 50 * time.Millisecond
+	intervalMax = time.Hour
 )
 
 // validateFlags rejects out-of-range values at startup: a running dashboard
@@ -858,20 +858,20 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 	if interval <= 0 {
 		return fmt.Errorf("--interval must be positive, got %s", interval)
 	}
-	if interval < minInterval {
+	if interval < intervalMin {
 		if interval < time.Millisecond {
-			return fmt.Errorf("--interval must be >= %s, got %s (bare numbers are nanoseconds; use 1s or 500ms)", minInterval, interval)
+			return fmt.Errorf("--interval must be >= %s, got %s (bare numbers are nanoseconds; use 1s or 500ms)", intervalMin, interval)
 		}
-		return fmt.Errorf("--interval must be >= %s, got %s", minInterval, interval)
+		return fmt.Errorf("--interval must be >= %s, got %s", intervalMin, interval)
 	}
-	if interval > maxInterval {
+	if interval > intervalMax {
 		return fmt.Errorf("--interval must be <= 1h, got %s", interval)
 	}
 	if probeSecs < 0 {
 		return fmt.Errorf("--probe must be >= 0 (0 disables auto-probe), got %d", probeSecs)
 	}
-	if probeSecs > maxProbeSecs {
-		return fmt.Errorf("--probe must be <= %d (seconds), got %d", maxProbeSecs, probeSecs)
+	if probeSecs > probeSecsMax {
+		return fmt.Errorf("--probe must be <= %d (seconds), got %d", probeSecsMax, probeSecs)
 	}
 	if once && frames < 1 {
 		return fmt.Errorf("--frames must be >= 1, got %d", frames)
@@ -943,10 +943,10 @@ func warnBearerFlag(flagSet bool, flagVal string) {
 // allocate a pane of newlines/cells big enough to OOM a capture from a typo
 // (TOKTOP_LINES=1000000000). 1024x512 is larger than any real terminal.
 const (
-	minFrameColumns = 41
-	minFrameLines   = 21
-	maxFrameColumns = 1024
-	maxFrameLines   = 512
+	frameColumnsMin = 41
+	frameLinesMin   = 21
+	frameColumnsMax = 1024
+	frameLinesMax   = 512
 )
 
 // frameEnv reads one TOKTOP_COLUMNS / TOKTOP_LINES override. Unset or empty
@@ -973,8 +973,8 @@ func validateOnceEnv() error {
 		name        string
 		least, most int
 	}{
-		{"TOKTOP_COLUMNS", minFrameColumns, maxFrameColumns},
-		{"TOKTOP_LINES", minFrameLines, maxFrameLines},
+		{"TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax},
+		{"TOKTOP_LINES", frameLinesMin, frameLinesMax},
 	} {
 		if _, _, err := frameEnv(e.name, e.least, e.most); err != nil {
 			return err

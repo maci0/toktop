@@ -45,8 +45,8 @@ type Model struct {
 	help            bool
 	focusAgents     bool // agents get the panel estate; engines keep header, charts, strip
 	clock           time.Time
-	maxAgg          float64
-	lastAgg         float64 // most recent aggregate output rate across engines
+	aggMax          float64
+	aggLast         float64 // most recent aggregate output rate across engines
 	chartCompressed bool
 	probeReq        time.Time // manual probe awaiting its first result
 	feedDown        string    // set once the ingest endpoint has died
@@ -66,8 +66,8 @@ func StaticFrame(cfg Config, s core.Snapshot, w, h int) string {
 	m.ready = true
 	m.clock = frameNow(s, time.Time{})
 	if agg := aggOutAt(s, m.clock); agg > 0 {
-		m.lastAgg = agg
-		m.maxAgg = agg
+		m.aggLast = agg
+		m.aggMax = agg
 	}
 	return m.View()
 }
@@ -146,9 +146,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.paused {
 			in := core.Snapshot(msg)
 			agg := aggOutAt(in, frameNow(in, m.clock))
-			m.lastAgg = agg
-			if agg > m.maxAgg {
-				m.maxAgg = agg
+			m.aggLast = agg
+			if agg > m.aggMax {
+				m.aggMax = agg
 			}
 			if n := len(in.Probes); n > 0 && in.Probes[n-1].At.After(m.probeReq) {
 				m.probeReq = time.Time{} // first result landed: hand over to it
@@ -280,7 +280,7 @@ func (m Model) renderHeader() string {
 		}
 	}
 
-	outV := styleValue.Foreground(heatColor(norm(m.lastAgg, m.maxAgg))).Render("▲ " + fmtRate(m.lastAgg))
+	outV := styleValue.Foreground(heatColor(norm(m.aggLast, m.aggMax))).Render("▲ " + fmtRate(m.aggLast))
 	inV := styleInfo.Render("▼ " + fmtRate(aggInAt(m.snap, m.snapNow())))
 	segs = append(segs,
 		headerSeg{text: outV + " " + dim("tok/s out"), shed: 10},
@@ -322,8 +322,7 @@ func fitSegments(segs []headerSeg, avail int) string {
 	if avail <= 0 || len(segs) == 0 {
 		return ""
 	}
-	src := make([]headerSeg, len(segs))
-	copy(src, segs)
+	kept := slices.Clone(segs)
 	width := func(ss []headerSeg) int {
 		n := 0
 		for i, s := range ss {
@@ -334,9 +333,9 @@ func fitSegments(segs []headerSeg, avail int) string {
 		}
 		return n
 	}
-	for len(src) > 1 && width(src) > avail {
+	for len(kept) > 1 && width(kept) > avail {
 		worst, idx := 0, -1
-		for i, s := range src {
+		for i, s := range kept {
 			if s.shed >= worst && s.shed > 0 {
 				worst, idx = s.shed, i
 			}
@@ -344,10 +343,10 @@ func fitSegments(segs []headerSeg, avail int) string {
 		if idx < 0 {
 			break
 		}
-		src = append(src[:idx], src[idx+1:]...)
+		kept = append(kept[:idx], kept[idx+1:]...)
 	}
-	parts := make([]string, len(src))
-	for i, s := range src {
+	parts := make([]string, len(kept))
+	for i, s := range kept {
 		parts[i] = s.text
 	}
 	line := strings.Join(parts, dim(" │ "))
@@ -454,7 +453,7 @@ func (m Model) throughputTitle() string {
 	if len(m.snap.Providers) == 0 {
 		kind = dim("  output")
 	}
-	title := "THROUGHPUT " + styleOK.Render("▲ "+fmtRate(m.lastAgg)+" tok/s") + kind
+	title := "THROUGHPUT " + styleOK.Render("▲ "+fmtRate(m.aggLast)+" tok/s") + kind
 	// Advertise the toggle in both modes: the hint only showing while
 	// compressed hid how to get back to the uniform timescale. Brackets mark
 	// the key so "compressed [t]" reads as mode plus switch rather than one

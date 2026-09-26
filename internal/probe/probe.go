@@ -61,14 +61,14 @@ const ModelNameMax = 256
 
 const promptText = "Count from one to twenty as words."
 
-// defaultRetryAfter is the floor for 429/503 backoff. A missing or tiny
+// retryAfterDefault is the floor for 429/503 backoff. A missing or tiny
 // Retry-After must not disable the cap: the next --probe tick would otherwise
 // POST again immediately against an overloaded or billed gateway.
-const defaultRetryAfter = 15 * time.Second
+const retryAfterDefault = 15 * time.Second
 
-// maxRetryAfter caps engine-supplied Retry-After. A hostile header must not
+// retryAfterMax caps engine-supplied Retry-After. A hostile header must not
 // silence probes for hours.
-const maxRetryAfter = 5 * time.Minute
+const retryAfterMax = 5 * time.Minute
 
 type Request struct {
 	Kind  string // core.KindOllama | openai-compatible kinds
@@ -515,14 +515,14 @@ func (e *httpStatusError) Unwrap() error { return e.err }
 func parseRetryAfter(resp *http.Response) time.Duration {
 	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
 	if v == "" {
-		return defaultRetryAfter
+		return retryAfterDefault
 	}
 	if secs, err := strconv.ParseInt(v, 10, 64); err == nil {
-		secs = min(max(secs, int64(defaultRetryAfter/time.Second)), int64(maxRetryAfter/time.Second))
+		secs = min(max(secs, int64(retryAfterDefault/time.Second)), int64(retryAfterMax/time.Second))
 		return time.Duration(secs) * time.Second
 	}
 	if t, err := http.ParseTime(v); err == nil {
-		return min(max(time.Until(t), defaultRetryAfter), maxRetryAfter)
+		return min(max(time.Until(t), retryAfterDefault), retryAfterMax)
 	}
-	return defaultRetryAfter
+	return retryAfterDefault
 }

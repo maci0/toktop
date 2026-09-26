@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/url"
 	"slices"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -484,7 +483,7 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) {
 	if core.HasAgentID(c.agents, ev.ID) {
 		return
 	}
-	c.agents = insertSorted(append(c.agents, ev), agentCmp)
+	c.agents = core.InsertSorted(append(c.agents, ev), core.AgentCmp)
 	if len(c.agents) > core.AgentHistoryLen {
 		c.agents = c.agents[len(c.agents)-core.AgentHistoryLen:]
 	}
@@ -496,52 +495,10 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) {
 func (c *Collector) RecordProbe(s core.ProbeSample) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.probes = insertSorted(append(c.probes, s), probeCmp)
+	c.probes = core.InsertSorted(append(c.probes, s), core.ProbeCmp)
 	if len(c.probes) > core.ProbeHistoryLen {
 		c.probes = c.probes[len(c.probes)-core.ProbeHistoryLen:]
 	}
-}
-
-func agentCmp(a, b core.AgentEvent) int {
-	if c := a.At.Compare(b.At); c != 0 {
-		return c
-	}
-	if c := strings.Compare(a.Agent, b.Agent); c != 0 {
-		return c
-	}
-	if c := strings.Compare(a.ID, b.ID); c != 0 {
-		return c
-	}
-	return strings.Compare(a.Note, b.Note)
-}
-
-func probeCmp(a, b core.ProbeSample) int {
-	if c := a.At.Compare(b.At); c != 0 {
-		return c
-	}
-	if c := strings.Compare(a.Addr, b.Addr); c != 0 {
-		return c
-	}
-	return strings.Compare(a.Model, b.Model)
-}
-
-// insertSorted places the element just appended to s (sorted before the
-// append) at its stable position: after every element cmp reports as less
-// than or equal to it. Time is the primary key; equal timestamps then order
-// by identity so concurrent RecordProbe/RecordAgent completions cannot
-// shuffle a replay. One binary search plus one shift replaces a full
-// re-sort per event; the ingest path holds c.mu across this, so every
-// comparison saved unblocks emit and ProbeAll sooner.
-func insertSorted[T any](s []T, cmp func(a, b T) int) []T {
-	if len(s) == 0 {
-		panic("insertSorted: empty slice, caller must append first")
-	}
-	i := len(s) - 1
-	ev := s[i]
-	dst := sort.Search(i, func(j int) bool { return cmp(s[j], ev) > 0 })
-	copy(s[dst+1:], s[dst:])
-	s[dst] = ev
-	return s
 }
 
 // providerKey is the per-provider state key: the endpoint when known, else

@@ -92,10 +92,10 @@ func (o *OpenAICompat) poll(ctx context.Context) (*Metrics, error) {
 func enrichLMStudio(ctx context.Context, base string, m *Metrics) bool {
 	var v0 struct {
 		Data []struct {
-			ID         string `json:"id"`
-			Type       string `json:"type"`
-			State      string `json:"state"`
-			MaxContext int64  `json:"max_context_length"`
+			ID            string `json:"id"`
+			Type          string `json:"type"`
+			State         string `json:"state"`
+			MaxContextLen int64  `json:"max_context_length"`
 		} `json:"data"`
 	}
 	if getJSON(ctx, base+"/api/v0/models", &v0) != nil {
@@ -112,8 +112,8 @@ func enrichLMStudio(ctx context.Context, base string, m *Metrics) bool {
 			continue
 		}
 		mi := core.ModelInfo{Name: d.ID}
-		if d.MaxContext > 0 {
-			mi.CtxMax = uint64(d.MaxContext)
+		if d.MaxContextLen > 0 {
+			mi.CtxMax = uint64(d.MaxContextLen)
 		}
 		m.Models = append(m.Models, mi)
 	}

@@ -191,7 +191,7 @@ func TestSnapshotAtUsesGivenTime(t *testing.T) {
 		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks}}, nil
 	}
 	s := NewSampler()
-	s.minRefresh = time.Second
+	s.refreshMin = time.Second
 	t0 := time.Unix(1_000, 0)
 
 	first := s.SnapshotAt(t0)
@@ -200,7 +200,7 @@ func TestSnapshotAtUsesGivenTime(t *testing.T) {
 	}
 	_ = s.SnapshotAt(t0.Add(100 * time.Millisecond))
 	if calls != 1 {
-		t.Fatalf("calls = %d, want 1 inside minRefresh", calls)
+		t.Fatalf("calls = %d, want 1 inside refreshMin", calls)
 	}
 
 	ticks = 200
@@ -226,7 +226,7 @@ func TestSnapshotAtZeroTickBaseline(t *testing.T) {
 		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks}}, nil
 	}
 	s := NewSampler()
-	s.minRefresh = 0
+	s.refreshMin = 0
 	now := time.Unix(1_000, 0)
 	first := s.SnapshotAt(now)
 	if len(first) != 1 || first[0].CPUPct != 0 {
@@ -307,11 +307,11 @@ func TestSnapshotErrorThrottled(t *testing.T) {
 		return nil, errors.New("timeout")
 	}
 	s := NewSampler()
-	s.minRefresh = 10 * time.Second
+	s.refreshMin = 10 * time.Second
 	now := time.Now()
 	_ = s.SnapshotAt(now)
 	_ = s.SnapshotAt(now.Add(time.Second))
 	if calls != 1 {
-		t.Fatalf("error was not throttled by minRefresh: calls = %d, want 1", calls)
+		t.Fatalf("error was not throttled by refreshMin: calls = %d, want 1", calls)
 	}
 }

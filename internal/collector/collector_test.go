@@ -1596,14 +1596,14 @@ func TestAgentCmp(t *testing.T) {
 		{"equal", core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, 0},
 	}
 	for _, tc := range cases {
-		c := agentCmp(tc.a, tc.b)
+		c := core.AgentCmp(tc.a, tc.b)
 		switch {
 		case tc.want < 0 && c >= 0:
-			t.Errorf("%s: agentCmp = %d, want < 0", tc.name, c)
+			t.Errorf("%s: AgentCmp = %d, want < 0", tc.name, c)
 		case tc.want > 0 && c <= 0:
-			t.Errorf("%s: agentCmp = %d, want > 0", tc.name, c)
+			t.Errorf("%s: AgentCmp = %d, want > 0", tc.name, c)
 		case tc.want == 0 && c != 0:
-			t.Errorf("%s: agentCmp = %d, want 0", tc.name, c)
+			t.Errorf("%s: AgentCmp = %d, want 0", tc.name, c)
 		}
 	}
 }

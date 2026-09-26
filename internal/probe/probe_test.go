@@ -750,16 +750,16 @@ func TestRetryAfterLargeDeltaSeconds(t *testing.T) {
 		header string
 		want   time.Duration
 	}{
-		{"9223372036", maxRetryAfter},
-		{"9223372037", maxRetryAfter},
-		{"9223372036854775807", maxRetryAfter},
-		{"-9223372037", defaultRetryAfter},
-		{"-9223372036854775808", defaultRetryAfter},
-		{"0", defaultRetryAfter},
-		{"15", defaultRetryAfter},
+		{"9223372036", retryAfterMax},
+		{"9223372037", retryAfterMax},
+		{"9223372036854775807", retryAfterMax},
+		{"-9223372037", retryAfterDefault},
+		{"-9223372036854775808", retryAfterDefault},
+		{"0", retryAfterDefault},
+		{"15", retryAfterDefault},
 		{"30", 30 * time.Second},
-		{"300", maxRetryAfter},
-		{"301", maxRetryAfter},
+		{"300", retryAfterMax},
+		{"301", retryAfterMax},
 	} {
 		t.Run(tc.header, func(t *testing.T) {
 			resp := &http.Response{Header: make(http.Header)}
@@ -778,8 +778,8 @@ func TestRunOpenAIRetryAfterFloorAndCap(t *testing.T) {
 	}))
 	defer srv.Close()
 	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
-	if s.RetryAfter != defaultRetryAfter {
-		t.Errorf("tiny Retry-After = %s, want floor %s", s.RetryAfter, defaultRetryAfter)
+	if s.RetryAfter != retryAfterDefault {
+		t.Errorf("tiny Retry-After = %s, want floor %s", s.RetryAfter, retryAfterDefault)
 	}
 
 	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -788,8 +788,8 @@ func TestRunOpenAIRetryAfterFloorAndCap(t *testing.T) {
 	}))
 	defer srv2.Close()
 	s = Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv2.URL, Model: "m"})
-	if s.RetryAfter != maxRetryAfter {
-		t.Errorf("huge Retry-After = %s, want cap %s", s.RetryAfter, maxRetryAfter)
+	if s.RetryAfter != retryAfterMax {
+		t.Errorf("huge Retry-After = %s, want cap %s", s.RetryAfter, retryAfterMax)
 	}
 }
 

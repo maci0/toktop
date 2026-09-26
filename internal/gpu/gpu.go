@@ -295,7 +295,7 @@ func parseXpuDiscovery(b []byte) []xpuDevice {
 			Devices []device `json:"devices"`
 		}
 	)
-	list := bare
+	var list []device
 	switch {
 	case json.Unmarshal(b, &wrap) == nil && wrap.Devices != nil:
 		list = wrap.Devices

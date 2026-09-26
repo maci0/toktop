@@ -3,6 +3,8 @@ package core
 
 import (
 	"slices"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -116,6 +118,22 @@ func HasAgentID(events []AgentEvent, id string) bool {
 	return id != "" && slices.ContainsFunc(events, func(e AgentEvent) bool { return e.ID == id })
 }
 
+// AgentCmp compares two AgentEvents for newest-last ordering. Time is the
+// primary key; equal timestamps then order by Agent, ID, and Note so
+// concurrent ingest cannot shuffle a replay.
+func AgentCmp(a, b AgentEvent) int {
+	if c := a.At.Compare(b.At); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Agent, b.Agent); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.ID, b.ID); c != 0 {
+		return c
+	}
+	return strings.Compare(a.Note, b.Note)
+}
+
 // ProbeSample is one generation-probe result (TTFT and decode rate).
 type ProbeSample struct {
 	At     time.Time
@@ -130,6 +148,39 @@ type ProbeSample struct {
 	// backend again. Set on 429/503 so an overloaded or billed gateway is
 	// not hammered; zero means no extra backoff.
 	RetryAfter time.Duration
+}
+
+// ProbeCmp compares two ProbeSamples for newest-last ordering. Time is the
+// primary key; equal timestamps then order by Addr and Model so two
+// sources with the same seed cannot disagree about probe order.
+func ProbeCmp(a, b ProbeSample) int {
+	if c := a.At.Compare(b.At); c != 0 {
+		return c
+	}
+	if c := strings.Compare(a.Addr, b.Addr); c != 0 {
+		return c
+	}
+	return strings.Compare(a.Model, b.Model)
+}
+
+// InsertSorted places the element just appended to s (sorted before the
+// append) at its stable position: after every element cmp reports as less
+// than or equal to it. Time is the primary key; equal timestamps then order
+// by identity so concurrent completions cannot shuffle a replay. One
+// binary search plus one shift replaces a full re-sort per event.
+func InsertSorted[T any](s []T, cmp func(a, b T) int) []T {
+	if len(s) == 0 {
+		panic("InsertSorted: empty slice, caller must append first")
+	}
+	if cmp == nil {
+		panic("InsertSorted: nil cmp")
+	}
+	lastIdx := len(s) - 1
+	item := s[lastIdx]
+	insertIdx := sort.Search(lastIdx, func(j int) bool { return cmp(s[j], item) > 0 })
+	copy(s[insertIdx+1:], s[insertIdx:])
+	s[insertIdx] = item
+	return s
 }
 
 // TempReading is one thermal sensor value in millidegrees Celsius.

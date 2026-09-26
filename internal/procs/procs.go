@@ -47,17 +47,17 @@ const clkTck = 100
 type Sampler struct {
 	mu         sync.Mutex
 	prev       map[int]uint64
-	last       time.Time // last poll attempt (for minRefresh throttling)
+	last       time.Time // last poll attempt (for refreshMin throttling)
 	lastSample time.Time // last successful poll (for CPU tick delta dt)
 
-	// minRefresh throttles expensive OS tooling (PowerShell CIM on Windows
+	// refreshMin throttles expensive OS tooling (PowerShell CIM on Windows
 	// takes seconds); within the window the previous snapshot is returned.
-	minRefresh time.Duration
+	refreshMin time.Duration
 	cached     []Info
 }
 
 func NewSampler() *Sampler {
-	return &Sampler{prev: map[int]uint64{}, minRefresh: defaultSamplerRefresh}
+	return &Sampler{prev: map[int]uint64{}, refreshMin: defaultSamplerRefresh}
 }
 
 // packageSampler is the process-wide engine sampler. Discovery and the
@@ -78,7 +78,7 @@ func (s *Sampler) Snapshot() []Info {
 }
 
 // SnapshotAt is Snapshot with the caller's clock. CPU tick deltas and the
-// minRefresh window use now, so a collector that injects time does not pick
+// refreshMin window use now, so a collector that injects time does not pick
 // up a second wall-clock read inside the sampler.
 func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	if platformList == nil {
@@ -87,7 +87,7 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	if s.minRefresh > 0 && !s.last.IsZero() && now.Sub(s.last) < s.minRefresh {
+	if s.refreshMin > 0 && !s.last.IsZero() && now.Sub(s.last) < s.refreshMin {
 		return slices.Clone(s.cached)
 	}
 	list, err := platformList()

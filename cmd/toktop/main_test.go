@@ -173,13 +173,13 @@ func TestValidateFlags(t *testing.T) {
 		{name: "negative interval rejected", interval: -time.Second, wantErr: "--interval"},
 		{name: "zero interval rejected", interval: 0, wantErr: "--interval"},
 		{name: "bare-number nanoseconds rejected", interval: time.Nanosecond, wantErr: "nanoseconds"},
-		{name: "below floor rejected", interval: minInterval - time.Millisecond, wantErr: "--interval"},
-		{name: "floor accepted", interval: minInterval},
-		{name: "cap accepted", interval: maxInterval},
-		{name: "above cap rejected", interval: maxInterval + time.Second, wantErr: "--interval"},
+		{name: "below floor rejected", interval: intervalMin - time.Millisecond, wantErr: "--interval"},
+		{name: "floor accepted", interval: intervalMin},
+		{name: "cap accepted", interval: intervalMax},
+		{name: "above cap rejected", interval: intervalMax + time.Second, wantErr: "--interval"},
 		{name: "negative probe rejected", interval: time.Second, probeSecs: -5, wantErr: "--probe"},
-		{name: "probe at cap accepted", interval: time.Second, probeSecs: maxProbeSecs},
-		{name: "probe above cap rejected", interval: time.Second, probeSecs: maxProbeSecs + 1, wantErr: "--probe"},
+		{name: "probe at cap accepted", interval: time.Second, probeSecs: probeSecsMax},
+		{name: "probe above cap rejected", interval: time.Second, probeSecs: probeSecsMax + 1, wantErr: "--probe"},
 		{name: "frames unchecked without --once", interval: time.Second, frames: 0},
 		{name: "zero frames with --once rejected", once: true, interval: time.Second, frames: 0, wantErr: "--frames"},
 		{name: "negative frames with --once rejected", once: true, interval: time.Second, frames: -1, wantErr: "--frames"},
@@ -273,14 +273,14 @@ func TestWarnUnknownEnv(t *testing.T) {
 func TestFrameEnv(t *testing.T) {
 	t.Run("trimmed value is used", func(t *testing.T) {
 		t.Setenv("TOKTOP_COLUMNS", " 120 ")
-		n, set, err := frameEnv("TOKTOP_COLUMNS", minFrameColumns, maxFrameColumns)
+		n, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax)
 		if err != nil || !set || n != 120 {
 			t.Fatalf("frameEnv() = %d, %v, %v, want 120, true, nil", n, set, err)
 		}
 	})
 	t.Run("unset is not set", func(t *testing.T) {
 		t.Setenv("TOKTOP_COLUMNS", "")
-		n, set, err := frameEnv("TOKTOP_COLUMNS", minFrameColumns, maxFrameColumns)
+		n, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax)
 		if err != nil || set || n != 0 {
 			t.Fatalf("frameEnv() = %d, %v, %v, want 0, false, nil", n, set, err)
 		}
@@ -299,11 +299,11 @@ func TestValidateOnceEnv(t *testing.T) {
 		{name: "whitespace only means unset", columns: "  ", lines: "\t"},
 		{name: "typical values pass", columns: "120", lines: "38"},
 		{name: "floors accepted", columns: "41", lines: "21"},
-		{name: "caps accepted", columns: strconv.Itoa(maxFrameColumns), lines: strconv.Itoa(maxFrameLines)},
+		{name: "caps accepted", columns: strconv.Itoa(frameColumnsMax), lines: strconv.Itoa(frameLinesMax)},
 		{name: "whitespace trimmed", columns: " 120 ", lines: " 38 "},
 		{name: "below floor rejected", columns: "40", wantErr: "TOKTOP_COLUMNS"},
-		{name: "above cap rejected", columns: strconv.Itoa(maxFrameColumns + 1), wantErr: "TOKTOP_COLUMNS"},
-		{name: "lines above cap rejected", lines: strconv.Itoa(maxFrameLines + 1), wantErr: "TOKTOP_LINES"},
+		{name: "above cap rejected", columns: strconv.Itoa(frameColumnsMax + 1), wantErr: "TOKTOP_COLUMNS"},
+		{name: "lines above cap rejected", lines: strconv.Itoa(frameLinesMax + 1), wantErr: "TOKTOP_LINES"},
 		{name: "not a number rejected", lines: "full-hd", wantErr: "TOKTOP_LINES"},
 		{name: "negative rejected", columns: "-1", wantErr: "TOKTOP_COLUMNS"},
 	}
