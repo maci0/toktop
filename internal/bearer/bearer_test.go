@@ -65,6 +65,8 @@ func TestAllowScopesByOrigin(t *testing.T) {
 		{"http://OMNI.lan", "http://omni.lan/v1/models", true}, // host case folds
 		{"http://[::1]:8420", "http://[::1]:8420/api/version", true},
 		{"http://[::1]:8420", "http://127.0.0.1:8420/api/version", false},
+		{"http://caf\u00e9.lan:8000", "http://cafe\u0301.lan:8000/v1/models", true},
+		{"http://cafe\u0301.lan:8000", "http://caf\u00e9.lan:8000/v1/models", true},
 	}
 	for _, tc := range cases {
 		resetAllowed()

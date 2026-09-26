@@ -15,6 +15,8 @@ import (
 	"cmp"
 	"slices"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // AgentRate is one agent's measured throughput.
@@ -59,10 +61,11 @@ func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []Agen
 		if ev.OutputTokens <= 0 && ev.PromptTokens <= 0 && ev.ThinkingTokens <= 0 && ev.ViaEngine == "" {
 			continue
 		}
-		a, ok := by[ev.Agent]
+		agent := norm.NFC.String(ev.Agent)
+		a, ok := by[agent]
 		if !ok {
 			a = &acc{first: ev.At}
-			by[ev.Agent] = a
+			by[agent] = a
 		}
 		a.tokens += ev.OutputTokens
 		a.prompt += ev.PromptTokens

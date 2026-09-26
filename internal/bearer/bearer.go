@@ -16,6 +16,8 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 var (
@@ -104,5 +106,5 @@ func originOf(u *url.URL) string {
 			port = "80"
 		}
 	}
-	return u.Scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port)
+	return u.Scheme + "://" + net.JoinHostPort(strings.ToLower(norm.NFC.String(u.Hostname())), port)
 }

@@ -3,13 +3,17 @@
 
 package agentusage
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // parseClaude reads one line of a Claude Code transcript. Assistant messages
 // carry per-message usage, so the values are added up. A negative counter is
 // not a measurement: it is clamped to absent, the same rule the generic
 // walker applies, so a corrupted or hostile line cannot subtract from a total.
 func parseClaude(line []byte) (values, string, bool) {
+	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 	var rec struct {
 		Type    string `json:"type"`
 		Cwd     string `json:"cwd"`

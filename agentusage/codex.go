@@ -3,10 +3,14 @@
 
 package agentusage
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // codexSessionCwd reads the working directory from a codex session header.
 func codexSessionCwd(line []byte) (string, bool) {
+	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 	var rec struct {
 		Type    string `json:"type"`
 		Payload struct {
@@ -25,6 +29,7 @@ func codexSessionCwd(line []byte) (string, bool) {
 // parseCodex reads one line of a codex rollout. Its token_count events carry
 // the session total, so the values are absolute.
 func parseCodex(line []byte) (values, string, bool) {
+	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 	var rec struct {
 		Type    string `json:"type"`
 		Payload struct {

@@ -88,6 +88,7 @@ var (
 // TrimSpace slices it, and json.Unmarshal neither retains nor modifies its
 // input.
 func parseJSON(line []byte) (jsonEvent, bool) {
+	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 	trimmed := bytes.TrimSpace(line)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return jsonEvent{}, false

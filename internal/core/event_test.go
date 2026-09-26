@@ -27,6 +27,14 @@ func TestHasAgentID(t *testing.T) {
 	if HasAgentID(nil, "a") {
 		t.Fatal("empty feed matched")
 	}
+	nfcEvent := []AgentEvent{{ID: "caf\u00e9", Agent: "coder"}}
+	if !HasAgentID(nfcEvent, "cafe\u0301") {
+		t.Fatal("NFD id must match NFC event id")
+	}
+	nfdEvent := []AgentEvent{{ID: "cafe\u0301", Agent: "coder"}}
+	if !HasAgentID(nfdEvent, "caf\u00e9") {
+		t.Fatal("NFC id must match NFD event id")
+	}
 }
 
 // The ingest id-dedup window is the retained event ring. README's Agent feed

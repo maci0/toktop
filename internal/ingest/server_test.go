@@ -275,6 +275,34 @@ func TestDerivedEventIDFitsCap(t *testing.T) {
 	}
 }
 
+func TestDerivedEventIDNormalizesNFC(t *testing.T) {
+	nfcKey := "retry-caf\u00e9"
+	nfdKey := "retry-cafe\u0301"
+	if derivedEventID(nfcKey, 1) != derivedEventID(nfdKey, 1) {
+		t.Fatalf("derivedEventID for NFC %q and NFD %q must match", nfcKey, nfdKey)
+	}
+}
+
+func TestHandlePostAcceptsUTF8BOM(t *testing.T) {
+	m := &memRecorder{}
+	s, err := newServer("127.0.0.1:0", m, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	defer s.Close()
+
+	bomBody := []byte("\xef\xbb\xbf{\"agent\":\"coder\",\"output_tokens\":50}\n")
+	req := httptest.NewRequest(http.MethodPost, "/v1/events", bytes.NewReader(bomBody))
+	rr := httptest.NewRecorder()
+	s.srv.Handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d (%s)", rr.Code, http.StatusAccepted, rr.Body.String())
+	}
+	if len(m.evs) != 1 || m.evs[0].Agent != "coder" {
+		t.Fatalf("recorded events = %+v, want 1 event with agent coder", m.evs)
+	}
+}
+
 // via_engine is the same attribution agentwatch stamps when an agent is
 // generating through a monitored engine: without it, a harness POST would
 // double-count those tokens in header and chart totals.

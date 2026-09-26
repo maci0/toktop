@@ -33,6 +33,7 @@ package agentusage
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -1139,6 +1140,7 @@ const maxLineBytes = 8 << 20
 const appendReaderBytes = 64 << 10
 
 func (w *Watcher) collect(recs []values, line []byte) []values {
+	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 	v, cwd, ok := w.ad.parse(line)
 	if !ok {
 		return recs
@@ -1246,7 +1248,8 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
 	lines := 0
 	for lines < ownerScanLines && sc.Scan() {
-		if cwd, ok := w.ad.sessionCwd(sc.Bytes()); ok {
+		line := bytes.TrimPrefix(sc.Bytes(), []byte("\xef\xbb\xbf"))
+		if cwd, ok := w.ad.sessionCwd(line); ok {
 			mine := w.sameDir(cwd)
 			w.owner[path] = mine
 			return mine, true

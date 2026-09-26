@@ -15,12 +15,20 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/cases"
+	"golang.org/x/text/unicode/norm"
 	"modernc.org/sqlite"
 )
 
+var dirFolder = cases.Fold()
+
+func foldDir(s string) string {
+	return norm.NFC.String(dirFolder.String(s))
+}
+
 func init() {
 	sqlite.MustRegisterCollationUtf8("toktop_directory", func(left, right string) int {
-		return strings.Compare(strings.ToLower(left), strings.ToLower(right))
+		return strings.Compare(foldDir(left), foldDir(right))
 	})
 }
 
@@ -125,7 +133,7 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 	}
 	if foldSessionDirectory {
 		for _, d := range dirs {
-			args = append(args, strings.ToLower(filepath.ToSlash(d)))
+			args = append(args, foldDir(filepath.ToSlash(d)))
 		}
 	}
 	args = append(args, since.UnixMilli())

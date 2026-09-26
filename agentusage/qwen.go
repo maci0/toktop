@@ -3,11 +3,15 @@
 
 package agentusage
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 // parseQwen reads one line of a qwen-code chat transcript. Usage is recorded
 // per assistant message, and thinking tokens are output tokens too.
 func parseQwen(line []byte) (values, string, bool) {
+	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
 	var rec struct {
 		Type  string `json:"type"`
 		Cwd   string `json:"cwd"`

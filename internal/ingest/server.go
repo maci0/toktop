@@ -3,6 +3,7 @@
 package ingest
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -20,6 +21,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -175,7 +178,7 @@ func derivedEventID(key string, seq int) string {
 		return ""
 	}
 	suffix := ":" + strconv.Itoa(seq)
-	sum := sha256.Sum256([]byte(key))
+	sum := sha256.Sum256([]byte(norm.NFC.String(key)))
 	return hex.EncodeToString(sum[:8]) + suffix
 }
 
@@ -483,7 +486,11 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	until := time.Now().Add(maxEventLifetime)
 	_ = rc.SetReadDeadline(until) // covers reads before the first progress extension
 	r.Body = http.MaxBytesReader(w, &progressBody{ReadCloser: r.Body, rc: rc, until: until}, maxEventBody)
-	dec := json.NewDecoder(r.Body)
+	br := bufio.NewReader(r.Body)
+	if lead, _ := br.Peek(3); len(lead) == 3 && lead[0] == 0xef && lead[1] == 0xbb && lead[2] == 0xbf {
+		_, _ = br.Discard(3)
+	}
+	dec := json.NewDecoder(br)
 	defer r.Body.Close()
 	n := 0
 	replayKey := clientEventKey(r)

@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -59,14 +60,15 @@ const (
 // of one directory share one file; the walk that finds it is the same for
 // a usage read and a session snapshot.
 func crushDBPaths(dirs []string) []string {
-	seen := make(map[string]bool, len(dirs))
 	var paths []string
 	for _, dir := range dirs {
 		path := crushDBPath(dir)
-		if path == "" || seen[path] {
+		if path == "" {
 			continue
 		}
-		seen[path] = true
+		if slices.ContainsFunc(paths, func(p string) bool { return sameSpelling(p, path) }) {
+			continue
+		}
 		paths = append(paths, path)
 	}
 	return paths

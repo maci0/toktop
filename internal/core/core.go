@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 const HistoryLen = 180 // rolling samples per provider (~3 min at 1s poll)
@@ -113,9 +115,13 @@ type AgentEvent struct {
 
 // HasAgentID reports whether events already contain this id. The empty string
 // never matches, so events without an id are not treated as duplicates of
-// each other.
+// each other. IDs are compared under NFC normalization.
 func HasAgentID(events []AgentEvent, id string) bool {
-	return id != "" && slices.ContainsFunc(events, func(e AgentEvent) bool { return e.ID == id })
+	if id == "" {
+		return false
+	}
+	id = norm.NFC.String(id)
+	return slices.ContainsFunc(events, func(e AgentEvent) bool { return norm.NFC.String(e.ID) == id })
 }
 
 // AgentCmp compares two AgentEvents for newest-last ordering. Time is the
@@ -125,13 +131,13 @@ func AgentCmp(a, b AgentEvent) int {
 	if c := a.At.Compare(b.At); c != 0 {
 		return c
 	}
-	if c := strings.Compare(a.Agent, b.Agent); c != 0 {
+	if c := strings.Compare(norm.NFC.String(a.Agent), norm.NFC.String(b.Agent)); c != 0 {
 		return c
 	}
-	if c := strings.Compare(a.ID, b.ID); c != 0 {
+	if c := strings.Compare(norm.NFC.String(a.ID), norm.NFC.String(b.ID)); c != 0 {
 		return c
 	}
-	return strings.Compare(a.Note, b.Note)
+	return strings.Compare(norm.NFC.String(a.Note), norm.NFC.String(b.Note))
 }
 
 // ProbeSample is one generation-probe result (TTFT and decode rate).
