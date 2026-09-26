@@ -187,18 +187,8 @@ var baseLum = func() float64 {
 	return l
 }()
 
-// contrastAgainstBase is the WCAG contrast of c against the panel
-// background, with the background's luminance read from baseLum instead of
-// recomputed per call. A non-hex color reports 0, the same "not measurable"
-// answer contrastRatio gives, so the fade treats it as full strength.
-func contrastAgainstBase(c lipgloss.Color) float64 {
-	lc, ok := relLuminance(c)
-	if !ok {
-		return 0
-	}
-	return contrastAgainstBaseLum(lc)
-}
-
+// contrastAgainstBaseLum is the WCAG contrast of a luminance against the
+// panel background, read from baseLum instead of recomputed per call.
 func contrastAgainstBaseLum(lc float64) float64 {
 	if lc < baseLum {
 		return (baseLum + 0.05) / (lc + 0.05)

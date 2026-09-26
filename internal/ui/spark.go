@@ -165,7 +165,7 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 		levels[cx] = frac * float64(dotH)
 		col := st.Heat(frac)
 		if frac > 0.02 {
-			f := 0.30 + 0.70*(float64(cx) / denom)
+			f := 0.30 + 0.70*(float64(cx)/denom)
 			col = fadeClamped(col, f, minGraphicContrast)
 		}
 		colColors[cx] = col
