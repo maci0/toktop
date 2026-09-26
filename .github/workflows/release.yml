@@ -19,6 +19,7 @@ jobs:
       TZ: UTC
       GOAMD64: v1
       GOARM64: v8.0
+      CGO_ENABLED: "0"
       GOFLAGS: ""
       GOEXPERIMENT: ""
     steps:

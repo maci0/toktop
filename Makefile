@@ -173,7 +173,7 @@ sbom: ## generate CycloneDX SBOM of all dependencies into dist/
 	@$(CHECK_VERSION)
 	mkdir -p $(DIST)
 	$(GO) run $(SBOM_TOOL) \
-		mod -licenses -std -json -output $(DIST)/toktop-sbom-$(VERSION).cdx.json .
+		mod -licenses -std -noserial -notimestamp -json -output $(DIST)/toktop-sbom-$(VERSION).cdx.json .
 
 .PHONY: vet
 vet: ## run go vet (both halves of the sqlite tag gate)
@@ -274,10 +274,10 @@ pr: ## every PR merge gate except the OS matrix: ci + site-check + scripts-check
 
 .PHONY: clean
 clean: ## remove build artifacts
-	rm -rf $(DIST) $(BINARY) coverage.out
+	rm -rf $(DIST) $(BINARY) coverage.out *.test
 
 .PHONY: release
-release: checksums ## build every release platform into dist/ with reproducible checksums
+release: checksums sbom ## build every release platform and SBOM into dist/ with reproducible checksums
 
 .PHONY: checksums
 checksums: test-dist ## checksum the dist/ binaries into a byte-reproducible tarball
