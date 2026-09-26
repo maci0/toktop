@@ -10,6 +10,15 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-09-26
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.14.1).
+
+### Changed
+
+- The bundled SQLite driver (`modernc.org/sqlite`) is 1.59.0.
+
 ## [0.14.0] - 2026-09-26
 
 Binaries, checksums, and a CycloneDX SBOM are on
@@ -520,7 +529,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.14.1...HEAD
+[0.14.1]: https://github.com/maci0/toktop/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/maci0/toktop/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/maci0/toktop/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/maci0/toktop/compare/v0.11.0...v0.12.0
