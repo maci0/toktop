@@ -124,6 +124,12 @@ func lookupSSHConfig(name string) *sshConfigEntry {
 	if err != nil || len(b) == 0 {
 		return nil
 	}
+	return parseSSHConfig(b, name)
+}
+
+// parseSSHConfig scans an ssh_config byte slice for the first Host block matching
+// name and returns the values it defines.
+func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 	entry := &sshConfigEntry{}
 	matched := false
 	inBlock := false
