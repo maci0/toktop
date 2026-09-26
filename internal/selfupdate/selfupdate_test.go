@@ -192,49 +192,29 @@ func TestCheck(t *testing.T) {
 		}
 	})
 
-	t.Run("http error", func(t *testing.T) {
-		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: http.StatusNotFound,
-				Status:     "404 Not Found",
-				Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found"}`)),
-				Header:     make(http.Header),
-			}, nil
+	for _, tc := range []struct {
+		name    string
+		status  int
+		body    string
+		wantErr string
+	}{
+		{"http error", http.StatusNotFound, `{"message":"Not Found"}`, "404"},
+		{"missing tag", http.StatusOK, `{"tag_name":""}`, "no tag"},
+		{"invalid json", http.StatusOK, `{invalid json`, "cannot parse"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: tc.status,
+					Status:     fmt.Sprintf("%d %s", tc.status, http.StatusText(tc.status)),
+					Body:       io.NopCloser(strings.NewReader(tc.body)),
+					Header:     make(http.Header),
+				}, nil
+			})
+			_, err := Check(context.Background(), "maci0/toktop")
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("Check() err = %v, want %s error", err, tc.wantErr)
+			}
 		})
-		_, err := Check(context.Background(), "maci0/toktop")
-		if err == nil || !strings.Contains(err.Error(), "404") {
-			t.Fatalf("Check() err = %v, want 404 error", err)
-		}
-	})
-
-	t.Run("missing tag", func(t *testing.T) {
-		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Status:     "200 OK",
-				Body:       io.NopCloser(strings.NewReader(`{"tag_name":""}`)),
-				Header:     make(http.Header),
-			}, nil
-		})
-		_, err := Check(context.Background(), "maci0/toktop")
-		if err == nil || !strings.Contains(err.Error(), "no tag") {
-			t.Fatalf("Check() err = %v, want no tag error", err)
-		}
-	})
-
-	t.Run("invalid json", func(t *testing.T) {
-		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
-			return &http.Response{
-				StatusCode: http.StatusOK,
-				Status:     "200 OK",
-				Body:       io.NopCloser(strings.NewReader(`{invalid json`)),
-				Header:     make(http.Header),
-			}, nil
-		})
-		_, err := Check(context.Background(), "maci0/toktop")
-		if err == nil || !strings.Contains(err.Error(), "cannot parse") {
-			t.Fatalf("Check() err = %v, want cannot parse error", err)
-		}
-	})
+	}
 }
-

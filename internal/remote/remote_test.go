@@ -639,19 +639,11 @@ func TestShort(t *testing.T) {
 }
 
 func TestFingerprintOfFallback(t *testing.T) {
-	line := "invalid-line"
-	sum := sha256.Sum256([]byte(line))
-	want := base64.RawStdEncoding.EncodeToString(sum[:8])
-	if got := fingerprintOf(line); got != want {
-		t.Errorf("fingerprintOf(%q) = %q, want %q", line, got, want)
-	}
-
-	line2 := "host not-a-valid-key"
-	sum2 := sha256.Sum256([]byte(line2))
-	want2 := base64.RawStdEncoding.EncodeToString(sum2[:8])
-	if got := fingerprintOf(line2); got != want2 {
-		t.Errorf("fingerprintOf(%q) = %q, want %q", line2, got, want2)
+	for _, line := range []string{"invalid-line", "host not-a-valid-key"} {
+		sum := sha256.Sum256([]byte(line))
+		want := base64.RawStdEncoding.EncodeToString(sum[:8])
+		if got := fingerprintOf(line); got != want {
+			t.Errorf("fingerprintOf(%q) = %q, want %q", line, got, want)
+		}
 	}
 }
-
-

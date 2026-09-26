@@ -1583,32 +1583,28 @@ func TestAgentCmp(t *testing.T) {
 	t0 := time.Unix(100, 0)
 	t1 := time.Unix(200, 0)
 
-	// Primary sort: At
-	if c := agentCmp(core.AgentEvent{At: t0}, core.AgentEvent{At: t1}); c >= 0 {
-		t.Errorf("agentCmp(t0, t1) = %d, want < 0", c)
+	cases := []struct {
+		name string
+		a, b core.AgentEvent
+		want int
+	}{
+		{"time before", core.AgentEvent{At: t0}, core.AgentEvent{At: t1}, -1},
+		{"time after", core.AgentEvent{At: t1}, core.AgentEvent{At: t0}, 1},
+		{"agent name", core.AgentEvent{At: t0, Agent: "a"}, core.AgentEvent{At: t0, Agent: "b"}, -1},
+		{"id", core.AgentEvent{At: t0, Agent: "a", ID: "1"}, core.AgentEvent{At: t0, Agent: "a", ID: "2"}, -1},
+		{"note", core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "beta"}, -1},
+		{"equal", core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, 0},
 	}
-	if c := agentCmp(core.AgentEvent{At: t1}, core.AgentEvent{At: t0}); c <= 0 {
-		t.Errorf("agentCmp(t1, t0) = %d, want > 0", c)
-	}
-
-	// Secondary sort: Agent
-	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a"}, core.AgentEvent{At: t0, Agent: "b"}); c >= 0 {
-		t.Errorf("agentCmp(a, b) = %d, want < 0", c)
-	}
-
-	// Tertiary sort: ID
-	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a", ID: "1"}, core.AgentEvent{At: t0, Agent: "a", ID: "2"}); c >= 0 {
-		t.Errorf("agentCmp(id1, id2) = %d, want < 0", c)
-	}
-
-	// Quaternary sort: Note
-	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "beta"}); c >= 0 {
-		t.Errorf("agentCmp(alpha, beta) = %d, want < 0", c)
-	}
-
-	// Equal
-	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}); c != 0 {
-		t.Errorf("agentCmp(equal) = %d, want 0", c)
+	for _, tc := range cases {
+		c := agentCmp(tc.a, tc.b)
+		switch {
+		case tc.want < 0 && c >= 0:
+			t.Errorf("%s: agentCmp = %d, want < 0", tc.name, c)
+		case tc.want > 0 && c <= 0:
+			t.Errorf("%s: agentCmp = %d, want > 0", tc.name, c)
+		case tc.want == 0 && c != 0:
+			t.Errorf("%s: agentCmp = %d, want 0", tc.name, c)
+		}
 	}
 }
 
@@ -1642,4 +1638,3 @@ func TestProviderKey(t *testing.T) {
 		t.Errorf("providerKey without Addr = %q, want gpu-monitor", got)
 	}
 }
-
