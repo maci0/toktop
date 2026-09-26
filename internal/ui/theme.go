@@ -196,6 +196,10 @@ func contrastAgainstBase(c lipgloss.Color) float64 {
 	if !ok {
 		return 0
 	}
+	return contrastAgainstBaseLum(lc)
+}
+
+func contrastAgainstBaseLum(lc float64) float64 {
 	if lc < baseLum {
 		return (baseLum + 0.05) / (lc + 0.05)
 	}

@@ -69,7 +69,8 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	outAgg, inAgg := aggBothAt(s, now)
 	fmt.Fprintf(&b, "%s · out %s tok/s · in %s tok/s",
 		state, fmtRate(outAgg), fmtRate(inAgg))
-	if n := len(core.AgentRates(s.Agents, now)); n > 0 {
+	rates := core.AgentRates(s.Agents, now)
+	if n := len(rates); n > 0 {
 		b.WriteString(fmt.Sprintf(" · %d agents", n))
 	}
 	if s.Uptime > 0 {
@@ -80,7 +81,7 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	writeEnginesPlain(&b, s)
 	writeSystemPlain(&b, s.Sys)
 	writeProbesPlain(&b, s)
-	writeFeedPlain(&b, s, cfg)
+	writeFeedPlain(&b, s, cfg, rates)
 	return b.String()
 }
 
@@ -247,9 +248,9 @@ func writeProbesPlain(b *strings.Builder, s core.Snapshot) {
 // writeFeedPlain tails the agent feed oldest-first like the panel does, with
 // per-kind words instead of icons. An empty feed keeps the panel's setup
 // guidance: which knob feeds this panel is invisible from a bare "empty".
-func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
+func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []core.AgentRate) {
 	b.WriteString("\nAGENT FEED\n")
-	if rates := core.AgentRates(s.Agents, frameNow(s, time.Time{})); len(rates) > 0 {
+	if len(rates) > 0 {
 		var parts []string
 		for i, r := range rates {
 			if i == 3 {
@@ -315,8 +316,9 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	fmt.Fprintf(b, "out %s tok/s · in %s tok/s\n", fmtRate(outPS), fmtRate(inPS))
 	writeSystemPlain(b, s.Sys)
 	b.WriteString("\nAGENTS\n")
+	rates := core.AgentRates(s.Agents, now)
 	rows := 0
-	for _, r := range core.AgentRates(s.Agents, now) {
+	for _, r := range rates {
 		name := core.SanitizeText(r.Agent)
 		recency := "idle " + fmtDur(now.Sub(r.Last).Truncate(time.Second))
 		if now.Sub(r.Last) < 3*time.Second {
@@ -345,5 +347,5 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	if rows == 0 {
 		b.WriteString("waiting for an agent to report tokens\n")
 	}
-	writeFeedPlain(b, s, cfg)
+	writeFeedPlain(b, s, cfg, rates)
 }

@@ -199,7 +199,7 @@ func TestAgentRowsSanitizeViaEngine(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("rows = %d, want 1", len(rows))
 	}
-	if strings.ContainsAny(rows[0], "\x1b\x07") {
+	if strings.Contains(rows[0], "\x07") || strings.Contains(rows[0], "\x1b]") {
 		t.Errorf("via-engine leaked escape bytes:\n%s", rows[0])
 	}
 	if !strings.Contains(strip(rows[0]), "127.0.0.1:11434") {

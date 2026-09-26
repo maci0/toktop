@@ -8,6 +8,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+
 	"github.com/maci0/toktop/internal/core"
 )
 
@@ -90,6 +93,10 @@ var allocBudget = map[[2]int]float64{
 //	before  65.4M instructions, 14.0M branches, 22.6k allocs
 //	after   39.1M instructions,  8.0M branches,  8.3k allocs
 func TestStaticFrameAllocBudget(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	defer lipgloss.SetColorProfile(prev)
+
 	cfg := Config{Version: "0.10.0", IngestAddr: "127.0.0.1:8420", Agents: true}
 	snap := perfSnap()
 	for _, sz := range perfFrameSizes {

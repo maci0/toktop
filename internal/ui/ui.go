@@ -1298,8 +1298,8 @@ func (m Model) renderMinimal() string {
 	if !m.probeReq.IsZero() {
 		lines = append(lines, clip(styleWarn.Render("● probing…"), m.w))
 	}
+	rates := core.AgentRates(m.snap.Agents, m.snapNow())
 	if len(m.snap.Providers) == 0 {
-		rates := core.AgentRates(m.snap.Agents, m.snapNow())
 		if len(rates) == 0 {
 			if m.cfg.Agents {
 				// This run asked for agents; leading with the engines it was
@@ -1332,7 +1332,7 @@ func (m Model) renderMinimal() string {
 		lines = append(lines, clip(line, m.w))
 	}
 	if len(m.snap.Providers) > 0 {
-		for _, r := range core.AgentRates(m.snap.Agents, m.snapNow()) {
+		for _, r := range rates {
 			lines = append(lines, clip(agentMiniLine(r), m.w))
 		}
 	}

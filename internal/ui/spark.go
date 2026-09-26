@@ -47,6 +47,8 @@ type ChartStyle struct {
 	Grid map[int]bool // columns marked true get a faint vertical guide
 }
 
+const hexDigits = "0123456789abcdef"
+
 // fadeColor blends a hex color toward black by factor f (0..1). Non-hex
 // colors pass through untouched.
 //
@@ -74,7 +76,15 @@ func fadeColor(c lipgloss.Color, f float64) string {
 	return string(out[:])
 }
 
-const hexDigits = "0123456789abcdef"
+func formatHexRGB(r, g, b uint64) string {
+	var out [7]byte
+	out[0] = '#'
+	for i, ch := range [3]uint64{r, g, b} {
+		out[1+i*2] = hexDigits[ch>>4&0xf]
+		out[2+i*2] = hexDigits[ch&0xf]
+	}
+	return string(out[:])
+}
 
 // minGraphicContrast is the WCAG 2.2 AA non-text floor (SC 1.4.11): a
 // data-bearing chart mark must keep at least this ratio against the panel
@@ -87,22 +97,46 @@ const minGraphicContrast = 3.0
 // the floor at all (non-hex encodings, colors darker than the background)
 // come back at full strength rather than half-hidden.
 func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
-	out := fadeColor(c, f)
-	if contrastAgainstBase(lipgloss.Color(out)) >= min {
-		return lipgloss.Color(out)
+	s := string(c)
+	if !strings.HasPrefix(s, "#") || len(s) != 7 {
+		return c
 	}
+	v, err := strconv.ParseUint(s[1:], 16, 32)
+	if err != nil {
+		return c
+	}
+	r0 := float64(v >> 16 & 0xff)
+	g0 := float64(v >> 8 & 0xff)
+	b0 := float64(v & 0xff)
+
+	lumOf := func(factor float64) (float64, uint64, uint64, uint64) {
+		r := uint64(r0 * factor)
+		g := uint64(g0 * factor)
+		b := uint64(b0 * factor)
+		lum := 0.2126*linearChannel[r] + 0.7152*linearChannel[g] + 0.0722*linearChannel[b]
+		return lum, r, g, b
+	}
+
+	lum, r, g, b := lumOf(f)
+	if contrastAgainstBaseLum(lum) >= min {
+		return lipgloss.Color(formatHexRGB(r, g, b))
+	}
+
 	// fadeColor is monotonic (less factor = darker = lower ratio), so the
-	// shallowest factor still above the floor can be bisected.
+	// shallowest factor still above the floor can be bisected without
+	// allocating intermediate strings.
 	lo, hi := f, 1.0
 	for range 16 {
 		mid := (lo + hi) / 2
-		if contrastAgainstBase(lipgloss.Color(fadeColor(c, mid))) >= min {
+		midLum, _, _, _ := lumOf(mid)
+		if contrastAgainstBaseLum(midLum) >= min {
 			hi = mid
 		} else {
 			lo = mid
 		}
 	}
-	return lipgloss.Color(fadeColor(c, hi))
+	_, rHi, gHi, bHi := lumOf(hi)
+	return lipgloss.Color(formatHexRGB(rHi, gHi, bHi))
 }
 
 // BrailleChart renders an area chart as braille dot-matrix, btop-style: every
@@ -122,22 +156,27 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 		pattern int
 	}
 	cache := map[cacheKey]string{}
-	// Age fade recomputes a clamped WCAG blend per cell, and each blend can
-	// bisect up to 16 times (hex parse + luminance per step). The blend
-	// depends only on the base color and the column, never on the row or the
-	// value's height, so results are memoized: w*h blends collapse to at
-	// most (#ramp colors x w).
-	type fadeKey struct {
-		color string
-		cx    int
+
+	levels := make([]float64, w)
+	colColors := make([]lipgloss.Color, w)
+	denom := float64(max(w-1, 1))
+	for cx := range w {
+		frac := clamp01(cols[cx] / peak)
+		levels[cx] = frac * float64(dotH)
+		col := st.Heat(frac)
+		if frac > 0.02 {
+			f := 0.30 + 0.70*(float64(cx) / denom)
+			col = fadeClamped(col, f, minGraphicContrast)
+		}
+		colColors[cx] = col
 	}
-	fades := make(map[fadeKey]lipgloss.Color)
+
 	rows := make([]strings.Builder, h)
 	for cy := range h {
+		rows[cy].Grow(w * 4)
 		for cx := range w {
-			frac := clamp01(cols[cx] / peak)
+			level := levels[cx]
 			pattern := 0
-			level := frac * float64(dotH)
 			for sr := range 4 {
 				dy := cy*4 + sr
 				if float64(dotH-dy) <= level {
@@ -148,28 +187,15 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 			if pattern == 0 && cy == h-1 && st.Grid[cx] {
 				pattern = int(brailleBits[3][0])
 			}
-			col := st.Heat(frac)
-			if frac > 0.02 {
-				k := fadeKey{color: string(col), cx: cx}
-				if fc, ok := fades[k]; ok {
-					col = fc
-				} else {
-					f := 0.30 + 0.70*(float64(cx)/float64(max(w-1, 1)))
-					// The oldest columns still carry history: clamp the fade at
-					// the non-text contrast floor instead of letting the bloom
-					// fade them into invisibility for low-vision users.
-					col = fadeClamped(col, f, minGraphicContrast)
-					fades[k] = col
-				}
+			if pattern == 0 {
+				rows[cy].WriteByte(' ')
+				continue
 			}
+			col := colColors[cx]
 			k := cacheKey{color: string(col), pattern: pattern}
 			s, ok := cache[k]
 			if !ok {
-				r := ' '
-				if pattern != 0 {
-					r = rune(0x2800 + pattern)
-				}
-				s = lipgloss.NewStyle().Foreground(col).Render(string(r))
+				s = lipgloss.NewStyle().Foreground(col).Render(string(rune(0x2800 + pattern)))
 				cache[k] = s
 			}
 			rows[cy].WriteString(s)
