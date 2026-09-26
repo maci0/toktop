@@ -10,6 +10,11 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-09-26
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.14.0).
+
 ### Added
 
 - `toktop update --help` shows subcommand help, and `toktop help` and
@@ -18,6 +23,11 @@ support channel (see SECURITY.md).
 - Web site accessibility improvements: skip-to-content navigation link,
   landmark regions, motion preference checks for smooth scrolling, and
   focus-visible styling.
+- Transcript lines, agent definition files, and `POST /v1/events` bodies may
+  begin with a UTF-8 BOM; the BOM is ignored instead of failing the parse.
+- Agent identifiers, session directories, and derived event IDs are compared
+  under Unicode NFC normalization, so NFC and NFD spellings of the same name
+  no longer split one agent into two or defeat duplicate detection.
 
 ### Changed
 
@@ -28,7 +38,8 @@ support channel (see SECURITY.md).
 
 - `toktop` treats broken pipes (`EPIPE` and `io.ErrClosedPipe`) on stdout as
   clean exits with code 0 instead of reporting write errors when piped to
-  utilities like `head` or `grep`.
+  utilities like `head` or `grep`. On Windows, `ERROR_BROKEN_PIPE` and
+  `ERROR_NO_DATA` are treated the same way.
 - Prevented potential cache aliasing and stale state by cloning cached
   slices in process and system monitoring, pruning expired transcript
   listings on cache hits in `agentusage`, and clearing cached KV percentages
@@ -47,7 +58,7 @@ support channel (see SECURITY.md).
 
 ## [0.13.0] - 2026-09-22
 
-Latest tagged release. Binaries, checksums, and a CycloneDX SBOM are on
+Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.13.0).
 
 ### Changed
@@ -509,7 +520,8 @@ Binaries, checksums, and a CycloneDX SBOM are on
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/maci0/toktop/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/maci0/toktop/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/maci0/toktop/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/maci0/toktop/compare/v0.10.0...v0.11.0
