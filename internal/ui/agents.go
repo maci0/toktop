@@ -116,6 +116,12 @@ func (m Model) renderAgentsOnly() string {
 	if hint := dim("  local, read from their own session logs"); m.w >= 78 {
 		title += hint
 	}
+	if !m.probeReq.IsZero() {
+		title += "  " + styleWarn.Render("● probing…")
+	}
+	if len(rows) > midIn && midIn > 0 {
+		title += "  " + dim(fmt.Sprintf("+%d more", len(rows)-midIn))
+	}
 
 	feed := feedLines(m.snap.Agents, feedIn, w)
 	if len(feed) == 0 {

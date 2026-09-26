@@ -143,15 +143,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, waitFeedErr(m.cfg.FeedErr)
 
 	case snapMsg:
+		in := core.Snapshot(msg)
+		if n := len(in.Probes); n > 0 && in.Probes[n-1].At.After(m.probeReq) {
+			m.probeReq = time.Time{} // first result landed: hand over to it
+			if m.paused {
+				m.snap.Probes = in.Probes
+			}
+		}
 		if !m.paused {
-			in := core.Snapshot(msg)
 			agg := aggOutAt(in, frameNow(in, m.clock))
 			m.aggLast = agg
 			if agg > m.aggMax {
 				m.aggMax = agg
-			}
-			if n := len(in.Probes); n > 0 && in.Probes[n-1].At.After(m.probeReq) {
-				m.probeReq = time.Time{} // first result landed: hand over to it
 			}
 			m.snap = in
 		}
@@ -163,14 +166,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// blind on the dashboard it covers (space silently paused mid-read,
 		// p fired real probe generations). Only the dismiss and toggle keys
 		// stay live while help is up.
-		if m.help && key != "q" && key != "ctrl+c" && key != "esc" &&
-			key != "?" && key != "h" {
-			return m, nil
+		if m.help {
+			switch key {
+			case "q", "Q", "ctrl+c", "esc", "?", "h", "H", "enter":
+				m.help = false
+				return m, nil
+			default:
+				return m, nil
+			}
 		}
 		switch key {
-		case "q", "ctrl+c", "esc":
-			if m.help {
-				m.help = false
+		case "q", "Q", "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			if m.focusAgents {
+				m.focusAgents = false
 				return m, nil
 			}
 			return m, tea.Quit
@@ -194,7 +204,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// frame never hides half the machine to show the other half.
 			m.focusAgents = !m.focusAgents
 			return m, nil
-		case "?", "h":
+		case "?", "h", "H":
 			m.help = !m.help
 			return m, nil
 		}
@@ -453,7 +463,7 @@ func (m Model) throughputTitle() string {
 	if len(m.snap.Providers) == 0 {
 		kind = dim("  output")
 	}
-	title := "THROUGHPUT " + styleOK.Render("▲ "+fmtRate(m.aggLast)+" tok/s") + kind
+	title := "THROUGHPUT " + styleValue.Foreground(heatColor(norm(m.aggLast, m.aggMax))).Render("▲ "+fmtRate(m.aggLast)+" tok/s") + kind
 	// Advertise the toggle in both modes: the hint only showing while
 	// compressed hid how to get back to the uniform timescale. Brackets mark
 	// the key so "compressed [t]" reads as mode plus switch rather than one
@@ -631,11 +641,41 @@ func (m Model) renderMidRow() string {
 	rw := m.w - pw - gw
 	_, midIn, _ := m.sectionHeights()
 
-	prov := panel("ENGINES", m.providersBody(pw-4), pw-4, midIn)
-	gaug := panel("ENGINE STATE", m.gaugesBody(gw-4), gw-4, midIn)
+	prov := panel(m.enginesTitle(pw-4, midIn), m.providersBody(pw-4), pw-4, midIn)
+	gaug := panel(m.engineStateTitle(gw-4, midIn), m.gaugesBody(gw-4), gw-4, midIn)
 	prb := panel(clip(m.probesTitle(), rw), m.probesBody(rw-4, midIn), rw-4, midIn)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, prov, gaug, prb)
+}
+
+func (m Model) enginesTitle(w, midIn int) string {
+	title := "ENGINES"
+	visible := max(midIn/2, 1)
+	if hidden := len(m.snap.Providers) - visible; hidden > 0 {
+		more := fmt.Sprintf("+%d more", hidden)
+		if lipgloss.Width(title)+lipgloss.Width(more)+2 <= w {
+			title += "  " + dim(more)
+		}
+	}
+	return title
+}
+
+func (m Model) engineStateTitle(w, midIn int) string {
+	title := "ENGINE STATE"
+	healthy := 0
+	for _, p := range m.snap.Providers {
+		if p.OK {
+			healthy++
+		}
+	}
+	visible := max((midIn+1)/4, 1)
+	if hidden := healthy - visible; hidden > 0 {
+		more := fmt.Sprintf("+%d more", hidden)
+		if lipgloss.Width(title)+lipgloss.Width(more)+2 <= w {
+			title += "  " + dim(more)
+		}
+	}
+	return title
 }
 
 // renderSystem is the two-row host strip: row 1 is live vitals (mem, gpus),
@@ -1007,6 +1047,9 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 	if m.paused {
 		add("  " + styleWarn.Render("(paused)"))
 	}
+	if m.feedDown != "" {
+		add("  " + styleBad.Render("✗ ingest down"))
+	}
 	if statsN == 0 {
 		if s := agentSummary(rates); s != "" {
 			add("  " + s)
@@ -1014,10 +1057,7 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 	} else if statsN < nRows {
 		add("  " + dim(fmt.Sprintf("+%d more", nRows-statsN)))
 	}
-	switch {
-	case m.feedDown != "":
-		add("  " + styleBad.Render("✗ ingest down"))
-	case m.cfg.IngestAddr != "":
+	if m.feedDown == "" && m.cfg.IngestAddr != "" {
 		add(dim("  ← POST http://" + m.cfg.IngestAddr + "/v1/events"))
 	}
 	return title
@@ -1116,7 +1156,7 @@ func (m Model) renderFooter() string {
 	// a swaps which side gets the panel estate. Advertised only where it
 	// changes something: without engines the agents view is already the
 	// view, and the key stays live so a focus left on agents can be undone.
-	if len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.focusAgents) {
+	if len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents) {
 		label := " agents"
 		if m.focusAgents {
 			label = " engines"
@@ -1245,11 +1285,18 @@ func (m Model) helpRows() [][2]string {
 // own because the footer and header are not rendered here.
 func (m Model) renderMinimal() string {
 	var lines []string
-	lines = append(lines, dim(clip("enlarge window for the full dashboard", m.w)))
+	hint := fmt.Sprintf("enlarge window (min %d×%d) for full dashboard", minDashW, minDashH)
+	if m.w >= 60 {
+		hint = fmt.Sprintf("enlarge window (min %d×%d, current %d×%d) for full dashboard", minDashW, minDashH, m.w, m.h)
+	}
+	lines = append(lines, dim(clip(hint, m.w)))
 	// space pauses here too: without a badge a frozen strip is
 	// indistinguishable from a feed that stalled.
 	if m.paused {
 		lines = append(lines, clip(styleWarn.Render("‖ PAUSED"), m.w))
+	}
+	if !m.probeReq.IsZero() {
+		lines = append(lines, clip(styleWarn.Render("● probing…"), m.w))
 	}
 	if len(m.snap.Providers) == 0 {
 		rates := core.AgentRates(m.snap.Agents, m.snapNow())
@@ -1294,6 +1341,11 @@ func (m Model) renderMinimal() string {
 	// help matches this list.
 	foot := dim(clip("q quit · space pause · ? help", m.w))
 	bodyH := max(m.h-lipgloss.Height(foot)-1, 0)
+	if len(lines) > bodyH && bodyH >= 3 {
+		hidden := len(lines) - (bodyH - 1)
+		lines = lines[:bodyH-1]
+		lines = append(lines, dim(clip(fmt.Sprintf("+%d more (enlarge window to view)", hidden), m.w)))
+	}
 	body := clipBlock(strings.Join(lines, "\n"), m.w, bodyH)
 	if bodyH == 0 {
 		return clipBlock(foot, m.w, m.h)

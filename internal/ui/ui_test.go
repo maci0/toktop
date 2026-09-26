@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"sync/atomic"
@@ -1716,5 +1717,117 @@ func TestHelpDescribesLiveProbe(t *testing.T) {
 	}
 	if strings.Contains(out, "synthetic") {
 		t.Errorf("help still calls the probe synthetic:\n%s", out)
+	}
+}
+
+func TestKeyMapCaseInsensitiveAndDismiss(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	key := func(s string) (Model, tea.Cmd) {
+		nm, cmd := m.Update(keyMsg(s))
+		m = nm.(Model)
+		return m, cmd
+	}
+
+	// Upper-case Q quits
+	if _, cmd := key("Q"); cmd == nil {
+		t.Error("Q must quit")
+	}
+
+	// Upper-case H opens help
+	key("H")
+	if !m.help {
+		t.Fatal("H did not open help")
+	}
+
+	// Enter dismisses help
+	key("enter")
+	if m.help {
+		t.Error("enter did not dismiss help")
+	}
+
+	// Upper-case H opens help, Q dismisses help
+	key("H")
+	if !m.help {
+		t.Fatal("H did not open help")
+	}
+	key("Q")
+	if m.help {
+		t.Error("Q with help open did not dismiss help")
+	}
+
+	// esc unfocuses agents without quitting
+	m.focusAgents = true
+	_, cmd := key("esc")
+	if cmd != nil {
+		t.Error("esc while focused on agents must not quit")
+	}
+	if m.focusAgents {
+		t.Error("esc while focused on agents did not unfocus")
+	}
+}
+
+func TestProbeFeedbackInAgentsView(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready, m.focusAgents = 100, 36, true, true
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Agents:    []core.AgentEvent{{Agent: "codex", OutputTokens: 100}},
+	}
+	m.probeReq = time.Now()
+	out := strip(m.View())
+	if !strings.Contains(out, "probing") {
+		t.Errorf("renderAgentsOnly missing probing indicator:\n%s", out)
+	}
+}
+
+func TestPausedModelReceivesManualProbeResult(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.paused = true
+	m.probeReq = time.Now().Add(-time.Second)
+
+	nm, _ := m.Update(snapMsg(core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Probes: []core.ProbeSample{{
+			At:    time.Now(),
+			Model: "llama3",
+			TokPS: 50.0,
+			OK:    true,
+		}},
+	}))
+	m = nm.(Model)
+	if !m.probeReq.IsZero() {
+		t.Error("probeReq was not cleared on probe result arrival while paused")
+	}
+	if len(m.snap.Probes) == 0 {
+		t.Error("probe sample was discarded while paused")
+	}
+}
+
+func TestFooterAdvertisesAgentsWithFlag(t *testing.T) {
+	m := New(Config{Version: "t", Agents: true}, nil)
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+	}
+	m.w, m.h, m.ready = 110, 36, true
+	out := strip(m.renderFooter())
+	if !strings.Contains(out, "a agents") {
+		t.Errorf("footer does not advertise 'a agents' when --agents is enabled:\n%s", out)
+	}
+}
+
+func TestPanelTitlesShowHiddenCount(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	ps := make([]core.ProviderSnapshot, 6)
+	for i := range ps {
+		ps[i] = core.ProviderSnapshot{
+			Label: fmt.Sprintf("engine-%d", i),
+			OK:    true,
+		}
+	}
+	m.snap = core.Snapshot{Providers: ps}
+	m.w, m.h, m.ready = 110, 32, true
+	out := strip(m.View())
+	if !strings.Contains(out, "+") || !strings.Contains(out, "more") {
+		t.Errorf("panels with overflow do not show hidden count in titles:\n%s", out)
 	}
 }
