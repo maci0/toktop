@@ -681,7 +681,6 @@ func TestUniqueAgents(t *testing.T) {
 	}
 }
 
-
 func TestStaticFrameRenders(t *testing.T) {
 	snap := core.Snapshot{
 		At:     time.Now(),

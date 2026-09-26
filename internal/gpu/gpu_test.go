@@ -288,4 +288,3 @@ func TestSampleCanceledContext(t *testing.T) {
 	cancel()
 	_ = Sample(ctx)
 }
-

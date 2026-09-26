@@ -1867,7 +1867,6 @@ func TestUtcLogTime(t *testing.T) {
 	}
 }
 
-
 func TestAddrRedactHandler(t *testing.T) {
 	var buf bytes.Buffer
 	baseHandler := slog.NewTextHandler(&buf, nil)
@@ -1889,4 +1888,3 @@ func TestAddrRedactHandler(t *testing.T) {
 		t.Errorf("redacted output missing expected tags: %q", out)
 	}
 }
-

@@ -309,4 +309,3 @@ func TestSampleLinux(t *testing.T) {
 		t.Error("Sample() CPUModel is empty on Linux")
 	}
 }
-

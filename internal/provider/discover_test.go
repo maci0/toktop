@@ -302,4 +302,3 @@ func TestDiscover(t *testing.T) {
 		t.Fatalf("Discover() provider = %+v, want %s as %s", providers[0], engine, core.KindSGLang)
 	}
 }
-

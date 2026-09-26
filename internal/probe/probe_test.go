@@ -895,7 +895,6 @@ func TestHttpStatusErrorUnwrap(t *testing.T) {
 	}
 }
 
-
 func FuzzReadEngineJSON(f *testing.F) {
 	for _, seed := range []string{
 		`{"choices":[{"message":{"content":"one two three"}}],"usage":{"completion_tokens":3}}`,

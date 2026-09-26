@@ -130,6 +130,7 @@ NEED_CC = cc="$${CC:-}"; \
 	if [ -z "$$cc" ] || ! command -v "$$cc" >/dev/null 2>&1; then \
 		echo "make: go test -race needs a C compiler (gcc or clang) on PATH" >&2; \
 		echo "  CGO stays off for make build; only the race tests need it." >&2; \
+		echo "  Pass RACE=0 to skip race detection: make test RACE=0" >&2; \
 		exit 1; \
 	fi
 
@@ -139,24 +140,24 @@ test: ## run all tests shuffled (both sqlite tag halves); RACE=0 skips -race
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(race_flag)-shuffle=on ./...
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on ./agentusage/...
 
-# Same flags and toolchain as `make test`. PKG is required; RUN and TESTTAGS
-# are optional. Unset TESTTAGS on ./agentusage runs both halves of the sqlite
-# tag gate (matching `make test`); TESTTAGS=sqlite (or another tag) runs one.
+# Same flags and toolchain as `make test`. PKG is required; RUN (or TEST) and
+# TESTTAGS are optional. Unset TESTTAGS on ./agentusage runs both halves of the
+# sqlite tag gate (matching `make test`); TESTTAGS=sqlite (or another tag) runs one.
 # RACE=0 drops -race for a faster edit loop; default matches CI.
 .PHONY: test-pkg
 test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite] [RACE=0]
 	@if [ -z "$(PKG)" ]; then \
 		echo "make test-pkg: set PKG (e.g. PKG=./internal/ui)" >&2; \
-		echo "  optional: RUN=TestName  TESTTAGS=sqlite  RACE=0" >&2; \
+		echo "  optional: RUN=TestName (or TEST=TestName)  TESTTAGS=sqlite  RACE=0" >&2; \
 		exit 1; \
 	fi
 	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
-	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS) )$(race_flag)-shuffle=on $(if $(RUN),-run "$(RUN)" )"$(PKG)"
+	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS) )$(race_flag)-shuffle=on $(if $(or $(RUN),$(TEST)),-run "$(or $(RUN),$(TEST))" )"$(PKG)"
 	@if [ -z "$(TESTTAGS)" ]; then \
 		case "$(PKG)" in \
 		./agentusage|./agentusage/|./agentusage/...|agentusage|github.com/maci0/toktop/agentusage|github.com/maci0/toktop/agentusage/|github.com/maci0/toktop/agentusage/...) \
 			echo "make test-pkg: also running -tags sqlite (set TESTTAGS to run one half)"; \
-			CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on $(if $(RUN),-run "$(RUN)" )"$(PKG)" || exit 1; \
+			CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on $(if $(or $(RUN),$(TEST)),-run "$(or $(RUN),$(TEST))" )"$(PKG)" || exit 1; \
 			;; \
 		esac; \
 	fi
@@ -225,12 +226,19 @@ site-check: ## bun test the Cloudflare Worker in site/ (CI parity)
 fmt: ## rewrite all Go files with gofmt (including simplifications)
 	$(GOFMT) -s -w .
 
+.PHONY: format
+format: fmt ## alias for fmt
+
 .PHONY: fix
 fix: ## apply go fix modernization autofixes, then gofmt
 	$(GO) fix ./...
 	GOOS=darwin $(GO) fix ./...
 	GOOS=windows $(GO) fix ./...
 	$(GOFMT) -s -w .
+
+.PHONY: tidy
+tidy: ## tidy go.mod and go.sum
+	$(GO) mod tidy
 
 .PHONY: tidy-check
 tidy-check: ## fail if go.mod or go.sum would change
@@ -254,7 +262,7 @@ scripts-check: ## black and ruff over scripts/ (same pins as CI)
 check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
-			echo "needs gofmt:" >&2; echo "$$unformatted" >&2; exit 1; \
+			echo "needs gofmt (run 'make fmt'):" >&2; echo "$$unformatted" >&2; exit 1; \
 		fi
 	@$(MAKE) tidy-check
 	@$(MAKE) lint

@@ -65,6 +65,7 @@ and rendered by `scripts/screenshot.py`:
 
 ```
 make build VERSION=0.10.0
+mkdir -p .scratch
 tmux new-session -d -c "$PWD" -x 180 -y 50 -s shot './toktop --demo --seed 7 --no-hot-reload'
 sleep 60 && tmux send-keys -t shot p   # let the charts fill, then probe
 sleep 40                               # and let the probes answer
@@ -119,8 +120,9 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-check` + `scripts-check` |
-| `make fmt` | rewrite files with gofmt -s |
+| `make fmt` / `make format` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
+| `make tidy` | run `go mod tidy` to clean up go.mod and go.sum |
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
 | `make govulncheck` | `govulncheck` over both sqlite tag halves at the Makefile pin (same pin as CI) |
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
