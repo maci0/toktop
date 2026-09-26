@@ -248,6 +248,22 @@ func TestDshPlainJSONLStillWorks(t *testing.T) {
 	}
 }
 
+func TestDshZstdHandlesCRLF(t *testing.T) {
+	store := withStore(t, "dsh")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl.zstd")
+	w := Watch("dsh", work, time.Now())
+	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\r\n"))
+	appendBytes(t, path, zstdFrame(t, dshMessage(55, 10, 20)+"\r\n"))
+	w.poll(nil)
+	if got := w.Sample().Output; got != 55 {
+		t.Fatalf("CRLF zstd output %d, want 55", got)
+	}
+	if got := w.Sample().Thinking; got != 10 {
+		t.Fatalf("CRLF zstd thinking %d, want 10", got)
+	}
+}
+
 func TestDshZstdTailCapContinuesNextPoll(t *testing.T) {
 	store := withStore(t, "dsh")
 	work := t.TempDir()

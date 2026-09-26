@@ -17,6 +17,9 @@ import (
 
 // knownHostsFile is the trust-on-first-use store. Overridable in tests.
 var knownHostsPath = func() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+		return filepath.Join(dir, "toktop", "known_hosts")
+	}
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return ""

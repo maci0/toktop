@@ -567,7 +567,7 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 }
 
 func outputStatus(err error) int {
-	if err == nil || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrClosedPipe) {
+	if err == nil || isBrokenPipe(err) {
 		return 0
 	}
 	fmt.Fprintf(os.Stderr, "toktop: write stdout: %v\n", err)

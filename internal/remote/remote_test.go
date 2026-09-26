@@ -657,3 +657,13 @@ func TestFingerprintOfFallback(t *testing.T) {
 		}
 	}
 }
+
+func TestKnownHostsPathHonorsXDGConfigHome(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", tmp)
+	got := knownHostsPath()
+	want := filepath.Join(tmp, "toktop", "known_hosts")
+	if got != want {
+		t.Fatalf("knownHostsPath() = %q, want %q", got, want)
+	}
+}

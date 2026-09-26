@@ -74,6 +74,28 @@ func TestParseVitals(t *testing.T) {
 	}
 }
 
+func TestParseVitalsCRLF(t *testing.T) {
+	crlfDump := strings.ReplaceAll(vitalsDump, "\n", "\r\n")
+	var s core.SysSample
+	parseVitals(crlfDump, &s)
+
+	if s.Load1 != 3.10 || s.Load5 != 2.20 || s.Load15 != 1.05 {
+		t.Errorf("load = %v %v %v", s.Load1, s.Load5, s.Load15)
+	}
+	if s.CPUModel != "AMD Ryzen 9 7950X 16-Core Processor" {
+		t.Errorf("cpumodel = %q", s.CPUModel)
+	}
+	if s.OsName != "Debian GNU/Linux 12 (bookworm)" {
+		t.Errorf("osname = %q", s.OsName)
+	}
+	if s.Kernel != "6.1.0-18-amd64" {
+		t.Errorf("kernel = %q", s.Kernel)
+	}
+	if len(s.GPUs) != 2 {
+		t.Fatalf("gpus = %+v", s.GPUs)
+	}
+}
+
 func TestParseVitalsInfLoadAndHugeUptime(t *testing.T) {
 	var s core.SysSample
 	if parseVitals(vitalsDumpFrom("+Inf nan 0", "", "1000000000000", "", "", "", ""), &s) {

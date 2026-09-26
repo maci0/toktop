@@ -163,6 +163,7 @@ func (w *Watcher) consumeZstd(f *os.File, off int64) (recs []values, complete in
 		return nil, 0, false
 	}
 	for line := range bytes.SplitSeq(plain, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
 		if len(line) == 0 {
 			continue
 		}
@@ -187,6 +188,7 @@ func (w *Watcher) ownsZstd(path string, f *os.File) (mine, decided bool) {
 		return false, false
 	}
 	for line := range bytes.SplitSeq(plain, []byte("\n")) {
+		line = bytes.TrimRight(line, "\r")
 		if cwd, ok := w.ad.sessionCwd(line); ok {
 			mine := w.sameDir(cwd)
 			w.owner[path] = mine

@@ -38,6 +38,8 @@ FONT_ROOTS: tuple[str, ...] = (
     os.path.expanduser("~/.local/share/fonts"),
     "/Library/Fonts",
     os.path.expanduser("~/Library/Fonts"),
+    os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts"),
+    os.path.expanduser("~/AppData/Local/Microsoft/Windows/Fonts"),
 )
 
 # The 16 ANSI colors as SGR 30-37/90-97, tuned to the dashboard's palette.
@@ -173,12 +175,12 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
 
     try:
         with open(src, "rb") as f:
-            data = f.read().rstrip(b"\n")
+            data = f.read().rstrip(b"\r\n")
     except OSError as e:
         print(f"screenshot.py: {src}: {e}", file=sys.stderr)
         raise SystemExit(1) from e
 
-    lines = data.split(b"\n")
+    lines = [ln.rstrip(b"\r") for ln in data.split(b"\n")]
     if cols <= 0:
         # count runes after stripping escapes: braille dots are 3 UTF-8 bytes
         cols = max(len(ANSI_RE.sub(b"", ln).decode("utf-8", "replace")) for ln in lines)

@@ -237,6 +237,7 @@ func splitSections(out string) []string {
 	var secs []string
 	var cur strings.Builder
 	for line := range strings.SplitSeq(out, "\n") {
+		line = strings.TrimRight(line, "\r")
 		if strings.TrimSpace(line) == sectionMark {
 			secs = append(secs, cur.String())
 			cur.Reset()
