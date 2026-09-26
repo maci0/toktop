@@ -5,6 +5,8 @@ package selfupdate
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -157,3 +159,82 @@ func TestApplyRejectsNonGitHubAssetURL(t *testing.T) {
 		t.Fatalf("non-GitHub asset URL must be refused, got %v", err)
 	}
 }
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
+}
+
+func TestCheck(t *testing.T) {
+	orig := client.Transport
+	defer func() { client.Transport = orig }()
+
+	t.Run("success", func(t *testing.T) {
+		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			if !strings.HasSuffix(req.URL.Path, "/releases/latest") {
+				return nil, fmt.Errorf("unexpected path: %s", req.URL.Path)
+			}
+			body := `{"tag_name":"v1.2.3","assets":[{"name":"toktop_1.2.3_linux_amd64","browser_download_url":"https://github.com/foo/bar"}]}`
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(body)),
+				Header:     make(http.Header),
+			}, nil
+		})
+		rel, err := Check(context.Background(), "maci0/toktop")
+		if err != nil {
+			t.Fatalf("Check() err = %v", err)
+		}
+		if rel.TagName != "v1.2.3" {
+			t.Fatalf("TagName = %q, want v1.2.3", rel.TagName)
+		}
+	})
+
+	t.Run("http error", func(t *testing.T) {
+		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusNotFound,
+				Status:     "404 Not Found",
+				Body:       io.NopCloser(strings.NewReader(`{"message":"Not Found"}`)),
+				Header:     make(http.Header),
+			}, nil
+		})
+		_, err := Check(context.Background(), "maci0/toktop")
+		if err == nil || !strings.Contains(err.Error(), "404") {
+			t.Fatalf("Check() err = %v, want 404 error", err)
+		}
+	})
+
+	t.Run("missing tag", func(t *testing.T) {
+		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(`{"tag_name":""}`)),
+				Header:     make(http.Header),
+			}, nil
+		})
+		_, err := Check(context.Background(), "maci0/toktop")
+		if err == nil || !strings.Contains(err.Error(), "no tag") {
+			t.Fatalf("Check() err = %v, want no tag error", err)
+		}
+	})
+
+	t.Run("invalid json", func(t *testing.T) {
+		client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Status:     "200 OK",
+				Body:       io.NopCloser(strings.NewReader(`{invalid json`)),
+				Header:     make(http.Header),
+			}, nil
+		})
+		_, err := Check(context.Background(), "maci0/toktop")
+		if err == nil || !strings.Contains(err.Error(), "cannot parse") {
+			t.Fatalf("Check() err = %v, want cannot parse error", err)
+		}
+	})
+}
+

@@ -1837,3 +1837,56 @@ func TestNewIngestLoggerHonorsLogLevel(t *testing.T) {
 		t.Fatal("warn should be disabled at error floor")
 	}
 }
+
+func TestStatusWriterUnwrap(t *testing.T) {
+	rec := httptest.NewRecorder()
+	sw := &statusWriter{ResponseWriter: rec}
+	if sw.Unwrap() != rec {
+		t.Errorf("sw.Unwrap() = %v, want %v", sw.Unwrap(), rec)
+	}
+	rc := http.NewResponseController(sw)
+	if err := rc.Flush(); err != nil {
+		t.Errorf("rc.Flush() = %v, want nil", err)
+	}
+}
+
+func TestUtcLogTime(t *testing.T) {
+	tm := time.Date(2026, 3, 15, 10, 30, 0, 0, time.FixedZone("EST", -5*3600))
+	attr := slog.Time(slog.TimeKey, tm)
+	got := utcLogTime(nil, attr)
+	if got.Value.Kind() != slog.KindString {
+		t.Fatalf("kind = %v, want string", got.Value.Kind())
+	}
+	want := tm.UTC().Format(time.RFC3339Nano)
+	if got.Value.String() != want {
+		t.Errorf("got %q, want %q", got.Value.String(), want)
+	}
+	other := slog.String("other", "value")
+	if gotOther := utcLogTime(nil, other); gotOther.Key != other.Key || gotOther.Value.String() != other.Value.String() {
+		t.Errorf("non-time attr was modified: %+v", gotOther)
+	}
+}
+
+
+func TestAddrRedactHandler(t *testing.T) {
+	var buf bytes.Buffer
+	baseHandler := slog.NewTextHandler(&buf, nil)
+	h := addrRedactHandler{Handler: baseHandler}
+	hWithAttrs := h.WithAttrs([]slog.Attr{slog.String("k", "v")})
+	hWithGroup := h.WithGroup("grp")
+	if hWithAttrs == nil || hWithGroup == nil {
+		t.Fatal("WithAttrs / WithGroup returned nil")
+	}
+	record := slog.NewRecord(time.Now(), slog.LevelInfo, "connect from 192.168.1.1:8080 and 127.0.0.1:9090", 0)
+	if err := h.Handle(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "192.168.1.1:8080") {
+		t.Errorf("remote IP leaked: %q", out)
+	}
+	if !strings.Contains(out, "remote") || !strings.Contains(out, "loopback:9090") {
+		t.Errorf("redacted output missing expected tags: %q", out)
+	}
+}
+

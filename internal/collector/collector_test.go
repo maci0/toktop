@@ -1578,3 +1578,68 @@ func TestProbeAllHonorsRetryAfter(t *testing.T) {
 		t.Fatalf("probes = %+v, want the replacement model after backoff", c.probes)
 	}
 }
+
+func TestAgentCmp(t *testing.T) {
+	t0 := time.Unix(100, 0)
+	t1 := time.Unix(200, 0)
+
+	// Primary sort: At
+	if c := agentCmp(core.AgentEvent{At: t0}, core.AgentEvent{At: t1}); c >= 0 {
+		t.Errorf("agentCmp(t0, t1) = %d, want < 0", c)
+	}
+	if c := agentCmp(core.AgentEvent{At: t1}, core.AgentEvent{At: t0}); c <= 0 {
+		t.Errorf("agentCmp(t1, t0) = %d, want > 0", c)
+	}
+
+	// Secondary sort: Agent
+	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a"}, core.AgentEvent{At: t0, Agent: "b"}); c >= 0 {
+		t.Errorf("agentCmp(a, b) = %d, want < 0", c)
+	}
+
+	// Tertiary sort: ID
+	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a", ID: "1"}, core.AgentEvent{At: t0, Agent: "a", ID: "2"}); c >= 0 {
+		t.Errorf("agentCmp(id1, id2) = %d, want < 0", c)
+	}
+
+	// Quaternary sort: Note
+	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "beta"}); c >= 0 {
+		t.Errorf("agentCmp(alpha, beta) = %d, want < 0", c)
+	}
+
+	// Equal
+	if c := agentCmp(core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}); c != 0 {
+		t.Errorf("agentCmp(equal) = %d, want 0", c)
+	}
+}
+
+func TestRecordAgentEqualTimestampOrdersByNote(t *testing.T) {
+	c := New(nil, time.Second)
+	at := time.Unix(1_700_000_000, 0).UTC()
+	c.RecordAgent(core.AgentEvent{At: at, Agent: "claude", Note: "z-note"})
+	c.RecordAgent(core.AgentEvent{At: at, Agent: "claude", Note: "a-note"})
+	if len(c.agents) != 2 {
+		t.Fatalf("agents = %d, want 2", len(c.agents))
+	}
+	if c.agents[0].Note != "a-note" || c.agents[1].Note != "z-note" {
+		t.Fatalf("agents = %+v, want sorted by Note", c.agents)
+	}
+}
+
+func TestProviderKey(t *testing.T) {
+	pWithAddr := provider.Provider{
+		Label: "ollama",
+		Addr:  "http://127.0.0.1:11434",
+	}
+	if got := providerKey(pWithAddr); got != "http://127.0.0.1:11434" {
+		t.Errorf("providerKey with Addr = %q, want http://127.0.0.1:11434", got)
+	}
+
+	pNoAddr := provider.Provider{
+		Label: "gpu-monitor",
+		Addr:  "",
+	}
+	if got := providerKey(pNoAddr); got != "gpu-monitor" {
+		t.Errorf("providerKey without Addr = %q, want gpu-monitor", got)
+	}
+}
+

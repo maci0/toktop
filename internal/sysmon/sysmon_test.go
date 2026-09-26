@@ -150,3 +150,18 @@ func TestParseSwapUsage(t *testing.T) {
 		t.Errorf("swap = %d/%d", used, total)
 	}
 }
+
+func TestSample(t *testing.T) {
+	s := Sample()
+	if s.Drivers == nil {
+		t.Fatal("Sample() must initialize Drivers map")
+	}
+	for _, g := range s.GPUs {
+		if g.Vendor != "" && g.Driver != "" {
+			if s.Drivers[g.Vendor] == "" {
+				t.Errorf("Driver for vendor %q not copied to Drivers map", g.Vendor)
+			}
+		}
+	}
+}
+

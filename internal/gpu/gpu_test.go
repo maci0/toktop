@@ -1,6 +1,7 @@
 package gpu
 
 import (
+	"context"
 	"math"
 	"os/exec"
 	"testing"
@@ -268,3 +269,23 @@ func TestLookupRetriesExpiredMisses(t *testing.T) {
 		t.Fatalf("hit was re-probed: path=%q ok=%v calls=%d", path, ok, n)
 	}
 }
+
+func TestSample(t *testing.T) {
+	ctx := t.Context()
+	devs := Sample(ctx)
+	for i := 1; i < len(devs); i++ {
+		prev, cur := devs[i-1], devs[i]
+		if vendorOrder[prev.Vendor] > vendorOrder[cur.Vendor] {
+			t.Errorf("devices not sorted by vendorOrder: %s > %s", prev.Vendor, cur.Vendor)
+		} else if vendorOrder[prev.Vendor] == vendorOrder[cur.Vendor] && prev.Index > cur.Index {
+			t.Errorf("devices not sorted by index for vendor %s: %d > %d", prev.Vendor, prev.Index, cur.Index)
+		}
+	}
+}
+
+func TestSampleCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_ = Sample(ctx)
+}
+

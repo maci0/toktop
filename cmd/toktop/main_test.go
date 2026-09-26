@@ -1184,6 +1184,9 @@ func TestRoutableBind(t *testing.T) {
 		{"127.0.0.1:8420", false},
 		{"[::1]:8420", false},
 		{"localhost:8420", false}, // resolved form is what Addr reports; a literal name errs into quiet
+		{"notanip:8420", false},
+		{"invalid-no-port", false},
+		{"", false},
 		{":8420", true},
 		{"0.0.0.0:8420", true},
 		{"[::]:8420", true},

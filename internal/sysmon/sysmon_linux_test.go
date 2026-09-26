@@ -290,3 +290,23 @@ func TestUtsField(t *testing.T) {
 		t.Errorf("all-NUL array = %q", got)
 	}
 }
+
+func TestSampleLinux(t *testing.T) {
+	s := Sample()
+	if s.MemTotal == 0 {
+		t.Error("Sample() MemTotal = 0 on Linux")
+	}
+	if s.MemUsed > s.MemTotal {
+		t.Errorf("Sample() MemUsed (%d) > MemTotal (%d)", s.MemUsed, s.MemTotal)
+	}
+	if s.HostUptime <= 0 {
+		t.Errorf("Sample() HostUptime = %v, want > 0", s.HostUptime)
+	}
+	if s.OsName == "" {
+		t.Error("Sample() OsName is empty on Linux")
+	}
+	if s.CPUModel == "" {
+		t.Error("Sample() CPUModel is empty on Linux")
+	}
+}
+

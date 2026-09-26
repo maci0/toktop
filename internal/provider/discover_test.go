@@ -267,3 +267,39 @@ func TestDiscoverBasesParallelKeepsOrder(t *testing.T) {
 			found[0].Addr, found[0].Label, engine, core.KindSGLang)
 	}
 }
+
+func TestIdentifyOmniRoute401(t *testing.T) {
+	kind := httptestKind(t, map[string]fakeRoute{
+		"/v1/models": {http.StatusUnauthorized, `{"error":"unauthorized"}`},
+	})
+	if kind != "" {
+		t.Errorf("kind = %q, want empty", kind)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("X-OmniRoute-Route-Class", "CLIENT_API")
+		w.WriteHeader(http.StatusUnauthorized)
+		w.Write([]byte(`{"error":"unauthorized"}`))
+	}))
+	defer srv.Close()
+
+	if kind := identify(context.Background(), srv.URL); kind != core.KindOmniRoute {
+		t.Errorf("identify on 401 with OmniRoute header = %q, want %q", kind, core.KindOmniRoute)
+	}
+}
+
+func TestDiscover(t *testing.T) {
+	engine, plain := sglangAndPlainURLs(t)
+	orig := defaultCandidates
+	defaultCandidates = []string{plain, engine, plain}
+	defer func() { defaultCandidates = orig }()
+
+	providers := Discover(context.Background())
+	if len(providers) != 1 {
+		t.Fatalf("Discover() returned %d providers, want 1", len(providers))
+	}
+	if providers[0].Addr != engine || providers[0].Label != core.KindSGLang {
+		t.Fatalf("Discover() provider = %+v, want %s as %s", providers[0], engine, core.KindSGLang)
+	}
+}
+

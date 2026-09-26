@@ -4,6 +4,8 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/pem"
 	"os"
 	"path/filepath"
@@ -618,3 +620,38 @@ func TestExplicitKeyFileFailureAborts(t *testing.T) {
 		t.Errorf("error should name the key path: %v", err)
 	}
 }
+
+func TestShort(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"", ""},
+		{"host", "host"},
+		{"host keytype", "keytype"},
+		{"host keytype base64key extra", "base64key"},
+	}
+	for _, tc := range cases {
+		if got := short(tc.in); got != tc.want {
+			t.Errorf("short(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestFingerprintOfFallback(t *testing.T) {
+	line := "invalid-line"
+	sum := sha256.Sum256([]byte(line))
+	want := base64.RawStdEncoding.EncodeToString(sum[:8])
+	if got := fingerprintOf(line); got != want {
+		t.Errorf("fingerprintOf(%q) = %q, want %q", line, got, want)
+	}
+
+	line2 := "host not-a-valid-key"
+	sum2 := sha256.Sum256([]byte(line2))
+	want2 := base64.RawStdEncoding.EncodeToString(sum2[:8])
+	if got := fingerprintOf(line2); got != want2 {
+		t.Errorf("fingerprintOf(%q) = %q, want %q", line2, got, want2)
+	}
+}
+
+

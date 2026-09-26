@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -878,6 +880,21 @@ func TestRunOllamaNonStreamDoneWithResponse(t *testing.T) {
 		t.Fatalf("done-frame content = %+v, want 1 token", s)
 	}
 }
+
+func TestHttpStatusErrorUnwrap(t *testing.T) {
+	baseErr := io.ErrUnexpectedEOF
+	err := &httpStatusError{status: 500, err: baseErr}
+	if !errors.Is(err, baseErr) {
+		t.Errorf("errors.Is(err, baseErr) = false, want true")
+	}
+	if err.Unwrap() != baseErr {
+		t.Errorf("err.Unwrap() = %v, want %v", err.Unwrap(), baseErr)
+	}
+	if err.Error() != baseErr.Error() {
+		t.Errorf("err.Error() = %q, want %q", err.Error(), baseErr.Error())
+	}
+}
+
 
 func FuzzReadEngineJSON(f *testing.F) {
 	for _, seed := range []string{

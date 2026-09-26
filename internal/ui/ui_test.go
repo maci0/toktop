@@ -595,16 +595,92 @@ func TestCompressSeriesZeroBlock(t *testing.T) {
 }
 
 func TestHeatFunctionsNaN(t *testing.T) {
-	if got := tempColor(math.NaN()); got == cRed {
-		t.Errorf("tempColor(NaN) returned cRed")
+	if got := tempColor(math.NaN()); got != cGreen {
+		t.Errorf("tempColor(NaN) = %v, want %v", got, cGreen)
 	}
-	if got := memHeat(math.NaN()); got == cRed {
-		t.Errorf("memHeat(NaN) returned cRed")
+	if got := memHeat(math.NaN()); got != cGreen {
+		t.Errorf("memHeat(NaN) = %v, want %v", got, cGreen)
 	}
-	if got := kvHeat(math.NaN()); got == cRed {
-		t.Errorf("kvHeat(NaN) returned cRed")
+	if got := kvHeat(math.NaN()); got != cGreen {
+		t.Errorf("kvHeat(NaN) = %v, want %v", got, cGreen)
 	}
 }
+
+func TestHeatFunctionsThresholds(t *testing.T) {
+	tempCases := []struct {
+		v    float64
+		want lipgloss.Color
+	}{
+		{59.9, cGreen},
+		{60.0, cYellow},
+		{79.9, cYellow},
+		{80.0, cRed},
+		{100.0, cRed},
+	}
+	for _, tc := range tempCases {
+		if got := tempColor(tc.v); got != tc.want {
+			t.Errorf("tempColor(%v) = %v, want %v", tc.v, got, tc.want)
+		}
+	}
+
+	memCases := []struct {
+		v    float64
+		want lipgloss.Color
+	}{
+		{69.9, cGreen},
+		{70.0, cYellow},
+		{89.9, cYellow},
+		{90.0, cRed},
+		{100.0, cRed},
+	}
+	for _, tc := range memCases {
+		if got := memHeat(tc.v); got != tc.want {
+			t.Errorf("memHeat(%v) = %v, want %v", tc.v, got, tc.want)
+		}
+	}
+
+	kvCases := []struct {
+		v    float64
+		want lipgloss.Color
+	}{
+		{59.9, cGreen},
+		{60.0, cYellow},
+		{84.9, cYellow},
+		{85.0, cRed},
+		{100.0, cRed},
+	}
+	for _, tc := range kvCases {
+		if got := kvHeat(tc.v); got != tc.want {
+			t.Errorf("kvHeat(%v) = %v, want %v", tc.v, got, tc.want)
+		}
+	}
+}
+
+func TestUniqueAgents(t *testing.T) {
+	cases := []struct {
+		name   string
+		events []core.AgentEvent
+		want   int
+	}{
+		{"empty", nil, 0},
+		{"empty strings", []core.AgentEvent{{Agent: ""}, {Agent: ""}}, 0},
+		{"duplicates and empty", []core.AgentEvent{
+			{Agent: "claude"},
+			{Agent: "codex"},
+			{Agent: "claude"},
+			{Agent: ""},
+			{Agent: "gemini"},
+		}, 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := uniqueAgents(tc.events); got != tc.want {
+				t.Errorf("uniqueAgents() = %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
 
 func TestStaticFrameRenders(t *testing.T) {
 	snap := core.Snapshot{
