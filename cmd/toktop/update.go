@@ -28,6 +28,7 @@ func updateUsage(w io.Writer, fs *flag.FlagSet) error {
 
 Usage:
   toktop update [--check] [--repo owner/name]
+  toktop update --help
   toktop update --version
 
 The download is verified against the release's checksums before anything is

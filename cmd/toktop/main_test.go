@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -41,6 +42,25 @@ func TestOutputFailures(t *testing.T) {
 			stderr := captureStderr(t, func() { code = tt.run(failedOutput{}) })
 			if code != 1 || !strings.Contains(stderr, "write stdout: output unavailable") {
 				t.Fatalf("code = %d, stderr = %q; want 1 and output error", code, stderr)
+			}
+		})
+	}
+}
+
+func TestOutputStatusBrokenPipe(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		err  error
+	}{
+		{"nil", nil},
+		{"epipe", syscall.EPIPE},
+		{"closed pipe", io.ErrClosedPipe},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var code int
+			stderr := captureStderr(t, func() { code = outputStatus(tt.err) })
+			if code != 0 || stderr != "" {
+				t.Fatalf("code = %d, stderr = %q; want 0 and no stderr", code, stderr)
 			}
 		})
 	}
@@ -699,8 +719,12 @@ func TestInformationalCommandsRejectExtraArguments(t *testing.T) {
 	}{
 		{"help help", runHelp, []string{"help", "extra"}},
 		{"help short flag", runHelp, []string{"-h", "extra"}},
+		{"help double short flag", runHelp, []string{"--h", "extra"}},
+		{"help single dash flag", runHelp, []string{"-help", "extra"}},
 		{"help long flag", runHelp, []string{"--help", "extra"}},
 		{"version short help", runVersion, []string{"-h", "extra"}},
+		{"version double short help", runVersion, []string{"--h", "extra"}},
+		{"version single dash help", runVersion, []string{"-help", "extra"}},
 		{"version long help", runVersion, []string{"--help", "extra"}},
 		{"update help", func(w io.Writer, args []string) int {
 			return runUpdate(context.Background(), w, args)
@@ -823,6 +847,16 @@ func TestRunHelp(t *testing.T) {
 			t.Fatalf("stderr = %q, want extra and --help", got)
 		}
 	})
+	t.Run("help flag variants print top-level help", func(t *testing.T) {
+		for _, arg := range []string{"-h", "--h", "-help", "--help", "help"} {
+			var out bytes.Buffer
+			var code int
+			got := captureStderr(t, func() { code = runHelp(&out, []string{arg}) })
+			if code != 0 || got != "" || !strings.Contains(out.String(), "Usage:") {
+				t.Fatalf("runHelp(%q) = %d, stderr = %q", arg, code, got)
+			}
+		}
+	})
 }
 
 func TestRunVersion(t *testing.T) {
@@ -865,6 +899,16 @@ func TestRunVersion(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "-demo") {
 			t.Fatalf("stdout missing generated flags: %q", out.String())
+		}
+	})
+	t.Run("help flag variants print top-level help", func(t *testing.T) {
+		for _, arg := range []string{"-h", "--h", "-help", "--help"} {
+			var out bytes.Buffer
+			var code int
+			got := captureStderr(t, func() { code = runVersion(&out, []string{arg}) })
+			if code != 0 || got != "" || !strings.Contains(out.String(), "Usage:") {
+				t.Fatalf("runVersion(%q) = %d, stderr = %q", arg, code, got)
+			}
 		}
 	})
 }

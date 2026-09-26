@@ -224,8 +224,6 @@ func main() {
 		}
 	}
 
-	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(remoteTargets), opencodeOn)
-
 	if !f.once && !term.IsTerminal(int(os.Stdout.Fd())) {
 		// The live dashboard paints with alt-screen sequences; piped or
 		// redirected they are garbage bytes in the capture, and --once is
@@ -233,6 +231,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live dashboard needs one (use --once for static output)")
 		os.Exit(2)
 	}
+
+	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(remoteTargets), opencodeOn)
 
 	// Only when --ingest was given explicitly should an unusable listen
 	// address abort the run; the default-enabled endpoint degrades gracefully.
@@ -560,7 +560,7 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 }
 
 func outputStatus(err error) int {
-	if err == nil {
+	if err == nil || errors.Is(err, syscall.EPIPE) || errors.Is(err, io.ErrClosedPipe) {
 		return 0
 	}
 	fmt.Fprintf(os.Stderr, "toktop: write stdout: %v\n", err)
@@ -620,8 +620,8 @@ func usage(w io.Writer) error {
 Usage:
   toktop [flags] [ssh://user@host ...]
   toktop update [--check] [--repo owner/name]   install the latest release
-  toktop help [update|version]
-  toktop version
+  toktop help [update|version]                  show help for toktop or a subcommand
+  toktop version                                print version and exit
 
 Examples:
   toktop --demo                simulated fleet, works instantly
@@ -652,10 +652,15 @@ See README.md for all environment variables.
 	return err
 }
 
+// isHelpArg reports whether arg is one of Go's supported help flag spellings.
+func isHelpArg(arg string) bool {
+	return arg == "-h" || arg == "--h" || arg == "-help" || arg == "--help"
+}
+
 // runHelp implements `toktop help [topic]`. Unknown topics are a usage error
 // so a typo does not dump the top-level screen and look like success.
 func runHelp(out io.Writer, args []string) int {
-	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
+	if len(args) == 0 || isHelpArg(args[0]) || args[0] == "help" {
 		if len(args) > 1 {
 			return rejectExtra("toktop help", args[1])
 		}
@@ -692,7 +697,7 @@ func rejectExtra(cmd, arg string) int {
 // any other extra argument is a usage error.
 func runVersion(out io.Writer, args []string) int {
 	if len(args) > 0 {
-		if args[0] == "-h" || args[0] == "--help" {
+		if isHelpArg(args[0]) {
 			if len(args) > 1 {
 				return rejectExtra("toktop version", args[1])
 			}
