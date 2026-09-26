@@ -39,8 +39,8 @@ import (
 const DefaultRepo = "maci0/toktop"
 
 // maxAssetBytes bounds a download. A release binary that large is a mistake or
-// an attack, and either way should not fill the disk.
-const maxAssetBytes = 256 << 20
+// an attack, and either way should not fill the disk. Var so tests can shrink it.
+var maxAssetBytes int64 = 256 << 20
 
 // maxChecksumsDecoded bounds decompressed checksums-archive bytes. The
 // compressed fetch is already 1 MiB; without a decoded cap a gzip bomb
@@ -375,8 +375,12 @@ func fileChecksum(path string) (string, error) {
 	}
 	defer f.Close()
 	h := sha256.New()
-	if _, err := io.Copy(h, io.LimitReader(f, maxAssetBytes+1)); err != nil {
+	n, err := io.Copy(h, io.LimitReader(f, maxAssetBytes+1))
+	if err != nil {
 		return "", err
+	}
+	if n > maxAssetBytes {
+		return "", fmt.Errorf("file %s exceeds %d bytes", path, int64(maxAssetBytes))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

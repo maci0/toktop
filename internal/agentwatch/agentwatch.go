@@ -110,6 +110,12 @@ func (w *Watcher) instant() time.Time { return w.now() }
 // before Run so a malformed definitions file is reported where the operator
 // can see it, not swallowed inside a goroutine behind the alt screen.
 func (w *Watcher) Run(ctx context.Context) {
+	if w.discoverEvery <= 0 {
+		w.discoverEvery = defaultDiscoverEvery
+	}
+	if w.readEvery <= 0 {
+		w.readEvery = defaultReadEvery
+	}
 	discover := time.NewTicker(w.discoverEvery)
 	defer discover.Stop()
 

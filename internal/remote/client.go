@@ -424,9 +424,11 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 	if c.stopped {
 		return nil, net.ErrClosed
 	}
+	var lastErr error
 	for _, rp := range rports {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
+			lastErr = err
 			continue
 		}
 		out[rp] = l.Addr().(*net.TCPAddr).Port
@@ -434,6 +436,9 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 		go c.relay(l, rp)
 	}
 	if len(out) == 0 {
+		if lastErr != nil {
+			return nil, fmt.Errorf("no local ports available for forwarding: %w", lastErr)
+		}
 		return nil, fmt.Errorf("no local ports available for forwarding")
 	}
 	return out, nil
@@ -485,13 +490,13 @@ func (c *Client) Close() {
 	select {
 	case <-c.closed:
 	default:
+		c.setErr(nil)
 		close(c.closed)
 	}
 	c.closeMu.Unlock()
 
 	c.closeListeners()
 
-	c.setErr(nil)
 	c.conn.Close()
 	<-c.keepaliveDone
 }
@@ -501,7 +506,7 @@ func (c *Client) Close() {
 // already marked by Close before they reach this point. Call once at Connect
 // time.
 func (c *Client) watchClose() {
-	c.conn.Conn.Wait() // returns when the connection is torn down
+	werr := c.conn.Conn.Wait() // returns when the connection is torn down
 	// Reclaim the forward listeners here rather than leaving it to a caller:
 	// after an unattended drop nothing else tears this client down, and
 	// listeners left bound would hold an fd and a relay goroutine apiece for
@@ -517,6 +522,10 @@ func (c *Client) watchClose() {
 	}
 	// Record the loss before Done fires: everything woken by Done must see
 	// the reason in Err instead of racing this assignment.
-	c.setErr(fmt.Errorf("ssh connection lost"))
+	if werr != nil {
+		c.setErr(fmt.Errorf("ssh connection lost: %w", werr))
+	} else {
+		c.setErr(fmt.Errorf("ssh connection lost"))
+	}
 	close(c.closed)
 }

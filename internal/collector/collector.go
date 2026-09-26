@@ -81,6 +81,9 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		}
 	}
 	providers = deduped
+	if interval <= 0 {
+		interval = time.Second
+	}
 	c := &Collector{
 		providers:     providers,
 		interval:      interval,

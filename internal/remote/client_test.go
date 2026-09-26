@@ -800,6 +800,10 @@ func TestDropReclaimsForwardListeners(t *testing.T) {
 	if got := cli.Err(); got == nil || !strings.Contains(got.Error(), "lost") {
 		t.Fatalf("drop reported %v, want the loss reason", got)
 	}
+	cli.Close()
+	if got := cli.Err(); got == nil || !strings.Contains(got.Error(), "lost") {
+		t.Fatalf("cli.Err() after Close() on dropped client = %v, want loss reason preserved", got)
+	}
 	if ports, err := cli.Forward([]int{rport}); !errors.Is(err, net.ErrClosed) || len(ports) != 0 {
 		t.Fatalf("Forward after drop = %v, %v; want no ports and net.ErrClosed", ports, err)
 	}

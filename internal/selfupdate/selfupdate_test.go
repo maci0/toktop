@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -224,5 +226,21 @@ func TestCheck(t *testing.T) {
 				t.Fatalf("Check() err = %v, want %s error", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestFileChecksumRejectsOversized(t *testing.T) {
+	orig := maxAssetBytes
+	maxAssetBytes = 10
+	t.Cleanup(func() { maxAssetBytes = orig })
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "oversized")
+	if err := os.WriteFile(path, []byte("this is more than ten bytes"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := fileChecksum(path)
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("fileChecksum err = %v, want exceeds error", err)
 	}
 }

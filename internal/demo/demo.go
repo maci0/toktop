@@ -44,6 +44,9 @@ type Source struct {
 }
 
 func NewSource(interval time.Duration, seed int64) *Source {
+	if interval <= 0 {
+		interval = time.Second
+	}
 	return &Source{
 		interval: interval,
 		rng:      rand.New(rand.NewPCG(uint64(seed), 0)),

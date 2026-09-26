@@ -81,6 +81,9 @@ true`
 // every poll fails, so continuing would only burn a round trip apiece on a
 // corpse for the rest of the process.
 func (s *Stats) Run(ctx context.Context, every time.Duration) {
+	if every <= 0 {
+		every = 5 * time.Second
+	}
 	t := time.NewTicker(every)
 	defer t.Stop()
 	s.poll(ctx)
@@ -101,6 +104,9 @@ func (s *Stats) Run(ctx context.Context, every time.Duration) {
 }
 
 func (s *Stats) poll(ctx context.Context) {
+	if s.Client == nil {
+		return
+	}
 	out, err := s.Client.Run(ctx, vitalsScript())
 	if err != nil {
 		return // keep last good sample; UI shows staleness via age

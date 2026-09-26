@@ -616,7 +616,15 @@ func (w *Watcher) seedBaseline(path string) {
 			return
 		}
 	}
-	recs, _, ok := w.consumeAppend(f, off)
+	var (
+		recs []values
+		ok   bool
+	)
+	if isDshZstd(path) {
+		recs, _, ok = w.consumeZstd(f, 0)
+	} else {
+		recs, _, ok = w.consumeAppend(f, off)
+	}
 	if !ok {
 		return
 	}
