@@ -1089,17 +1089,23 @@ func TestRunOllamaRefusedEvalDurationUsesWallClock(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	start := time.Now()
 	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	elapsed := time.Since(start)
 	if !s.OK {
 		t.Fatalf("probe failed: %+v", s)
 	}
 	if math.IsInf(s.TokPS, 0) || math.IsNaN(s.TokPS) {
 		t.Fatalf("tokps = %v, want the wall-clock rate", s.TokPS)
 	}
-	// 6 tokens over the ~200ms decode window, not the 1ms the refused
-	// reading would have claimed.
-	if s.TokPS < 5 || s.TokPS > 200 {
-		t.Errorf("tokps = %v, want a rate from the measured round trip", s.TokPS)
+	// 6 tokens over the measured decode window, not the 1ms the refused
+	// reading would have claimed. The window is a subset of the whole call,
+	// so a runner that stretches the 200ms sleep stretches the rate with it:
+	// the floor scales with the elapsed time this call actually took, and
+	// the ceiling is what separates the measured window (200ms, ~30 tok/s)
+	// from the refused one.
+	if lo := float64(6) / elapsed.Seconds() / 2; s.TokPS < lo || s.TokPS > 200 {
+		t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip", s.TokPS, elapsed)
 	}
 }
 
@@ -1128,14 +1134,16 @@ func TestRunOllamaOutOfRangeEvalDurationUsesWallClock(t *testing.T) {
 			}))
 			defer srv.Close()
 
+			start := time.Now()
 			s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+			elapsed := time.Since(start)
 			if !s.OK {
 				t.Fatalf("probe failed: %+v", s)
 			}
 			// Same bound as the refused-reading case: the rate has to come
 			// from the measured decode window, not from the wrapped value.
-			if s.TokPS < 5 || s.TokPS > 200 {
-				t.Errorf("tokps = %v, want a rate from the measured round trip", s.TokPS)
+			if lo := float64(6) / elapsed.Seconds() / 2; s.TokPS < lo || s.TokPS > 200 {
+				t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip", s.TokPS, elapsed)
 			}
 		})
 	}

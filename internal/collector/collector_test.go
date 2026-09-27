@@ -130,8 +130,8 @@ func TestRatesHonorDirectThroughput(t *testing.T) {
 	c := New(nil, time.Second)
 	c.rates("p", &provider.Metrics{OutTotal: 10}, time.Now())
 	out, _ := c.rates("p", &provider.Metrics{OutTotal: 10, DirectOutPS: 300, HasDirectOutPS: true}, time.Now().Add(time.Second))
-	if out < 104 || out > 106 { // ema(0, 300)
-		t.Fatalf("direct rate = %v", out)
+	if want := ema(0, 300); out != want { // the gauge seeds the EMA at its own alpha
+		t.Fatalf("direct rate = %v, want %v", out, want)
 	}
 }
 

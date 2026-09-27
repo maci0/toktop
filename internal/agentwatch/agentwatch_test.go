@@ -357,10 +357,12 @@ func TestSilentAgentProducesNoEvents(t *testing.T) {
 	go w.Run(ctx)
 
 	waitFor(t, waitCeiling, func() bool { return w.following(cmd.Process.Pid) })
-	// Followed, with nothing written to the transcript. A few read cycles
-	// must stay silent; checking before discovery would pass even if a
-	// silent agent invented events once it was tracked.
-	deadline := time.Now().Add(3 * w.readEvery)
+	// Followed, with nothing written to the transcript. The window has to
+	// cover discovery as well as reads: it is a re-discovery that can
+	// re-add the agent, so a few read cycles alone can end before the tick
+	// under test. Two discovery ticks plus a few reads keeps a slow runner
+	// from ending the window on a single delayed tick.
+	deadline := time.Now().Add(2*w.discoverEvery + 3*w.readEvery)
 	for time.Now().Before(deadline) {
 		for _, ev := range rec.all() {
 			if ev.Note == core.ShortDir(cmd.Dir) {
