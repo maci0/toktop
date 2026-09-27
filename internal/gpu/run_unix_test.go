@@ -81,3 +81,44 @@ func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	return err == nil || errors.Is(err, syscall.EPERM)
 }
+
+// A vendor CLI has no reason to stop printing, and Output's buffer would grow
+// for whatever it emitted inside runTimeout. run caps the read instead, so an
+// endless tool is reported as a miss and its output is not retained; the
+// sampler runs this several times per tick, so an uncapped read is a memory
+// exhaustion the dashboard cannot defend against.
+func TestRunCapsUnboundedVendorOutput(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	start := time.Now()
+	out, ok := run(ctx, "sh", "-c", "yes x | head -c 8000000")
+	if ok {
+		t.Fatalf("run accepted %d bytes of unbounded vendor output, want a miss", len(out))
+	}
+	if len(out) != 0 {
+		t.Fatalf("run returned %d bytes with ok=false, want nothing", len(out))
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("run took %s to hit the cap: the write was not refused at the cap", elapsed)
+	}
+}
+
+// Output that fits must still come through whole, or the cap costs a vendor
+// its readings.
+func TestRunReturnsOutputUnderTheCap(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, ok := run(ctx, "sh", "-c", "head -c 1024 /dev/zero | tr '\\0' 'x'")
+	if !ok {
+		t.Fatal("run reported a miss for 1 KiB of vendor output")
+	}
+	if len(out) != 1024 {
+		t.Fatalf("run returned %d bytes, want 1024", len(out))
+	}
+}

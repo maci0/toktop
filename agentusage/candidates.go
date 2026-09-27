@@ -136,15 +136,23 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 		rootLists[key] = rootListing{at: now, walk: done}
 		rootListMu.Unlock()
 
-		files := walkTranscripts(root, suffix, cutoff)
+		// The claim is released from a defer, not at the end of the body. Every
+		// other caller for this key parks on <-walk with no deadline, and the
+		// goroutine holding the walk is a watcher's Run loop, which owns pollMu
+		// and nothing else can release: a panic here would wedge one agent's
+		// ticker forever and then hang agentwatch.stopOne on its done channel,
+		// taking the whole discovery pass with it. Stamped with the instant the
+		// walk started, not a second clock read, so the listing's age stays a
+		// function of the caller's clock alone.
+		var files []string
+		defer func() {
+			rootListMu.Lock()
+			rootLists[key] = rootListing{files: files, at: now}
+			close(done)
+			rootListMu.Unlock()
+		}()
 
-		rootListMu.Lock()
-		// Stamped with the instant the walk started, not a second clock read:
-		// the listing's age is then a function of the caller's clock alone, so
-		// a frozen clock never expires it and a stepped one expires it in step.
-		rootLists[key] = rootListing{files: files, at: now}
-		close(done)
-		rootListMu.Unlock()
+		files = walkTranscripts(root, suffix, cutoff)
 		return append([]string(nil), files...)
 	}
 }

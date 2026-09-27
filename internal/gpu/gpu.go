@@ -9,9 +9,11 @@
 package gpu
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"math"
 	"os/exec"
@@ -88,11 +90,34 @@ func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
 	cmd := exec.CommandContext(c, path, args...)
 	cmd.WaitDelay = pipeGrace
 	groupKill(cmd)
-	out, err := cmd.Output()
-	if err != nil {
+	// Capped like every HTTP body this process reads. Output would grow an
+	// internal buffer for whatever the tool printed inside runTimeout, and a
+	// wedged or hostile nvidia-smi on PATH has no reason to stop: the sampler
+	// runs it several times per tick, so an uncapped read is a memory
+	// exhaustion the dashboard cannot defend against. Over the cap the write
+	// fails, the read end closes under the tool, and the call is reported as a
+	// miss like any other.
+	var out cappedOutput
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
 		return nil, false
 	}
-	return out, true
+	return out.buf.Bytes(), true
+}
+
+// maxToolOutput is the most stdout one vendor CLI may contribute. A healthy
+// nvidia-smi answers a fixed handful of CSV lines well under this; the room
+// above that is for a fleet of cards, not for output that grows without end.
+const maxToolOutput = 1 << 20
+
+// cappedOutput is a bytes.Buffer that refuses to grow past maxToolOutput.
+type cappedOutput struct{ buf bytes.Buffer }
+
+func (c *cappedOutput) Write(p []byte) (int, error) {
+	if c.buf.Len()+len(p) > maxToolOutput {
+		return 0, fmt.Errorf("vendor CLI wrote more than %d bytes", maxToolOutput)
+	}
+	return c.buf.Write(p)
 }
 
 var vendorOrder = map[string]int{"nvidia": 0, "amd": 1, "intel": 2, "apple": 3}

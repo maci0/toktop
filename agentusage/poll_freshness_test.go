@@ -105,6 +105,49 @@ func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 	}
 }
 
+// Every caller that loses the race for a root's walk parks on the winner's
+// claim channel, which nobody reads and nobody times out. The claim is
+// therefore released on the way out of the walk, not on the normal path alone,
+// and the entry it leaves behind must not still name it.
+func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	key := rootListKey(dir, ".jsonl")
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		rootLists = map[string]rootListing{}
+		rootListMu.Unlock()
+	})
+
+	if got := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+		t.Fatalf("empty store listed %v, want nothing", got)
+	}
+	rootListMu.Lock()
+	c, ok := rootLists[key]
+	rootListMu.Unlock()
+	if !ok {
+		t.Fatal("the walk left no cached listing behind")
+	}
+	if c.walk != nil {
+		t.Fatal("the cached listing still holds a walk claim: later callers for this root would park forever")
+	}
+
+	// A caller arriving after the claim is released is served from the cache
+	// rather than parking on a channel nobody will close.
+	done := make(chan []string, 1)
+	go func() {
+		done <- listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+	}()
+	select {
+	case got := <-done:
+		if len(got) != 0 {
+			t.Fatalf("cached read = %v, want nothing", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a caller arriving after the walk parked on the claim: it was never released")
+	}
+}
+
 // The recency window belongs to the watcher's own clock. A caller that
 // injects one has to be able to age a transcript out by stepping time, not by
 // waiting it out: on the wall clock a replay that reaches this point within a

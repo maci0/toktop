@@ -4,7 +4,10 @@ package gpu
 
 import "os/exec"
 
-// groupKill is a no-op where there is no process group to signal. Windows
-// terminates the child tree through the console it inherits rather than a
-// signal, so a deadline kill already reaches what the tool spawned.
+// groupKill is a no-op where there is no process group to signal. On Windows
+// the deadline kill is os/exec's Process.Kill, which terminates the direct
+// child only; anything that child spawned survives, reparented. The unix path
+// closes the same hole with a group signal and Windows has no equivalent here
+// without a Job Object, so a vendor CLI that hangs leaks its tree once per
+// poll for as long as it keeps hanging.
 func groupKill(*exec.Cmd) {}
