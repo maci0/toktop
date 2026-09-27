@@ -164,7 +164,11 @@ const HTML = htmlForWire(`<!doctype html>
     max-width: none; margin: 0 0 1rem; padding: 0; list-style: none; }
   .grid li { margin: 0; background: var(--panel); border: 1px solid var(--line);
     border-top: 2px solid var(--accent); padding: .9rem 1rem; }
-  .grid li:nth-child(2n) { border-top-color: var(--warm); }
+  /* Warm marks the System pane and nothing else: it is cYellow in the
+     terminal, where amber is pressure, and that pane is the one about
+     pressure (temps, VRAM, power). A second accent alternated by position
+     would say nothing and read as decoration. */
+  .grid li:last-child { border-top-color: var(--warm); }
   .grid b { display: block; font-size: .95rem; margin-bottom: .3rem; }
   .grid p { margin: 0 0 .5rem; font-size: 13.5px; color: var(--dim); max-width: none; }
   .grid code { display: block; font-size: 12.5px; white-space: normal; }
