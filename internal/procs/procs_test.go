@@ -643,3 +643,46 @@ func TestSnapshotFailedSweepReleasesClaim(t *testing.T) {
 		t.Errorf("snapshot after a failed sweep = %+v, want the listing retried", got)
 	}
 }
+
+// Engine matching folds a process name and its command line with
+// core.FoldASCII, not strings.ToLower, because the matchers test ASCII
+// literals against bytes a /proc listing hands over verbatim. ToLower also
+// folds runes whose lowercase form is ASCII, so a binary invoked through a
+// U+212A (KELVIN SIGN) reaches a matcher as "kvllm" and is claimed as a vLLM:
+// an engine identity assigned to whatever the operator happened to launch.
+func TestEngineMatchRejectsUnicodeFoldedNames(t *testing.T) {
+	for _, info := range []Info{
+		// The needle is what carries the rune here: vllm matches on
+		// "vllm.entrypoints" appearing in an argument, and a U+212A in place
+		// of the k folds to "k" under ToLower and satisfies a substring
+		// match on a path no vLLM install has.
+		{Name: "node", Args: []string{"node", "/srv/vll\u212A.entrypoints.openai.api_server"}},
+		{Name: "node", Args: []string{"node", "-m", "sglan\u212A.srt.entrypoints.http_server"}},
+		{Name: "node", Args: []string{"node", "/opt/litell\u212A.proxy.proxy_server"}},
+		{Name: "node", Args: []string{"node", "/opt/gpustac\u212A.start"}},
+		{Name: "node", Args: []string{"node", "-m", "vll\u0130m.entrypoints.openai.api_server"}},
+		{Name: "ollama-run", Args: []string{"ollama-run", "ollama \u212Aserve"}},
+	} {
+		if engine, _, ok := MatchEngine(info); ok {
+			t.Errorf("MatchEngine(%+v) = %q, want no engine", info, engine)
+		}
+	}
+	// The ASCII spellings still match, which is what the fold is for.
+	for _, info := range []Info{
+		{Name: "tritonserver"},
+		{Name: "vllm", Args: []string{"vllm", "serve"}},
+	} {
+		if _, _, ok := MatchEngine(info); !ok {
+			t.Errorf("MatchEngine(%+v) matched no engine, want the ASCII spelling to match", info)
+		}
+	}
+}
+
+// A name carrying a byte that is not valid UTF-8 is a legal /proc name. The
+// fold must leave it alone: strings.ToLower rewrote it to U+FFFD, which is
+// not the name the process is running under.
+func TestBaseNameKeepsInvalidBytes(t *testing.T) {
+	if got := baseName("vllm\xff"); got != "vllm\xff" {
+		t.Errorf("baseName(%q) = %q, want the invalid byte preserved", "vllm\xff", got)
+	}
+}

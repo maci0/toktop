@@ -30,8 +30,12 @@ const LevelEnv = "TOKTOP_LOG_LEVEL"
 
 // ParseLogLevel maps a TOKTOP_LOG_LEVEL value onto a slog floor.
 // Empty is info. Accepted names are debug, info, warn (or warning), and error.
+// Folded with core.FoldASCII: the accepted names are ASCII literals, and
+// strings.ToLower also folds runes whose lowercase form is ASCII, so a level
+// spelled with U+0130 or U+212A would be accepted as one the operator did not
+// name.
 func ParseLogLevel(s string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	switch core.FoldASCII(strings.TrimSpace(s)) {
 	case "", "info":
 		return slog.LevelInfo, nil
 	case "debug":

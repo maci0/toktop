@@ -10,6 +10,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Windows OpenSSH's ssh-agent listens on this named pipe and does not set
@@ -29,9 +31,14 @@ func dialAgentConn(sock string) (net.Conn, error) {
 	return dialNamedPipe(pipe)
 }
 
+// isWindowsNamedPipe reports whether sock is a named pipe rather than a TCP
+// address, and picks the pipe to dial. The prefix is a Windows API literal,
+// so the compare folds with core.FoldASCII: strings.ToLower also folds runes
+// whose lowercase form is ASCII, so a pipe path spelled with U+212A would
+// reach the named-pipe dial as one Windows does not name.
 func isWindowsNamedPipe(p string) bool {
 	p = strings.ReplaceAll(p, `/`, `\`)
-	return strings.HasPrefix(strings.ToLower(p), `\\.\pipe\`)
+	return strings.HasPrefix(core.FoldASCII(p), `\\.\pipe\`)
 }
 
 func dialNamedPipe(path string) (net.Conn, error) {

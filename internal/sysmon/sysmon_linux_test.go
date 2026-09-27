@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // buildTree materializes files under a fresh temp root.
@@ -439,5 +441,36 @@ func TestReadProcAuditsOutageOnceAndRecovery(t *testing.T) {
 	// is the normal case and must stay silent.
 	if n := strings.Count(lines.String(), "host vitals source readable again"); n != 1 {
 		t.Fatalf("audited %d recovery lines, want 1:\n%s", n, lines.String())
+	}
+}
+
+// A hwmon chip name is matched against the ASCII literals in gpuChips, so
+// it folds with core.FoldASCII. strings.ToLower also folds runes whose
+// lowercase form is ASCII: U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE)
+// becomes "i", so a chip named "nvdİa" satisfies the "nvidia" needle
+// under ToLower and is marked a GPU that no driver reports as one.
+func TestSensorLabelFoldsASCIIOnly(t *testing.T) {
+	for _, spoof := range []string{"nvd\u0130a", "\u0130915"} {
+		if got := sensorLabel(spoof); core.ContainsAny(got, gpuChips...) {
+			t.Errorf("sensorLabel(%q) = %q, must not match a GPU chip", spoof, got)
+		}
+	}
+	// The genuine spellings still match, which is what the fold is for.
+	for _, real := range []string{"nvidia", "i915", "amdgpu"} {
+		if got := sensorLabel(real); !core.ContainsAny(got, gpuChips...) {
+			t.Errorf("sensorLabel(%q) = %q, want it to match a GPU chip", real, got)
+		}
+	}
+}
+
+// A /proc/cpuinfo key is folded the same way. The literal keys hold no
+// foldable ASCII letter, so the guard is that a real key still reads and a
+// key spelled with a rune that folds stays unrecognized.
+func TestParseCPUModelFoldsASCIIOnly(t *testing.T) {
+	if got := parseCPUModel([]byte("cpu model\t: Loongson-3A5000\n")); got != "Loongson-3A5000" {
+		t.Errorf("parseCPUModel(cpu model) = %q, want Loongson-3A5000", got)
+	}
+	if got := parseCPUModel([]byte("cpu \u212Amodel\t: Spoofed\n")); got != "" {
+		t.Errorf("parseCPUModel with a Kelvin-signed key = %q, want no brand", got)
 	}
 }

@@ -215,15 +215,19 @@ func identify(ctx context.Context, base string) string {
 	}
 }
 
-// probeContains fetches a path and checks that every needle appears.
+// probeContains fetches a path and checks that every needle appears. The
+// body is an engine's own, and the needles are ASCII literals, so both sides
+// fold with core.FoldASCII: strings.ToLower also folds runes whose lowercase
+// form is ASCII, which would let a body spell a needle out of U+0130 or
+// U+212A and claim an engine identity the engine never served.
 func probeContains(ctx context.Context, base, path string, needles ...string) bool {
 	text, err := getText(ctx, scanClient, base+path)
 	if err != nil {
 		return false
 	}
-	lower := strings.ToLower(text)
+	lower := core.FoldASCII(text)
 	for _, n := range needles {
-		if !strings.Contains(lower, strings.ToLower(n)) {
+		if !strings.Contains(lower, core.FoldASCII(n)) {
 			return false
 		}
 	}
@@ -247,7 +251,7 @@ func sglangInfoOK(ctx context.Context, base string) bool {
 // (mlx-community/…, …-mlx-q4 …).
 func idsLookMLX(mr *modelsResp) bool {
 	for _, d := range mr.Data {
-		if strings.Contains(strings.ToLower(d.ID), "mlx") {
+		if strings.Contains(core.FoldASCII(d.ID), "mlx") {
 			return true
 		}
 	}

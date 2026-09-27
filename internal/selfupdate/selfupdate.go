@@ -35,6 +35,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/text/unicode/norm"
+
 	"github.com/maci0/toktop/internal/core"
 )
 
@@ -165,8 +167,16 @@ func alnum(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
 
+// githubDownloadHost is the allowlist every release download and redirect hop
+// is checked against. Folded with core.FoldASCII, the fold this tree uses for
+// host labels (see internal/remote/target.go and internal/bearer), rather than
+// strings.ToLower: the needles are ASCII literals, and ToLower also folds
+// runes whose lowercase is ASCII, so a U+212A (KELVIN SIGN) in a
+// browser_download_url would satisfy a comparison the operator's GitHub never
+// wrote. The composed spelling is folded too, so a host typed in the NFD form
+// a macOS terminal supplies is the host already trusted.
 func githubDownloadHost(host string) bool {
-	h := strings.ToLower(host)
+	h := core.FoldASCII(norm.NFC.String(host))
 	if h == "github.com" || h == "api.github.com" {
 		return true
 	}
@@ -201,7 +211,7 @@ func githubRedirect(req *http.Request, via []*http.Request) error {
 	if req.URL.Scheme != "https" || req.URL.User != nil || !githubDownloadHost(req.URL.Hostname()) {
 		return fmt.Errorf("refusing redirect to %s", req.URL.Redacted())
 	}
-	if strings.ToLower(req.URL.Hostname()) != "api.github.com" && req.Header != nil {
+	if core.FoldASCII(norm.NFC.String(req.URL.Hostname())) != "api.github.com" && req.Header != nil {
 		req.Header.Del("Authorization")
 	}
 	return nil

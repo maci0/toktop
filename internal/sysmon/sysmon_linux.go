@@ -393,7 +393,11 @@ func cpuModelLinux() string {
 
 // parseCPUModel picks a brand string out of /proc/cpuinfo. x86 uses
 // "model name"; ARM often uses Hardware / Processor / cpu model instead,
-// and "processor : 0" is a core index, not a brand.
+// and "processor : 0" is a core index, not a brand. The key is folded with
+// core.FoldASCII, the fold for /proc field names: the switch below matches
+// ASCII literals, and strings.ToLower would also fold a rune whose lowercase
+// is ASCII, so a key spelled with U+0130 or U+212A would reach a branch the
+// kernel never wrote that key for.
 func parseCPUModel(b []byte) string {
 	var modelName, hardware, processor, cpuModel string
 	for line := range strings.SplitSeq(string(b), "\n") {
@@ -401,7 +405,7 @@ func parseCPUModel(b []byte) string {
 		if !ok {
 			continue
 		}
-		key := strings.ToLower(strings.TrimSpace(k))
+		key := core.FoldASCII(strings.TrimSpace(k))
 		val := strings.TrimSpace(v)
 		if val == "" {
 			continue
@@ -516,8 +520,14 @@ func readSensors(inputs []sensorInput) []core.TempReading {
 // sensorLabel normalizes a hwmon name/label or thermal-zone type. These are
 // file contents on a host toktop may not own, and they reach a terminal, so
 // escape sequences are stripped before the value is stored.
+//
+// Folded with core.FoldASCII, not strings.ToLower, because the result is
+// matched against ASCII needles (gpuChips, "gpu", "junction"). ToLower also
+// folds runes whose lowercase form is ASCII, so a chip named with U+212A
+// (KELVIN SIGN) in place of a k satisfies a match its producer never wrote,
+// which marks a chip as a GPU the hardware does not report as one.
 func sensorLabel(raw string) string {
-	return strings.ToLower(strings.TrimSpace(core.SanitizeText(raw)))
+	return core.FoldASCII(strings.TrimSpace(core.SanitizeText(raw)))
 }
 
 func listHwmon(root string) []sensorInput {

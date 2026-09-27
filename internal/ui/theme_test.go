@@ -4,8 +4,11 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // contrastRatio is the WCAG contrast ratio between two colors; ok is false
@@ -158,5 +161,47 @@ func TestFadeClampsFactorToUnitRange(t *testing.T) {
 	}
 	if got := fadeColor(cRed, 0); got != "#000000" {
 		t.Errorf("fadeColor(0) = %q, want #000000", got)
+	}
+}
+
+// The kind badge is the one fixed-width cell in the frame, so every row's
+// label starts in the same column. It is padded and cut in visible cells
+// because the label beside it is: the %-9.9s it replaced counted runes, and
+// a kind spelled in a wide script padded to 9 runes while rendering 18
+// cells, pushing that row's label 9 cells right of every other and
+// overflowing a narrow pane.
+func TestKindBadgeIsFixedWidthInCells(t *testing.T) {
+	// The last two are the same word in the two normalization forms, and they
+	// look identical here on purpose: NFC is the precomposed U+00E9, NFD is
+	// "e" plus U+0301. A badge cut between them renders the decomposed one
+	// one cell wider than the composed one, so both must land on the same
+	// width or the column below it wobbles.
+	composed, decomposed := "caf\u00e9", "cafe\u0301"
+	for _, kind := range []string{
+		core.KindOllama, core.KindVLLM, core.KindLlamaCPP, core.KindGPUStack,
+		"\u65e5\u672c\u8a9e\u30a8\u30f3\u30b8\u30f3", // every rune two cells wide
+		composed,
+		decomposed,
+		"\U0001F469\u200D\U0001F4BB", // ZWJ sequence, one cell
+		"unknown-kind-from-a-hostile-engine",
+	} {
+		if w := lipgloss.Width(kindBadge(kind)); w != kindBadgeCells {
+			t.Errorf("kindBadge(%q) renders %d cells, want %d", kind, w, kindBadgeCells)
+		}
+	}
+}
+
+// Cutting the badge must not split a character: a kind that does not fit
+// loses whole grapheme clusters, so the result is always valid UTF-8 and
+// never ends between a base letter and its combining mark.
+func TestKindBadgeCutsBetweenClusters(t *testing.T) {
+	for _, kind := range []string{"日本語エンジン", "café latte", "café latte"} {
+		got := kindBadge(kind)
+		if !utf8.ValidString(got) {
+			t.Errorf("kindBadge(%q) = %q, is not valid UTF-8", kind, got)
+		}
+		if strings.ContainsRune(got, '�') {
+			t.Errorf("kindBadge(%q) = %q, holds a replacement rune", kind, got)
+		}
 	}
 }

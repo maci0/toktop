@@ -68,7 +68,13 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	switch ev.Kind {
 	case core.AgentKindTurn, core.AgentKindTool, core.AgentKindError, core.AgentKindNote:
 	default:
-		ev.Kind = core.ClampField(core.SingleLine(strings.ToLower(ev.Kind)), core.AgentKindMax)
+		// core.FoldASCII, not strings.ToLower: the four kinds are ASCII
+		// literals, and a sender is free to spell one with U+0130 or U+212A.
+		// ToLower would fold those into the ASCII letter and store the event
+		// under a kind the sender never wrote, so the feed's kind column
+		// (core.AgentKindError drives a red row) reads as something the
+		// wire did not say.
+		ev.Kind = core.ClampField(core.SingleLine(core.FoldASCII(ev.Kind)), core.AgentKindMax)
 	}
 	if ev.Kind == "" {
 		ev.Kind = core.AgentKindTurn

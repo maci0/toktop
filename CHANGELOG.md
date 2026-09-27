@@ -198,6 +198,28 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   trackers before it installs any watcher, so the survivor's baseline is taken
   only once the dead watcher's final growth has been reported, and the two
   readings partition the same transcripts instead of overlapping them.
+- The engine kind badge is padded and cut in terminal cells rather than
+  characters. `%-9.9s` counted runes, so a kind spelled in a wide script
+  padded to 9 runes while rendering 18 cells, pushing that engine's label 9
+  cells right of every other row and overflowing a narrow pane; the precision
+  also cut between runes, leaving a combining mark or a multi-byte sequence
+  split. It is the one fixed-width cell in the frame, and it is now measured
+  the way every other cell is.
+- Text matched against ASCII literals is folded with `core.FoldASCII` rather
+  than `strings.ToLower`, at every remaining site: process names and command
+  lines, hwmon labels and `/proc/cpuinfo` keys, the probe's model-name and
+  Content-Type checks, the engine-discovery body sniff, the ingest event
+  `kind`, the log level, the ssh target's localhost test, the Windows named-pipe
+  prefix, and the GitHub host allowlist `toktop update` trusts.
+  `strings.ToLower` also folds runes whose lowercase form is ASCII (U+0130 to
+  `i`, U+212A to `k`), so a name spelled with one satisfied a match its
+  producer never wrote: a chip named `nvdİa` counted as an `nvidia` GPU, an
+  argument naming `gpustacK.start` was claimed as a GPUStack engine, and a
+  release asset on a Kelvin-signed host passed the download allowlist. The
+  fold also leaves an invalid byte alone, where `ToLower` rewrote it to
+  U+FFFD, a name no other process on the machine spells it as. The host folds
+  compose to NFC first, so a host typed in the NFD form a macOS terminal
+  supplies is the host already trusted.
 - `--frames` is named as a wait-only knob under `--once --json`, the way it
   already was under `--once --plain`. Both reports render the last snapshot
   alone, so the count buys the wait before the render and nothing else, and a

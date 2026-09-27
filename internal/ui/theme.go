@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -108,13 +107,23 @@ func padBlock(content string, innerW, innerH int) string {
 	return strings.Join(lines, "\n")
 }
 
-// kindBadge renders a fixed-width colored tag for a backend kind.
+// kindBadgeCells is the visible width every kind badge occupies, so the
+// label beside it starts in the same column on every row.
+const kindBadgeCells = 9
+
+// kindBadge renders a fixed-width colored tag for a backend kind. Padded and
+// cut in visible cells, like every other cell in this package: the %-9.9s it
+// replaced counted runes, so a kind spelled in a wide script (a discovered
+// engine named in Japanese) padded to 9 runes and rendered 18 cells, pushing
+// its label 9 cells right of every other row and overflowing a narrow pane.
+// shorten also cuts between grapheme clusters, where the precision verb cut
+// between runes and left a combining mark or a multi-byte sequence split.
 func kindBadge(kind string) string {
 	st, ok := kindStyles[kind]
 	if !ok {
 		st = styleDim
 	}
-	return st.Render(fmt.Sprintf("%-9.9s", kind))
+	return st.Render(padTo(shorten(kind, kindBadgeCells), kindBadgeCells))
 }
 
 // heatColor maps 0..1 intensity onto a cool-to-hot ramp (cyan, green, amber,

@@ -298,6 +298,13 @@ type engineMatcher struct {
 	match   func(name string, lowerCmd string, args []string) bool
 }
 
+// baseName is a process name reduced to the form the engine matchers below
+// compare, folded with core.FoldASCII rather than strings.ToLower. A /proc
+// name is arbitrary bytes, and the matchers test ASCII literals: ToLower also
+// folds runes whose lowercase form is ASCII, so a binary invoked through a
+// U+212A (KELVIN SIGN) reaches the matcher as "kvllm" and is claimed as a
+// vLLM. It also rewrites an invalid byte to U+FFFD, which is not the name
+// anything else on the machine spells it.
 func baseName(n string) string {
 	if i := strings.LastIndexByte(n, '/'); i >= 0 {
 		n = n[i+1:]
@@ -305,7 +312,7 @@ func baseName(n string) string {
 	if i := strings.LastIndexByte(n, '\\'); i >= 0 {
 		n = n[i+1:]
 	}
-	return strings.TrimSuffix(strings.ToLower(n), ".exe")
+	return strings.TrimSuffix(core.FoldASCII(n), ".exe")
 }
 
 // anyArgContains reports whether any argument holds one of subs. The
@@ -319,7 +326,7 @@ func anyArgContains(args []string, subs ...string) bool {
 		if budget <= 0 {
 			return false
 		}
-		la := strings.ToLower(clipUTF8Prefix(a, budget))
+		la := core.FoldASCII(clipUTF8Prefix(a, budget))
 		budget -= len(la)
 		for _, sub := range subs {
 			if strings.Contains(la, sub) {
@@ -417,7 +424,7 @@ func lowerJoinedArgs(args []string) string {
 		if len(a) > remain {
 			a = clipUTF8Prefix(a, remain)
 		}
-		b.WriteString(strings.ToLower(a))
+		b.WriteString(core.FoldASCII(a))
 	}
 	return b.String()
 }

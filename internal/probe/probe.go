@@ -395,8 +395,14 @@ func SelectModel(models []core.ModelInfo) string {
 	return fallback
 }
 
+// skipProbeModel reports whether a model is an embedding or reranking model,
+// which take no completion tokens and would report a bogus throughput. The
+// needles are ASCII and the name is engine-supplied, so it is folded with
+// core.FoldASCII: strings.ToLower also folds runes whose lowercase is ASCII,
+// so a model id spelled with U+0130 or U+212A would be skipped on a spelling
+// the engine never published.
 func skipProbeModel(name string) bool {
-	n := strings.ToLower(name)
+	n := core.FoldASCII(name)
 	return strings.Contains(n, "embed") || strings.Contains(n, "rerank")
 }
 
@@ -550,8 +556,13 @@ func openaiFrame(line string) (payload string, ok bool) {
 	return "", false
 }
 
+// jsonNotStream reports whether a Content-Type names a plain JSON body rather
+// than an SSE or NDJSON stream. The header value is a protocol token, so it
+// is folded with core.FoldASCII: an ASCII media type must not be satisfied by
+// a spelling strings.ToLower invents out of U+0130 or U+212A, and the two
+// answers here decide whether the body is parsed as a stream at all.
 func jsonNotStream(ct string) bool {
-	ct = strings.ToLower(ct)
+	ct = core.FoldASCII(ct)
 	if strings.Contains(ct, "event-stream") || strings.Contains(ct, "ndjson") {
 		return false
 	}

@@ -8,6 +8,10 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"golang.org/x/text/unicode/norm"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // --add endpoint and --ingest listen address parsing, and the cleartext and
@@ -37,7 +41,12 @@ func localHost(host string) bool {
 	if ip := net.ParseIP(host); ip != nil {
 		return ip.IsLoopback()
 	}
-	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	// Folded the way the rest of the tree folds a host label
+	// (core.FoldASCII over the NFC-composed form), not with strings.ToLower:
+	// the needles are ASCII literals, and ToLower also folds runes whose
+	// lowercase is ASCII. The composed form matters because the check decides
+	// whether a cleartext --add is exempt from the insecure-endpoint warning.
+	name := core.FoldASCII(norm.NFC.String(strings.TrimSuffix(host, ".")))
 	return name == "localhost" || strings.HasSuffix(name, ".localhost")
 }
 
