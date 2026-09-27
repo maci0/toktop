@@ -168,6 +168,7 @@ const HTML = htmlForWire(`<!doctype html>
   <a class="brand" href="#top">toktop<span class="cursor" aria-hidden="true">_</span></a>
   <nav aria-label="Sections">
     <a href="#install">Install</a>
+    <a href="#run">Run</a>
     <a href="#shows" aria-label="What it shows">Shows</a>
     <a href="#keys">Keys</a>
     <a href="#feed">Feed</a>

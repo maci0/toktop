@@ -50,6 +50,20 @@ type Model struct {
 	chartCompressed bool
 	probeReq        time.Time // manual probe awaiting its first result
 	feedDown        string    // set once the ingest endpoint has died
+	notice          string    // one-shot explanation of a key that changed nothing
+	noticeAt        time.Time
+}
+
+// noticeTTL is how long a "that key does nothing here" explanation stays on
+// the footer line. Long enough to read, short enough not to become the footer.
+const noticeTTL = 3 * time.Second
+
+// notice sets the transient footer explanation for a key press that had no
+// effect. The footer hides keys with nothing to act on, but a user who
+// remembers them from another run still presses them; silence reads as a
+// dropped keystroke, and the reason is what they are missing.
+func (m *Model) setNotice(s string) {
+	m.notice, m.noticeAt = s, m.clock
 }
 
 func New(cfg Config, ch <-chan core.Snapshot) Model {
@@ -136,6 +150,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.probeReq.IsZero() && m.clock.Sub(m.probeReq) > 15*time.Second {
 			m.probeReq = time.Time{}
 		}
+		if !m.noticeAt.IsZero() && time.Time(msg).Sub(m.noticeAt) >= noticeTTL {
+			m.notice, m.noticeAt = "", time.Time{}
+		}
 		return m, tickClock()
 
 	case feedDownMsg:
@@ -189,19 +206,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "p", "P":
 			// No engines: ProbeAll is a silent no-op and the PROBES panel
-			// (where "probing…" lives) is absent. Skip rather than look dead.
-			if m.cfg.Prober != nil && len(m.snap.Providers) > 0 {
+			// (where "probing…" lives) is absent. Say why rather than look dead.
+			switch {
+			case m.cfg.Prober == nil:
+				m.setNotice("p: probing is not available in this run")
+			case len(m.snap.Providers) == 0:
+				m.setNotice("p: no engines to probe")
+			default:
 				go m.cfg.Prober()
 				m.probeReq = m.clock
 			}
 			return m, nil
 		case "t", "T":
+			if len(m.snap.Providers) == 0 && len(m.snap.Agents) == 0 {
+				m.setNotice("t: no throughput to plot yet")
+				return m, nil
+			}
 			m.chartCompressed = !m.chartCompressed
 			return m, nil
 		case "a", "A":
 			// Which side gets the panel estate. The other side keeps the
 			// header, the shared throughput chart and the host strip, so the
 			// frame never hides half the machine to show the other half.
+			// Without engines the agents view is already the view.
+			if len(m.snap.Providers) == 0 && !m.focusAgents {
+				m.setNotice("a: no engines to switch to")
+				return m, nil
+			}
 			m.focusAgents = !m.focusAgents
 			return m, nil
 		case "?", "h", "H":
@@ -1164,6 +1195,11 @@ func (m Model) renderFooter() string {
 		foot += styleInfo.Render("a") + dim(label+"  ")
 	}
 	foot += styleInfo.Render("?") + dim(" help")
+	// The notice shares the footer row so a key that did nothing is answered
+	// where the key itself is printed.
+	if m.notice != "" {
+		foot += dim("  ·  ") + styleWarn.Render(m.notice)
+	}
 	tag := ""
 	if m.cfg.Demo {
 		tag = styleWarn.Render(" DEMO ") + " "
@@ -1233,6 +1269,9 @@ func (m Model) renderEmpty() string {
 
 func (m Model) renderHelp() string {
 	var b strings.Builder
+	// The overlay replaces the whole screen, so it carries the same bold
+	// title every panel does; without one it reads as an untitled fragment.
+	b.WriteString(styleTitle.Render("KEYS") + "\n")
 	for _, r := range m.helpRows() {
 		key := styleInfo.Render(padTo(r[0], 12))
 		b.WriteString(key + dim(r[1]) + "\n")
@@ -1297,6 +1336,11 @@ func (m Model) renderMinimal() string {
 	}
 	if !m.probeReq.IsZero() {
 		lines = append(lines, clip(styleWarn.Render("● probing…"), m.w))
+	}
+	// The compact foot is one clipped line wide, too narrow to carry a notice
+	// beside the keys; the body is the only place it fits.
+	if m.notice != "" {
+		lines = append(lines, clip(styleWarn.Render(m.notice), m.w))
 	}
 	rates := core.AgentRates(m.snap.Agents, m.snapNow())
 	if len(m.snap.Providers) == 0 {

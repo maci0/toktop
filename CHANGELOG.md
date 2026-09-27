@@ -10,6 +10,18 @@ support channel (see SECURITY.md).
 
 ## [Unreleased]
 
+### Added
+
+- A key that has nothing to act on (`p` with no engines, `t` before any
+  throughput, `a` with no engines to swap to) says so on the footer for a few
+  seconds instead of being swallowed.
+- The help overlay is titled `KEYS`.
+
+### Changed
+
+- toktop.ai's section nav links `Run`, the first-run command block that had an
+  anchor but no link.
+
 ## [0.14.1] - 2026-09-26
 
 Binaries, checksums, and a CycloneDX SBOM are on

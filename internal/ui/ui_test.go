@@ -1831,3 +1831,82 @@ func TestPanelTitlesShowHiddenCount(t *testing.T) {
 		t.Errorf("panels with overflow do not show hidden count in titles:\n%s", out)
 	}
 }
+
+// A key the footer cannot advertise (nothing to probe, nothing to plot, no
+// engines to swap to) used to be swallowed. A user who remembers it from
+// another run gets a dropped-keystroke read instead, so each one answers on
+// the footer line and then times itself out.
+func TestInertKeysExplainThemselves(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := New(Config{Version: "t", Prober: func() {}}, nil)
+		m.w, m.h, m.ready = 110, 36, true
+
+		for _, k := range []string{"p", "t", "a"} {
+			m.notice, m.noticeAt = "", time.Time{}
+			nm, _ := m.Update(keyMsg(k))
+			m = nm.(Model)
+			if m.notice == "" {
+				t.Errorf("%s with nothing to act on set no notice", k)
+			}
+			if !strings.Contains(strip(m.renderFooter()), strip(m.notice)) {
+				t.Errorf("footer hides the notice for %s:\n%s", k, strip(m.renderFooter()))
+			}
+		}
+
+		// The notice is a beat, not a label: it clears on its own.
+		nm, _ := m.Update(tickMsg(m.clock.Add(noticeTTL)))
+		m = nm.(Model)
+		if m.notice != "" {
+			t.Errorf("notice %q outlived %s", m.notice, noticeTTL)
+		}
+	})
+}
+
+// The same explanation has to fit where the compact view prints it: the foot
+// there is one clipped line wide, so the notice goes in the body.
+func TestInertKeyNoticeInCompactStrip(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready = 50, 24, true
+	nm, _ := m.Update(keyMsg("p"))
+	m = nm.(Model)
+	out := strip(m.renderMinimal())
+	if !strings.Contains(out, "no engines to probe") {
+		t.Errorf("compact strip does not explain an inert p:\n%s", out)
+	}
+}
+
+// With an engine attached these are not inert: t must still flip the
+// timescale and a must still reach the agents view.
+func TestLiveKeysStillWorkWithoutNotice(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	m.w, m.h, m.ready = 110, 36, true
+	nm, _ := m.Update(keyMsg("t"))
+	m = nm.(Model)
+	if m.chartCompressed {
+		t.Error("t did not toggle the timescale with an engine attached")
+	}
+	if m.notice != "" {
+		t.Errorf("t raised a notice with an engine attached: %q", m.notice)
+	}
+	nm, _ = m.Update(keyMsg("a"))
+	m = nm.(Model)
+	if !m.focusAgents {
+		t.Error("a did not focus agents with an engine attached")
+	}
+}
+
+// The overlay replaces the whole frame, so it titles itself the way every
+// panel does; an untitled box reads as a fragment with no anchor.
+func TestHelpOverlayIsTitled(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.help, m.w, m.h, m.ready = true, 110, 36, true
+	if out := strip(m.View()); !strings.Contains(out, "KEYS") {
+		t.Errorf("help overlay has no title:\n%s", out)
+	}
+	small := New(Config{Version: "t"}, nil)
+	small.help, small.w, small.h, small.ready = true, 40, 10, true
+	if out := strip(small.View()); !strings.Contains(out, "KEYS") {
+		t.Errorf("compact help overlay has no title:\n%s", out)
+	}
+}
