@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // pollEvery is how often a transcript is re-read. It bounds how stale a live
@@ -71,7 +73,7 @@ func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 // A walk that outlives every watcher is released by the walk itself, not here.
 func pruneRootListsLocked(now time.Time, maxAge time.Duration) {
 	for k, c := range rootLists {
-		if c.walk == nil && now.Sub(c.at) >= maxAge {
+		if c.walk == nil && core.Age(now, c.at) >= maxAge {
 			delete(rootLists, k)
 		}
 	}
@@ -108,7 +110,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 		rootListMu.Lock()
 		pruneRootListsLocked(now, rescanEvery)
 		c := rootLists[key]
-		if !force && c.walk == nil && !c.at.IsZero() && now.Sub(c.at) < rescanEvery {
+		if !force && c.walk == nil && !c.at.IsZero() && core.Age(now, c.at) < rescanEvery {
 			out := append([]string(nil), c.files...)
 			rootListMu.Unlock()
 			return out
@@ -217,7 +219,7 @@ func (w *Watcher) attachCandidates() []string {
 func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 	now := w.clock()()
 	force := w.scanned.IsZero()
-	if cache && !force && now.Sub(w.scanned) < rescanEvery {
+	if cache && !force && core.Age(now, w.scanned) < rescanEvery {
 		return w.cached
 	}
 	var out []string

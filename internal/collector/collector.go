@@ -316,7 +316,14 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	}
 
 	now, started := c.clock()
-	snap := core.Snapshot{At: now, Uptime: now.Sub(started)}
+	// Uptime is an elapsed duration, but it is measured against the same clock
+	// the rest of the snapshot uses, which is a wall clock on a real run. An
+	// NTP step or a manual set (a laptop resuming, a VM snapshot restored)
+	// moves that clock backwards, and the raw subtraction then reports a
+	// session that started in the future. fmtDur clamps it for the header, but
+	// --json serializes Uptime.Seconds() straight out, so the negative is
+	// clamped here where the frame is built.
+	snap := core.Snapshot{At: now, Uptime: max(now.Sub(started), 0)}
 	// Vitals and the process table are independent of c.mu. Sampling them
 	// inside the critical section would stall RecordAgent/ProbeAll for the
 	// whole vendor-CLI sweep on a cold cache.
@@ -569,7 +576,7 @@ func (c *Collector) ProbeAll() {
 
 	now := c.instant()
 	c.probeMu.Lock()
-	if now.Sub(c.lastProbeWave) < probeWaveGap {
+	if core.Age(now, c.lastProbeWave) < probeWaveGap {
 		c.probeMu.Unlock()
 		return
 	}

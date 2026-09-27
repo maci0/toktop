@@ -419,6 +419,26 @@ func TestEmitFollowsInjectedClock(t *testing.T) {
 	}
 }
 
+// A clock stepped backwards (NTP correction, a laptop resuming from sleep) puts
+// the frame's instant before the one this process started on. Uptime is an
+// elapsed duration, so it floors at zero rather than reporting a session that
+// ends before it began; --json serializes it unguarded.
+func TestEmitClampsUptimeOnABackwardStep(t *testing.T) {
+	started := time.Unix(1_700_000_000, 0).UTC()
+	stepped := started.Add(-5 * time.Minute)
+	c := frozenCollector(t, stepped, []provider.Provider{(&fakeProvider{label: "x", m: &provider.Metrics{OutTotal: 10}}).asProvider()})
+	c.started = started
+	ch := make(chan core.Snapshot, 1)
+	c.emit(context.Background(), ch)
+	snap := <-ch
+	if !snap.At.Equal(stepped) {
+		t.Fatalf("At = %v, want the stepped instant %v", snap.At, stepped)
+	}
+	if snap.Uptime != 0 {
+		t.Fatalf("Uptime = %v, want 0 after a backward step", snap.Uptime)
+	}
+}
+
 func TestEmitDeterministicUnderSameClock(t *testing.T) {
 	frozen := time.Unix(1_700_000_000, 0).UTC()
 	fp := fakeProvider{label: "ollama", m: &provider.Metrics{OutTotal: 100, InTotal: 20, Running: 1}}

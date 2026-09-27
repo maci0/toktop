@@ -192,10 +192,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// leave the "probing…" marker up forever without this bail-out.
 		// On the display clock, not wall time: a paused frame is meant to be
 		// still, so the marker holds until the frame is resumed.
-		if !m.probeReq.IsZero() && m.clock.Sub(m.probeReq) > probeTimeout {
+		if !m.probeReq.IsZero() && core.Age(m.clock, m.probeReq) > probeTimeout {
 			m.probeReq = time.Time{}
 		}
-		if !m.noticeAt.IsZero() && time.Time(msg).Sub(m.noticeAt) >= noticeTTL {
+		if !m.noticeAt.IsZero() && core.Age(time.Time(msg), m.noticeAt) >= noticeTTL {
 			m.notice, m.noticeAt = "", time.Time{}
 		}
 		return m, tickClock()

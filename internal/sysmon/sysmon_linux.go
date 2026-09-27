@@ -403,11 +403,11 @@ func sensorLayout(key, root string, build func(string) []sensorInput) []sensorIn
 	defer sensorLayoutMu.Unlock()
 	now := time.Now()
 	for k, c := range sensorLayouts {
-		if now.Sub(c.at) >= sensorLayoutTTL {
+		if core.Age(now, c.at) >= sensorLayoutTTL {
 			delete(sensorLayouts, k)
 		}
 	}
-	if c, ok := sensorLayouts[key]; ok && now.Sub(c.at) < sensorLayoutTTL {
+	if c, ok := sensorLayouts[key]; ok && core.Age(now, c.at) < sensorLayoutTTL {
 		return c.inputs
 	}
 	// Build under the lock so concurrent samples share one walk and a

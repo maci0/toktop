@@ -11,6 +11,8 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Info is one sampled process relevant to engine discovery or accounting.
@@ -136,7 +138,7 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	// mid-sweep gets the previous snapshot rather than a second sweep, and
 	// the tick math below still runs as one critical section.
 	s.mu.Lock()
-	if s.sweeping || (s.refreshMin > 0 && !s.last.IsZero() && now.Sub(s.last) < s.refreshMin) {
+	if s.sweeping || (s.refreshMin > 0 && !s.last.IsZero() && core.Age(now, s.last) < s.refreshMin) {
 		out := slices.Clone(s.cached)
 		s.mu.Unlock()
 		return out

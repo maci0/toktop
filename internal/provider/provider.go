@@ -205,7 +205,7 @@ func (c *versionCache) fetch(ctx context.Context, base string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	now := versionInstant()
-	if !c.at.IsZero() && now.Sub(c.at) < versionWindow(c.resolved) {
+	if !c.at.IsZero() && core.Age(now, c.at) < versionWindow(c.resolved) {
 		return c.val
 	}
 	for _, path := range []string{"/api/version", "/version", "/get_server_info"} {

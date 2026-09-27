@@ -174,7 +174,7 @@ func (s *Stats) poll(ctx context.Context) {
 func (s *Stats) Merge(into *core.SysSample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.at.IsZero() || s.instant().Sub(s.at) > stalenessWindow {
+	if s.at.IsZero() || core.Age(s.instant(), s.at) > stalenessWindow {
 		if s.err != "" {
 			into.RemoteHost, into.RemoteErr = s.host(), s.err
 		}

@@ -57,6 +57,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   with nothing to change.
 - Flag descriptions in `--help` hang under the flag name with spaces. The
   tab the flag package's own printer uses landed them on a tab stop.
+- A wall clock stepped backwards (an NTP correction, a laptop resuming from
+  sleep, a restored VM snapshot) no longer leaves a run's expiry windows
+  counting up from a stamp in its own future. A negative age satisfied every
+  "younger than the window" test, so until real time caught back up the probe
+  wave gate stopped spacing its waves (a gateway can bill every probe token),
+  transcript listings stopped re-walking and new sessions went unseen, the
+  version endpoints were re-asked on every scrape, and an unreachable remote
+  target kept its last vitals on screen.
+- A session's own age is floored at zero rather than reported as ending before
+  it began when the clock steps back mid-run. `--once --json` serialized the
+  negative `uptime_secs` straight out.
 - `toktop update --help` names the `--repo` argument the way its own usage
   line does (`owner/name`) instead of the type name Go's flag package
   reports (`string`).
