@@ -171,6 +171,9 @@ exit 0`
 // parseProcScan turns procScanScript output into Infos. Argv splitting by
 // spaces is lossy for quoted arguments, which is acceptable: both consumers
 // (engine matching, --port extraction) scan tokens rather than exact paths.
+// The sweep already cut every line, so the clip here is the same bound in
+// bytes rather than characters: an Info retains the prefix and nothing past
+// it, exactly as a local listing holds one.
 func parseProcScan(out string) []procs.Info {
 	var infos []procs.Info
 	for line := range strings.SplitSeq(out, "\n") {
@@ -182,7 +185,7 @@ func parseProcScan(out string) []procs.Info {
 		if err != nil || pid <= 0 {
 			continue
 		}
-		infos = append(infos, procs.Info{PID: pid, Name: fields[1], Args: fields[1:]})
+		infos = append(infos, procs.Info{PID: pid, Name: fields[1], Args: procs.ClipArgs(fields[1:])})
 	}
 	return infos
 }

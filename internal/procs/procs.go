@@ -18,13 +18,13 @@ import (
 // Info is one sampled process relevant to engine discovery or accounting.
 type Info struct {
 	PID      int
-	Name     string // executable / comm
-	Args     []string
-	RSS      uint64  // resident memory, bytes
-	CPUPct   float64 // percent of one core
-	PortHint int     // --port found on the command line
-	Engine   string  // matched well-known engine id
-	DefPort  int     // the matched engine's default port
+	Name     string   // executable / comm
+	Args     []string // leading CmdlinePrefix bytes of the command line; the tail is not retained
+	RSS      uint64   // resident memory, bytes
+	CPUPct   float64  // percent of one core
+	PortHint int      // --port found on the command line
+	Engine   string   // matched well-known engine id
+	DefPort  int      // the matched engine's default port
 }
 
 // raw is the platform-sampled record before delta math.
@@ -47,8 +47,11 @@ type raw struct {
 }
 
 // annotate derives the listen-port hint and engine match from the command
-// line the lister already read.
+// line the lister already read, and keeps only the prefix of it a consumer
+// can read. Both derivations run on the clipped command line, so what a
+// listing retains and what it reports are the same bytes.
 func annotate(r *raw) {
+	r.args = ClipArgs(r.args)
 	r.port = ExtractPort(r.args)
 	if eng, defPort, ok := MatchEngine(Info{Name: r.name, Args: r.args}); ok {
 		r.engine, r.defPort = eng, defPort
@@ -321,9 +324,48 @@ const (
 // CmdlinePrefix is the longest leading slice of a command line any engine
 // matcher reads, so a command line longer than this cannot change a match. A
 // scan of another host's processes (internal/remote) ships at most this many
-// bytes per process: the tail is where an agent's inline prompt, a file path
-// or a credential sits, and none of it is read back on the other side.
+// bytes per process, and a local listing keeps at most this many (see
+// ClipArgs): the tail is where an agent's inline prompt, a file path or a
+// credential sits, and none of it is read on this side either.
 const CmdlinePrefix = matchJoinBytes
+
+// ClipArgs keeps the leading CmdlinePrefix bytes of a command line, the same
+// bound the ssh sweep ships and the matchers read, and drops what is past
+// them. A local listing reads /proc/PID/cmdline whole: a browser, an Electron
+// app or an agent started with a long inline script puts hundreds of
+// kilobytes on that line, and the tail past the prefix is exactly where a
+// home directory, an inline prompt or a credential sits. None of it is read
+// by anything here, and the Info a listing produces is retained for the life
+// of the sampler, so holding it costs memory and keeps personal data in a
+// structure no consumer ever asks for.
+//
+// The budget is spent across arguments rather than per argument, so it counts
+// what a joined command line counts: the separator between two arguments is a
+// byte of that line. An argument that straddles the cut is clipped rather
+// than dropped whole, the way the sweep's cut -c clips mid-token.
+//
+// Exported for the sweep's own reader, which splits a line that was cut in
+// characters, so the Info it builds is bounded in bytes the same way.
+func ClipArgs(args []string) []string {
+	spent := 0
+	for i, a := range args {
+		if i > 0 {
+			spent++ // the separator a join writes between two arguments
+		}
+		if spent >= CmdlinePrefix {
+			return args[:i]
+		}
+		room := CmdlinePrefix - spent
+		if len(a) <= room {
+			spent += len(a)
+			continue
+		}
+		out := make([]string, i, i+1)
+		copy(out, args[:i])
+		return append(out, clipUTF8Prefix(a, room))
+	}
+	return args
+}
 
 // clipUTF8Prefix keeps at most n bytes of s, ending on a code-point
 // boundary so a cut cannot leave a dangling lead byte (é as 0xC3).

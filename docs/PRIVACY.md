@@ -10,9 +10,16 @@ data flows, so the claim is checkable rather than a slogan.
 | Source | What is taken |
 | --- | --- |
 | Engine HTTP APIs (`--add`, or engines found on local ports) | model names, version, token counts, load, KV-cache and slot state |
-| `/proc`, `ps`, Win32 CIM, `nvidia-smi`, `rocm-smi`, `xpu-smi`, `system_profiler`, `ioreg` | CPU, memory, GPU, power, temperature, process name, port flags |
+| `/proc`, `ps`, Win32 CIM, `nvidia-smi`, `rocm-smi`, `xpu-smi`, `system_profiler`, `ioreg` | CPU, memory, GPU, power, temperature, process name, port flags, and the leading 4096 bytes of a command line (see below) |
 | Agent transcripts, only with `--agents` | the token counters each agent records about itself, plus the working directory it ran in |
 | `ssh://` target, only when you name one | the same vitals, the listening ports `/proc/net/tcp(+6)` reports (or an active probe of the well-known list), and the leading 4096 bytes of each process's command line (see below) |
+
+A local process listing keeps the leading 4096 bytes of a command line and
+drops the rest, rather than holding the whole line for as long as the
+dashboard runs. Engine matching and the `--port` hint read no further in, so
+nothing past the cut changes what is reported, and a browser, an Electron app
+or an agent started with a long inline script leaves its flags, prompts and
+paths on the other side of the cut rather than in a toktop structure.
 
 `--agents` is off by default: it means reading session files nobody pointed
 toktop at. The adapters in the

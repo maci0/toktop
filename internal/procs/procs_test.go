@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -112,6 +113,75 @@ func hugeArgs(n, each int) []string {
 		a[i] = pad
 	}
 	return a
+}
+
+// A listing keeps only the prefix a consumer reads, so the tail of a long
+// command line (a browser's flags, an inline prompt, a credential) is not
+// retained for the life of the sampler, while everything inside the prefix
+// still decides the match and the port.
+func TestClipArgsKeepsOnlyTheReadablePrefix(t *testing.T) {
+	args := append([]string{"ollama", "serve", "--port", "11434"}, hugeArgs(64, 1024)...)
+	got := ClipArgs(args)
+
+	n := 0
+	for i, a := range got {
+		if i > 0 {
+			n++ // the separator a join writes between two arguments
+		}
+		n += len(a)
+	}
+	if n > CmdlinePrefix {
+		t.Fatalf("retained %d bytes of command line, bound is %d", n, CmdlinePrefix)
+	}
+	if len(got) >= len(args) {
+		t.Fatalf("kept %d of %d arguments: the tail past the prefix was retained", len(got), len(args))
+	}
+	if !slices.Equal(got[:4], args[:4]) {
+		t.Fatalf("clipped argv lost a leading argument: %q", got[:min(4, len(got))])
+	}
+	if !utf8.ValidString(got[len(got)-1]) {
+		t.Fatalf("ClipArgs split a character: %q", got[len(got)-1])
+	}
+	eng, def, ok := MatchEngine(Info{Name: "ollama", Args: got, PortHint: ExtractPort(got)})
+	if !ok || eng != "ollama" || def != 11434 {
+		t.Fatalf("match over the clipped command line = %q/%d/%v, want ollama/11434/true", eng, def, ok)
+	}
+	if p := ExtractPort(got); p != 11434 {
+		t.Fatalf("ExtractPort over the clipped command line = %d, want 11434", p)
+	}
+}
+
+// A command line inside the bound is handed back untouched, so the common
+// listing of a normal engine allocates nothing extra.
+func TestClipArgsLeavesAShortCommandLineAlone(t *testing.T) {
+	args := []string{"vllm", "serve", "--port", "8001"}
+	if got := ClipArgs(args); &got[0] != &args[0] {
+		t.Fatalf("ClipArgs copied a command line that fits: %q", got)
+	}
+	if got := ClipArgs(nil); len(got) != 0 {
+		t.Fatalf("ClipArgs(nil) = %q, want empty", got)
+	}
+}
+
+// The bound is a property of the listing, not of the matchers alone: a lister
+// that hands the whole line to annotate must come back holding the prefix.
+func TestAnnotateClipsTheRetainedCommandLine(t *testing.T) {
+	r := raw{pid: 1, name: "ollama", args: append([]string{"ollama", "serve"}, hugeArgs(8, 4096)...)}
+	annotate(&r)
+
+	total := 0
+	for i, a := range r.args {
+		if i > 0 {
+			total++
+		}
+		total += len(a)
+	}
+	if total > CmdlinePrefix {
+		t.Fatalf("annotate retained %d bytes, bound is %d", total, CmdlinePrefix)
+	}
+	if r.engine != "ollama" || r.defPort != 11434 {
+		t.Fatalf("annotate over the clipped line = %q/%d, want ollama/11434", r.engine, r.defPort)
+	}
 }
 
 func TestLowerJoinedArgsCapsSize(t *testing.T) {
