@@ -4,9 +4,88 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
+
+// AgentNameField is the identity boundary: both producers of an agent event
+// run it, so the feed cannot hold a name only one of them approved. Each of
+// the four outcomes it decides has to be pinned separately, because the
+// failure mode is a name that looks real and is not.
+func TestAgentNameField(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"an ordinary name", "claude", "claude"},
+		{"a hyphenated name", "prime-agent", "prime-agent"},
+		{"a non-latin name", "модель", "модель"},
+		{"a version suffix", "claude-4.5", "claude-4.5"},
+		// Everything that sanitizing removes and leaves nothing behind.
+		{"empty", "", AgentAnonymous},
+		{"only control characters", "\x00\x1b\x7f", AgentAnonymous},
+		{"only a bidi override", "\u202e", AgentAnonymous},
+		// Stripped, not replaced: the clean part of the name survives, so a
+		// display-name escape cannot erase a real agent from the feed.
+		{"a CSI wrapper", "\x1b[1mclaude\x1b[0m", "claude"},
+		// Two gaps SanitizeText leaves open by design, pinned here so a
+		// change to either is a deliberate one: it keeps whitespace, and it
+		// keeps newlines and tabs because layout text needs them. The
+		// only-empty check does not catch a name made of blanks. The feed
+		// line is rendered from this value (ui/feed.go), so a name carrying
+		// a newline reaches a line-oriented renderer unaltered.
+		{"whitespace only", "   ", "   "},
+		{"an embedded newline", "clau\nde", "clau\nde"},
+		// A spoof: a name that is byte-for-byte one agent and reads as
+		// another. There is no honest version of this string.
+		{"a cyrillic es", "сlaude", AgentAnonymous},
+		{"a greek omicron", "cοdex", AgentAnonymous},
+		// Clamped, then judged: the cap is applied before the script check,
+		// so a spoof padded past AgentNameMax is still caught.
+		{"a long ordinary name", strings.Repeat("a", AgentNameMax+20), strings.Repeat("a", AgentNameMax)},
+		{"a long spoofed name", "с" + strings.Repeat("a", AgentNameMax+20), AgentAnonymous},
+		{"a name exactly at the cap", strings.Repeat("a", AgentNameMax), strings.Repeat("a", AgentNameMax)},
+		{"a name one past the cap", strings.Repeat("a", AgentNameMax+1), strings.Repeat("a", AgentNameMax)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AgentNameField(tc.in)
+			if got != tc.want {
+				t.Fatalf("AgentNameField(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+			if got == "" {
+				t.Error("AgentNameField returned an empty name; the feed would key on nothing")
+			}
+		})
+	}
+}
+
+// ClampEventTokens is the single ceiling both event producers route through,
+// so the boundaries are the test: the value at the ceiling, one past it, and
+// the negative that a subtraction of two counters can produce.
+func TestClampEventTokens(t *testing.T) {
+	cases := []struct {
+		name string
+		in   int64
+		want int64
+	}{
+		{"zero", 0, 0},
+		{"an ordinary count", 1234, 1234},
+		{"one below the ceiling", MaxEventTokens - 1, MaxEventTokens - 1},
+		{"exactly the ceiling", MaxEventTokens, MaxEventTokens},
+		{"one above the ceiling", MaxEventTokens + 1, 0},
+		{"far above the ceiling", math.MaxInt64, 0},
+		{"a negative count", -1, 0},
+		{"the most negative count", math.MinInt64, 0},
+	}
+	for _, tc := range cases {
+		if got := ClampEventTokens(tc.in); got != tc.want {
+			t.Errorf("ClampEventTokens(%d) = %d, want %d", tc.in, got, tc.want)
+		}
+	}
+}
 
 // AgentRates drives every per-agent number the dashboard prints. A known
 // event sequence must produce exactly the rate math the UI renders: tokens

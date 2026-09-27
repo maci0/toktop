@@ -53,6 +53,22 @@ func TestLoggerHonorsLogLevel(t *testing.T) {
 	}
 }
 
+// main rejects an unparseable value at startup, so Logger never sees one from
+// the command line. A library caller, a test, or an operator who edited the
+// environment after start can, and the fallback has to be the quiet one
+// rather than the zero value: slog.Level(0) is Info, but a future default
+// must not silently open the log up.
+func TestLoggerFallsBackToInfoOnAnUnparseableLevel(t *testing.T) {
+	t.Setenv(LevelEnv, "trace")
+	lg := Logger()
+	if !lg.Enabled(context.Background(), slog.LevelInfo) {
+		t.Error("info should be enabled after an unparseable level")
+	}
+	if lg.Enabled(context.Background(), slog.LevelDebug) {
+		t.Error("debug should be disabled after an unparseable level")
+	}
+}
+
 func TestUtcLogTime(t *testing.T) {
 	tm := time.Date(2026, 3, 15, 10, 30, 0, 0, time.FixedZone("EST", -5*3600))
 	attr := slog.Time(slog.TimeKey, tm)
@@ -126,5 +142,122 @@ func TestRedactLogAddrs(t *testing.T) {
 		if got := RedactAddrs(tc.in); got != tc.want {
 			t.Errorf("RedactAddrs(%q) = %q, want %q", tc.in, got, tc.want)
 		}
+	}
+}
+
+// Remote is the only thing standing between a peer address and the audit log.
+// The unparsable branch matters: a caller that hands it anything but host:port
+// must get "unknown" rather than the input echoed back, IP and all.
+func TestRemote(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"127.0.0.1:54321", "loopback:54321"},
+		{"127.0.0.53:53", "loopback:53"},
+		{"[::1]:8080", "loopback:8080"},
+		{"[fe80::1%eth0]:22", "remote"},
+		{"192.168.1.1:8080", "remote"},
+		{"[2001:db8::1]:443", "remote"},
+		{"0.0.0.0:22", "remote"},
+		{"", "unknown"},
+		{"192.168.1.1", "unknown"},
+		{"192.168.1.1:8080:extra", "unknown"},
+		{"example.com:22", "remote"},
+	}
+	for _, tc := range cases {
+		if got := Remote(tc.in); got != tc.want {
+			t.Errorf("Remote(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// LogLevelName exists so the startup config line and the docs spell the
+// floor the way TOKTOP_LOG_LEVEL does, and ParseLogLevel is the only reader
+// of that spelling. Anything the name renders must parse back to the same
+// level, or the line names a setting the log does not apply.
+func TestLogLevelName(t *testing.T) {
+	for _, lvl := range []slog.Level{
+		slog.LevelDebug, slog.LevelDebug + 2,
+		slog.LevelInfo, slog.LevelInfo + 2,
+		slog.LevelWarn, slog.LevelWarn + 2,
+		slog.LevelError, slog.LevelError + 2,
+	} {
+		name := LogLevelName(lvl)
+		if name == "" {
+			t.Errorf("LogLevelName(%v) is empty", lvl)
+			continue
+		}
+		if strings.ToUpper(name) == name && strings.ToLower(name) != name {
+			t.Errorf("LogLevelName(%v) = %q, want the lower-case TOKTOP_LOG_LEVEL spelling", lvl, name)
+		}
+		got, err := ParseLogLevel(name)
+		if err != nil {
+			t.Errorf("ParseLogLevel(LogLevelName(%v)=%q) = %v", lvl, name, err)
+			continue
+		}
+		// ParseLogLevel snaps to the named floor, so the bucket is what has
+		// to survive the round trip, not the exact level.
+		if LogLevelName(got) != name {
+			t.Errorf("round trip of %v: LogLevelName(%v) = %q, want %q", lvl, got, LogLevelName(got), name)
+		}
+	}
+	if got := LogLevelName(slog.LevelInfo - 4); got != "debug" {
+		t.Errorf("LogLevelName below debug = %q", got)
+	}
+	if got := LogLevelName(slog.LevelError + 4); got != "error" {
+		t.Errorf("LogLevelName above error = %q", got)
+	}
+}
+
+// Field is what every attacker-shaped string reaches on its way into an audit
+// line: an HTTP method, a request path, a request id, an engine's error text.
+// Three properties have to hold together, and none is visible from any single
+// input: escapes go, the result cannot contain a newline, and it is capped.
+func TestField(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"plain text is untouched", "POST", 16, "POST"},
+		{"a path keeps its slashes", "/v1/events", 64, "/v1/events"},
+		{"a newline collapses to a space", "GET\nlevel=INFO forged", 64, "GET level=INFO forged"},
+		// A CR is dropped rather than collapsed, so the tokens either side
+		// of it join: what matters is that no line break survives.
+		{"a carriage return is dropped", "GET\rmsg=hi", 64, "GETmsg=hi"},
+		{"runs of whitespace collapse to one", "a \t\n  b", 64, "a b"},
+		{"an escape sequence is removed", "\x1b[31mred\x1b[0m", 64, "red"},
+		{"an OSC title set is removed", "x\x1b]0;pwned\x07y", 64, "xy"},
+		{"control characters go", "a\x00b\x1fc", 64, "abc"},
+		{"a bidi override is removed", "a\u202eb", 64, "ab"},
+		{"an empty string stays empty", "", 16, ""},
+		{"whitespace only collapses to nothing", " \t\n ", 16, ""},
+		{"a cap of zero yields nothing", "abc", 0, ""},
+		{"a negative cap yields nothing", "abc", -1, ""},
+		{"the cap truncates", "abcdefgh", 3, "abc"},
+		{"the cap is in characters, not bytes", "héllo wörld", 5, "héllo"},
+		{"an emoji is not cut in half", "a👩‍💻b", 2, "a👩‍💻"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := Field(c.in, c.n)
+			if got != c.want {
+				t.Fatalf("Field(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+			}
+			// Whatever the exact bytes, no output may carry a line break or
+			// an escape: that is the whole reason this wrapper exists.
+			if strings.ContainsAny(got, "\n\r\x1b") {
+				t.Errorf("Field(%q, %d) = %q still carries a line break or escape", c.in, c.n, got)
+			}
+		})
+	}
+}
+
+// The cap has to survive the sanitizing pass too: sanitizing shortens a
+// string, so a caller that sized the cap for the raw value would get a line
+// longer than it asked for.
+func TestFieldCapsAfterSanitizing(t *testing.T) {
+	got := Field("\x1b[31mabcdefghij\x1b[0m", 4)
+	if got != "abcd" {
+		t.Errorf("Field with escapes = %q, want the first 4 clean characters", got)
 	}
 }
