@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/rivo/uniseg"
+
 	"github.com/maci0/toktop/internal/core"
 )
 
@@ -20,13 +22,17 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	if err != nil {
 		return core.AgentEvent{}, err
 	}
+	id, err := wireEventID(wire.ID)
+	if err != nil {
+		return core.AgentEvent{}, err
+	}
 	prompt, output, thinking, err := parseTokenFields(wire)
 	if err != nil {
 		return core.AgentEvent{}, err
 	}
 	ev := core.AgentEvent{
 		At:             at,
-		ID:             wire.ID,
+		ID:             id,
 		Agent:          wire.Agent,
 		Model:          wire.Model,
 		Kind:           wire.Kind,
@@ -42,7 +48,6 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// stored and later rendered into a cell of a row.
 	// Defaults come after sanitization: a value the sanitizer empties
 	// (pure escape sequences) must not slip past the fallback.
-	ev.ID = core.ClampField(core.SingleLine(ev.ID), core.AgentIDMax)
 	ev.Agent = core.AgentNameField(ev.Agent)
 	ev.Model = core.ClampField(core.SingleLine(ev.Model), core.AgentModelMax)
 	ev.ViaEngine = core.ClampField(core.SingleLine(ev.ViaEngine), core.AgentViaMax)
@@ -99,6 +104,36 @@ func pathNote(note string) bool {
 		return false
 	}
 	return strings.ContainsAny(note, `/\`) || strings.HasPrefix(note, "~")
+}
+
+// wireEventID is the stored form of a caller-supplied event id. An absent id
+// is not an error: the endpoint derives one from the POST's Idempotency-Key,
+// and the handler only reaches here for an id the sender did write.
+//
+// A supplied id that cannot be stored whole is refused rather than clamped.
+// The id is the dedup key, so clamping one past the cap folds every key with
+// that prefix onto a single stored id, and the second event is dropped as a
+// duplicate of the first: the sender loses a turn and the answer's
+// accepted/stored pair reads as a replay. The same is true of an id that
+// sanitizes to nothing, which leaves the event with no key at all and is
+// counted again on every replay. Both are answered the way an out-of-range
+// token count is: a 400 naming the field.
+func wireEventID(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	line := core.SingleLine(raw)
+	// Clusters, not bytes or runes: the cap is a display cap the feed applies
+	// in clusters, so an id of 129 flags is over it and an id of 129 bytes of
+	// a two-byte rune is not.
+	if uniseg.GraphemeClusterCount(line) > core.AgentIDMax {
+		return "", fmt.Errorf("bad id: must be at most %d characters", core.AgentIDMax)
+	}
+	id := core.ClampField(line, core.AgentIDMax)
+	if id == "" {
+		return "", errors.New("bad id: must be at least one printable character")
+	}
+	return id, nil
 }
 
 // agentEventWire mirrors core.AgentEvent for decoding, with ts and token

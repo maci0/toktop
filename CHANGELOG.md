@@ -27,6 +27,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   joiner stays legal, so an emoji spelled with it is still a target. The
   characters have to be removed from the name for the target to work, which is
   the point: `ssh` itself dials what the operator typed.
+- A `POST /v1/events` event `id` past 128 characters, or one that is nothing but
+  whitespace or control characters, is refused with a `400` naming the field
+  instead of being clamped. The id is the key the retained feed deduplicates
+  on, so clamping it folded every longer key sharing that prefix onto one
+  stored id and dropped the second event as a duplicate of the first, and an
+  id that sanitized to nothing left the event unkeyed, counted again on every
+  replay. An id of exactly 128 characters is still stored whole.
 
 ### Added
 

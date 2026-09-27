@@ -856,12 +856,14 @@ func TestIngestSecurityHeaders(t *testing.T) {
 	}
 }
 
+// Every display field is clamped to its cap; the id is not, because it keys
+// the dedup window (see TestIngestRefusesUnstorableId).
 func TestIngestClampsOversizedFields(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
 	huge := strings.Repeat("x", 10_000)
-	body := fmt.Sprintf(`{"id":%q,"agent":%q,"model":%q,"note":%q,"via_engine":%q,"kind":%q}`, huge, huge, huge, huge, huge, huge)
+	body := fmt.Sprintf(`{"agent":%q,"model":%q,"note":%q,"via_engine":%q,"kind":%q}`, huge, huge, huge, huge, huge)
 	resp := post(t, "http://"+s.Addr()+"/v1/events", body)
 	if resp != http.StatusAccepted {
 		t.Fatalf("status = %d", resp)
@@ -873,7 +875,6 @@ func TestIngestClampsOversizedFields(t *testing.T) {
 		got  string
 		cap  int
 	}{
-		{"id", ev.ID, 128},
 		{"agent", ev.Agent, 64},
 		{"model", ev.Model, 128},
 		{"note", ev.Note, 512},
@@ -883,6 +884,54 @@ func TestIngestClampsOversizedFields(t *testing.T) {
 		if want := strings.Repeat("x", field.cap); field.got != want {
 			t.Errorf("%s = %q, want %q", field.name, field.got, want)
 		}
+	}
+}
+
+// An id the endpoint cannot store whole is a 400 naming the field, the way an
+// out-of-range token count is. Clamping it would fold two keys onto one stored
+// id and drop the second event as a duplicate; an id that sanitizes to nothing
+// would leave the event unkeyed, counted again on every replay.
+func TestIngestRefusesUnstorableId(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	for _, tc := range []struct{ name, id string }{
+		{"over the cap", strings.Repeat("x", 10_000)},
+		{"one character over the cap", strings.Repeat("x", 129)},
+		{"whitespace only", "   "},
+		{"escape sequences only", "\x1b[31m\x1b[0m"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"id":%q,"agent":"coder"}`, tc.id)
+			code, msg := postBody(t, "http://"+s.Addr()+"/v1/events", body)
+			if code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400", code)
+			}
+			if !strings.Contains(msg, "id") {
+				t.Errorf("body %q does not name the field", msg)
+			}
+		})
+	}
+	if len(rec.evs) != 0 {
+		t.Fatalf("stored %d events, want 0", len(rec.evs))
+	}
+}
+
+// An id exactly at the cap is kept whole, and so is one written in decomposed
+// Unicode: the cap counts characters, not bytes.
+func TestIngestKeepsIdAtCap(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	for _, id := range []string{strings.Repeat("x", 128), strings.Repeat("k", 64) + "café"} {
+		body := fmt.Sprintf(`{"id":%q,"agent":"coder"}`, id)
+		if code, _ := postBody(t, "http://"+s.Addr()+"/v1/events", body); code != http.StatusAccepted {
+			t.Fatalf("id of %d bytes: status = %d", len(id), code)
+		}
+	}
+	awaitEvents(t, rec, 2)
+	if got := rec.evs[0].ID; got != strings.Repeat("x", 128) {
+		t.Errorf("id = %q, want the whole 128 characters", got)
 	}
 }
 
