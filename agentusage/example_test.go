@@ -5,6 +5,7 @@ package agentusage_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -78,6 +79,24 @@ func ExampleRegisterSpec() {
 	err := agentusage.RegisterSpec("", agentusage.Spec{})
 	fmt.Println(err)
 	// Output: usage spec needs an agent name
+}
+
+func ExampleUnregisterSpec() {
+	err := agentusage.RegisterSpec("myagent", agentusage.Spec{
+		Roots: []string{"~/.myagent/sessions"},
+	})
+	fmt.Println(err, agentusage.Supported("myagent"))
+	agentusage.UnregisterSpec("myagent")
+	fmt.Println(agentusage.Supported("myagent"))
+	// Output:
+	// <nil> true
+	// false
+}
+
+func ExampleWatcher_Err() {
+	w := agentusage.Watch("nosuchagent", "", time.Now())
+	fmt.Println(w == nil, errors.Is(w.Err(), agentusage.ErrUnsupportedTool))
+	// Output: true true
 }
 
 func ExampleSample_Empty() {

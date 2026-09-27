@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -544,11 +545,7 @@ func TestDefinedAgentTranscriptsAreReadGenerically(t *testing.T) {
 	if err := RegisterSpec("piclone", Spec{Roots: []string{store}}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		adaptersMu.Lock()
-		delete(adapters, "piclone")
-		adaptersMu.Unlock()
-	})
+	t.Cleanup(func() { UnregisterSpec("piclone") })
 	if !Supported("piclone") {
 		t.Fatal("a registered spec should make the agent supported")
 	}
@@ -572,11 +569,7 @@ func TestDefinedAgentIgnoresOtherDirectories(t *testing.T) {
 	if err := RegisterSpec("piclone2", Spec{Roots: []string{store}}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		adaptersMu.Lock()
-		delete(adapters, "piclone2")
-		adaptersMu.Unlock()
-	})
+	t.Cleanup(func() { UnregisterSpec("piclone2") })
 	w := Watch("piclone2", work, time.Now())
 	append_(t, filepath.Join(store, "s.jsonl"),
 		`{"role":"assistant","cwd":`+jsonPath(other)+`,"usage":{"output_tokens":5000}}`)
@@ -631,6 +624,70 @@ func TestRegisterSpecValidates(t *testing.T) {
 	}
 }
 
+func TestUnregisterSpecRemovesARegistration(t *testing.T) {
+	store := t.TempDir()
+	if err := RegisterSpec("unreg", Spec{Roots: []string{store}}); err != nil {
+		t.Fatal(err)
+	}
+	if !Supported("unreg") {
+		t.Fatal("a registered spec should make the agent supported")
+	}
+	if !UnregisterSpec("  unreg  ") {
+		t.Fatal("UnregisterSpec should canonicalize the name like RegisterSpec")
+	}
+	if Supported("unreg") {
+		t.Fatal("the agent should be unreadable again once unregistered")
+	}
+	if w := Watch("unreg", t.TempDir(), time.Now()); w != nil || !errors.Is(w.Err(), ErrUnsupportedTool) {
+		t.Fatalf("Watch after unregister = %v, %v; want a nil watcher reporting ErrUnsupportedTool", w, w.Err())
+	}
+	if UnregisterSpec("unreg") {
+		t.Fatal("a second UnregisterSpec should report nothing removed")
+	}
+	if UnregisterSpec("") || UnregisterSpec("   ") {
+		t.Fatal("a blank name cannot name a registration")
+	}
+}
+
+func TestUnregisterSpecRestoresTheDisplacedAdapter(t *testing.T) {
+	store := t.TempDir()
+	builtin, ok := adapterFor("codex")
+	if !ok {
+		t.Fatal("codex should be a built-in adapter")
+	}
+	if err := RegisterSpec("codex", Spec{Roots: []string{store}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { UnregisterSpec("codex") })
+	got, ok := adapterFor("codex")
+	if !ok || !slices.Equal(got.roots("/work"), []string{store}) {
+		t.Fatalf("registered roots = %v, want the spec's %q", got.roots("/work"), store)
+	}
+	if !UnregisterSpec("codex") {
+		t.Fatal("UnregisterSpec should report the registration it removed")
+	}
+	got, ok = adapterFor("codex")
+	if !ok || got.suffix != builtin.suffix || !slices.Equal(got.roots("/work"), builtin.roots("/work")) {
+		t.Fatalf("after unregister roots = %v, want the built-in %v", got.roots("/work"), builtin.roots("/work"))
+	}
+}
+
+func TestWatcherErr(t *testing.T) {
+	if err := (*Watcher)(nil).Err(); !errors.Is(err, ErrUnsupportedTool) {
+		t.Fatalf("nil watcher Err = %v, want ErrUnsupportedTool", err)
+	}
+	if err := Watch("no-such-agent-anywhere", t.TempDir(), time.Now()).Err(); !errors.Is(err, ErrUnsupportedTool) {
+		t.Fatalf("unreadable agent Err = %v, want ErrUnsupportedTool", err)
+	}
+	w := Watch("claude", t.TempDir(), time.Now())
+	if w == nil {
+		t.Fatal("claude should be watchable")
+	}
+	if err := w.Err(); err != nil {
+		t.Fatalf("live watcher Err = %v, want nil", err)
+	}
+}
+
 func TestParseClaudeThinkingOnly(t *testing.T) {
 	line := []byte(`{"type":"assistant","cwd":"/tmp/p","message":{"usage":{"input_tokens":0,"output_tokens":0,"output_tokens_details":{"thinking_tokens":40}}}}`)
 	v, cwd, ok := parseClaude(line)
@@ -650,11 +707,7 @@ func TestRegisterSpecTrimsToolName(t *testing.T) {
 	if err := RegisterSpec("  spaced  ", Spec{Roots: []string{store}}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		adaptersMu.Lock()
-		delete(adapters, "spaced")
-		adaptersMu.Unlock()
-	})
+	t.Cleanup(func() { UnregisterSpec("spaced") })
 	if !Supported("spaced") || !Supported("  spaced") {
 		t.Fatal("trimmed name should be the lookup key")
 	}
@@ -834,11 +887,7 @@ func TestDirPlaceholderInDefinedRoots(t *testing.T) {
 	if err := RegisterSpec("inproject", Spec{Roots: []string{"{dir}/.logs"}}); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		adaptersMu.Lock()
-		delete(adapters, "inproject")
-		adaptersMu.Unlock()
-	})
+	t.Cleanup(func() { UnregisterSpec("inproject") })
 	w := Watch("inproject", work, time.Now())
 	append_(t, filepath.Join(work, ".logs", "usage.jsonl"),
 		`{"usage":{"output_tokens":77}}`)

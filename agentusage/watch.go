@@ -252,6 +252,11 @@ var adapters = map[string]adapter{
 	},
 }
 
+// overrides records what each RegisterSpec displaced, keyed like adapters and
+// guarded by adaptersMu. It is not an adapter source: adapterFor still reads
+// adapters, and an entry here only says what UnregisterSpec puts back.
+var overrides = map[string]displaced{}
+
 var (
 	// ErrEmptyTool is returned by RegisterSpec when the agent name is blank.
 	ErrEmptyTool = errors.New("usage spec needs an agent name")
@@ -259,6 +264,13 @@ var (
 	// directories. errors.Is matches it through the formatted error that
 	// includes the agent name.
 	ErrNoRoots = errors.New("usage spec has no roots")
+	// ErrUnsupportedTool is what Watcher.Err reports for the nil watcher Watch
+	// returns: the agent keeps nothing this package can read, because no source
+	// is registered for it, no definition names its transcripts, or its
+	// definition names none. It is a fact about the agent, not a failure, so a
+	// caller that has nothing to display treats it like any other empty
+	// reading.
+	ErrUnsupportedTool = errors.New("agent has no readable usage source")
 )
 
 // specAdapter builds the file adapter a definition's spec describes. Pure: it
@@ -321,9 +333,60 @@ func RegisterSpec(tool string, spec Spec) error {
 		return fmt.Errorf("usage spec for %q has no roots: %w", tool, ErrNoRoots)
 	}
 	adaptersMu.Lock()
+	defer adaptersMu.Unlock()
+	prev, had := adapters[tool]
+	// Only the first registration remembers what it displaced, so repeated
+	// RegisterSpec calls followed by one UnregisterSpec land back where the
+	// process started rather than on the second spec.
+	if _, overridden := overrides[tool]; !overridden {
+		overrides[tool] = displaced{prev: prev, had: had}
+	}
 	adapters[tool] = ad
-	adaptersMu.Unlock()
 	return nil
+}
+
+// displaced is the adapter a RegisterSpec replaced, so UnregisterSpec can put
+// it back. had is false when the agent had no registered adapter to displace,
+// which is the definition-derived case: dropping the override is what lets the
+// definition apply again.
+type displaced struct {
+	prev adapter
+	had  bool
+}
+
+// UnregisterSpec removes the adapter [RegisterSpec] installed for an agent and
+// restores the one it replaced, reporting whether a registration was there to
+// remove. It is how a program that teaches this package an agent, or fakes one
+// in its own tests, takes that back: the registry is process-wide, so without
+// it every later test in the same binary inherits the spec.
+//
+// The agent name is canonicalized like everywhere else, so " pi " and "pi"
+// unregister the same agent. A name that was never registered removes nothing
+// and reports false.
+//
+// The restored adapter is a built-in one if a built-in was displaced, and the
+// agent's loaded definition if there was no registered adapter to displace.
+// A non-file source (opencode) is registered by EnableOpenCodeDB, not here,
+// and is left alone. Watchers already running keep the adapter they attached
+// with.
+func UnregisterSpec(tool string) bool {
+	tool = canonicalTool(tool)
+	if tool == "" {
+		return false
+	}
+	adaptersMu.Lock()
+	defer adaptersMu.Unlock()
+	prev, ok := overrides[tool]
+	if !ok {
+		return false
+	}
+	if prev.had {
+		adapters[tool] = prev.prev
+	} else {
+		delete(adapters, tool)
+	}
+	delete(overrides, tool)
+	return true
 }
 
 // registeredAdapter returns the adapter explicitly registered for an agent.
@@ -470,6 +533,28 @@ func (w *Watcher) Dir() string {
 	return w.dir
 }
 
+// Err reports whether this watcher can read anything, and is the reason to
+// show a caller who asked for one it cannot have.
+//
+// A watcher is either usable or nil: Watch never returns one that is bound to
+// nothing, so Err is nil on every live watcher and matches
+// [ErrUnsupportedTool] on the nil one. Like Tool and Dir it is safe to call on
+// the result without a nil check:
+//
+//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
+//		return w.Err() // the agent is known, but keeps nothing readable here
+//	}
+//
+// A nil watcher means the agent is unknown here, or keeps transcripts no build
+// of this package can read, or has a definition naming no roots. The error says
+// only that: the caller already knows which agent it asked about.
+func (w *Watcher) Err() error {
+	if w != nil {
+		return nil
+	}
+	return fmt.Errorf("%w: no usage source is registered for this agent", ErrUnsupportedTool)
+}
+
 // Watch starts reading usage for one agent working in one directory.
 //
 // tool is the agent name (claude, codex, crush, …). dir is the working
@@ -479,7 +564,12 @@ func (w *Watcher) Dir() string {
 // attach-time end, so since does not rewind them; pass time.Now() at attach.
 //
 // It returns nil when that agent keeps no readable transcript, which callers
-// should treat as "no rate available" rather than an error.
+// should treat as "no rate available" rather than an error. Err names that
+// case for a caller that reports it:
+//
+//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
+//		// no readable usage for this agent
+//	}
 func Watch(tool, dir string, since time.Time) *Watcher {
 	tool = canonicalTool(tool)
 	if source, ok := sourceFor(tool); ok {

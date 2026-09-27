@@ -27,6 +27,13 @@ support channel (see SECURITY.md).
   binaries, naming the commit, Go toolchain, build tags, and flags behind the
   bytes. A checksum list proves a download arrived intact; this says what
   produced it.
+- `agentusage.UnregisterSpec` removes a spec `RegisterSpec` added and restores
+  the adapter it displaced, so a program (or its own tests) can take a
+  registration back out of the process-wide registry.
+- `agentusage.Watcher.Err` reports that a watcher `agentusage.Watch` returned
+  is nil because the agent keeps nothing readable, and matches the new
+  `agentusage.ErrUnsupportedTool`. It is safe on a nil `*Watcher`, like
+  `Tool` and `Dir`.
 
 ### Fixed
 

@@ -161,10 +161,14 @@ The example watches the discovered processes concurrently for ten seconds.
 Only usage written after attachment is reported; existing transcript counts
 are skipped. Keep an agent generating during that window to see output.
 
-`RegisterSpec` teaches the package about an agent it was not compiled to know.
-`errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on a rejected spec, and
-`ErrInvalidDefinitions` on a malformed definitions file or colliding agent names
-after normalization. `Rate` is output
+`RegisterSpec` teaches the package about an agent it was not compiled to know,
+and `UnregisterSpec` takes it back, restoring the adapter it displaced (the
+registry is process-wide, so a program that registers a fake agent in its own
+tests needs that undo). `errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on
+a rejected spec, and `ErrInvalidDefinitions` on a malformed definitions file or
+colliding agent names after normalization. `Watch` returns a nil `*Watcher`
+when an agent keeps nothing readable; `Watcher.Err` says so, and matches
+`ErrUnsupportedTool`. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
 prompt tokens.
 

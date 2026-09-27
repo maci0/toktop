@@ -36,19 +36,21 @@ var publicFuncs = []string{
 	"Rate",
 	"RegisterSpec",
 	"Supported",
+	"UnregisterSpec",
 	"Watch",
 }
 
 var publicMethods = map[string][]string{
 	"Process": {"Watch"},
 	"Sample":  {"Empty"},
-	"Watcher": {"Dir", "Poll", "Run", "Sample", "Tool"},
+	"Watcher": {"Dir", "Err", "Poll", "Run", "Sample", "Tool"},
 }
 
 var publicVars = []string{
 	"ErrEmptyTool",
 	"ErrInvalidDefinitions",
 	"ErrNoRoots",
+	"ErrUnsupportedTool",
 }
 
 func TestPublicAPI(t *testing.T) {
