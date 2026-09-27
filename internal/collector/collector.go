@@ -193,16 +193,16 @@ func (c *Collector) SetSysFn(fn func() core.SysSample) {
 	c.sysMu.Unlock()
 }
 
-// startSysPoller refreshes host vitals in the background; emit never blocks
-// on it (GPU vendor CLIs can take seconds and would stall every frame). Run
-// warms the cache before emitting, so this first pass is a cache hit.
-func (c *Collector) startSysPoller(ctx context.Context) <-chan struct{} {
+// startPoller runs one background refresh loop until ctx is done, calling
+// warm once up front and refresh on every tick. The two pollers differ only
+// in what a refresh does.
+func startPoller(ctx context.Context, every time.Duration, warm, refresh func()) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		t := time.NewTicker(c.interval)
+		t := time.NewTicker(every)
 		defer t.Stop()
-		c.sampleSys(false) // skip when Run already warmed the cache
+		warm()
 		for {
 			select {
 			case <-ctx.Done():
@@ -211,11 +211,20 @@ func (c *Collector) startSysPoller(ctx context.Context) <-chan struct{} {
 				if ctx.Err() != nil {
 					return
 				}
-				c.sampleSys(true)
+				refresh()
 			}
 		}
 	}()
 	return done
+}
+
+// startSysPoller refreshes host vitals in the background; emit never blocks
+// on it (GPU vendor CLIs can take seconds and would stall every frame). Run
+// warms the cache before emitting, so this first pass is a cache hit.
+func (c *Collector) startSysPoller(ctx context.Context) <-chan struct{} {
+	return startPoller(ctx, c.interval,
+		func() { c.sampleSys(false) },
+		func() { c.sampleSys(true) })
 }
 
 // sampleSys runs the vitals sampler. Concurrent callers serialize on
@@ -256,32 +265,14 @@ func (c *Collector) sysSnapshot() *core.SysSample {
 // startProcPoller refreshes the process table in the background; emit never
 // blocks on it (Windows CIM enumeration takes seconds).
 func (c *Collector) startProcPoller(ctx context.Context) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		t := time.NewTicker(c.interval)
-		defer t.Stop()
-		refresh := func() {
-			if infos := c.procFn(); infos != nil {
-				c.procMu.Lock()
-				c.procCache = infos
-				c.procMu.Unlock()
-			}
+	refresh := func() {
+		if infos := c.procFn(); infos != nil {
+			c.procMu.Lock()
+			c.procCache = infos
+			c.procMu.Unlock()
 		}
-		refresh()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if ctx.Err() != nil {
-					return
-				}
-				refresh()
-			}
-		}
-	}()
-	return done
+	}
+	return startPoller(ctx, c.interval, refresh, refresh)
 }
 
 // procSnapshot returns the latest cached engine processes, detached from the
@@ -830,31 +821,15 @@ func cloneSys(s *core.SysSample) *core.SysSample {
 	return &out
 }
 
-func isLoopbackURL(addr string) bool {
-	u, err := url.Parse(addr)
-	if err != nil {
-		return false
-	}
-	return hostIsLoopback(u)
-}
-
 func hostIsLoopback(u *url.URL) bool {
 	host := u.Hostname()
 	return strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
 }
 
-// urlPort extracts the TCP port from a backend URL. Non-http(s) addresses
+// httpPort extracts the TCP port from a backend URL. Non-http(s) addresses
 // (tests use fake://, and a blank Addr is not a listener) must not fall
 // through to port 80: that would attach GPUStack-on-80 process stats to
 // an unrelated provider.
-func urlPort(addr string) int {
-	u, err := url.Parse(addr)
-	if err != nil {
-		return 0
-	}
-	return httpPort(u)
-}
-
 func httpPort(u *url.URL) int {
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return 0
@@ -872,9 +847,9 @@ func httpPort(u *url.URL) int {
 }
 
 // loopbackPort answers both halves of the engine-block process lookup from
-// one parse. urlPort and isLoopbackURL each parsed the same address string,
-// and every provider's frame asked for both, so each engine paid two parses
-// per frame to decide whether a listening port belongs to it.
+// one parse. Every provider's frame asks for both, so each engine would
+// otherwise pay two parses per frame to decide whether a listening port
+// belongs to it.
 func loopbackPort(addr string) (port int, loopback bool) {
 	u, err := url.Parse(addr)
 	if err != nil {

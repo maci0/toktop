@@ -63,13 +63,7 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 		return b.String()
 	}
 
-	up, tot := 0, 0
-	for _, p := range s.Providers {
-		tot++
-		if p.OK {
-			up++
-		}
-	}
+	up, tot := upCount(s.Providers)
 	state := fmt.Sprintf("%d/%d engines up", up, tot)
 	switch {
 	case up == 0:
@@ -312,11 +306,7 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	now := frameNow(s, time.Time{})
 	sum := core.Summarize(s.Agents, now)
-	var outPS, inPS float64
-	for _, r := range sum.Own {
-		outPS += r.TokPS
-		inPS += r.PromptPS
-	}
+	outPS, inPS := sumOwn(sum.Own)
 	b.WriteString("no inference engines detected; --add URL attaches one\n")
 	fmt.Fprintf(b, "out %s tok/s · in %s tok/s\n", fmtRate(outPS), fmtRate(inPS))
 	writeSystemPlain(b, s.Sys)

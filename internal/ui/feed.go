@@ -94,11 +94,16 @@ func (m Model) feedEmptyLines(w int) []string {
 	}
 }
 
-var kindIcons = map[string]string{
-	core.AgentKindTurn:  "▸",
-	core.AgentKindTool:  "⚙",
-	core.AgentKindError: "✗",
-	core.AgentKindNote:  "✎",
+// kindMarks is each event kind's glyph and color. A kind missing from the
+// table reads as dim with a middot rather than being dropped.
+var kindMarks = map[string]struct {
+	icon string
+	st   lipgloss.Style
+}{
+	core.AgentKindTurn:  {"▸", styleOK},
+	core.AgentKindTool:  {"⚙", styleInfo},
+	core.AgentKindError: {"✗", styleBad},
+	core.AgentKindNote:  {"✎", styleWarn},
 }
 
 // feedLines renders the newest n events oldest-first, so a feed panel reads
@@ -115,21 +120,14 @@ func feedLines(events []core.AgentEvent, n, w int) []string {
 }
 
 func feedLine(ev core.AgentEvent) string {
-	icon := kindIcons[ev.Kind]
-	if icon == "" {
-		icon = "·"
+	mark := kindMarks[ev.Kind]
+	if mark.icon == "" {
+		mark = struct {
+			icon string
+			st   lipgloss.Style
+		}{"·", styleDim}
 	}
-	st := styleDim
-	switch ev.Kind {
-	case core.AgentKindTurn:
-		st = styleOK
-	case core.AgentKindTool:
-		st = styleInfo
-	case core.AgentKindError:
-		st = styleBad
-	case core.AgentKindNote:
-		st = styleWarn
-	}
+	icon, st := mark.icon, mark.st
 	name := shorten(core.SingleLine(ev.Agent), 16)
 	// ▲ output / ▼ prompt, same directions as the header rates. Output
 	// first so a feed row scans like the header: out, then in.

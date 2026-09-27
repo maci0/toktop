@@ -61,10 +61,7 @@ const AgentAnonymous = "anonymous"
 // only one of them approved.
 func AgentNameField(s string) string {
 	s = ClampField(SingleLine(s), AgentNameMax)
-	if MixedScriptIdentity(s) {
-		return AgentAnonymous
-	}
-	if s == "" {
+	if s == "" || MixedScriptIdentity(s) {
 		return AgentAnonymous
 	}
 	return s

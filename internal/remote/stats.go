@@ -358,7 +358,6 @@ func parseGPUs(section string) []core.GPUDevice {
 	return gpu.ParseRocmSMI([]byte(strings.TrimSpace(section)))
 }
 
-// firstLine returns the first non-blank line of s.
 func firstLine(s string) string {
 	for line := range strings.SplitSeq(s, "\n") {
 		if t := strings.TrimSpace(line); t != "" {

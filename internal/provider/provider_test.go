@@ -322,7 +322,7 @@ func TestProviderRedirectAuthorization(t *testing.T) {
 				return err
 			}},
 			{"scan", func(url string) error {
-				resp, err := scanGet(context.Background(), url)
+				resp, err := get(context.Background(), scanClient, url)
 				if err == nil {
 					resp.Body.Close()
 				}

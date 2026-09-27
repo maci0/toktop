@@ -259,7 +259,6 @@ func ExtractPort(args []string) int {
 	return 0
 }
 
-// isPort reports whether p is a number a process can listen on.
 func isPort(p int) bool { return p >= 1 && p <= 65535 }
 
 // ListenPort returns the process's effective listen port: an explicit --port

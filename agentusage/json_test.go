@@ -158,11 +158,11 @@ func TestCounter64RejectsOverflow(t *testing.T) {
 	if got := counter64(-1); got != 0 {
 		t.Fatalf("counter64(-1) = %d, want 0", got)
 	}
-	if got := clampSane(3_000_000_000); got != 3_000_000_000 {
-		t.Fatalf("clampSane(3e9) = %d, want 3e9", got)
+	if got := counter(3_000_000_000); got != 3_000_000_000 {
+		t.Fatalf("counter(3e9) = %d, want 3e9", got)
 	}
-	if got := clampSane(math.MaxInt64); got != 0 {
-		t.Fatalf("clampSane(MaxInt64) = %d, want 0", got)
+	if got := counter(math.MaxInt64); got != 0 {
+		t.Fatalf("counter(MaxInt64) = %d, want 0", got)
 	}
 }
 

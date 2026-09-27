@@ -62,34 +62,6 @@ func CandidatePorts() []int {
 
 var scanClient = &http.Client{Timeout: scanTimeout, CheckRedirect: bearer.CheckRedirect}
 
-// scanGet issues one identification GET through scanClient with the bearer
-// token applied. The response body, when present, must be closed by the
-// caller; err is nil only for HTTP 200.
-//
-// Failures carry the URL like every other request in this package: identify
-// probes a dozen endpoints in a row, and a bare "http 404 Not Found" does not
-// say which one answered that way.
-func scanGet(ctx context.Context, url string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", url, err)
-	}
-	bearer.Apply(req)
-	resp, err := scanClient.Do(req)
-	if err != nil {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return nil, fmt.Errorf("%s: %w", url, err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		err := httpStatus(url, resp)
-		resp.Body.Close()
-		return nil, err
-	}
-	return resp, nil
-}
-
 // decodeScanJSON decodes a scan response under the same cap every other
 // engine body in this package gets. Discovery talks to whatever is listening
 // on a well-known port, so a body is untrusted by construction: without the
@@ -260,7 +232,7 @@ func probeContains(ctx context.Context, base, path string, needles ...string) bo
 
 // sglangInfoOK detects SGLang via its native /get_model_info endpoint.
 func sglangInfoOK(ctx context.Context, base string) bool {
-	resp, err := scanGet(ctx, base+"/get_model_info")
+	resp, err := get(ctx, scanClient, base+"/get_model_info")
 	if err != nil {
 		return false
 	}
@@ -285,7 +257,7 @@ func idsLookMLX(mr *modelsResp) bool {
 // isOmniRoute detects the OmniRoute gateway by its distinctive routing
 // header on the API surface. One GET of /v1/models is enough; no auth
 // required (the header rides 401s too), so any status may carry it and
-// scanGet's 200-only rule does not apply here.
+// get's 200-only rule does not apply here.
 func isOmniRoute(ctx context.Context, base string) bool {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/v1/models", nil)
 	if err != nil {
@@ -304,7 +276,7 @@ func isOmniRoute(ctx context.Context, base string) bool {
 }
 
 func isOllama(ctx context.Context, base string) bool {
-	resp, err := scanGet(ctx, base+"/api/ps")
+	resp, err := get(ctx, scanClient, base+"/api/ps")
 	if err != nil {
 		return false
 	}
@@ -322,7 +294,7 @@ type modelsResp struct {
 }
 
 func getOpenAIModels(ctx context.Context, base string) *modelsResp {
-	resp, err := scanGet(ctx, base+"/v1/models")
+	resp, err := get(ctx, scanClient, base+"/v1/models")
 	if err != nil {
 		return nil
 	}
@@ -340,7 +312,7 @@ func getOpenAIModels(ctx context.Context, base string) *modelsResp {
 
 // healthOK reports whether base's health path answers at all.
 func healthOK(ctx context.Context, base, path string) bool {
-	resp, err := scanGet(ctx, base+path)
+	resp, err := get(ctx, scanClient, base+path)
 	if err != nil {
 		return false
 	}

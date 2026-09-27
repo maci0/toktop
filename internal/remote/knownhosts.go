@@ -72,7 +72,6 @@ const (
 	// file and a rename, so this is generous; exceeding it means a peer died
 	// holding the lock, which the stale check then breaks.
 	storeLockWait = 5 * time.Second
-	// storeLockPoll is the gap between attempts to take the lock.
 	storeLockPoll = 20 * time.Millisecond
 	// storeLockStale is how old a lock file has to be before it is assumed to
 	// belong to a process that died mid-write and is broken. A live critical
@@ -375,8 +374,6 @@ func sweepStaleTempFiles(dir string) {
 // is gone, so a kill between the two renames costs nothing.
 const displacedSuffix = ".displaced"
 
-// displacedPath is where a store's previous contents live while the new ones
-// are being renamed in.
 func displacedPath(path string) string { return path + displacedSuffix }
 
 // replaceFile renames tmpName over path.

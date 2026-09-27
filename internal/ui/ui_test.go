@@ -1158,14 +1158,14 @@ func TestKindStylesCoverCoreKinds(t *testing.T) {
 	}
 }
 
-// Every documented agent-event kind must have a feed icon; a missing entry
+// Every documented agent-event kind must have a feed mark; a missing entry
 // silently falls through to the generic dot.
-func TestKindIconsCoverAgentKinds(t *testing.T) {
+func TestKindMarksCoverAgentKinds(t *testing.T) {
 	for _, k := range []string{
 		core.AgentKindTurn, core.AgentKindTool, core.AgentKindError, core.AgentKindNote,
 	} {
-		if _, ok := kindIcons[k]; !ok {
-			t.Errorf("kindIcons missing %q", k)
+		if _, ok := kindMarks[k]; !ok {
+			t.Errorf("kindMarks missing %q", k)
 		}
 	}
 }

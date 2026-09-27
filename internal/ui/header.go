@@ -16,7 +16,7 @@ func (m Model) renderHeader() string {
 	logo := wordmark
 	segs := []headerSeg{{text: logo}, {text: dim("v" + m.cfg.Version), shed: 40}}
 
-	up, tot := m.upCount()
+	up, tot := upCount(m.snap.Providers)
 	rates := m.agentRates()
 	if tot == 0 {
 		n := len(rates)

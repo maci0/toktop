@@ -116,10 +116,10 @@ func basenameLogin(name string) string {
 	return name
 }
 
-// dialTimeout bounds TCP connect and DNS. ssh.ClientConfig.Timeout is only
-// consulted by ssh.Dial; Connect opens the socket itself then calls
-// NewClientConn, so without this a blackholed host hangs until the caller
-// cancels. Var so tests can shrink it.
+// dialTimeout bounds TCP connect and DNS. Connect opens the socket itself
+// rather than through ssh.Dial, so ssh.ClientConfig.Timeout never applies;
+// without this a blackholed host hangs until the caller cancels. Var so
+// tests can shrink it.
 var dialTimeout = 8 * time.Second
 
 // bannerTimeout bounds the wait for the remote sshd's version banner after
@@ -242,7 +242,6 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		User:            t.userOr(currentUser()),
 		Auth:            methods,
 		HostKeyCallback: hk,
-		Timeout:         dialTimeout, // unused by NewClientConn; the Dialer below carries it
 	}
 	// Library defaults still offer ssh-rsa (SHA-1) and DSA host keys, and
 	// hmac-sha1-96, for old servers. SupportedAlgorithms is the same

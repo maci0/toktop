@@ -88,8 +88,7 @@ const retryAfterDefault = 15 * time.Second
 const retryAfterMax = 5 * time.Minute
 
 // Request is one generation to measure: which engine dialect to speak, where
-// it lives, and the model to ask for. An empty Model is refused by Run, since
-// some engines read it as "load the default model".
+// it lives, and the model to ask for. An empty Model is refused by Run.
 type Request struct {
 	Kind  string // core.KindOllama | openai-compatible kinds
 	Base  string
@@ -369,8 +368,7 @@ func overBudget(tokens, contentBytes int) bool {
 	return tokens >= probeTokens || contentBytes >= probeContentBytes
 }
 
-// capModel trims and bounds an engine-supplied model id. Empty after trim
-// means the caller must not POST: some engines treat "" as "load default".
+// capModel trims and bounds an engine-supplied model id.
 func capModel(name string) string {
 	return core.TruncateClusters(strings.TrimSpace(name), ModelNameMax)
 }
@@ -449,10 +447,10 @@ func engineErrorText(s string) string {
 
 // sseErrorMessage extracts an engine-reported failure from a streaming data
 // payload. Gateways disagree on the shape: {"error":{"message":…}},
-// {"error":"…"}, or other junk; null and absent mean no error. A recognized
-// message is capped by core.ClampField; only the unrecognized-junk path gets
-// core.Snippet, and with it terminal-escape stripping. The result is clipped
-// to the readout's line width at render time.
+// {"error":"…"}, or other junk; null and absent mean no error. Only the
+// unrecognized-junk path gets core.Snippet, and with it terminal-escape
+// stripping. The result is clipped to the readout's line width at render
+// time.
 func sseErrorMessage(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""

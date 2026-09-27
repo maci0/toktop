@@ -53,7 +53,7 @@ func (f *fakeProvider) asProvider() provider.Provider {
 	}}
 }
 
-func TestURLPort(t *testing.T) {
+func TestLoopbackPortExtracts(t *testing.T) {
 	cases := []struct {
 		addr string
 		want int
@@ -75,8 +75,8 @@ func TestURLPort(t *testing.T) {
 		{"http://127.0.0.1:65536", 0},
 	}
 	for _, tc := range cases {
-		if got := urlPort(tc.addr); got != tc.want {
-			t.Errorf("urlPort(%q) = %d, want %d", tc.addr, got, tc.want)
+		if got, _ := loopbackPort(tc.addr); got != tc.want {
+			t.Errorf("loopbackPort(%q) = %d, want %d", tc.addr, got, tc.want)
 		}
 	}
 }
@@ -86,7 +86,7 @@ func TestURLPort(t *testing.T) {
 // machine's PIDs and RSS attributed to it, so the loopback spellings that
 // name the same host all have to agree, and nothing that only looks like one
 // may pass.
-func TestIsLoopbackURL(t *testing.T) {
+func TestLoopbackPortLoopback(t *testing.T) {
 	cases := []struct {
 		addr string
 		want bool
@@ -109,8 +109,8 @@ func TestIsLoopbackURL(t *testing.T) {
 		{"http://[::1", false},
 	}
 	for _, tc := range cases {
-		if got := isLoopbackURL(tc.addr); got != tc.want {
-			t.Errorf("isLoopbackURL(%q) = %v, want %v", tc.addr, got, tc.want)
+		if _, got := loopbackPort(tc.addr); got != tc.want {
+			t.Errorf("loopbackPort(%q) loopback = %v, want %v", tc.addr, got, tc.want)
 		}
 	}
 }

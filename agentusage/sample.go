@@ -142,15 +142,12 @@ const (
 // reporting nothing beats displaying a lie (or overflowing the totals).
 const maxSaneTokens = 1 << 40
 
-// counter coerces a decoded transcript counter to its contribution.
-func counter(n int) int {
-	return int(clampSane(int64(n)))
-}
-
-// clampSane is the one statement of the ceiling counter enforces: a negative
-// or absurd magnitude reads as absent, the same judgment asInt makes for the
-// generic walker.
-func clampSane(n int64) int64 {
+// counter coerces a decoded transcript counter to its contribution: negative
+// or absurd magnitudes read as absent, the same judgment asInt makes for the
+// generic walker. It is generic over the two widths counters arrive in, so
+// both an int from a transcript and an int64 from a database column are
+// checked before any conversion narrows them.
+func counter[T int | int64](n T) T {
 	if n < 0 || n > maxSaneTokens {
 		return 0
 	}
@@ -161,7 +158,7 @@ func clampSane(n int64) int64 {
 // column, so a magnitude that does not fit in int is rejected before the
 // conversion rather than wrapping.
 func counter64(n int64) int {
-	c := clampSane(n)
+	c := counter(n)
 	if c > math.MaxInt {
 		return 0
 	}

@@ -393,8 +393,8 @@ func clipBlock(s string, w, h int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m Model) upCount() (up, total int) {
-	for _, p := range m.snap.Providers {
+func upCount(providers []core.ProviderSnapshot) (up, total int) {
+	for _, p := range providers {
 		total++
 		if p.OK {
 			up++
@@ -467,33 +467,30 @@ func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
 	return aggBoth(s, core.Summarize(s.Agents, now))
 }
 
-// aggBoth adds a feed summary's unattributed rates to the provider totals.
-func aggBoth(s core.Snapshot, sum core.AgentSummary) (out, in float64) {
-	for _, p := range s.Providers {
-		out += p.OutTokPS
-		in += p.InTokPS
-	}
-	for _, r := range sum.Own {
+// sumOwn adds up the unattributed agent rates a frame already accounted.
+func sumOwn(own []core.AgentRate) (out, in float64) {
+	for _, r := range own {
 		out += r.TokPS
 		in += r.PromptPS
 	}
 	return out, in
 }
 
-// aggOwn sums the unattributed agent rates a frame already accounted.
-func (m Model) aggOwn() (out, in float64) {
-	for _, r := range m.agentSum().Own {
-		out += r.TokPS
-		in += r.PromptPS
+// aggBoth adds a feed summary's unattributed rates to the provider totals.
+func aggBoth(s core.Snapshot, sum core.AgentSummary) (out, in float64) {
+	for _, p := range s.Providers {
+		out += p.OutTokPS
+		in += p.InTokPS
 	}
-	return
+	aOut, aIn := sumOwn(sum.Own)
+	return out + aOut, in + aIn
 }
 
 // aggIn is the header's input total: provider rates plus the feed's
 // unattributed share, off the frame's own walk.
 func (m Model) aggIn() float64 {
 	in := m.aggInProviders()
-	_, aIn := m.aggOwn()
+	_, aIn := sumOwn(m.agentSum().Own)
 	return in + aIn
 }
 

@@ -18,6 +18,11 @@ import (
 // gpuBudget bounds the whole vendor-tool sweep per poll cycle.
 const gpuBudget = 3 * time.Second
 
+// The parsers below take their text from /proc on this host or from another
+// host over the remote vitals path, so a value here is untrusted: every
+// conversion saturates or rejects rather than wrapping into a small,
+// plausible-looking reading.
+
 // Hooks implemented by each platform file.
 var (
 	platformMemory   func(*core.SysSample)
@@ -92,15 +97,15 @@ func ParseMeminfo(b []byte, s *core.SysSample) {
 // bytesPerKiB is the meminfo unit: every value in /proc/meminfo is KiB.
 const bytesPerKiB uint64 = 1 << 10
 
-// kibBytes converts a meminfo KiB count to bytes.
+// kibBytes converts a meminfo KiB count to bytes. An absurd magnitude must
+// saturate rather than wrap to a small byte count in the shift.
 func kibBytes(kib uint64) uint64 {
 	return core.MulSatU64(kib, bytesPerKiB)
 }
 
 // satSub subtracts saturating at zero: some ballooning/virtualized kernels
-// transiently report MemAvailable above MemTotal, and the remote vitals path
-// feeds this parser text from another host, so the difference must never
-// wrap to a near-2^64 byte count.
+// transiently report MemAvailable above MemTotal, so the difference must
+// never wrap to a near-2^64 byte count.
 func satSub(a, b uint64) uint64 {
 	if b >= a {
 		return 0
@@ -109,9 +114,8 @@ func satSub(a, b uint64) uint64 {
 }
 
 // satAdd4 adds four page counts without wrapping: a wrapping sum turns a
-// huge reading into a small, plausible-looking byte count. SatAddU64 already
-// saturates at MaxUint64 on the first overflow, so no further check here can
-// fire.
+// huge reading into a small, plausible-looking byte count. SatAddU64
+// saturates, so no further check is needed here.
 func satAdd4(a, b, c, d uint64) uint64 {
 	return core.SatAddU64(core.SatAddU64(a, b), core.SatAddU64(c, d))
 }
@@ -133,7 +137,6 @@ func cutMeminfoLine(line string) (string, uint64, bool) {
 }
 
 // ParseLoadavg reads "1.5 0.7 0.3 extra..." into three load averages.
-// The remote vitals path feeds this parser text from another host, so
 // NaN, ±Inf and negatives (ParseFloat accepts all of them) collapse to
 // zero rather than reaching the load readout.
 func ParseLoadavg(s string) (l1, l5, l15 float64) {
@@ -152,8 +155,7 @@ func ParseLoadavg(s string) (l1, l5, l15 float64) {
 }
 
 // ParseUptimeSecs converts a /proc/uptime first field (seconds, possibly
-// fractional) into a duration. The remote vitals path feeds this parser
-// text from another host: a non-finite or out-of-range value must not
+// fractional) into a duration. A non-finite or out-of-range value must not
 // convert to a wrapped or negative Duration (time.Duration(+Inf) is
 // implementation-defined, often MinInt64 on amd64).
 func ParseUptimeSecs(s string) time.Duration {

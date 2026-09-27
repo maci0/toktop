@@ -123,21 +123,16 @@ func hostStaticInfo() hostStatic {
 }
 
 func mergeHostStatic(prev, fresh hostStatic) hostStatic {
-	if prev.osName == "" {
-		prev.osName = fresh.osName
+	fill := func(dst *string, src string) {
+		if *dst == "" {
+			*dst = src
+		}
 	}
-	if prev.kernel == "" {
-		prev.kernel = fresh.kernel
-	}
-	if prev.nvidiaDrv == "" {
-		prev.nvidiaDrv = fresh.nvidiaDrv
-	}
-	if prev.cuda == "" {
-		prev.cuda = fresh.cuda
-	}
-	if prev.amdgpu == "" {
-		prev.amdgpu = fresh.amdgpu
-	}
+	fill(&prev.osName, fresh.osName)
+	fill(&prev.kernel, fresh.kernel)
+	fill(&prev.nvidiaDrv, fresh.nvidiaDrv)
+	fill(&prev.cuda, fresh.cuda)
+	fill(&prev.amdgpu, fresh.amdgpu)
 	if len(prev.npus) == 0 {
 		prev.npus = fresh.npus
 	}
@@ -182,10 +177,8 @@ func hostInfoLinux(s *core.SysSample) {
 	if h.amdgpu != "" {
 		s.Drivers["amdgpu"] = h.amdgpu
 	}
-	// h.npus is hostStaticInfo's own copy, made for this call and shared with
-	// nobody: the cache below it hands out a clone and holds the original. The
-	// sample takes it as is, so a steady-state sample costs no second copy of
-	// a slice that never changes once filled.
+	// h.npus is hostStaticInfo's own per-call copy: the cache hands out a
+	// clone and keeps the original, and the slice never changes once filled.
 	s.NPUs = h.npus
 }
 
@@ -222,16 +215,20 @@ func linuxUptime() time.Duration {
 // whenever it comes first, and report a driver with a silently missing CUDA
 // row.
 func parseNvidiaVersion(text string) (driver, cuda string) {
-	for line := range strings.SplitSeq(text, "\n") {
-		if _, after, ok := strings.Cut(line, "Driver Version:"); ok {
+	first := func(line, prefix string) string {
+		if _, after, ok := strings.Cut(line, prefix); ok {
 			if fields := strings.Fields(after); len(fields) > 0 {
-				driver = fields[0]
+				return fields[0]
 			}
 		}
-		if _, after, ok := strings.Cut(line, "CUDA Version:"); ok {
-			if fields := strings.Fields(after); len(fields) > 0 {
-				cuda = fields[0]
-			}
+		return ""
+	}
+	for line := range strings.SplitSeq(text, "\n") {
+		if v := first(line, "Driver Version:"); v != "" {
+			driver = v
+		}
+		if v := first(line, "CUDA Version:"); v != "" {
+			cuda = v
 		}
 	}
 	if driver == "" {

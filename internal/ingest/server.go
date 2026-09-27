@@ -143,10 +143,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}()
 
-		e, known := endpoint{}, false
-		if r.URL != nil {
-			e, known = lookupEndpoint(r.URL.Path)
-		}
+		e, known := lookupEndpoint(r.URL.Path)
 		if !known {
 			http.Error(w, notFoundMessage(), http.StatusNotFound)
 			s.logRequest(r, id, http.StatusNotFound, 0, 0, time.Since(start), "not found")
@@ -213,10 +210,7 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, sto
 	if s.log == nil {
 		return
 	}
-	path := ""
-	if r.URL != nil {
-		path = r.URL.Path
-	}
+	path := r.URL.Path
 	attrs := []any{
 		"req", reqID,
 		"method", logcfg.Field(r.Method, 16),
