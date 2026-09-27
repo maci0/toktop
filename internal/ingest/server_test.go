@@ -1046,6 +1046,74 @@ func TestIngestFoldsHomeOutOfNote(t *testing.T) {
 	}
 }
 
+// A note that is nothing but a working directory is shortened the way a
+// locally watched one is. Everything above the checkout is where a client's
+// name and a project index sit, and the feed only needs the checkout.
+func TestIngestShortensAPathNote(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	if err := os.MkdirAll(filepath.Join(home, "clients", "AcmeCorp", "migrator"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if got, err := os.UserHomeDir(); err != nil || got != home {
+		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
+	}
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	// One path under home, one outside it: neither keeps the components
+	// above the last two.
+	under := filepath.Join(home, "clients", "AcmeCorp", "migrator")
+	outside := filepath.Join(string(filepath.Separator)+"srv", "clients", "AcmeCorp", "migrator")
+	body := fmt.Sprintf(`{"agent":"coder","note":%q}`+"\n"+`{"agent":"coder","note":%q}`, under, outside)
+	resp := post(t, "http://"+s.Addr()+"/v1/events", body)
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 2)
+	for i, want := range []string{"AcmeCorp/migrator", "clients/AcmeCorp/migrator"} {
+		if got := rec.evs[i].Note; got != lastComponents(want) {
+			t.Errorf("note = %q, want %q", got, lastComponents(want))
+		}
+		if strings.Contains(rec.evs[i].Note, "private-user") {
+			t.Errorf("note %q names the account", rec.evs[i].Note)
+		}
+	}
+}
+
+// lastComponents is what core.ShortDir leaves of a path on this platform:
+// the two components below the last separator.
+func lastComponents(dir string) string {
+	parts := strings.Split(filepath.ToSlash(dir), "/")
+	if len(parts) <= 2 {
+		return filepath.ToSlash(dir)
+	}
+	return strings.Join(parts[len(parts)-2:], "/")
+}
+
+func TestIngestLeavesFreeTextNoteAlone(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	// Prose the sender wrote, carrying the feed's own separator: a working
+	// directory inside it is the sender's to spell, and cutting the note at a
+	// separator would cut a sentence in half.
+	note := "in " + home + "/projects/app · 1200 reasoning"
+	resp := post(t, "http://"+s.Addr()+"/v1/events",
+		fmt.Sprintf(`{"agent":"coder","note":%q}`, note))
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 1)
+	if got, want := rec.evs[0].Note, "in ~/projects/app · 1200 reasoning"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
+	}
+}
+
 func TestIngestSanitizesCustomKind(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)

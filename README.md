@@ -267,7 +267,7 @@ Event fields are all optional; anything omitted gets the default:
 | `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`; custom kinds pass through lowercased, capped at 24 characters |
 | `prompt_tokens` / `output_tokens` / `thinking_tokens` | integer | `0` | negative values and values above 2^40 clamp to `0`; a whole JSON number such as `100.0` counts; thinking is the reasoning share of output when the agent says so |
 | `via_engine` | string | - | monitored engine already counting this output; aggregates skip the event; capped at 128 characters |
-| `note` | string | - | free-form, capped at 512 characters |
+| `note` | string | - | free-form, capped at 512 characters; a note that is nothing but a directory is reduced to its last two components, with a path under `$HOME` folded to `~`, so client and project names above the checkout never reach the feed |
 
 One POST answers `202` with `{"accepted":N,"stored":M}` once every event in
 the stream is decoded, where `accepted` is what the wire carried and

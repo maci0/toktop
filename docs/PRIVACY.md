@@ -60,10 +60,13 @@ verified out of band, as any first contact is.
   `127.0.0.1:8420` by default, authenticates nobody, and prints a warning
   when bound anywhere else. The `/v1/events` body is `id`, `agent`, `model`,
   `kind`, token counts, a timestamp, `via_engine` and a free-form note, all
-  of which are stored in memory and rendered on your terminal. A note
-  naming a directory under your home is stored with the home folded to `~`,
-  the same rewrite the working directory gets when an agent is watched
-  locally.
+  of which are stored in memory and rendered on your terminal. A note that
+  is nothing but a directory gets the same two components a locally
+  watched working directory does, with the home folded to `~`; a note
+  carrying any other text is stored as sent, with the home folded to `~`.
+  The directories above the checkout are where a client's name and a
+  project index sit, so they are dropped on the way in rather than
+  rendered.
 
 The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or
