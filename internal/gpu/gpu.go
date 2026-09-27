@@ -39,15 +39,32 @@ var platformExtras func(ctx context.Context) []core.GPUDevice
 type toolInfo struct {
 	path string
 	ok   bool
-	at   time.Time // when a miss was recorded; hits are immortal
+	at   time.Time // when the answer was recorded
 }
 
 var tools sync.Map // tool name -> *toolInfo
 
 // toolRetry spaces out LookPath of a missing vendor CLI. A miss cached
 // forever would blank the GPU row for a session that started before the
-// driver module (or its bin dir) was on PATH; a hit is still kept.
+// driver module (or its bin dir) was on PATH.
 const toolRetry = 30 * time.Second
+
+// toolHitTTL is how long a resolved path is reused. A hit kept for the
+// process lifetime would leave the GPU row empty for the rest of the session
+// after a driver or container reinstall moved or removed the binary: the
+// cached path is executed every poll, fails, and nothing re-resolves it. The
+// window is long because a tool's location changes rarely, and re-resolving
+// costs one directory scan per vendor per window rather than one per frame.
+const toolHitTTL = 10 * time.Minute
+
+// toolWindow is how long the recorded answer stands: a miss is retried on the
+// short retry spacing, a hit on the long one.
+func toolWindow(ok bool) time.Duration {
+	if ok {
+		return toolHitTTL
+	}
+	return toolRetry
+}
 
 // lookPath is exec.LookPath, swapped in tests.
 var lookPath = exec.LookPath
@@ -55,15 +72,12 @@ var lookPath = exec.LookPath
 func lookup(name string) (string, bool) {
 	if v, ok := tools.Load(name); ok {
 		ti := v.(*toolInfo)
-		if ti.ok || time.Since(ti.at) < toolRetry {
+		if time.Since(ti.at) < toolWindow(ti.ok) {
 			return ti.path, ti.ok
 		}
 	}
 	p, err := lookPath(name)
-	ti := &toolInfo{path: p, ok: err == nil}
-	if !ti.ok {
-		ti.at = time.Now()
-	}
+	ti := &toolInfo{path: p, ok: err == nil, at: time.Now()}
 	tools.Store(name, ti)
 	return ti.path, ti.ok
 }

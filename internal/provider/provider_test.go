@@ -617,7 +617,8 @@ func TestExtractVersionField(t *testing.T) {
 
 // A version probe fired while the engine is still starting must not be
 // cached as a permanent miss: later polls retry after versionRetry, and
-// the first success is memoized so healthy engines are asked only once.
+// the first success is memoized so healthy engines are asked once per
+// refresh window rather than once per poll.
 func TestVersionCacheRetriesUntilResolved(t *testing.T) {
 	var failing, reqs atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -657,6 +658,56 @@ func TestVersionCacheRetriesUntilResolved(t *testing.T) {
 	}
 	if n := reqs.Load(); n != 4 { // outage sweep of 3 paths, then one resolving request, then cache silence
 		t.Errorf("server hit %d times, want 4", n)
+	}
+}
+
+// An engine replaced under a running dashboard (container re-pulled, remote
+// host restarted with a new image) answers a different version. A resolved
+// hit kept for the process lifetime would pin the old one until the operator
+// quit, so the cache re-asks after versionRefresh and keeps showing the last
+// good version while the engine is down rather than blanking the readout.
+func TestVersionCacheRefreshesResolvedHit(t *testing.T) {
+	var version atomic.Value
+	version.Store("0.6.0")
+	var reqs atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reqs.Add(1)
+		v, _ := version.Load().(string)
+		if v == "" { // engine restarting: every version endpoint dark
+			w.WriteHeader(http.StatusBadGateway)
+			return
+		}
+		fmt.Fprintf(w, `{"version":%q}`, v)
+	}))
+	defer srv.Close()
+
+	var vc versionCache
+	ctx := context.Background()
+	if got := vc.fetch(ctx, srv.URL); got != "0.6.0" {
+		t.Fatalf("first fetch = %q, want 0.6.0", got)
+	}
+	version.Store("0.7.0")
+	if got := vc.fetch(ctx, srv.URL); got != "0.6.0" {
+		t.Fatalf("fetch inside the refresh window = %q, want the cached 0.6.0", got)
+	}
+
+	vc.mu.Lock()
+	vc.at = time.Now().Add(-versionRefresh - time.Second)
+	vc.mu.Unlock()
+	if got := vc.fetch(ctx, srv.URL); got != "0.7.0" {
+		t.Fatalf("fetch after the refresh window = %q, want 0.7.0", got)
+	}
+
+	// A dark refresh must not blank a version the engine already reported.
+	version.Store("")
+	vc.mu.Lock()
+	vc.at = time.Now().Add(-versionRefresh - time.Second)
+	vc.mu.Unlock()
+	if got := vc.fetch(ctx, srv.URL); got != "0.7.0" {
+		t.Fatalf("fetch while the engine is down = %q, want the last good 0.7.0", got)
+	}
+	if reqs.Load() < 5 {
+		t.Errorf("server hit %d times, want the expired windows re-probed", reqs.Load())
 	}
 }
 

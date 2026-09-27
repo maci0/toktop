@@ -118,18 +118,39 @@ func getText(ctx context.Context, c *http.Client, url string) (string, error) {
 // not a sync.Once: an engine polled while still starting answers nothing,
 // and caching that miss would blank the version readout for the whole
 // session. Unresolved caches retry after versionRetry so an engine that
-// never publishes a version is not probed on every scrape.
+// never publishes a version is not probed on every scrape, and resolved
+// ones are re-asked after versionRefresh so an engine replaced under a
+// running dashboard does not report its old version until the next start.
 type versionCache struct {
 	mu       sync.Mutex
 	resolved bool
 	val      string
-	at       time.Time // last probe; misses retry after versionRetry
+	at       time.Time // last probe; a miss retries after versionRetry, a hit after versionRefresh
 }
 
-// versionRetry spaces out probes of an unresolved version. A hit is kept
-// for the process lifetime; retrying a miss every poll would add three
-// HTTP round trips to every scrape of engines with no version endpoint.
+// versionRetry spaces out probes of an unresolved version. Retrying a miss
+// every poll would add three HTTP round trips to every scrape of engines
+// with no version endpoint.
 const versionRetry = 30 * time.Second
+
+// versionRefresh is how long a resolved version is reused before the engine
+// is asked again. Engines are replaced under a running dashboard (a
+// container re-pulled, an ollama upgrade, a remote host behind the forward
+// restarted with a new image), and a hit kept for the process lifetime would
+// report the old version until the operator quit and relaunched. The window
+// is long because a version changes rarely and the probe is cheap next to
+// the scrape that triggers it: three requests per engine per window, not
+// three per poll.
+const versionRefresh = 10 * time.Minute
+
+// versionWindow is how long the last probe stands: a miss is retried on the
+// short retry spacing, a hit on the long refresh spacing.
+func versionWindow(resolved bool) time.Duration {
+	if resolved {
+		return versionRefresh
+	}
+	return versionRetry
+}
 
 // fetch probes common engine version endpoints and caches the first success.
 // Engines differ wildly here: /api/version (Ollama-style), /version (vLLM,
@@ -137,10 +158,7 @@ const versionRetry = 30 * time.Second
 func (c *versionCache) fetch(ctx context.Context, base string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.resolved {
-		return c.val
-	}
-	if !c.at.IsZero() && time.Since(c.at) < versionRetry {
+	if !c.at.IsZero() && time.Since(c.at) < versionWindow(c.resolved) {
 		return c.val
 	}
 	for _, path := range []string{"/api/version", "/version", "/get_server_info"} {

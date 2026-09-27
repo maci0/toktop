@@ -275,6 +275,63 @@ func TestLookupRetriesExpiredMisses(t *testing.T) {
 	}
 }
 
+// A driver or container reinstall can move or remove a vendor CLI. A hit
+// cached for the process lifetime would keep executing the stale path and
+// leave the GPU row empty for the rest of the session, so the lookup is
+// re-resolved once the hit window passes.
+func TestLookupRetriesExpiredHit(t *testing.T) {
+	name := "toktop-moving-gpu-tool"
+	tools.Delete(name)
+	orig := lookPath
+	t.Cleanup(func() {
+		lookPath = orig
+		tools.Delete(name)
+	})
+
+	var n int
+	lookPath = func(string) (string, error) {
+		n++
+		if n == 1 {
+			return "/opt/old/" + name, nil
+		}
+		return "/opt/new/" + name, nil
+	}
+
+	if path, ok := lookup(name); !ok || path != "/opt/old/"+name {
+		t.Fatalf("first lookup = %q, %v; want the original path", path, ok)
+	}
+	if path, ok := lookup(name); !ok || path != "/opt/old/"+name || n != 1 {
+		t.Fatalf("hit inside the window = %q, %v; calls=%d", path, ok, n)
+	}
+
+	v, ok := tools.Load(name)
+	if !ok {
+		t.Fatal("hit was not stored")
+	}
+	v.(*toolInfo).at = time.Now().Add(-toolHitTTL - time.Second)
+
+	path, ok := lookup(name)
+	if !ok || path != "/opt/new/"+name {
+		t.Fatalf("expired hit = %q, %v; want the relocated tool", path, ok)
+	}
+	if n != 2 {
+		t.Fatalf("LookPath called %d times, want 2 (re-resolve after expiry)", n)
+	}
+}
+
+func TestSample(t *testing.T) {
+	ctx := t.Context()
+	devs := Sample(ctx)
+	for i := 1; i < len(devs); i++ {
+		prev, cur := devs[i-1], devs[i]
+		if vendorOrder[prev.Vendor] > vendorOrder[cur.Vendor] {
+			t.Errorf("devices not sorted by vendorOrder: %s > %s", prev.Vendor, cur.Vendor)
+		} else if vendorOrder[prev.Vendor] == vendorOrder[cur.Vendor] && prev.Index > cur.Index {
+			t.Errorf("devices not sorted by index for vendor %s: %d > %d", prev.Vendor, prev.Index, cur.Index)
+		}
+	}
+}
+
 // A caller that cancels (the UI tearing down, the sysmon budget spent) must
 // not pay runTimeout per vendor, and must not report a device the canceled
 // sample never got to read. The fake CLI is present on PATH, so a Sample that

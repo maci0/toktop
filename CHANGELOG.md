@@ -80,6 +80,15 @@ support channel (see SECURITY.md).
 - A flag written after an `ssh://` target says it has to come before the
   targets. Flag parsing stops at the first positional, so `toktop ssh://box
   --agents` reported only "unexpected argument", with nothing to change.
+- An engine's version is asked again after ten minutes instead of once per
+  session. A container re-pulled, an engine upgraded, or a remote host behind
+  the ssh forward restarted with a new image left the version readout showing
+  the old one until the dashboard was quit and relaunched. The last known
+  version is kept while the engine is unreachable, so a restart does not blank
+  the row.
+- A vendor GPU CLI that moves or is removed is resolved again after ten
+  minutes. A cached path was executed for the rest of the session, so a driver
+  or container reinstall left the GPU row empty until the next start.
 - An ssh failure no longer reports the home directory. A refused key, an
   unreadable host key store or a changed host key named the absolute path it
   worked on, and `$HOME` names the account; those paths now read `~/...`, as
