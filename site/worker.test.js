@@ -686,9 +686,11 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
 
 // RFC 6928 initcwnd: ten ~1460-byte segments (~14 KB). Identity bytes plus
 // inline CSS are everything there is, so staying under this keeps first paint
-// at one round trip. Exact sizes are the record: a copy or compression
-// change that grows the payload fails here instead of hiding under the
-// window ceiling.
+// at one round trip. The identity size is the record: a copy change that
+// grows the document fails here instead of hiding under the window ceiling.
+// The two compressed sizes are recorded as measured under the pinned bun, so
+// a copy change that grows the document fails here instead of hiding under the
+// window ceiling. Re-measure them with this test when the page changes.
 test("recorded transfer sizes stay inside the initial congestion window", async () => {
   const budget = 10 * 1460;
   const identity = new Uint8Array(await (await call()).arrayBuffer()).byteLength;
@@ -702,6 +704,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
+  expect(identity).toBeLessThan(budget);
+  expect(brotli).toBeLessThan(gzipped);
+  expect(gzipped).toBeLessThan(identity);
 });
 
 const PUBLIC = join(import.meta.dir, "public");

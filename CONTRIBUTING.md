@@ -149,7 +149,8 @@ capture at 1200px, the width a `summary_large_image` is laid out at. The
 capture is 262 flat colors, so `-colors 128` is not a visible cut and takes
 it from 303,865 bytes to 68,924. The full-size PNG stays as the `<img src>`
 fallback for a client with neither AVIF nor WebP. `bun test site/` pins the
-HTML transfer sizes, the AVIF/WebP byte ceilings and the card's width and
+HTML identity size, the compressed transfer sizes under the initial congestion
+window, the AVIF/WebP byte ceilings and the card's width and
 weight, so a recapture that blows the budget fails there.
 
 ## Make targets

@@ -374,7 +374,8 @@ matched() { tags="-tags $(ZONE_TAG)"; [ -n "$$1" ] && tags="-tags $$1 $(ZONE_TAG
 		if [ -n "$(BOTH_HALVES)" ]; then all=$${all}$$'\n'$$($(GO) test -mod=readonly $(GOTAGS) -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); fi; \
 		near=$$(printf '%s\n' "$$all" | grep -F "$(RUN_PATTERN)" || true); \
 		if [ -n "$$near" ]; then echo "  close: $$near" >&2; fi; \
-		echo "  list the names with: $(GO) test -list '.*' $(PKG)" >&2; \
+		echo "  list the names with: $(GO) test -mod=readonly -tags \"$(strip $(TESTTAGS) $(ZONE_TAG))\" -list '.*' $(PKG)" >&2; \
+		if [ -n "$(BOTH_HALVES)" ]; then echo "  (TESTTAGS is unset, so that lists the untagged half; the sqlite half can hold more: $(GO) test -mod=readonly $(GOTAGS) -list '.*' $(PKG))" >&2; fi; \
 		exit 1; \
 	fi
 endef
@@ -976,3 +977,8 @@ PREFIX ?= $(HOME)/.local
 install: build ## install into PREFIX/bin (default ~/.local/bin)
 	mkdir -p "$(PREFIX)/bin"
 	install -m 0755 $(BINARY) "$(PREFIX)/bin/$(BINARY)"
+	@case ":$$PATH:" in \
+		*":$(PREFIX)/bin:"*) ;; \
+		*) echo "make install: installed to $(PREFIX)/bin, which is not on PATH; add it before '$(BINARY)' resolves" >&2; \
+		   echo "  export PATH=\"$(PREFIX)/bin:$$PATH\"" >&2 ;; \
+	esac

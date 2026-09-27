@@ -162,11 +162,16 @@ func TestDependencyTableMatchesManifest(t *testing.T) {
 // since the two packages then have to move together.
 //
 //	0  core              the types and helpers everything is written in terms of
-//	1  logcfg, bearer, procs, selfreload, agentusage
-//	2  gpu, probe, provider, demo, selfupdate, ui
-//	3  sysmon, ingest, agentwatch
-//	4  remote, collector
-//	5  cmd/toktop        the only package allowed to wire the rest together
+//	1  logcfg            the audit-log vocabulary, below every package that logs
+//	2  bearer, procs, selfreload, agentusage
+//	3  gpu, probe, provider, demo, selfupdate, ui
+//	4  sysmon, ingest, agentwatch
+//	5  remote, collector  the ssh client and the fan-in, over every engine-side package
+//	6  cmd/toktop         the only package allowed to wire the rest together
+//
+// logcfg sits below its consumers rather than beside them: procs, gpu and
+// ingest all reach for the redaction helpers, so a tier that held logcfg
+// alongside them would be a layer importing sideways into itself.
 var tiers = [][]string{
 	{"internal/core"},
 	{"internal/logcfg"},
