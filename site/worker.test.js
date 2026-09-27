@@ -146,7 +146,7 @@ test("accept-encoding variants negotiate correctly", async () => {
   ]) {
     const res = await call({ "accept-encoding": ae });
     expect(res.headers.get("content-encoding")).toBe(want);
-    if (want == null) expect(await res.text()).toBe(identityBody);
+    if (want === null) expect(await res.text()).toBe(identityBody);
   }
 });
 
@@ -283,6 +283,7 @@ test("every page answer carries the security headers, not only revalidations", a
   }
 });
 
+// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
 const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
 
 function staticAssets(body = new Uint8Array([1, 2, 3, 4])) {
@@ -413,11 +414,11 @@ const shotPalette = () => {
       .join("")}`;
   const named = (name) => {
     const m = src.match(new RegExp(`^${name}: RGB = (\\(\\d+, \\d+, \\d+\\))`, "m"));
-    if (m == null) throw new Error(`${name} not found in scripts/screenshot.py`);
+    if (m === null) throw new Error(`${name} not found in scripts/screenshot.py`);
     return toHex(m[1]);
   };
   const block = src.match(/^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m);
-  if (block == null) throw new Error("ANSI16 not found in scripts/screenshot.py");
+  if (block === null) throw new Error("ANSI16 not found in scripts/screenshot.py");
   const ansi = {};
   for (const [, index, tuple] of block[1].matchAll(/^\s*(\d+): (\(\d+, \d+, \d+\))/gm)) {
     ansi[index] = toHex(tuple);
@@ -445,7 +446,7 @@ test("the page ships the terminal's palette, not one of its own", () => {
       identityBody.includes(`${cssVar}: ${hex}`),
       `${cssVar} does not carry theme.go ${token} (${hex})`,
     ).toBe(true);
-    if (sgr != null) {
+    if (sgr !== undefined) {
       expect(SHOT.ansi[sgr], `scripts/screenshot.py ANSI16[${sgr}]`).toBe(hex);
     }
   }
@@ -600,7 +601,7 @@ function assetsEnv(bodies) {
       fetch(request) {
         const url = new URL(request.url);
         const body = bodies[url.pathname];
-        if (body == null) {
+        if (!(url.pathname in bodies)) {
           return Promise.resolve(new Response("missing", { status: 404 }));
         }
         const headers = {
@@ -711,6 +712,7 @@ test("image paths are served from ASSETS with cache and security headers", async
   expect(res.status).toBe(200);
   expect(await res.text()).toBe("avif-bytes");
   expect(res.headers.get("cache-control")).toBe(
+    // biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
     "public, max-age=86400, stale-while-revalidate=604800",
   );
   expect(res.headers.get("etag")).toBe('"/dashboard.avif"');
@@ -782,6 +784,7 @@ test("image HEAD matches GET headers with no body, POST is 405", async () => {
 // stays quiet.
 function captureLogs() {
   const lines = [];
+  // biome-ignore lint/suspicious/noConsole: the point of this helper is to intercept those writes.
   const original = console.error;
   console.error = (...args) => lines.push(args.join(" "));
   return {

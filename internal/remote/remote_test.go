@@ -510,8 +510,17 @@ func TestStoreMutexIsPerPath(t *testing.T) {
 		t.Fatal("the same store path returned a different mutex")
 	}
 
-	a.Lock()
-	defer a.Unlock()
+	// Hold a's lock across the check, from a goroutine, so the critical
+	// section is released before the test returns even on a failure below.
+	held, release := make(chan struct{}), make(chan struct{})
+	go func() {
+		a.Lock()
+		defer a.Unlock()
+		close(held)
+		<-release
+	}()
+	<-held
+
 	done := make(chan struct{})
 	go func() {
 		b.Lock()
@@ -523,6 +532,7 @@ func TestStoreMutexIsPerPath(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("holding one store's mutex blocked another store's")
 	}
+	close(release)
 }
 
 func TestTOFUStore(t *testing.T) {

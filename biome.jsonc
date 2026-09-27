@@ -13,16 +13,23 @@
   "linter": {
     "enabled": true,
     "rules": {
-      // The preset alone is Biome's default set, which leaves the correctness
-      // and a11y groups largely unrun. Those are the groups that catch a bad
-      // header, a bad status, or a misused async call in edge code, and the
-      // tree passes both today apart from the one rule disabled below.
+      // The preset alone is Biome's default set, which leaves the correctness,
+      // a11y, suspicious and security groups largely unrun. Those are the
+      // groups that catch a bad header, a bad status, a misused async call, a
+      // loose null comparison, or a leaked key in edge code, and the tree
+      // passes all four today.
       "preset": "recommended",
       "a11y": "error",
+      "suspicious": "error",
+      "security": "error",
       // In the correctness group but assumes a Qwik app, which this is not:
       // useQwikValidLexicalScope flags every ordinary closure capture. There is
       // no Qwik build here for the rule to be right about.
       "correctness": { "useQwikValidLexicalScope": "off" },
+      // complexity, performance, style and nursery stay off: the tree does not
+      // pass them today (cognitive-complexity on the representation picker,
+      // await-in-loop in the image tests, magic numbers in the FNV hash), and
+      // those are refactors rather than defects to gate on.
     },
   },
   "overrides": [

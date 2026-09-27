@@ -335,9 +335,11 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
 const ETAG_HASH = (() => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < HTML.length; i++) {
+    // biome-ignore lint/suspicious/noBitwiseOperators: FNV-1a is defined by xor, not arithmetic.
     hash ^= HTML.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
+  // biome-ignore lint/suspicious/noBitwiseOperators: the unsigned shift is how FNV-1a normalizes to 32 bits.
   return (hash >>> 0).toString(16);
 })();
 
@@ -363,7 +365,7 @@ function ifNoneMatchMatches(headerValue) {
 // client that never advertised it is how old HTTP/1.0 agents used to break.
 function parseAcceptEncoding(headerValue) {
   const qByCoding = new Map();
-  if (headerValue == null || !headerValue.trim()) return qByCoding;
+  if (headerValue === null || !headerValue.trim()) return qByCoding;
   for (const part of headerValue.split(",")) {
     const [rawToken, ...params] = part.trim().toLowerCase().split(";");
     const token = rawToken.trim();
@@ -441,6 +443,7 @@ async function buildRepresentations(request) {
       // page at its uncompressed size forever without a word, so name it.
       logFailure(request, "coding-dropped", {
         coding,
+        // A throw carries any value, null included, so err may have no message.
         error: String(err?.message ?? err),
       });
     }
@@ -459,7 +462,7 @@ async function representationFor(acceptEncoding, request) {
     const q = quality(qByCoding, rep.coding ?? "identity");
     if (q <= 0) continue;
     if (
-      best == null ||
+      best === null ||
       q > best.q ||
       (q === best.q && rep.bytes.byteLength < best.bytes.byteLength)
     ) {
@@ -472,6 +475,7 @@ async function representationFor(acceptEncoding, request) {
 // Fresh for five minutes, then served from the browser's copy while a cheap
 // 304 revalidation runs in the background: repeat visitors paint instantly
 // and are never more than the first max-age behind a deploy.
+// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
 const PAGE_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=86400";
 
 // Several encodings live under one URL, so every cached copy must be keyed on
@@ -507,6 +511,7 @@ function errorResponse(status, body, extraHeaders = {}) {
 // served page, its 304s and its images are the steady state, and a line per
 // visit would bury the few that name a broken deploy.
 function logFailure(request, event, fields) {
+  // biome-ignore lint/suspicious/noConsole: Workers Logs is the only place a failure reaches an operator.
   console.error(
     JSON.stringify({
       event,
@@ -542,6 +547,7 @@ const IMAGE_PATHS = new Set([
   ...srcsetPaths(HERO_AVIF_SRCSET),
   ...srcsetPaths(HERO_WEBP_SRCSET),
 ]);
+// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
 const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
 
 export default {
@@ -650,7 +656,7 @@ async function handle(request, env) {
     request.headers.get("accept-encoding"),
     request,
   );
-  if (chosen == null) {
+  if (chosen === null) {
     return errorResponse(406, request.method === "HEAD" ? null : "not acceptable", {
       vary: VARY,
     });
