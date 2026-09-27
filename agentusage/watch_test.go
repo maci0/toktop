@@ -1552,3 +1552,69 @@ func TestSampleStampFollowsInjectedClock(t *testing.T) {
 		t.Fatalf("sample At = %v after SetNow(nil), want wall time at or after %v", s.At, frozen)
 	}
 }
+
+// A watcher left running against a long-lived agent would otherwise hold
+// per-file bookkeeping for every session file the agent ever wrote. The
+// recency window releases a counted file once its last write is older than
+// the window, and the cap releases the least recently written of the rest, so
+// a store that keeps writing inside the window still cannot grow the maps
+// without bound. A released transcript keeps its read position: the offset is
+// seeded to the file's end, so a later append is growth and not a re-read.
+func TestCountedFilesAreCapped(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	w := Watch("claude", work, time.Now())
+	if w == nil {
+		t.Fatal("no claude adapter")
+	}
+
+	// More counted files than the cap, all written within the window, so the
+	// window releases none of them and the cap is the only bound in play.
+	n := countedCap + 8
+	for i := range n {
+		append_(t, filepath.Join(store, "session"+strconv.Itoa(i)+".jsonl"), claudeLine(work, i+1))
+	}
+	w.cached, w.scanned = nil, time.Time{} // force a walk on this poll
+	w.Poll()
+	if got := len(w.seen); got != n {
+		t.Fatalf("%d files counted, want %d", got, n)
+	}
+
+	// Step the walker's clock past the recency window. The mtimes the cutoff
+	// compares against stay wall time, which is what a filesystem records, so
+	// this is the same ageing a real run reaches, one poll after the last
+	// write.
+	stepped := time.Now().Add(recencyWindow + time.Minute)
+	w.SetNow(func() time.Time { return stepped })
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := len(w.seen); got > countedCap {
+		t.Fatalf("%d counted files retained after ageing, want at most %d", got, countedCap)
+	}
+
+	// A released transcript is not forgotten: appending to it is read as
+	// growth rather than re-read from byte zero. Which files were released
+	// depends on the mtimes the files carry, so take the first one the cap
+	// let go of.
+	var held string
+	for i := range n {
+		p := filepath.Join(store, "session"+strconv.Itoa(i)+".jsonl")
+		if _, ok := w.seen[p]; !ok {
+			held = p
+			break
+		}
+	}
+	if held == "" {
+		t.Fatal("nothing was released, so the cap is not exercised")
+	}
+	// Back to wall time: the append below rewrites held's mtime, and the walk
+	// only lists a file inside the window of the watcher's own clock.
+	w.SetNow(time.Now)
+	before := w.Sample().Output
+	append_(t, held, claudeLine(work, 5000))
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := w.Sample().Output; got < before+5000 {
+		t.Fatalf("appending to a released transcript reported %d, want at least %d", got, before+5000)
+	}
+}

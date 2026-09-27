@@ -286,6 +286,50 @@ func TestSamePIDKeepsTracker(t *testing.T) {
 	}
 }
 
+// TestHandoverPromotesTheSurvivor pins the store handover: two agents share
+// one transcript store, only the first may follow it, and when the first exits
+// the second takes it over. A tracker left with no watcher reports nothing, so
+// a handover that silently did nothing would leave a live agent unwatched.
+func TestHandoverPromotesTheSurvivor(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	work := t.TempDir()
+	first := agentusage.Process{PID: 101, Tool: "claude", Dir: work, Started: time.Unix(100, 0)}
+	second := agentusage.Process{PID: 102, Tool: "claude", Dir: work, Started: time.Unix(101, 0)}
+
+	var mu sync.Mutex
+	live := []agentusage.Process{first, second}
+	w := New(&recorder{}, nil)
+	w.readEvery = time.Hour
+	w.listAgents = func() []agentusage.Process {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]agentusage.Process(nil), live...)
+	}
+	ctx := t.Context()
+	defer w.stopAll()
+
+	w.discover(ctx)
+	watched := func(pid int) bool {
+		w.mu.Lock()
+		defer w.mu.Unlock()
+		t := w.tracked[pid]
+		return t != nil && t.watch != nil
+	}
+	// The lowest PID claims the store, so exactly one of the two is followed.
+	if watched(101) == watched(102) {
+		t.Fatal("a store followed twice, or by neither process")
+	}
+
+	mu.Lock()
+	live = []agentusage.Process{second}
+	mu.Unlock()
+	w.discover(ctx)
+
+	if !watched(102) {
+		t.Fatal("the surviving process did not take the store over")
+	}
+}
+
 // TestForgetsExitedAgents keeps the tracking table from growing for the life
 // of the process.
 func TestForgetsExitedAgents(t *testing.T) {

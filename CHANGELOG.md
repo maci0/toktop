@@ -15,6 +15,24 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- An agent that shares its transcript store with another agent now takes the
+  store over when the process that was following it exits. The handover never
+  ran, so the survivor was tracked but reported no tokens for the rest of the
+  run, and every discovery pass rebuilt a watcher it then discarded.
+- A forwarded port pipes at most 64 connections at once, and the connections it
+  is piping are released on teardown. A client that opened connections and
+  stayed silent previously held an fd, two goroutines and an ssh channel apiece
+  for as long as the dashboard ran.
+- A watcher releases the per-file bookkeeping of the least recently written
+  transcripts once a run has counted more than 512 of them, so a long
+  `--agents` run against a busy store stops growing one entry per session file
+  in each of seven maps. A released transcript keeps its read position, so its
+  next append still reads as growth.
+- Shutting down no longer waits forever on an agent read loop stuck in a
+  transcript read on a mount that stopped answering. The wait is bounded, and
+  the tail read of an agent that has exited is dropped rather than hanging
+  process exit with it.
+
 - `TOKTOP_LOG_LEVEL` is no longer reported as unused under `--no-ingest`. The
   variable sets the floor for every audit log the process writes, and the
   engine collector, the ssh client and the `--add` attach path all write one;

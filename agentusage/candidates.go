@@ -4,9 +4,11 @@
 package agentusage
 
 import (
+	"cmp"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -300,6 +302,66 @@ func (w *Watcher) forgetIdle(live []string) {
 	}
 	for _, path := range drop {
 		w.dropFile(path)
+	}
+	w.trimCounted(live)
+}
+
+// countedCap bounds the per-file bookkeeping for transcripts that have aged
+// out of the walk but still carry this attach's counts. Those are kept so a
+// later append is read from where it stopped instead of from byte zero, and
+// every one of them is an entry in seen, total, base, baseThink, baseInput,
+// stamps and offsets. A watcher left running against a long-lived agent would
+// otherwise hold one of each per session file written while it ran, which over
+// a multi-day dashboard is every session the agent ever had.
+const countedCap = 512
+
+// trimCounted releases the bookkeeping of the least recently written counted
+// transcripts once there are more than countedCap of them. Ageing a file out is
+// the recency window's job; this is the backstop for a store that keeps every
+// file inside it, where the window never drops anything.
+//
+// A released transcript is not forgotten, only cut loose: its offset is seeded
+// to the file's current end, so a later append is still read as growth rather
+// than re-read from byte zero. What is lost is the remainder of a session that
+// went idle while the run held more sessions than the cap. The published total
+// drops by that much, and Sample.Delta, the rule callers re-baseline on, is
+// what tells them the smaller figure replaces the old one rather than being a
+// fall in usage.
+func (w *Watcher) trimCounted(live []string) {
+	if len(w.seen) <= countedCap {
+		return
+	}
+	// Oldest first by recorded mtime: the transcript least likely to be
+	// appended to is the one whose remaining growth is cheapest to lose.
+	type aged struct {
+		path   string
+		mtimeN int64
+	}
+	cut := make([]aged, 0, len(w.seen)-countedCap)
+	for path := range w.seen {
+		if slices.Contains(live, path) {
+			continue
+		}
+		cut = append(cut, aged{path: path, mtimeN: w.stamps[path].mtimeNanos})
+	}
+	if len(cut) <= 0 {
+		return
+	}
+	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeN, b.mtimeN) })
+	for _, a := range cut[:len(cut)-(countedCap-len(live))] {
+		if a.mtimeN == 0 {
+			// Never stamped, so the end is unknown and re-seeding it would read
+			// the whole file again. Drop it outright instead.
+			w.dropFile(a.path)
+			continue
+		}
+		if fi, err := os.Stat(a.path); err == nil {
+			w.offsets[a.path] = fi.Size()
+		} else {
+			w.dropFile(a.path)
+			continue
+		}
+		w.forgetCounts(a.path)
 	}
 }
 

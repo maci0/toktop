@@ -272,7 +272,8 @@ func (w *Watcher) discover(ctx context.Context) {
 	}
 	w.mu.Unlock()
 
-	// attach gives p its own watcher. follow inserts a tracker with none.
+	// attach gives p its own watcher and starts it. follow inserts a tracker
+	// with none.
 	//
 	// A watcher counts only what is written after it attaches, so an agent
 	// already halfway through a task contributes from here on rather than
@@ -283,7 +284,14 @@ func (w *Watcher) discover(ctx context.Context) {
 	// run. Watch walks transcript stores; doing that under w.mu would stall
 	// report() for agents already being followed. cancel is set before the map
 	// insert so stopOne never observes a nil cancel.
-	attach := func(p agentusage.Process) {
+	//
+	// prev is the tracker handover replaces, for a store whose earlier follower
+	// exited while this process stayed live. It is nil on the new-process path,
+	// where the PID is expected to be absent. Either way the map must hold prev
+	// (or nothing) for the insert to be this pass's: a PID reused between the
+	// snapshot and this lock belongs to a different process, and the tracker
+	// under it is stopped and replaced in the block above.
+	attach := func(p agentusage.Process, prev *tracked) {
 		watch := p.Watch(time.Now())
 		if watch == nil {
 			return // this agent keeps nothing readable
@@ -296,7 +304,8 @@ func (w *Watcher) discover(ctx context.Context) {
 		tctx, cancel := context.WithCancel(ctx)
 		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()
-		if _, seen := w.tracked[p.PID]; seen {
+		cur, seen := w.tracked[p.PID]
+		if seen && cur != prev {
 			w.mu.Unlock()
 			cancel()
 			return
@@ -325,7 +334,7 @@ func (w *Watcher) discover(ctx context.Context) {
 			continue
 		}
 		before := len(started)
-		attach(p)
+		attach(p, nil)
 		if len(started) > before {
 			claimed[storeKey(p)] = true
 		}
@@ -335,16 +344,16 @@ func (w *Watcher) discover(ctx context.Context) {
 	// running against it, so a live agent is never left unwatched. Ordered by
 	// PID like every other pass, so the choice is reproducible.
 	w.mu.Lock()
-	var promote []agentusage.Process
+	var promote []*tracked
 	for _, t := range w.trackedList() {
 		if t.watch == nil && !claimed[storeKey(t.proc)] {
 			claimed[storeKey(t.proc)] = true
-			promote = append(promote, t.proc)
+			promote = append(promote, t)
 		}
 	}
 	w.mu.Unlock()
-	for _, p := range promote {
-		attach(p)
+	for _, t := range promote {
+		attach(t.proc, t)
 	}
 
 	for i, t := range started {
@@ -395,12 +404,26 @@ func (w *Watcher) stopAll() {
 	}
 }
 
+// stopWait bounds how long a stop waits for a tracker's read loop to unwind.
+// Cancel stops the ticker, but the poll already in flight is inside the kernel
+// walking a transcript store or reading a transcript, and neither takes the
+// context. A mount that stopped answering would otherwise hang shutdown, and
+// with it process exit, forever. Past the bound the tail read is dropped: the
+// transcripts of an exited agent are one more poll from the dashboard anyway.
+const stopWait = 3 * time.Second
+
 func (w *Watcher) stopOne(t *tracked) {
 	if t.cancel != nil {
 		t.cancel()
 	}
 	if t.done != nil {
-		<-t.done
+		timer := time.NewTimer(stopWait)
+		defer timer.Stop()
+		select {
+		case <-t.done:
+		case <-timer.C:
+			return
+		}
 	}
 	if t.watch != nil {
 		w.report(t, t.watch.Poll())
