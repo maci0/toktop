@@ -39,8 +39,7 @@ export CGO_ENABLED := 0
 export GOFLAGS :=
 export GOEXPERIMENT :=
 # Strip paths, omit git stamps (checkout vs tarball would disagree), honor
-# go.sum, produce a PIE. Empty -buildid= so the GNU build-id note is not a
-# second, toolchain-hash-shaped input to the bytes.
+# go.sum, produce a PIE.
 GO_BUILDFLAGS := -trimpath -buildvcs=false -mod=readonly -buildmode=pie
 STATICCHECK := $(GO) tool staticcheck
 # go run @version, not a go.mod tool: govulncheck's module graph is newer than
@@ -80,6 +79,8 @@ SITE_ROLLED_BACK  := $(DIST)/site.rolled-back
 # -bindnow is the Go spelling of -Wl,-z,now: without it the linux ELF ships
 # partial RELRO, because the internal linker (CGO stays off) emits DT_BIND_NOW
 # for nothing. A no-op on darwin and windows, so one LDFLAGS covers PLATFORMS.
+# Empty -buildid= so the GNU build-id note is not a second, toolchain-hash-shaped
+# input to the bytes.
 LDFLAGS     := -s -w -buildid= -bindnow -X main.version=$(VERSION)
 # gofmt from the selected toolchain, not a different major on PATH.
 GOFMT = $$($(GO) env GOROOT)/bin/gofmt
@@ -477,7 +478,7 @@ require-encoders:
 	fi
 
 .PHONY: site-assets
-site-assets: require-encoders ## rebuild the site dashboard captures from docs/images/dashboard.png
+site-assets: require-encoders require-bun ## rebuild the site dashboard captures from docs/images/dashboard.png
 	@mkdir -p $(DIST)
 	cp docs/images/dashboard.png $(SITE_PUBLIC)/dashboard.png
 	magick docs/images/dashboard.png -strip -resize 1920x -quality 82 $(SITE_PUBLIC)/dashboard.webp
@@ -761,10 +762,44 @@ check-changelog: ## verify CHANGELOG.md contains release section and link for VE
 	@$(CHECK_VERSION)
 	@$(CHECK_CHANGELOG)
 
+# A release packages the working tree, so the two states that leave the bytes
+# unreproducible have to be refused before they are packaged rather than
+# recorded after: an uncommitted change, which buildinfo would name a commit
+# for while the binaries carry something else, and no git at all, where
+# SOURCE_DATE_EPOCH falls back to 0 and every archive member is dated to the
+# epoch. A dev build is exempt: it is a local artifact, and its manifest
+# records the tree honestly. ALLOW_DIRTY=1 is the named override for a release
+# cut from a tree that cannot be committed first.
+.PHONY: check-release-source
+check-release-source: ## fail unless a non-dev VERSION builds from a clean, git-backed tree
+	@if [ "$(VERSION)" = "dev" ]; then exit 0; fi; \
+	if ! git rev-parse HEAD >/dev/null 2>&1; then \
+		echo "make release: VERSION=$(VERSION) needs a git checkout; a source export has no commit for buildinfo to record and no commit time for SOURCE_DATE_EPOCH" >&2; \
+		echo "  cut the release from the repository, or build VERSION=dev from the export" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$(ALLOW_DIRTY)" != "1" ]; then \
+		dirty=$$(git status --porcelain); \
+		if [ -n "$$dirty" ]; then \
+			echo "make release: the working tree has uncommitted changes, so the binaries do not match the commit buildinfo records:" >&2; \
+			printf '%s\n' "$$dirty" | sed 's/^/  /' >&2; \
+			echo "  commit them, or pass ALLOW_DIRTY=1 to ship the tree as it stands" >&2; \
+			exit 1; \
+		fi; \
+	fi; \
+	case '$(SOURCE_DATE_EPOCH)' in \
+		''|*[!0-9]*) echo "make release: SOURCE_DATE_EPOCH '$(SOURCE_DATE_EPOCH)' is not an epoch, so archive timestamps would follow the clock" >&2; exit 1;; \
+	esac; \
+	if [ "$(SOURCE_DATE_EPOCH)" = 0 ]; then \
+		echo "make release: SOURCE_DATE_EPOCH is 0, so the checksums tarball dates every member to the epoch" >&2; \
+		echo "  export SOURCE_DATE_EPOCH=\$$(git log -1 --pretty=%ct) before 'make release'" >&2; \
+		exit 1; \
+	fi
+
 # sbom first: checksums.txt has to cover the SBOM, or a downloaded SBOM is the
 # one release asset with nothing to verify it against.
 .PHONY: release
-release: check-changelog sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
+release: check-changelog check-release-source sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
 
 # dist/ is shared: cover writes coverage.out, vet-cross and repro-check write
 # subdirectories, and the release build writes binaries. release.yml publishes

@@ -177,13 +177,14 @@ weight, so a recapture that blows the budget fails there.
 | `make site-lint` | biome format-check and lint over the files `biome.jsonc` includes (the Worker and the jsonc configs) at the Makefile `BIOME` pin (CI parity) |
 | `make site-fmt` | rewrite those files with the biome formatter, then re-lint |
 | `make site-check` | `bun test site/` |
-| `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick` and `avifenc`) |
+| `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick`, `avifenc`, and the pinned `bun`) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command names the Makefile's `WRANGLER` pin (`site-deploy` runs it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
+| `make check-release-source` | fail unless a non-dev VERSION builds from a clean, git-backed tree with a nonzero `SOURCE_DATE_EPOCH` (`make release` runs it; `ALLOW_DIRTY=1` overrides the tree check) |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
 | `make release-verify` | fetch every asset a published `VERSION` holds back from GitHub and re-verify each digest against that release's own `checksums.txt` (the restore drill the release job runs) |
 | `make repro-check` | build every release platform twice, from two different source paths and two different build caches, then diff |
@@ -318,8 +319,11 @@ normalized, mode is forced to 0644 (so a builder's umask cannot change
 the archive), atime/ctime PAX headers are dropped, and gzip's name/mtime
 header is stripped at compression level 6, so two builds of one source
 produce byte-identical archives. Binaries are built with `-trimpath
--buildvcs=false -mod=readonly -buildmode=pie`. This needs GNU tar; where the
-system tar is bsdtar (macOS), install GNU tar as `gtar`.
+-buildvcs=false -mod=readonly -buildmode=pie`. A release refuses to package
+an uncommitted working tree or a source export with no git behind it, so the
+bytes always match the commit the manifest names; `ALLOW_DIRTY=1` overrides
+the first. Deterministic packaging needs GNU tar; where the system tar is
+bsdtar (macOS), install GNU tar as `gtar`.
 
 A tag is a version, not a branch: cut it once and leave it. Moving one re-runs
 the release job, and the job refuses to run when a release of that tag already
