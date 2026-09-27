@@ -13,13 +13,17 @@ import (
 func TestAgentRates(t *testing.T) {
 	now := time.Unix(1_700_000_100, 0)
 	events := []AgentEvent{
-		// Two-turn span: 80 out and 200 prompt over one second.
-		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100},
-		{At: now.Add(-1 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100},
+		// Two-turn span: 80 out, 200 prompt and 25 thinking over one second.
+		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 10},
+		{At: now.Add(-1 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 15},
 		// Single event: tokens but no rate (no span to measure).
 		{At: now.Add(-1 * time.Second), Agent: "codex", OutputTokens: 30},
 		// Outside the window: excluded entirely.
 		{At: now.Add(-2 * AgentRateWindow), Agent: "stale", OutputTokens: 9999},
+		// Two events sharing one instant: a zero-length span, so there is
+		// still no rate to report (and no division by zero).
+		{At: now.Add(-1 * time.Second), Agent: "coincident", OutputTokens: 6},
+		{At: now.Add(-1 * time.Second), Agent: "coincident", OutputTokens: 4},
 		// Via-engine row with no tokens of its own: kept so the list shows
 		// who is working.
 		{At: now.Add(-1 * time.Second), Agent: "opencode", ViaEngine: "127.0.0.1:11434"},
@@ -27,10 +31,10 @@ func TestAgentRates(t *testing.T) {
 		{At: now.Add(-1 * time.Second), Agent: "idle"},
 	}
 	rates := AgentRates(events, now)
-	if len(rates) != 3 {
-		t.Fatalf("rates = %d entries, want 3 (claude, codex, opencode)", len(rates))
+	if len(rates) != 4 {
+		t.Fatalf("rates = %d entries, want 4 (claude, codex, coincident, opencode)", len(rates))
 	}
-	// Busiest first: claude (80 tok/s) before codex and opencode (no rate).
+	// Busiest first: claude (80 tok/s) before the three rows with no rate.
 	if rates[0].Agent != "claude" {
 		t.Fatalf("first = %q, want claude", rates[0].Agent)
 	}
@@ -40,17 +44,27 @@ func TestAgentRates(t *testing.T) {
 	if rates[0].Tokens != 80 || rates[0].Prompt != 200 {
 		t.Errorf("claude totals = %v/%v, want 80/200", rates[0].Tokens, rates[0].Prompt)
 	}
+	if rates[0].Thinking != 25 {
+		t.Errorf("claude thinking = %v, want 25", rates[0].Thinking)
+	}
 	for _, r := range rates[1:] {
 		if r.TokPS != 0 || r.PromptPS != 0 {
-			t.Errorf("%s got a rate from a single event: %v", r.Agent, r.TokPS)
+			t.Errorf("%s got a rate with no measurable span: %v", r.Agent, r.TokPS)
 		}
 	}
 	codex := rates[1]
 	if codex.Agent != "codex" || codex.Tokens != 30 {
 		t.Errorf("codex row = %+v, want 30 output tokens", codex)
 	}
-	if rates[2].Agent != "opencode" || rates[2].ViaEngine != "127.0.0.1:11434" {
-		t.Errorf("via-engine row = %+v, want opencode via 127.0.0.1:11434", rates[2])
+	// A zero-length span leaves the rate at zero, so the row sorts with the
+	// other unrated agents (by name) rather than jumping the queue on the
+	// strength of its token total.
+	coincident := rates[2]
+	if coincident.Agent != "coincident" || coincident.TokPS != 0 || coincident.Tokens != 10 {
+		t.Errorf("coincident row = %+v, want 10 tokens at 0 tok/s", coincident)
+	}
+	if rates[3].Agent != "opencode" || rates[3].ViaEngine != "127.0.0.1:11434" {
+		t.Errorf("via-engine row = %+v, want opencode via 127.0.0.1:11434", rates[3])
 	}
 }
 

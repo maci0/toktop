@@ -294,11 +294,18 @@ func TestDiscover(t *testing.T) {
 	defaultCandidates = []string{plain, engine, plain}
 	defer func() { defaultCandidates = orig }()
 
-	providers := Discover(context.Background())
-	if len(providers) != 1 {
-		t.Fatalf("Discover() returned %d providers, want 1", len(providers))
+	// Discover also walks the host process table, so the candidates are the
+	// only part of the result this test controls.
+	var ours []Provider
+	for _, p := range Discover(context.Background()) {
+		if p.Addr == engine || p.Addr == plain {
+			ours = append(ours, p)
+		}
 	}
-	if providers[0].Addr != engine || providers[0].Label != core.KindSGLang {
-		t.Fatalf("Discover() provider = %+v, want %s as %s", providers[0], engine, core.KindSGLang)
+	if len(ours) != 1 {
+		t.Fatalf("Discover() returned %d of our candidates, want 1", len(ours))
+	}
+	if ours[0].Addr != engine || ours[0].Label != core.KindSGLang {
+		t.Fatalf("Discover() provider = %+v, want %s as %s", ours[0], engine, core.KindSGLang)
 	}
 }

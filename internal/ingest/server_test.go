@@ -669,19 +669,31 @@ func TestIngestClampsFarFutureTimestamps(t *testing.T) {
 
 	farFuture := frozen.Add(time.Hour).Format(time.RFC3339)
 	nearFuture := frozen.Add(10 * time.Second).Format(time.RFC3339)
+	// The skew bound is inclusive: exactly maxEventSkew is still honored,
+	// one second past it is clamped.
+	atBound := frozen.Add(maxEventSkew).Format(time.RFC3339)
+	pastBound := frozen.Add(maxEventSkew + time.Second).Format(time.RFC3339)
 	resp := post(t, "http://"+s.Addr()+"/v1/events",
 		`{"agent":"skewed","ts":"`+farFuture+`"}`+"\n"+
-			`{"agent":"skewed","ts":"`+nearFuture+`"}`)
+			`{"agent":"skewed","ts":"`+nearFuture+`"}`+"\n"+
+			`{"agent":"skewed","ts":"`+atBound+`"}`+"\n"+
+			`{"agent":"skewed","ts":"`+pastBound+`"}`)
 	if resp != http.StatusAccepted {
 		t.Fatalf("status = %d", resp)
 	}
-	awaitEvents(t, rec, 2)
+	awaitEvents(t, rec, 4)
 	if got := rec.evs[0].At; !got.Equal(frozen) {
 		t.Errorf("far-future stamp retained: %v, want clamped to %v", got, frozen)
 	}
 	want := frozen.Add(10 * time.Second)
 	if got := rec.evs[1].At; !got.Equal(want) {
 		t.Errorf("modest skew not honored: %v, want %v", got, want)
+	}
+	if want := frozen.Add(maxEventSkew); !rec.evs[2].At.Equal(want) {
+		t.Errorf("stamp at the skew bound = %v, want retained %v", rec.evs[2].At, want)
+	}
+	if got := rec.evs[3].At; !got.Equal(frozen) {
+		t.Errorf("stamp one second past the bound = %v, want clamped to %v", got, frozen)
 	}
 }
 
@@ -2118,8 +2130,14 @@ func TestAddrRedactHandler(t *testing.T) {
 	h := addrRedactHandler{Handler: baseHandler}
 	hWithAttrs := h.WithAttrs([]slog.Attr{slog.String("k", "v")})
 	hWithGroup := h.WithGroup("grp")
-	if hWithAttrs == nil || hWithGroup == nil {
-		t.Fatal("WithAttrs / WithGroup returned nil")
+	// The wrapper is the whole point of both methods: the derived handlers
+	// must still be addrRedactHandler, not the bare inner handler, or a
+	// dialed server logs peer addresses unredacted.
+	if _, ok := hWithAttrs.(addrRedactHandler); !ok {
+		t.Fatalf("WithAttrs returned %T, want addrRedactHandler", hWithAttrs)
+	}
+	if _, ok := hWithGroup.(addrRedactHandler); !ok {
+		t.Fatalf("WithGroup returned %T, want addrRedactHandler", hWithGroup)
 	}
 	record := slog.NewRecord(time.Now(), slog.LevelInfo, "connect from 192.168.1.1:8080 and 127.0.0.1:9090", 0)
 	if err := h.Handle(context.Background(), record); err != nil {
@@ -2131,5 +2149,19 @@ func TestAddrRedactHandler(t *testing.T) {
 	}
 	if !strings.Contains(out, "remote") || !strings.Contains(out, "loopback:9090") {
 		t.Errorf("redacted output missing expected tags: %q", out)
+	}
+
+	buf.Reset()
+	derived := slog.New(hWithAttrs)
+	derivedRecord := slog.NewRecord(time.Now(), slog.LevelWarn, "dial 192.168.1.1:8080", 0)
+	if err := derived.Handler().Handle(context.Background(), derivedRecord); err != nil {
+		t.Fatal(err)
+	}
+	derivedOut := buf.String()
+	if strings.Contains(derivedOut, "192.168.1.1:8080") {
+		t.Errorf("remote IP leaked through WithAttrs: %q", derivedOut)
+	}
+	if !strings.Contains(derivedOut, "remote") {
+		t.Errorf("WithAttrs output missing expected tag: %q", derivedOut)
 	}
 }

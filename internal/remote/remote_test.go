@@ -574,8 +574,15 @@ func TestDefaultKeyPathsAndAuthChain(t *testing.T) {
 	if len(methods) != 0 {
 		t.Fatalf("empty home yielded %d methods, want 0", len(methods))
 	}
-	if got, want := len(defaultKeyPaths()), 3; got != want {
-		t.Fatalf("defaultKeyPaths = %d paths, want %d", got, want)
+	// Order matters: authMethods tries the defaults in this order, so the
+	// sequence is the preference order, not just a set of three paths.
+	want := []string{
+		filepath.Join(home, ".ssh", "id_ed25519"),
+		filepath.Join(home, ".ssh", "id_ecdsa"),
+		filepath.Join(home, ".ssh", "id_rsa"),
+	}
+	if got := defaultKeyPaths(); !slices.Equal(got, want) {
+		t.Fatalf("defaultKeyPaths() = %v, want %v", got, want)
 	}
 
 	key := filepath.Join(home, ".ssh", "id_ed25519")
@@ -787,6 +794,30 @@ func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Fatalf("directory = %v, want %v", names, want)
+	}
+
+	// The store holds host keys, so the write must create a private directory
+	// and leave a private file. Neither mode is visible without a stat, and the
+	// directory mode only takes effect where MkdirAll has work to do, so this
+	// writes to a nested subdir that does not exist yet.
+	privateDir := filepath.Join(t.TempDir(), "toktop")
+	privateStore := filepath.Join(privateDir, "known_hosts")
+	if err := writeKnownHosts(privateStore, map[string]string{"a.example:22": "a.example:22 ssh-ed25519 AAAA"}); err != nil {
+		t.Fatal(err)
+	}
+	storeInfo, err := os.Stat(privateStore)
+	if err != nil {
+		t.Fatalf("the store must be written into a directory that did not exist: %v", err)
+	}
+	if got := storeInfo.Mode().Perm(); got != 0o600 {
+		t.Errorf("store mode = %#o, want %#o", got, 0o600)
+	}
+	dirInfo, err := os.Stat(privateDir)
+	if err != nil {
+		t.Fatalf("the store directory must be created: %v", err)
+	}
+	if got := dirInfo.Mode().Perm(); got != 0o700 {
+		t.Errorf("store directory mode = %#o, want %#o", got, 0o700)
 	}
 }
 

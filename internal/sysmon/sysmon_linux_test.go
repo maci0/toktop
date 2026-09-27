@@ -149,13 +149,16 @@ func TestMergeHostStaticFillsGapsOnly(t *testing.T) {
 	}
 }
 
+// reset clears the cached host static probe so the next call re-reads the
+// process globals rather than a value a previous test faked in.
+func reset() {
+	hostStaticMu.Lock()
+	hostStaticVal = hostStatic{}
+	hostStaticAt = time.Time{}
+	hostStaticMu.Unlock()
+}
+
 func TestHostStaticInfoRetriesEmptyDrivers(t *testing.T) {
-	reset := func() {
-		hostStaticMu.Lock()
-		hostStaticVal = hostStatic{}
-		hostStaticAt = time.Time{}
-		hostStaticMu.Unlock()
-	}
 	reset()
 	orig := loadHostStatic
 	t.Cleanup(func() {
@@ -249,16 +252,16 @@ func TestSensorLayoutDropsExpiredOnHit(t *testing.T) {
 }
 
 func TestHostStaticNPUsDetached(t *testing.T) {
+	reset()
 	orig := loadHostStatic
-	t.Cleanup(func() { loadHostStatic = orig })
+	t.Cleanup(func() {
+		loadHostStatic = orig
+		reset()
+	})
 
 	loadHostStatic = func() hostStatic {
 		return hostStatic{osName: "Debian", kernel: "6.1", npus: []string{"accel0"}}
 	}
-	hostStaticMu.Lock()
-	hostStaticAt = time.Time{}
-	hostStaticVal = hostStatic{}
-	hostStaticMu.Unlock()
 
 	h1 := hostStaticInfo()
 	h1.npus[0] = "mutated"

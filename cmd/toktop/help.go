@@ -146,7 +146,9 @@ func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 // http(s) URLs suggest --add; other bare words point at --help.
 func unexpectedArg(arg string) error {
 	switch {
-	case arg == "update" || arg == "help" || arg == "version":
+	case arg == "update":
+		return fmt.Errorf("toktop: unexpected argument %q (the update subcommand must be first: toktop update)", arg)
+	case arg == "help" || arg == "version":
 		return fmt.Errorf("toktop: unexpected argument %q (the %s subcommand must be first: toktop %s)", arg, arg, arg)
 	case strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://"):
 		return fmt.Errorf("toktop: unexpected argument %q (did you mean --add %s?)", arg, arg)

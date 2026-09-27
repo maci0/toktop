@@ -584,6 +584,13 @@ func TestPollSucceedsWithModelsOnly(t *testing.T) {
 	if len(m.Models) != 1 || m.Models[0].Name != "m" {
 		t.Fatalf("models = %+v, want [{m}]", m.Models)
 	}
+
+	// Same server as vLLM: a model listing alone does not describe a vLLM
+	// engine, so a missing /metrics must fail the poll.
+	vllm := NewOpenAICompat(srv.URL, core.KindVLLM, core.KindVLLM)
+	if m, err := vllm.Poll(context.Background()); err == nil {
+		t.Errorf("vLLM poll succeeded on /v1/models alone: %+v", m)
+	}
 }
 
 // Version extraction feeds the UI header across wildly different engine

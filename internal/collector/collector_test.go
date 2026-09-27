@@ -1012,8 +1012,11 @@ func TestEmitSurvivesFirstPollError(t *testing.T) {
 			t.Fatalf("providers = %d, want 1", len(snap.Providers))
 		}
 		p := snap.Providers[0]
-		if p.OK || p.Err == "" {
-			t.Fatalf("expected failed provider with error, got ok=%v err=%q", p.OK, p.Err)
+		if p.OK {
+			t.Fatalf("failed provider reported ok: %+v", p)
+		}
+		if p.Err != "connection refused" {
+			t.Fatalf("err = %q, want the poll error verbatim", p.Err)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("emit did not produce a snapshot")
@@ -1033,8 +1036,11 @@ func TestEmitSurvivesNilMetrics(t *testing.T) {
 		t.Fatalf("providers = %d, want 1", len(snap.Providers))
 	}
 	p := snap.Providers[0]
-	if p.OK || p.Err == "" {
-		t.Fatalf("nil metrics without error: ok=%v err=%q", p.OK, p.Err)
+	if p.OK {
+		t.Fatalf("nil metrics reported ok: %+v", p)
+	}
+	if p.Err != "empty poll result" {
+		t.Fatalf("err = %q, want %q", p.Err, "empty poll result")
 	}
 }
 
