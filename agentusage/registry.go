@@ -149,7 +149,8 @@ var adapters = map[string]adapter{
 	// agy (Antigravity CLI) logs steps to
 	// brain/<id>/.system_generated/logs/transcript.jsonl. A step that carries
 	// no usage counts as nothing. The workspace is the one history.jsonl
-	// records for that conversation id, not a field on the step.
+	// records for that conversation id, or cache/last_conversations.json
+	// when the history has no line for it. The step itself does not name it.
 	"agy": {
 		roots:          func(string) []string { return []string{home(".gemini", "antigravity-cli")} },
 		suffix:         "transcript.jsonl",

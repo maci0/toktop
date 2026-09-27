@@ -79,7 +79,8 @@ crush which keep SQLite stores, and grok which rewrites one usage.json per
 session). Gemini CLI chats live under `~/.gemini/tmp`, Grok under
 `~/.grok/sessions`, and Antigravity (`agy`) under `~/.gemini/antigravity-cli`.
 An agy step that names no tokens contributes nothing. Its workspace comes
-from `history.jsonl`, not from the step.
+from `history.jsonl`, or from `cache/last_conversations.json` when the
+history has no line for that conversation.
 dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 Agents that report nothing show no rate rather than a zero.

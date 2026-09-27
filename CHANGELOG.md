@@ -28,7 +28,8 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `~/.gemini/antigravity-cli/brain/<id>` are read when a step carries token
   counts. A step that names none contributes nothing. The workspace is the
   one `history.jsonl` records for that conversation, which the step itself
-  does not name.
+  does not name. A conversation absent from that log is taken from
+  `cache/last_conversations.json` when that file names it.
 
 ### Fixed
 

@@ -19,35 +19,50 @@ import (
 // working directory or, usually, any tokens. A step that carries a tokens
 // object or usageMetadata is counted; every other step contributes nothing.
 //
-// The workspace is recorded on history.jsonl at the store root, one line per
-// event, with conversationId and workspace. The transcript itself never has
-// that field, so the conversation id in the brain/ path is looked up there.
-// A conversation the history has not mentioned yet is left undecided and
-// retried: refusing it would drop a usage step that arrives after the index.
+// The workspace is recorded in two indexes at the store root, never on the
+// step. history.jsonl is one line per event, with conversationId and
+// workspace, and the last line for an id wins. cache/last_conversations.json
+// maps a workspace to its current conversation id, including conversations
+// the history log never names. The brain/<id> directory is looked up in
+// history first, then in last_conversations. A conversation neither index
+// has mentioned yet is left undecided and retried: refusing it would drop a
+// usage step that arrives after the index.
 
-const agyHistoryFile = "history.jsonl"
+const (
+	agyHistoryFile = "history.jsonl"
+	agyLastDir     = "cache"
+	agyLastFile    = "last_conversations.json"
+)
 
-// agyHistoryDepth is how far above a transcript the store root, and its
-// history.jsonl, can sit. brain/<id>/.system_generated/logs is four levels.
+// agyHistoryDepth is how far above a transcript the store root can sit.
+// brain/<id>/.system_generated/logs is four levels.
 const agyHistoryDepth = 8
 
 func parseAgy(line []byte) (values, string, bool) {
 	return parseGeminiRecord(line)
 }
 
-// agySessionCwd is the workspace history.jsonl records for the conversation
-// whose transcript this path is. ok is false when the index is missing or
-// does not name this conversation yet.
+// agySessionCwd is the workspace either index records for the conversation
+// whose transcript this path is. ok is false when neither index names this
+// conversation yet.
 func agySessionCwd(path string) (string, bool) {
 	id := agyConversationID(path)
 	if id == "" {
 		return "", false
 	}
-	hist := agyHistoryPath(path)
-	if hist == "" {
+	root := agyStoreRoot(path)
+	if root == "" {
 		return "", false
 	}
-	return agyWorkspace(hist, id)
+	ids, ok := agyIndex(root)
+	if !ok {
+		return "", false
+	}
+	ws := ids[id]
+	if ws == "" {
+		return "", false
+	}
+	return ws, true
 }
 
 // agyConversationID is the brain/<id> directory a transcript lives under.
@@ -70,13 +85,13 @@ func agyConversationID(path string) string {
 	return ""
 }
 
-func agyHistoryPath(path string) string {
+// agyStoreRoot is the directory that holds history.jsonl or
+// cache/last_conversations.json above this transcript.
+func agyStoreRoot(path string) string {
 	dir := filepath.Dir(path)
 	for range agyHistoryDepth {
-		candidate := filepath.Join(dir, agyHistoryFile)
-		st, err := os.Stat(candidate)
-		if err == nil && !st.IsDir() {
-			return candidate
+		if agyHasIndex(dir) {
+			return dir
 		}
 		parent := filepath.Dir(dir)
 		if parent == dir {
@@ -87,11 +102,25 @@ func agyHistoryPath(path string) string {
 	return ""
 }
 
-type agyHist struct {
-	path  string
+func agyHasIndex(dir string) bool {
+	if st, err := os.Stat(filepath.Join(dir, agyHistoryFile)); err == nil && !st.IsDir() {
+		return true
+	}
+	st, err := os.Stat(filepath.Join(dir, agyLastDir, agyLastFile))
+	return err == nil && !st.IsDir()
+}
+
+type agyStamp struct {
 	size  int64
 	mtime int64
-	ids   map[string]string
+	ok    bool
+}
+
+type agyHist struct {
+	root string
+	hist agyStamp
+	last agyStamp
+	ids  map[string]string
 }
 
 var (
@@ -99,27 +128,59 @@ var (
 	agyHistCache agyHist
 )
 
-func agyWorkspace(histPath, id string) (string, bool) {
-	st, err := os.Stat(histPath)
-	if err != nil {
-		return "", false
+func agyFileStamp(path string) agyStamp {
+	st, err := os.Stat(path)
+	if err != nil || st.IsDir() {
+		return agyStamp{}
 	}
+	return agyStamp{size: st.Size(), mtime: st.ModTime().UnixNano(), ok: true}
+}
+
+// agyIndex maps a conversation id to the workspace that owns it. A line in
+// history.jsonl wins when last_conversations.json names the same id. A file
+// that is present but cannot be read is left out of the cache, so the next
+// poll tries it again. ok is false when neither index could be read.
+func agyIndex(root string) (map[string]string, bool) {
+	histPath := filepath.Join(root, agyHistoryFile)
+	lastPath := filepath.Join(root, agyLastDir, agyLastFile)
+	hs, ls := agyFileStamp(histPath), agyFileStamp(lastPath)
 	agyHistMu.Lock()
 	defer agyHistMu.Unlock()
 	c := agyHistCache
-	if c.path != histPath || c.size != st.Size() || c.mtime != st.ModTime().UnixNano() {
-		ids, ok := loadAgyHistory(histPath)
+	if c.root == root && c.hist == hs && c.last == ls && c.ids != nil {
+		return c.ids, true
+	}
+	ids := map[string]string{}
+	failed := false
+	if hs.ok {
+		loaded, ok := loadAgyHistory(histPath)
 		if !ok {
-			return "", false
+			failed = true
+		} else {
+			for id, ws := range loaded {
+				ids[id] = ws
+			}
 		}
-		c = agyHist{path: histPath, size: st.Size(), mtime: st.ModTime().UnixNano(), ids: ids}
-		agyHistCache = c
 	}
-	ws := c.ids[id]
-	if ws == "" {
-		return "", false
+	if ls.ok {
+		loaded, ok := loadAgyLast(lastPath)
+		if !ok {
+			failed = true
+		} else {
+			for id, ws := range loaded {
+				if _, seen := ids[id]; !seen {
+					ids[id] = ws
+				}
+			}
+		}
 	}
-	return ws, true
+	if !hs.ok && !ls.ok {
+		return nil, false
+	}
+	if !failed {
+		agyHistCache = agyHist{root: root, hist: hs, last: ls, ids: ids}
+	}
+	return ids, true
 }
 
 // agyHistoryCap bounds the index read. The file is one line per prompt, and
@@ -157,6 +218,46 @@ func loadAgyHistory(path string) (map[string]string, bool) {
 	}
 	if err := sc.Err(); err != nil && err != io.EOF {
 		return nil, false
+	}
+	return ids, true
+}
+
+// agyLastCap bounds the current-conversation index. Past this the JSON object
+// is not parsed: a truncated object would drop the ids at the end, which are
+// the ones this file is read for.
+const agyLastCap = 32 << 20
+
+// loadAgyLast inverts cache/last_conversations.json, workspace path to
+// conversation id, into conversation id to workspace.
+func loadAgyLast(path string) (map[string]string, bool) {
+	dir := filepath.Dir(path)
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return nil, false
+	}
+	defer r.Close()
+	f, err := r.Open(filepath.Base(path))
+	if err != nil {
+		return nil, false
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, agyLastCap+1))
+	if err != nil || len(b) > agyLastCap {
+		return nil, false
+	}
+	var raw map[string]string
+	if err := json.Unmarshal(bytes.TrimPrefix(b, utf8BOM), &raw); err != nil {
+		return nil, false
+	}
+	ids := make(map[string]string, len(raw))
+	for ws, id := range raw {
+		if ws == "" || id == "" {
+			continue
+		}
+		if _, seen := ids[id]; seen {
+			continue
+		}
+		ids[id] = ws
 	}
 	return ids, true
 }

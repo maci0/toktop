@@ -109,9 +109,39 @@ func TestAgyFileWithoutUsageContributesNothing(t *testing.T) {
 	}
 }
 
+func TestAgyCountsALateUsageStepFromLastConversations(t *testing.T) {
+	store := withStore(t, "agy")
+	work, other := t.TempDir(), t.TempDir()
+	w := Watch("agy", work, time.Now())
+	if w == nil {
+		t.Fatal("agy watcher")
+	}
+	// history.jsonl has no conversationId for either transcript. The CLI
+	// records the current conversation per workspace in last_conversations.json.
+	append_(t, filepath.Join(store, "history.jsonl"),
+		`{"timestamp":1780203996276,"workspace":`+jsonPath(other)+`}`,
+		`{"timestamp":1780204120907,"workspace":`+jsonPath(other)+`,"conversationId":"history-only"}`)
+	writeAgySteps(t, store, "mine-id", true)
+	writeAgySteps(t, store, "other-id", true)
+	writeAgyLast(t, store, work, "mine-id", other, "other-id")
+	s := w.Poll()
+	if s.Input != 20 || s.Output != 8 || s.Thinking != 2 {
+		t.Fatalf("sample = %+v, want input 20 output 8 thinking 2", s)
+	}
+}
+
 // writeAgyTranscript lays out brain/<id>/.system_generated/logs/transcript.jsonl
 // and the history.jsonl line that records that conversation's workspace.
 func writeAgyTranscript(t *testing.T, store, id, workspace string, withUsage bool) {
+	t.Helper()
+	writeAgySteps(t, store, id, withUsage)
+	append_(t, filepath.Join(store, "history.jsonl"),
+		`{"timestamp":1780204120907,"workspace":`+jsonPath(workspace)+`,"conversationId":`+jsonPath(id)+`}`)
+}
+
+// writeAgySteps writes the transcript lines the CLI writes. They carry no
+// workspace. More than ownerScanLines of them precede any usage step.
+func writeAgySteps(t *testing.T, store, id string, withUsage bool) {
 	t.Helper()
 	dir := filepath.Join(store, "brain", id, ".system_generated", "logs")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -125,8 +155,21 @@ func writeAgyTranscript(t *testing.T, store, id, workspace string, withUsage boo
 		lines = append(lines, `{"step_index":`+itoa(ownerScanLines+1)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:34:00Z","usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":6,"thoughtsTokenCount":2,"cachedContentTokenCount":5,"totalTokenCount":28}}`)
 	}
 	append_(t, filepath.Join(dir, "transcript.jsonl"), lines...)
-	append_(t, filepath.Join(store, "history.jsonl"),
-		`{"timestamp":1780204120907,"workspace":`+jsonPath(workspace)+`,"conversationId":`+jsonPath(id)+`}`)
+}
+
+// writeAgyLast writes cache/last_conversations.json, workspace path to the
+// conversation id the CLI last used there.
+func writeAgyLast(t *testing.T, store, workspace, id, otherWorkspace, otherID string) {
+	t.Helper()
+	dir := filepath.Join(store, "cache")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := "{\n  " + jsonPath(workspace) + ": " + jsonPath(id) +
+		",\n  " + jsonPath(otherWorkspace) + ": " + jsonPath(otherID) + "\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "last_conversations.json"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestGrokUsageIsThisProject(t *testing.T) {
