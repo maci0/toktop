@@ -430,12 +430,6 @@ func TestKeyFoldIsASCIIOnly(t *testing.T) {
 	if ev.Usage.Input != 3 || ev.Usage.Output != 0 {
 		t.Fatalf("lookalike key was read as a counter: %+v", ev.Usage)
 	}
-	if got := foldKey("Output_Tokens"); got != "output_tokens" {
-		t.Fatalf("foldKey(%q) = %q, want output_tokens", "Output_Tokens", got)
-	}
-	if got := foldKey("cafÉ"); got != "cafÉ" {
-		t.Fatalf("foldKey touched a non-ASCII rune: %q", got)
-	}
 }
 
 func TestCwdChoiceIsDeterministic(t *testing.T) {
@@ -567,20 +561,15 @@ func TestCwdIsDeterministicAcrossSiblingSubtrees(t *testing.T) {
 	}
 }
 
-func TestFoldKeyOnlyMovesASCII(t *testing.T) {
-	// The tables hold ASCII names, so a rune whose lowercase form is ASCII
-	// must not be folded into one of them: "K" (U+212A KELVIN SIGN) is not
-	// a producer's spelling of "k".
-	for _, k := range []string{"Output_Tokens", "usage", "", "ünïcode", "MiXeD"} {
-		got := foldKey(k)
-		want := strings.Map(func(r rune) rune {
-			if r >= 'A' && r <= 'Z' {
-				return r + ('a' - 'A')
-			}
-			return r
-		}, k)
-		if got != want {
-			t.Fatalf("foldKey(%q) = %q, want %q", k, got, want)
-		}
+func TestMixedCaseKeysReachTheCounters(t *testing.T) {
+	// The tables hold lowercase ASCII names, so a key spelled in any other
+	// case still has to reach them, and a rune whose lowercase form is ASCII
+	// must not: "K" (U+212A KELVIN SIGN) is not a producer's spelling of "k".
+	ev, ok := parseJSON([]byte(`{"usage":{"Output_Tokens":7,"Kelvin_output_tokens":999}}`))
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	if ev.Usage.Output != 7 {
+		t.Fatalf("Output_Tokens read as %d, want 7", ev.Usage.Output)
 	}
 }

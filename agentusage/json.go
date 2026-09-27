@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"math"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Transcript JSON is walked by key rather than modeled per agent: envelopes
@@ -149,7 +151,7 @@ func walk(node any, ev *jsonEvent, depth int) {
 			cwdValue string
 		)
 		for k, child := range v {
-			lower := foldKey(k)
+			lower := core.FoldASCII(k)
 			if str, isString := child.(string); isString {
 				if str != "" && cwdKeys[lower] && (cwdKey == "" || k < cwdKey) {
 					cwdKey, cwdValue = k, str
@@ -199,46 +201,6 @@ func isNumberKey(lower string) bool {
 // utf8BOM is the byte-order mark a transcript may open a record with. A
 // package-level slice so trimming it costs no allocation per line.
 var utf8BOM = []byte{0xef, 0xbb, 0xbf}
-
-// foldKey lowercases a JSON key for the tables above, which hold ASCII names
-// only. Folding with strings.ToLower would also fold runes whose lowercase
-// form is ASCII: U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE) becomes "i"
-// and U+212A (KELVIN SIGN) becomes "k", so a key spelled in either would
-// satisfy an entry like "input_tokens" that its producer never wrote. Only
-// the ASCII letters move; every byte of a multi-byte rune is left alone.
-//
-// A key that is already folded, which is nearly every key in every envelope
-// these agents write, is returned as it came in: walk asks for this once per
-// key of every record, and a copy per key is the allocation this path is
-// measured on.
-func foldKey(k string) string {
-	for i := 0; i < len(k); i++ {
-		if k[i] >= 'A' && k[i] <= 'Z' {
-			return foldUpperASCII(k)
-		}
-	}
-	return k
-}
-
-// foldUpperASCII is foldKey's path for a key that does carry an uppercase
-// letter. Short keys fold in a stack buffer; only an unusually long one
-// allocates.
-func foldUpperASCII(k string) string {
-	var stack [64]byte
-	var b []byte
-	if len(k) <= len(stack) {
-		b = stack[:len(k)]
-	} else {
-		b = make([]byte, len(k))
-	}
-	copy(b, k)
-	for i := range b {
-		if c := b[i]; c >= 'A' && c <= 'Z' {
-			b[i] = c + ('a' - 'A')
-		}
-	}
-	return string(b)
-}
 
 // assign records a counter, keeping the largest value seen for that field on
 // this line: agents sometimes repeat a total in a nested summary.

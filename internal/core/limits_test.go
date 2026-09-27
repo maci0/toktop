@@ -28,6 +28,24 @@ func TestSatCoercions(t *testing.T) {
 	}
 }
 
+func TestSatAddU64(t *testing.T) {
+	tests := []struct {
+		a, b, want uint64
+	}{
+		{0, 0, 0},
+		{5, 7, 12},
+		{math.MaxUint64, 0, math.MaxUint64},
+		{math.MaxUint64, 1, math.MaxUint64}, // must saturate, not wrap to 0
+		{0, math.MaxUint64, math.MaxUint64},
+		{1 << 40, 1 << 40, 1 << 41},
+	}
+	for _, tc := range tests {
+		if got := SatAddU64(tc.a, tc.b); got != tc.want {
+			t.Errorf("SatAddU64(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 func TestContainsAny(t *testing.T) {
 	if !ContainsAny("vllm:requests_running", "running", "waiting") {
 		t.Error("matching substring not found")

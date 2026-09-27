@@ -112,19 +112,11 @@ func satSub(a, b uint64) uint64 {
 }
 
 // satAdd4 adds four page counts without wrapping: a wrapping sum turns a
-// huge reading into a small, plausible-looking byte count. satAdd already
-// saturates at ^uint64(0) on the first overflow, so no further check here can
+// huge reading into a small, plausible-looking byte count. SatAddU64 already
+// saturates at MaxUint64 on the first overflow, so no further check here can
 // fire.
 func satAdd4(a, b, c, d uint64) uint64 {
-	return satAdd(satAdd(a, b), satAdd(c, d))
-}
-
-func satAdd(a, b uint64) uint64 {
-	s := a + b
-	if s < a {
-		return ^uint64(0)
-	}
-	return s
+	return core.SatAddU64(core.SatAddU64(a, b), core.SatAddU64(c, d))
 }
 
 // pagesToBytes converts a page count to bytes, saturating so the multiply

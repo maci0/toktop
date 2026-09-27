@@ -191,7 +191,7 @@ func procLine(p core.ProviderSnapshot) string {
 	var parts []string
 	var bytes uint64
 	for _, mm := range p.Models {
-		bytes = satAddU64(bytes, mm.SizeVRAM)
+		bytes = core.SatAddU64(bytes, mm.SizeVRAM)
 	}
 	if bytes > 0 {
 		parts = append(parts, "mem "+humanBytes(bytes))
@@ -214,15 +214,6 @@ func procLine(p core.ProviderSnapshot) string {
 		return ""
 	}
 	return styleDim.Render(strings.Join(parts, " · "))
-}
-
-// satAddU64 adds saturating at MaxUint64: a wrapped sum of two engine-reported
-// VRAM sizes would read as a small allocation instead of "full".
-func satAddU64(a, b uint64) uint64 {
-	if b > ^uint64(0)-a {
-		return ^uint64(0)
-	}
-	return a + b
 }
 
 // probeReadout is the one-line outcome of the last probe, for the views that

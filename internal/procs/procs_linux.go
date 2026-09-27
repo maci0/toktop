@@ -6,6 +6,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 func init() {
@@ -83,24 +85,11 @@ func procStatCPUAndRSS(stat string) (ticks uint64, rssBytes uint64) {
 			stime, _ = strconv.ParseUint(rest[start:i], 10, 64)
 		case 24:
 			pages, _ = strconv.ParseUint(rest[start:i], 10, 64)
-			return satAddTicks(utime, stime), pagesToBytes(pages)
+			return core.SatAddU64(utime, stime), pagesToBytes(pages)
 		}
 		field++
 	}
-	return satAddTicks(utime, stime), pagesToBytes(pages)
-}
-
-// satAddTicks adds two jiffy counters saturating at MaxUint64, the rule
-// every other counter sum in the tree follows (core.SatAddPos, sysmon.satAdd,
-// ui.satAddU64; agentusage.satAdd saturates too, at its own token ceiling). A
-// wrapped sum reads as a process that used no CPU at all, and the next
-// sample's delta then covers two intervals while the elapsed time covers one,
-// halving the reported percentage.
-func satAddTicks(a, b uint64) uint64 {
-	if b > ^uint64(0)-a {
-		return ^uint64(0)
-	}
-	return a + b
+	return core.SatAddU64(utime, stime), pagesToBytes(pages)
 }
 
 // pagesToBytes converts a /proc/pid/stat RSS page count to bytes. A page
