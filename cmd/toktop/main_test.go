@@ -1175,6 +1175,24 @@ func TestRunUpdateInterrupted(t *testing.T) {
 	}
 }
 
+// The live dashboard quits on q and Ctrl+C at 0, but a SIGTERM reaches it
+// through the run context instead: main's NotifyContext replaced that signal's
+// default disposition, so a process that ignored the context stayed on screen
+// with every backend canceled behind it. The signal is the same one --once and
+// toktop update already exit 130 on, and the help screen documents it.
+func TestTUIExitOnCanceledContext(t *testing.T) {
+	live, cancelLive := context.WithCancel(context.Background())
+	defer cancelLive()
+	if code, settled := tuiExit(live); settled || code != 0 {
+		t.Fatalf("tuiExit(live ctx) = %d, %t; want 0, false", code, settled)
+	}
+	cancelLive()
+	code, settled := tuiExit(live)
+	if !settled || code != 130 {
+		t.Fatalf("tuiExit(canceled ctx) = %d, %t; want 130, true", code, settled)
+	}
+}
+
 func TestInformationalCommandsRejectExtraArguments(t *testing.T) {
 	for _, tt := range []struct {
 		name string

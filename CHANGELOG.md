@@ -132,6 +132,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   stamp used to shorten the span, or turn it negative and drop the rate
   entirely, so an agent that reported 80 tok/s a moment ago could read as
   having no rate at all.
+- A `SIGTERM` stops the live dashboard instead of leaving it on screen. The
+  run context carries the signal, and the context's default dispositions were
+  replaced, so a process that watched only for keyboard input had nothing left
+  to stop it: the dashboard kept painting the last snapshot it was given while
+  every collector behind it had already stopped. It now exits 130, the code
+  `--once` and `toktop update` already return for the same signal, and the
+  terminal is restored on the way out.
 
 - Failures that reported "nothing happened" now reach the audit log. A crush
   or opencode store that exists and cannot be read, a dsh transcript frame

@@ -384,7 +384,7 @@ func main() {
 		return
 	}
 
-	runTUI(ctx, cfg, ch, !f.noReload)
+	os.Exit(runTUI(ctx, cfg, ch, !f.noReload))
 }
 
 // startProbeTicker fires prober once straight away and then every d, until
@@ -411,8 +411,10 @@ func startProbeTicker(ctx context.Context, prober func(), d time.Duration) {
 }
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the
-// executable on disk is rebuilt (dev hot-reload).
-func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotReload bool) {
+// executable on disk is rebuilt (dev hot-reload). It returns the process exit
+// code: 0 for the q and Ctrl+C quit, 130 for a signal that reached the run
+// context, 1 for a dashboard that could not run.
+func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotReload bool) int {
 	self, selfErr := os.Executable()
 	var (
 		mu       sync.Mutex
@@ -447,7 +449,12 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 		}
 	}
 
-	prog := tea.NewProgram(ui.New(cfg, ch), tea.WithAltScreen())
+	// WithContext is what makes a signal from outside the process stop the
+	// dashboard. main registers SIGINT and SIGTERM on ctx, which replaces
+	// their default dispositions, so without it a `kill` left the program on
+	// screen with every backend already canceled behind it: no input could
+	// reach it on a terminal that had scrolled away, and it never exited.
+	prog := tea.NewProgram(ui.New(cfg, ch), tea.WithAltScreen(), tea.WithContext(ctx))
 	mu.Lock()
 	current = prog
 	mu.Unlock()
@@ -456,13 +463,31 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 	}
 
 	if _, err := prog.Run(); err != nil {
+		if code, settled := tuiExit(ctx); settled {
+			return code
+		}
 		fmt.Fprintln(os.Stderr, "toktop:", err)
-		os.Exit(1)
+		return 1
 	}
 	if reloaded.Load() {
 		fmt.Fprintln(os.Stderr, "toktop: binary changed, restarting…")
 		selfreload.Restart(self, os.Args, os.Environ())
 	}
+	return 0
+}
+
+// tuiExit maps a canceled run context onto toktop's exit code, and reports
+// whether it settles the run at all. A canceled ctx is the one main's signal
+// handler writes to: the dashboard was stopped from outside, and that is the
+// 130 the --once and update paths already use for the same signal rather than
+// the 1 a failure gets. A hot-reload Quit is not a cancellation (the ctx is
+// untouched there, and the reload is what follows), and a dashboard that quit
+// on q or Ctrl+C leaves the ctx live, so both fall through to the 0.
+func tuiExit(ctx context.Context) (code int, settled bool) {
+	if ctx.Err() == nil {
+		return 0, false
+	}
+	return 130, true
 }
 
 // errInterrupted reports ctx cancellation while waiting for frames, so the

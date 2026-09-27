@@ -181,8 +181,9 @@ Exit codes:
   0    success, including a reader such as head closing stdout early
   1    runtime failure (no telemetry arrived, a write or the update failed)
   2    usage error (unknown flag, command or ssh:// target, bad value)
-  130  interrupted with Ctrl+C (--once and toktop update; the live dashboard
-       quits on q or Ctrl+C instead, which is a clean 0)
+  130  interrupted (--once, toktop update, and the live dashboard when
+       SIGINT or SIGTERM stops it; the dashboard's own q and Ctrl+C are a
+       clean 0)
 
 Results go to stdout (the rendered frame, the JSON report, the version, the
 release URL); progress, warnings and errors go to stderr, so a script can

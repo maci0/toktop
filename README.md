@@ -577,9 +577,9 @@ a usage error that says so. Results (the rendered frame, the JSON report, the
 version, the release URL) go to stdout and progress, warnings and errors to
 stderr, so `toktop --once >frame.txt` and `toktop version` stay pipeable.
 Exit codes: `0`
-success, `1` runtime failure, `2` usage error, `130` interrupted (`--once` and
-`toktop update`; the live dashboard quits on `q` or Ctrl+C, which is a clean
-`0`).
+success, `1` runtime failure, `2` usage error, `130` interrupted (`--once`,
+`toktop update`, and the live dashboard when SIGINT or SIGTERM stops it; the
+dashboard's own `q` and Ctrl+C are a clean `0`).
 
 ## Scripting
 
