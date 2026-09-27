@@ -230,8 +230,13 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
     <dt><kbd>p</kbd></dt><dd>probe every engine</dd>
     <dt><kbd>t</kbd></dt><dd>toggle compressed timescale</dd>
     <dt><kbd>a</kbd></dt><dd>focus engines or agents</dd>
+    <dt><kbd>?</kbd></dt><dd>key help, in the app</dd>
+    <dt><kbd>esc</kbd></dt><dd>back to engines, or quit</dd>
     <dt><kbd>q</kbd></dt><dd>quit</dd>
   </dl>
+  <p class="dim">The footer carries the same list, and drops the keys that
+  have nothing to act on: no engines yet means no probe and nothing to
+  swap to.</p>
   </section>
 
   <section id="feed" aria-labelledby="feed-heading">

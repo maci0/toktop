@@ -34,15 +34,20 @@ type Config struct {
 }
 
 type Model struct {
-	cfg             Config
-	ch              <-chan core.Snapshot
-	snap            core.Snapshot
-	w, h            int
-	ready           bool
-	paused          bool
-	help            bool
-	focusAgents     bool // agents get the panel estate; engines keep header, charts, strip
-	clock           time.Time
+	cfg         Config
+	ch          <-chan core.Snapshot
+	snap        core.Snapshot
+	w, h        int
+	ready       bool
+	paused      bool
+	help        bool
+	focusAgents bool // agents get the panel estate; engines keep header, charts, strip
+	clock       time.Time
+	// tickAt is the newest wall time bubbletea delivered, which keeps
+	// advancing while clock is frozen by a pause. Timers that must keep
+	// running read it, not clock: a notice timed against clock expires on
+	// its very next tick once the frame has been paused for a while.
+	tickAt          time.Time
 	aggMax          float64
 	aggLast         float64 // most recent aggregate output rate across engines
 	chartCompressed bool
@@ -59,15 +64,22 @@ const noticeTTL = 3 * time.Second
 // notice sets the transient footer explanation for a key press that had no
 // effect. The footer hides keys with nothing to act on, but a user who
 // remembers them from another run still presses them; silence reads as a
-// dropped keystroke, and the reason is what they are missing.
+// dropped keystroke, and the reason is what they are missing. It is stamped
+// on the tick clock, not the display clock, so a pause does not age it out
+// before it has been read.
 func (m *Model) setNotice(s string) {
-	m.notice, m.noticeAt = s, m.clock
+	at := m.tickAt
+	if at.IsZero() {
+		at = m.clock
+	}
+	m.notice, m.noticeAt = s, at
 }
 
 func New(cfg Config, ch <-chan core.Snapshot) Model {
 	// The header clock only advances on ticks, so until the first one lands
 	// (~1s in) it must show the launch time rather than a zero-value midnight.
-	return Model{cfg: cfg, ch: ch, chartCompressed: chartCompressedDefault, clock: time.Now()}
+	now := time.Now()
+	return Model{cfg: cfg, ch: ch, chartCompressed: chartCompressedDefault, clock: now, tickAt: now}
 }
 
 // StaticFrame renders one snapshot for non-interactive output (--once).
@@ -137,6 +149,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
+		m.tickAt = time.Time(msg)
 		// A paused frame must be genuinely still: the header clock is the
 		// only element that kept changing every second, churning the screen
 		// for anyone pausing to read it with a screen reader or magnifier.
@@ -226,6 +239,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t", "T":
 			if len(m.snap.Providers) == 0 && len(m.snap.Agents) == 0 {
 				m.setNotice("t: no throughput to plot yet")
+				return m, nil
+			}
+			// The compact strip draws no chart, so flipping the timescale there
+			// changes nothing on screen. Same rule as the hidden keys in
+			// renderMinimal: say so rather than read as a dropped keystroke.
+			if m.w < minDashW || m.h < minDashH {
+				m.setNotice("t: enlarge window, the timescale has no chart here")
 				return m, nil
 			}
 			m.chartCompressed = !m.chartCompressed

@@ -1895,6 +1895,58 @@ func TestInertKeyNoticeInCompactStrip(t *testing.T) {
 	}
 }
 
+// The notice is a beat measured in wall time, not on the display clock: a
+// pause freezes clock, so a notice raised while paused used to age out on the
+// very next tick and read as a dropped keystroke, which is what it exists to
+// prevent.
+func TestInertKeyNoticeSurvivesAPause(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		m := New(Config{Version: "t", Prober: func() {}}, nil)
+		m.w, m.h, m.ready = 110, 36, true
+		nm, _ := m.Update(keyMsg(" ")) // pause: clock stops advancing
+		m = nm.(Model)
+
+		nm, _ = m.Update(keyMsg("p")) // nothing to probe
+		m = nm.(Model)
+		if m.notice == "" {
+			t.Fatal("p with nothing to act on set no notice")
+		}
+
+		// A second of wall time, with clock still where the pause left it.
+		nm, _ = m.Update(tickMsg(m.tickAt.Add(time.Second)))
+		m = nm.(Model)
+		if m.notice == "" {
+			t.Fatalf("notice expired 1s after the key press while paused: %q", m.notice)
+		}
+		if !strings.Contains(strip(m.renderFooter()), strip(m.notice)) {
+			t.Errorf("paused footer hides the notice:\n%s", strip(m.renderFooter()))
+		}
+
+		nm, _ = m.Update(tickMsg(m.tickAt.Add(noticeTTL)))
+		m = nm.(Model)
+		if m.notice != "" {
+			t.Errorf("notice %q outlived %s", m.notice, noticeTTL)
+		}
+	})
+}
+
+// t flips the throughput chart, which the compact strip does not draw, so on a
+// pane too small for the dashboard the key would otherwise change nothing.
+func TestTimescaleKeyExplainsItselfInCompactStrip(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	m.w, m.h, m.ready = 50, 24, true
+	nm, _ := m.Update(keyMsg("t"))
+	m = nm.(Model)
+	if !m.chartCompressed {
+		t.Error("t flipped the timescale on a pane with no chart")
+	}
+	out := strip(m.renderMinimal())
+	if !strings.Contains(out, "enlarge window") {
+		t.Errorf("compact strip does not explain an inert t:\n%s", out)
+	}
+}
+
 // With an engine attached these are not inert: t must still flip the
 // timescale and a must still reach the agents view.
 func TestLiveKeysStillWorkWithoutNotice(t *testing.T) {
