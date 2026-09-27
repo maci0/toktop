@@ -14,8 +14,8 @@ import (
 // Discovery is the result of one sweep over a remote host.
 type Discovery struct {
 	// Listening holds every port answering on the target, read from
-	// /proc/net/tcp(+6). On hardened kernels where that read is denied, it
-	// falls back to actively probing the well-known ports over the shell.
+	// /proc/net/tcp(+6). A read that fails or yields nothing falls back to
+	// actively probing the well-known ports over the shell.
 	Listening []int
 	// EnginePorts holds ports inferred from engine-looking processes: their
 	// --port flag when present, otherwise the engine's default. These catch
@@ -62,8 +62,8 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 		d.Listening = parseNetTCP(out)
 	}
 	if len(d.Listening) == 0 {
-		// Hardened kernels hide /proc/net/tcp from unprivileged readers; fall
-		// back to actively probing the well-known ports through the shell.
+		// An unreadable or empty /proc/net/tcp (hardened kernels hide it from
+		// unprivileged readers); fall back to probing the well-known ports.
 		out, err := c.Run(ctx, probeScript(wellKnown))
 		if err != nil {
 			return nil, fmt.Errorf("port probe failed: %w", err) // unreachable host: nothing else will work either

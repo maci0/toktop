@@ -36,9 +36,9 @@ func RedactHome(msg string) string {
 	} else {
 		msg = strings.ReplaceAll(msg, from, to)
 	}
-	// A message that ends at the home directory itself ("cannot chdir
-	// /home/me") carries the same account name as a path under it, and the
-	// separator-terminated match above leaves it untouched.
+	// A message that is exactly the home directory carries the same account
+	// name as a path under it, and the separator-terminated match above leaves
+	// it untouched. A longer message ending in the home path is not rewritten.
 	if msg == home {
 		return "~"
 	}

@@ -32,9 +32,9 @@ func init() {
 	})
 }
 
-// opencode keeps its sessions in SQLite rather than the JSONL every other
-// agent here writes: ~/.local/share/opencode/opencode.db, with one row per
-// message and the usage in a JSON column.
+// opencode keeps its sessions in SQLite, as crush does, rather than in the
+// JSONL the file adapters tail: ~/.local/share/opencode/opencode.db, with one
+// row per message and the usage in a JSON column.
 //
 //	session.directory  the working directory, which is the attribution key
 //	message.data       {"role":"assistant","tokens":{"output":324,"reasoning":52,…}}

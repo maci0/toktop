@@ -16,8 +16,8 @@ type identity struct {
 	mtimeNanos int64
 }
 
-// Watch polls the executable's identity and calls onChange exactly once per
-// rebuild. It never fires for the initial stat.
+// Watch polls the executable's identity and calls onChange once, the first
+// time it changes, then returns. It never fires for the initial stat.
 func Watch(ctx context.Context, exePath string, interval time.Duration, onChange func()) {
 	if interval <= 0 {
 		interval = time.Second

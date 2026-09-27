@@ -50,5 +50,3 @@ func (m Model) engineStateTitle(w, midIn int) string {
 	}
 	return title
 }
-
-// renderSystem is the two-row host strip: row 1 is live vitals (mem, gpus),

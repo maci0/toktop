@@ -13,8 +13,9 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// Target is one ssh-reachable host to monitor, fully resolved: explicit URL
-// fields win over ~/.ssh/config, which wins over defaults.
+// Target is one ssh-reachable host to monitor, fully resolved. Explicit URL
+// user, port and key win over ~/.ssh/config, which wins over defaults; a
+// HostName from config always replaces the URL host, as OpenSSH does.
 type Target struct {
 	User string
 	Host string
@@ -24,7 +25,8 @@ type Target struct {
 }
 
 // ParseTarget parses ssh://[user@]host[:port] and applies ~/.ssh/config
-// overrides for everything the URL leaves unset. A password in the URL is
+// overrides for everything the URL leaves unset. A key already on the target
+// skips the config lookup entirely. A password in the URL is
 // rejected: it would be visible in process listings, and this parser would
 // otherwise ignore it. A path, query, or fragment is rejected rather than
 // ignored.

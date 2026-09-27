@@ -22,8 +22,8 @@ import (
 const (
 	dshZstdSuffix = ".jsonl.zstd"
 	// dshHeaderBytes is enough for the opening header frame (one JSON
-	// object). A larger prefix is fine: extra complete frames are ignored
-	// when deciding ownership.
+	// object). A larger prefix is fine as long as the header comes first:
+	// the first frame naming a cwd decides ownership.
 	dshHeaderBytes = 64 << 10
 	// zstdBlockHeaderLen is the 3-byte Block_Header that precedes every
 	// block (RFC 8878 §3.1.1.2). Header.HeaderSize does not include it.

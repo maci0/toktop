@@ -142,8 +142,8 @@ func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
 // BrailleChart renders an area chart as braille dot-matrix, btop-style: every
 // terminal cell is a 2x4 dot grid, so a w*h chart resolves w*2 by h*4 dots -
 // far finer than the block ramp. Values fill upward from the baseline. Older
-// columns fade toward black; Grid columns draw a faint dotted baseline guide
-// through empty cells (used to mark timescale boundaries).
+// columns fade toward black; Grid columns draw a faint dotted guide on the
+// bottom row wherever the data leaves it empty (marking timescale boundaries).
 func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 	if w <= 0 || h <= 0 {
 		return ""

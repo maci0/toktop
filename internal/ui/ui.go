@@ -68,7 +68,7 @@ type Model struct {
 // the footer line. Long enough to read, short enough not to become the footer.
 const noticeTTL = 3 * time.Second
 
-// notice sets the transient footer explanation for a key press that had no
+// setNotice sets the transient footer explanation for a key press that had no
 // effect. The footer hides keys with nothing to act on, but a user who
 // remembers them from another run still presses them; silence reads as a
 // dropped keystroke, and the reason is what they are missing. It is stamped
@@ -417,7 +417,8 @@ func aggOutAt(s core.Snapshot, now time.Time) float64 {
 }
 
 // aggInAt is the input-side half of aggBothAt, for call sites needing one
-// direction only: same single AgentOwnTokPS pass, no duplicate scan.
+// direction only: it reuses aggBoth's single pass over the agent feed rather
+// than scanning again.
 func aggInAt(s core.Snapshot, now time.Time) float64 {
 	_, in := aggBothAt(s, now)
 	return in

@@ -353,7 +353,7 @@ const (
 // cannot be missing from the other two.
 type endpoint struct {
 	path    string
-	methods []string // methods answered; a GET registration also answers HEAD
+	methods []string // methods answered exactly; list HEAD explicitly to take it
 	handle  func(*Server, http.ResponseWriter, *http.Request)
 }
 

@@ -13,8 +13,8 @@ import (
 	"golang.org/x/term"
 )
 
-// defaultKeyPaths lists the private keys tried when nothing explicit is
-// configured, mirroring ssh's defaults.
+// defaultKeyPaths lists the per-user private keys tried after any explicitly
+// configured one, approximating ssh's default identities.
 func defaultKeyPaths() []string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -28,8 +28,9 @@ func defaultKeyPaths() []string {
 	return paths
 }
 
-// loadSigner reads one private key file. Encrypted keys are skipped (they
-// would block headless runs); use an agent or a passphrase-less key.
+// loadSigner reads one private key file. An encrypted key yields a named
+// error rather than a prompt, so a headless run never blocks; whether that
+// error aborts the auth chain or just drops the key is keyFileAuth's call.
 func loadSigner(path string) (ssh.Signer, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -42,10 +43,11 @@ func loadSigner(path string) (ssh.Signer, error) {
 	return s, err
 }
 
-// keyFileAuth builds an AuthMethod from one key file. required marks an
-// explicitly configured key (--ssh-key): its load failure must reach the
-// operator instead of degrading into a confusing generic auth rejection;
-// optional keys (the ~/.ssh defaults) may return an error the caller ignores.
+// keyFileAuth builds an AuthMethod from one key file. required marks the
+// target's own key (--ssh-key, or IdentityFile from ~/.ssh/config): its load
+// failure must reach the operator instead of degrading into a confusing
+// generic auth rejection; the ~/.ssh defaults are best effort and may return
+// an error the caller ignores.
 func keyFileAuth(path string, required bool) (ssh.AuthMethod, error) {
 	if path == "" {
 		return nil, nil

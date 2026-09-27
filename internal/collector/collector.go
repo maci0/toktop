@@ -62,7 +62,7 @@ type Collector struct {
 	probeInflight map[string]bool
 	probeBackoff  map[string]time.Time
 
-	now func() time.Time // snapshot/probe/event stamps; nil means time.Now
+	now func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
 }
 
 // New polls providers every interval. Host vitals come from sysmon; call

@@ -23,7 +23,7 @@ var (
 	platformLoad     func(*core.SysSample)
 	platformTemps    func() []core.TempReading
 	platformCPUModel func() string
-	platformHost     func(*core.SysSample) // os name, kernel, uptime, drivers
+	platformHost     func(*core.SysSample) // os name, kernel, uptime, drivers, NPUs
 )
 
 // Sample collects a best-effort snapshot of host vitals; missing sources are

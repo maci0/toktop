@@ -62,7 +62,7 @@ var (
 		"cwd": true, "working_directory": true, "workingdirectory": true,
 		"workdir": true, "project_dir": true, "projectdir": true,
 	}
-	// Payload keys hold user, model, or tool text. Counters live beside
+	// Payload keys hold user or tool text. Counters live beside
 	// these fields, not inside them; descending would inspect prompts
 	// and could pick a cwd or a number out of user content.
 	payloadKeys = map[string]bool{

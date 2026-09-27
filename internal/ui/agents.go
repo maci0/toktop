@@ -100,8 +100,9 @@ func agentMiniLine(r core.AgentRate) string {
 	return line
 }
 
-// renderAgentsOnly is the view for a machine with agents but no engines: the
-// same dashboard chrome (header, throughput, host strip) with the agents
+// renderAgentsOnly is the agents view: a machine with agents but no engines
+// gets it automatically, and `a` reaches it with engines present. The same
+// dashboard chrome (header, throughput, host strip) with the agents
 // themselves in place of the backend panels. It is a real dashboard, not a
 // placeholder, because for someone driving claude or codex all day this is
 // the whole picture.

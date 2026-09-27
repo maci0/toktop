@@ -87,8 +87,9 @@ type ProviderSnapshot struct {
 // MaxEventTokens bounds one token count on one AgentEvent. Real usage never
 // approaches it; a sender claiming more is lying or broken, and every
 // producer of an event (the ingest endpoint, a transcript reader) clamps to
-// the same ceiling, so a value above it is refused rather than summed: a
-// retained window adding MaxInt64 values wraps its own totals negative. One
+// the same ceiling, so a value above it is refused rather than kept: the
+// retained window's totals are saturated, so an unclamped MaxInt64 would
+// survive into Tokens and report a rate billions of times too high. One
 // constant, because two producers drifting apart would let a value in that
 // the other would have refused.
 const MaxEventTokens = 1 << 40

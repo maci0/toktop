@@ -65,8 +65,9 @@ func boottimeUptime() time.Duration {
 }
 
 // boottimeWallFallback is the pre-CLOCK_MONOTONIC path: kern.boottime is a
-// wall-clock timeval, so a stepped clock still moves the reading. Used only
-// when clock_gettime is unavailable. Negative results collapse to zero.
+// wall-clock timeval, so a stepped clock still moves the reading. Used when
+// clock_gettime errors or returns a non-positive duration. Negative results
+// collapse to zero.
 func boottimeWallFallback() time.Duration {
 	b, err := unix.SysctlRaw("kern.boottime")
 	if err != nil || len(b) < 8 {

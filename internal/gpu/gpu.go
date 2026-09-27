@@ -3,9 +3,9 @@
 // NVIDIA/AMD/Intel are read through their vendor CLIs (nvidia-smi,
 // rocm-smi, xpu-smi). We shell out deliberately: NVML and Level Zero have
 // no stable in-process Go API without cgo-linking driver libraries, and the
-// vendor CLIs are their documented interfaces. A found tool is remembered
-// for the process lifetime; a miss is retried so a driver that appears after
-// start is not blank for the whole session.
+// vendor CLIs are their documented interfaces. A resolved path is reused
+// for toolHitTTL and a miss is retried on the shorter toolRetry, so a driver
+// that appears or moves after start is picked up mid-session.
 package gpu
 
 import (

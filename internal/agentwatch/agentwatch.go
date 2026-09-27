@@ -61,7 +61,7 @@ type Watcher struct {
 	readEvery     time.Duration
 	// listAgents lists running agent processes. Nil means agentusage.Discover.
 	listAgents func() []agentusage.Process
-	now        func() time.Time // event stamps; nil means time.Now
+	now        func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
 	// onError surfaces a condition the operator must see that Run cannot
 	// return. Nil disables reporting.
 	onError func(error)
@@ -135,9 +135,10 @@ func (w *Watcher) engineError(err error) {
 // transcript event lands on the same timeline as the sample that carried it.
 func (w *Watcher) instant() time.Time { return w.now() }
 
-// Run follows agents until the context is canceled. Call LoadDefinitions
-// before Run so a malformed definitions file is reported where the operator
-// can see it, not swallowed inside a goroutine behind the alt screen.
+// Run follows agents until the context is canceled. Load the agent
+// definitions (agentusage.LoadDefinitions, as main does) before Run so a
+// malformed definitions file is reported where the operator can see it, not
+// swallowed inside a goroutine behind the alt screen.
 func (w *Watcher) Run(ctx context.Context) {
 	if w.discoverEvery <= 0 {
 		w.discoverEvery = defaultDiscoverEvery
@@ -451,8 +452,8 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 
 // eventTokens bounds one event's token count to core.MaxEventTokens, the same
 // ceiling the HTTP ingest path applies. A transcript file's accumulators
-// saturate at MaxInt64, and the retained agent window sums this field across
-// events, so an unclamped value wraps the agent total negative.
+// saturate at MaxInt64, and such a value would land in the agent total and
+// every rate derived from it.
 func eventTokens(n int) int64 {
 	if n <= 0 || int64(n) > core.MaxEventTokens {
 		return 0

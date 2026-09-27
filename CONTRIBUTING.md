@@ -101,16 +101,23 @@ magick docs/images/dashboard.png -strip -resize 1920x -quality 82 \
   site/public/dashboard.webp
 magick docs/images/dashboard.png -strip -resize 1280x -quality 82 \
   site/public/dashboard-1280.webp
+magick docs/images/dashboard.png -strip -resize 768x -quality 82 \
+  site/public/dashboard-768.webp
 magick docs/images/dashboard.png -strip -resize 1920x .scratch/hero-1920.png
 magick docs/images/dashboard.png -strip -resize 1280x .scratch/hero-1280.png
+magick docs/images/dashboard.png -strip -resize 768x .scratch/hero-768.png
 avifenc -q 50 -s 2 -y 444 --ignore-exif --ignore-xmp \
   .scratch/hero-1920.png site/public/dashboard.avif
 avifenc -q 50 -s 2 -y 444 --ignore-exif --ignore-xmp \
   .scratch/hero-1280.png site/public/dashboard-1280.avif
+avifenc -q 50 -s 2 -y 444 --ignore-exif --ignore-xmp \
+  .scratch/hero-768.png site/public/dashboard-768.avif
 ```
 
-AVIF is what browsers that speak it download (about half the WebP); 1280w
-covers phones and 1x desktops. The PNG stays at capture resolution for
+AVIF is what browsers that speak it download (about half the WebP). The three
+widths match the `srcset` in `site/worker.js`: 768w is the ~720px slot,
+1280w covers phones at 3x and desktops at 1x, 1920w is the 2x desktop. The
+PNG stays at capture resolution for
 share cards. `bun test site/` pins the HTML transfer sizes and the AVIF/WebP
 byte ceilings, so a recapture that blows the budget fails there.
 
