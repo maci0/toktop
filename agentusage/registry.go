@@ -3,6 +3,11 @@
 
 // Package agentusage reports the token usage AI coding agents record on disk.
 //
+// Typical use: LoadDefinitions, Discover running agents, Watch each process
+// (or Process.Watch), then Poll or Run for Sample values. EnableOpenCodeDB
+// opts into opencode's machine-wide SQLite store; crush is read whenever the
+// sqlite build tag is on.
+//
 // An agent is read one of two ways. Transcript agents (claude, qwen, dsh,
 // clanker, copilot, codex) appear in the adapters table, each naming where
 // its logs live under a working directory and how one line becomes a Sample.
@@ -18,9 +23,35 @@
 // transcripts of the one working in a directory, so a caller can take a
 // Sample on an interval without knowing which agent is underneath.
 //
+// The agent registry is process-wide, since one process reports one set of
+// agents. RegisterSpec and UnregisterSpec add and remove an adapter, and
+// LoadDefinitions and ResetDefinitions do the same for a definitions file, so
+// a program that teaches this package an agent can take it back out.
+//
 // The crush and opencode sources need a SQLite driver, so they exist only
 // under the sqlite build tag. Without it the package still compiles, and
 // Supported reports those agents unreadable.
+//
+// Agents differ in what they print to stdout: some report token usage as they
+// stream, some only at exit, some never. They agree on something else, though,
+// which is that they keep a structured session transcript, and that transcript
+// carries per-message usage with timestamps. Tailing it gives a live rate
+// without root, without intercepting anyone's network traffic, and without
+// asking the agent to behave differently.
+//
+// The design constraints that shape everything here:
+//
+//   - Only count usage after the watcher attached. Session transcripts persist
+//     across runs, so the watcher records where each file ended when it
+//     attached and reads only what is appended after that. Database-backed
+//     agents (opencode, crush) use the since argument the same way; file
+//     transcripts are always tailed from their attach-time end.
+//   - Attribute the transcript to the right process. Each adapter ties its
+//     files to a working directory: recorded per record, read from the
+//     session header, or implicit because the log lives inside the project
+//     directory itself (clanker), so the cwd is the key.
+//   - Never invent a number. An agent whose transcript cannot be found, parsed,
+//     or attributed simply reports nothing, and the dashboard shows no rate.
 package agentusage
 
 import (

@@ -23,34 +23,6 @@ type Discovery struct {
 	EnginePorts []int
 }
 
-// ForwardSet returns the ports worth tunneling: engine hints always, plus
-// well-known-candidate ports that are actually listening. Random other
-// listeners (sshd, printers) are ignored.
-func (d *Discovery) ForwardSet(wellKnown []int) []int {
-	seen := map[int]bool{}
-	var out []int
-	add := func(p int) {
-		if p > 0 && !seen[p] {
-			seen[p] = true
-			out = append(out, p)
-		}
-	}
-	for _, p := range d.EnginePorts {
-		add(p)
-	}
-	wk := map[int]bool{}
-	for _, p := range wellKnown {
-		wk[p] = true
-	}
-	for _, p := range d.Listening {
-		if wk[p] {
-			add(p)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
 // Discover sweeps a remote host for inference engines over an established
 // connection.
 func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, error) {
@@ -82,6 +54,34 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 		d.EnginePorts = enginePorts(parseProcScan(out))
 	}
 	return d, nil
+}
+
+// ForwardSet returns the ports worth tunneling: engine hints always, plus
+// well-known-candidate ports that are actually listening. Random other
+// listeners (sshd, printers) are ignored.
+func (d *Discovery) ForwardSet(wellKnown []int) []int {
+	seen := map[int]bool{}
+	var out []int
+	add := func(p int) {
+		if p > 0 && !seen[p] {
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	for _, p := range d.EnginePorts {
+		add(p)
+	}
+	wk := map[int]bool{}
+	for _, p := range wellKnown {
+		wk[p] = true
+	}
+	for _, p := range d.Listening {
+		if wk[p] {
+			add(p)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 const netTCPScript = "(cat /proc/net/tcp 2>/dev/null; cat /proc/net/tcp6 2>/dev/null; true)"

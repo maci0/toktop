@@ -1,39 +1,6 @@
 // Copyright (C) 2026 Marcel W. Wysocki
 // SPDX-License-Identifier: MIT
 
-// Package agentusage reads live token counts out of the transcripts agent CLIs
-// already write to disk.
-//
-// Typical use: LoadDefinitions, Discover running agents, Watch each process
-// (or Process.Watch), then Poll or Run for Sample values. EnableOpenCodeDB
-// opts into opencode's machine-wide SQLite store; crush is read whenever the
-// sqlite build tag is on.
-//
-// The agent registry is process-wide, since one process reports one set of
-// agents. RegisterSpec and UnregisterSpec add and remove an adapter, and
-// LoadDefinitions and ResetDefinitions do the same for a definitions file, so
-// a program that teaches this package an agent can take it back out.
-//
-// Agents differ in what they print to stdout: some report token usage as they
-// stream, some only at exit, some never. They agree on something else, though,
-// which is that they keep a structured session transcript, and that transcript
-// carries per-message usage with timestamps. Tailing it gives a live rate
-// without root, without intercepting anyone's network traffic, and without
-// asking the agent to behave differently.
-//
-// The design constraints that shape everything here:
-//
-//   - Only count usage after the watcher attached. Session transcripts persist
-//     across runs, so the watcher records where each file ended when it
-//     attached and reads only what is appended after that. Database-backed
-//     agents (opencode, crush) use the since argument the same way; file
-//     transcripts are always tailed from their attach-time end.
-//   - Attribute the transcript to the right process. Each adapter ties its
-//     files to a working directory: recorded per record, read from the
-//     session header, or implicit because the log lives inside the project
-//     directory itself (clanker), so the cwd is the key.
-//   - Never invent a number. An agent whose transcript cannot be found, parsed,
-//     or attributed simply reports nothing, and the dashboard shows no rate.
 package agentusage
 
 import (
@@ -115,44 +82,6 @@ type fileStamp struct {
 	size       int64
 }
 
-// Tool is the agent this watcher follows.
-func (w *Watcher) Tool() string {
-	if w == nil {
-		return ""
-	}
-	return w.tool
-}
-
-// Dir is the working directory this watcher attributes usage to.
-func (w *Watcher) Dir() string {
-	if w == nil {
-		return ""
-	}
-	return w.dir
-}
-
-// Err reports whether this watcher can read anything, and is the reason to
-// show a caller who asked for one it cannot have.
-//
-// A watcher is either usable or nil: Watch never returns one that is bound to
-// nothing, so Err is nil on every live watcher and matches
-// [ErrUnsupportedTool] on the nil one. Like Tool and Dir it is safe to call on
-// the result without a nil check:
-//
-//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
-//		return w.Err() // the agent is known, but keeps nothing readable here
-//	}
-//
-// A nil watcher means the agent is unknown here, or keeps transcripts no build
-// of this package can read, or has a definition naming no roots. The error says
-// only that: the caller already knows which agent it asked about.
-func (w *Watcher) Err() error {
-	if w != nil {
-		return nil
-	}
-	return fmt.Errorf("%w: no usage source is registered for this agent", ErrUnsupportedTool)
-}
-
 // Watch starts reading usage for one agent working in one directory.
 //
 // tool is the agent name (claude, codex, crush, …). dir is the working
@@ -227,6 +156,44 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 	// same rescanEvery freshness window.
 	w.scanned = time.Time{}
 	return w
+}
+
+// Tool is the agent this watcher follows.
+func (w *Watcher) Tool() string {
+	if w == nil {
+		return ""
+	}
+	return w.tool
+}
+
+// Dir is the working directory this watcher attributes usage to.
+func (w *Watcher) Dir() string {
+	if w == nil {
+		return ""
+	}
+	return w.dir
+}
+
+// Err reports whether this watcher can read anything, and is the reason to
+// show a caller who asked for one it cannot have.
+//
+// A watcher is either usable or nil: Watch never returns one that is bound to
+// nothing, so Err is nil on every live watcher and matches
+// [ErrUnsupportedTool] on the nil one. Like Tool and Dir it is safe to call on
+// the result without a nil check:
+//
+//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
+//		return w.Err() // the agent is known, but keeps nothing readable here
+//	}
+//
+// A nil watcher means the agent is unknown here, or keeps transcripts no build
+// of this package can read, or has a definition naming no roots. The error says
+// only that: the caller already knows which agent it asked about.
+func (w *Watcher) Err() error {
+	if w != nil {
+		return nil
+	}
+	return fmt.Errorf("%w: no usage source is registered for this agent", ErrUnsupportedTool)
 }
 
 // SetNow overrides the clock that stamps published samples, and with them the

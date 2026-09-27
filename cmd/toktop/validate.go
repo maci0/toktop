@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
-	"github.com/maci0/toktop/internal/ingest"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // Mode and environment validation, and the warnings for flags and env vars
@@ -125,8 +125,8 @@ func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 			}
 		}
 	}
-	if noIngest && os.Getenv(ingest.LogLevelEnv) != "" {
-		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --no-ingest\n", ingest.LogLevelEnv)
+	if noIngest && os.Getenv(logcfg.LevelEnv) != "" {
+		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --no-ingest\n", logcfg.LevelEnv)
 	}
 }
 
@@ -176,7 +176,7 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 // validateLogLevelEnv rejects a set-but-unknown TOKTOP_LOG_LEVEL before the
 // ingest logger is built. Empty means the info default.
 func validateLogLevelEnv() error {
-	_, err := ingest.ParseLogLevel(os.Getenv(ingest.LogLevelEnv))
+	_, err := logcfg.ParseLogLevel(os.Getenv(logcfg.LevelEnv))
 	return err
 }
 

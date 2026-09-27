@@ -16,7 +16,6 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"regexp"
 	"runtime/debug"
 	"slices"
 	"strconv"
@@ -26,6 +25,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // Server accepts POST /v1/events (single object or newline-delimited stream)
@@ -49,7 +49,7 @@ var idleTimeout = 2 * time.Minute
 // happens here so Addr reports the actual bound port (including :0) before
 // Serve runs.
 func New(addr string, rec core.AgentRecorder) (*Server, error) {
-	return newServer(addr, rec, newIngestLogger())
+	return newServer(addr, rec, logcfg.Logger())
 }
 
 func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, error) {
@@ -80,9 +80,9 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    16 << 10, // default 1 MiB; this endpoint has no large headers
 		// net/http interpolates conn.RemoteAddr into panic and handshake
-		// lines. That is the same peer address logRemote redacts: personal
+		// lines. That is the same peer address logcfg.Remote redacts: personal
 		// data when --ingest is bound off loopback.
-		ErrorLog: slog.NewLogLogger(addrRedactHandler{lg.Handler()}, slog.LevelError),
+		ErrorLog: slog.NewLogLogger(logcfg.RedactHandler{Handler: lg.Handler()}, slog.LevelError),
 	}
 	return s, nil
 }
@@ -130,7 +130,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			}
 			s.logRequest(r, state.id, http.StatusInternalServerError, state.accepted, state.stored, time.Since(start),
 				fmt.Sprintf("panic: %v", recov),
-				"stack", logField(string(debug.Stack()), 2048))
+				"stack", logcfg.Field(string(debug.Stack()), 2048))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}()
 
@@ -159,7 +159,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 }
 
 func incomingRequestID(r *http.Request) string {
-	if v := logField(r.Header.Get("X-Request-Id"), 64); v != "" {
+	if v := logcfg.Field(r.Header.Get("X-Request-Id"), 64); v != "" {
 		return v
 	}
 	return rand.Text()
@@ -196,116 +196,6 @@ func requestID(r *http.Request) string {
 	return incomingRequestID(r)
 }
 
-// LogLevelEnv is the process environment variable that sets the ingest
-// audit-log floor. Empty means info. Main validates the value at startup.
-const LogLevelEnv = "TOKTOP_LOG_LEVEL"
-
-// ParseLogLevel maps a TOKTOP_LOG_LEVEL value onto a slog floor.
-// Empty is info. Accepted names are debug, info, warn (or warning), and error.
-func ParseLogLevel(s string) (slog.Level, error) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "", "info":
-		return slog.LevelInfo, nil
-	case "debug":
-		return slog.LevelDebug, nil
-	case "warn", "warning":
-		return slog.LevelWarn, nil
-	case "error":
-		return slog.LevelError, nil
-	default:
-		return 0, fmt.Errorf("$%s must be debug, info, warn, or error, got %q", LogLevelEnv, s)
-	}
-}
-
-// LogLevelName renders a level as the TOKTOP_LOG_LEVEL word that selects it,
-// so the startup config line and the documentation spell it the same way.
-// slog's own String() would print "WARN".
-func LogLevelName(l slog.Level) string {
-	switch {
-	case l < slog.LevelInfo:
-		return "debug"
-	case l < slog.LevelWarn:
-		return "info"
-	case l < slog.LevelError:
-		return "warn"
-	default:
-		return "error"
-	}
-}
-
-func newIngestLogger() *slog.Logger {
-	lvl, err := ParseLogLevel(os.Getenv(LogLevelEnv))
-	if err != nil {
-		lvl = slog.LevelInfo // main already rejected this; stay quiet if constructed in tests
-	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level:       lvl,
-		ReplaceAttr: utcLogTime,
-	}))
-}
-
-func utcLogTime(_ []string, a slog.Attr) slog.Attr {
-	if a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
-		return slog.String(slog.TimeKey, a.Value.Time().UTC().Format(time.RFC3339Nano))
-	}
-	return a
-}
-
-// logField prepares attacker-shaped text for a single-line log attribute:
-// terminal escapes stripped, whitespace collapsed so a payload cannot split
-// the line, then capped.
-func logField(s string, n int) string {
-	return core.ClampField(strings.Join(strings.Fields(core.SanitizeText(s)), " "), n)
-}
-
-// logRemote prepares a peer address for the ingest audit line. Loopback
-// keeps the port so a local sender can be told apart; any other IP is
-// dropped. The address is personal data when --ingest is bound off loopback.
-func logRemote(addr string) string {
-	host, port, err := net.SplitHostPort(addr)
-	if err != nil {
-		return "unknown"
-	}
-	ip := net.ParseIP(host)
-	if ip != nil && ip.IsLoopback() {
-		return net.JoinHostPort("loopback", port)
-	}
-	return "remote"
-}
-
-// remoteAddrPat matches the host:port form net.Addr.String uses for TCP:
-// dotted IPv4, or bracketed IPv6 (including zone ids).
-var remoteAddrPat = regexp.MustCompile(`(?:\d{1,3}(?:\.\d{1,3}){3}|\[[0-9A-Fa-f:.]+(?:%[^\]\r\n]+)?\]):\d{1,5}`)
-
-// redactLogAddrs rewrites host:port appearances with logRemote so a line
-// from net/http's ErrorLog cannot carry a peer IP.
-func redactLogAddrs(s string) string {
-	if !strings.ContainsAny(s, ".[") {
-		return s
-	}
-	return remoteAddrPat.ReplaceAllStringFunc(s, logRemote)
-}
-
-// addrRedactHandler rewrites slog messages the way logRemote rewrites the
-// audit line's remote attribute. http.Server.ErrorLog is a *log.Logger, so
-// the peer address arrives as text in the message, not as a structured attr.
-type addrRedactHandler struct {
-	slog.Handler
-}
-
-func (h addrRedactHandler) Handle(ctx context.Context, r slog.Record) error {
-	r.Message = redactLogAddrs(r.Message)
-	return h.Handler.Handle(ctx, r)
-}
-
-func (h addrRedactHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return addrRedactHandler{h.Handler.WithAttrs(attrs)}
-}
-
-func (h addrRedactHandler) WithGroup(name string) slog.Handler {
-	return addrRedactHandler{h.Handler.WithGroup(name)}
-}
-
 // logRequest writes the one audit line a finished request produces, success
 // and rejection alike. accepted counts events decoded off the wire, stored how
 // many the feed took: a replayed POST after a lost 202 differs from a first
@@ -320,16 +210,16 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, sto
 	}
 	attrs := []any{
 		"req", reqID,
-		"method", logField(r.Method, 16),
-		"path", logField(path, 64),
-		"remote", logRemote(r.RemoteAddr),
+		"method", logcfg.Field(r.Method, 16),
+		"path", logcfg.Field(path, 64),
+		"remote", logcfg.Remote(r.RemoteAddr),
 		"status", status,
 		"accepted", accepted,
 		"stored", stored,
 		"duration", d.Round(time.Microsecond),
 	}
 	if errMsg != "" {
-		attrs = append(attrs, "error", logField(errMsg, 256))
+		attrs = append(attrs, "error", logcfg.Field(errMsg, 256))
 	}
 	attrs = append(attrs, extra...)
 	level := slog.LevelInfo
@@ -557,7 +447,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		sw := &statusWriter{ResponseWriter: w}
 		http.Error(sw, msg, status)
 		if sw.err != nil {
-			extra = append(extra, "response_error", logField(redactLogAddrs(sw.err.Error()), 256))
+			extra = append(extra, "response_error", logcfg.Field(logcfg.RedactAddrs(sw.err.Error()), 256))
 		}
 		done(status, n, stored, msg, extra...)
 	}
@@ -662,7 +552,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 			if _, ok := errors.AsType[*net.OpError](err); ok {
 				fail(http.StatusBadRequest, clientJSONError(err),
-					"body_error", logField(redactLogAddrs(err.Error()), 256))
+					"body_error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256))
 				return
 			}
 			fail(http.StatusBadRequest, clientJSONError(err))
@@ -718,7 +608,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		// The events are already recorded, so the status stands. The reason
 		// still belongs in the audit line: without it a vanished sender and a
 		// timeout mid-body are indistinguishable from success.
-		done(http.StatusAccepted, n, stored, "response write failed: "+redactLogAddrs(err.Error()))
+		done(http.StatusAccepted, n, stored, "response write failed: "+logcfg.RedactAddrs(err.Error()))
 		return
 	}
 	_ = rc.SetWriteDeadline(time.Time{}) // keep-alive must not inherit the write cap

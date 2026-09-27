@@ -64,6 +64,13 @@ type Model struct {
 	sum *core.AgentSummary
 }
 
+func New(cfg Config, ch <-chan core.Snapshot) Model {
+	// The header clock only advances on ticks, so until the first one lands
+	// (~1s in) it must show the launch time rather than a zero-value midnight.
+	now := time.Now()
+	return Model{cfg: cfg, ch: ch, chartCompressed: chartCompressedDefault, clock: now, tickAt: now}
+}
+
 // noticeTTL is how long a "that key does nothing here" explanation stays on
 // the footer line. Long enough to read: the notice answers a key that changed
 // nothing on screen, so the reader has to look away from where they were
@@ -88,13 +95,6 @@ func (m *Model) setNotice(s string) {
 		at = m.clock
 	}
 	m.notice, m.noticeAt = s, at
-}
-
-func New(cfg Config, ch <-chan core.Snapshot) Model {
-	// The header clock only advances on ticks, so until the first one lands
-	// (~1s in) it must show the launch time rather than a zero-value midnight.
-	now := time.Now()
-	return Model{cfg: cfg, ch: ch, chartCompressed: chartCompressedDefault, clock: now, tickAt: now}
 }
 
 // StaticFrame renders one snapshot for non-interactive output (--once).

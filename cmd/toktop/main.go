@@ -27,6 +27,7 @@ import (
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/demo"
 	"github.com/maci0/toktop/internal/ingest"
+	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/provider"
 	"github.com/maci0/toktop/internal/remote"
 	"github.com/maci0/toktop/internal/selfreload"
@@ -531,12 +532,12 @@ func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, n
 		b.WriteString(" ingest=")
 		b.WriteString(f.ingest)
 	}
-	if lvl := strings.TrimSpace(os.Getenv(ingest.LogLevelEnv)); lvl != "" {
+	if lvl := strings.TrimSpace(os.Getenv(logcfg.LevelEnv)); lvl != "" {
 		// The resolved level, not the raw string: "warning" and "WARN" print
 		// as warn, so the line matches what the audit log actually applies.
 		// main rejects an unparseable value, so the error case is unreachable.
-		if parsed, err := ingest.ParseLogLevel(lvl); err == nil {
-			fmt.Fprintf(&b, " log=%s", ingest.LogLevelName(parsed))
+		if parsed, err := logcfg.ParseLogLevel(lvl); err == nil {
+			fmt.Fprintf(&b, " log=%s", logcfg.LogLevelName(parsed))
 		}
 	}
 	if f.demo {

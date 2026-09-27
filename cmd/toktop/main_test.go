@@ -18,7 +18,7 @@ import (
 
 	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/core"
-	"github.com/maci0/toktop/internal/ingest"
+	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/selfupdate"
 	"github.com/maci0/toktop/internal/ui"
 )
@@ -1255,13 +1255,13 @@ func TestLogActiveConfig(t *testing.T) {
 	t.Run("log level is named as it applies", func(t *testing.T) {
 		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420"}
 		var buf strings.Builder
-		t.Setenv(ingest.LogLevelEnv, "WARNING")
+		t.Setenv(logcfg.LevelEnv, "WARNING")
 		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
 		if !strings.Contains(buf.String(), " log=warn") {
 			t.Fatalf("logActiveConfig() = %q, want log=warn", buf.String())
 		}
 		buf.Reset()
-		t.Setenv(ingest.LogLevelEnv, "")
+		t.Setenv(logcfg.LevelEnv, "")
 		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
 		if strings.Contains(buf.String(), " log=") {
 			t.Fatalf("logActiveConfig() = %q, want no log= when the variable is unset", buf.String())
