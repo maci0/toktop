@@ -527,6 +527,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   transport observes no context of its own and the connection deadline is
   lifted once the version banner arrives, so a peer that sends the banner and
   then waits held the dashboard unkillable by Ctrl+C.
+- An `ssh://` target named more than once is attached once. The second
+  spelling opened its own connection and forwarded the same remote ports onto
+  a second set of local listeners, so that host's engines appeared twice under
+  different local addresses and the totals added one engine's tokens to
+  themselves. Forwarding a port that is already forwarded now reports the
+  local port it has instead of binding a second listener.
 
 ## [0.14.1] - 2026-09-26
 

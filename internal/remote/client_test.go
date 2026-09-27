@@ -784,6 +784,46 @@ func TestClientHostKeyChangeRefused(t *testing.T) {
 	}
 }
 
+// Forwarding a port twice must return the first mapping and bind nothing new:
+// a second listener would relay to the same remote port under an address no
+// caller holds, and the first would stay bound for the life of the connection.
+func TestForwardIsIdempotent(t *testing.T) {
+	cli := &Client{closed: make(chan struct{})}
+	defer cli.closeListeners()
+
+	first, err := cli.Forward([]int{8000, 9000})
+	if err != nil {
+		t.Fatalf("first Forward: %v", err)
+	}
+	cli.mu.Lock()
+	before := len(cli.listeners)
+	cli.mu.Unlock()
+
+	second, err := cli.Forward([]int{9000, 8000})
+	if err != nil {
+		t.Fatalf("repeated Forward: %v", err)
+	}
+	if len(second) != 2 || second[8000] != first[8000] || second[9000] != first[9000] {
+		t.Fatalf("repeated Forward = %v, want the first mapping %v", second, first)
+	}
+	cli.mu.Lock()
+	after := len(cli.listeners)
+	cli.mu.Unlock()
+	if after != before {
+		t.Fatalf("repeated Forward bound %d extra listener(s)", after-before)
+	}
+
+	// A port not forwarded yet still binds, and shares no local port with one
+	// already mapped.
+	third, err := cli.Forward([]int{8000, 7000})
+	if err != nil {
+		t.Fatalf("Forward with a new port: %v", err)
+	}
+	if third[8000] != first[8000] || third[7000] == 0 || third[7000] == first[8000] {
+		t.Fatalf("Forward with a new port = %v; want the old mapping for 8000 and a fresh one for 7000", third)
+	}
+}
+
 func TestForwardCannotRestartAfterListenerTeardown(t *testing.T) {
 	cli := &Client{closed: make(chan struct{})}
 	defer cli.closeListeners()

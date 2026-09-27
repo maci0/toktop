@@ -1302,6 +1302,28 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
+// A target named twice must attach once. Attaching it twice opens a second
+// ssh connection, forwards the same remote ports onto a second set of local
+// listeners, and lists that host's engines again under different local
+// addresses, so its tokens land in the totals twice.
+func TestParseTargetsCollapsesRepeats(t *testing.T) {
+	got, err := parseTargets([]string{"ssh://user@dupbox:2222", "ssh://user@dupbox:2222", "ssh://user@DUPBOX:2222"})
+	if err != nil {
+		t.Fatalf("parseTargets(repeat) = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("parseTargets(repeat) = %+v, want one target", got)
+	}
+	// A different port or account on the same host is a different target.
+	got, err = parseTargets([]string{"ssh://user@dupbox:2222", "ssh://user@dupbox:2223", "ssh://other@dupbox:2222"})
+	if err != nil {
+		t.Fatalf("parseTargets(distinct) = %v, want nil", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("parseTargets(distinct) = %+v, want three targets", got)
+	}
+}
+
 func TestFlagAddRejectsEmpty(t *testing.T) {
 	var adds []string
 	if err := parseAdd("", &adds); err == nil {

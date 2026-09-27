@@ -51,6 +51,7 @@ type Client struct {
 
 	mu        sync.Mutex
 	listeners []net.Listener
+	forwards  map[int]int // remote port -> local port already bound for it
 	stopped   bool
 
 	keepaliveDone chan struct{} // closed when the keepalive goroutine exits
@@ -531,6 +532,12 @@ func connLost(err error) error {
 // Forward binds a local listener per remote port and pipes every accepted
 // connection through an ssh TCP channel. The returned map (remote port ->
 // bound local port) is usable the moment this returns.
+//
+// A port already forwarded keeps the listener it has and reports the same
+// local port, so forwarding the same set twice returns the same map and binds
+// nothing new. A second listener for a port would relay to the same place but
+// under an address nothing knows, and every caller holding the first map would
+// leave it bound and relaying for the life of the connection.
 func (c *Client) Forward(rports []int) (map[int]int, error) {
 	out := make(map[int]int, len(rports))
 	c.mu.Lock()
@@ -545,12 +552,21 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 			continue // a duplicate would bind a second listener no map entry reaches
 		}
 		seen[rp] = true
+		if local, ok := c.forwards[rp]; ok {
+			out[rp] = local
+			continue
+		}
 		l, err := listenEphemeralAvoiding(rports, out)
 		if err != nil {
 			lastErr = err
 			continue
 		}
-		out[rp] = l.Addr().(*net.TCPAddr).Port
+		if c.forwards == nil {
+			c.forwards = make(map[int]int, len(rports))
+		}
+		local := l.Addr().(*net.TCPAddr).Port
+		c.forwards[rp] = local
+		out[rp] = local
 		c.listeners = append(c.listeners, l)
 		go c.relay(l, rp)
 	}
@@ -629,6 +645,7 @@ func (c *Client) closeListeners() {
 		l.Close()
 	}
 	c.listeners = nil
+	c.forwards = nil
 }
 
 // Close tears down relays and the connection. Safe more than once, and

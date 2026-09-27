@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -543,13 +544,29 @@ func outputStatus(err error) int {
 // parseTargets resolves every ssh:// target up front. A bad URL is a usage
 // error, and the caller is still deciding whether stdout is a terminal, so
 // parsing here keeps the two complaints from competing.
+//
+// A target named twice resolves to one attachment, keeping the first. The
+// second spelling of one host is the same host, and attaching it again opens a
+// second ssh connection, forwards the same remote ports onto a second set of
+// local listeners, and lists that host's engines a second time under different
+// local addresses: the UI keys rates by endpoint, so the header and chart
+// totals would add one engine's tokens to themselves. Host case is folded for
+// the same reason the host-key store folds it; the user and port are compared
+// as written, so two accounts or two ports on one host stay two targets.
 func parseTargets(raws []string) ([]remote.Target, error) {
 	targets := make([]remote.Target, 0, len(raws))
+	seen := make(map[string]bool, len(raws))
 	for _, raw := range raws {
 		tgt, err := remote.ParseTarget(raw)
 		if err != nil {
 			return nil, err
 		}
+		key := core.FoldASCII(tgt.Host) + "\x00" + tgt.User + "\x00" + strconv.Itoa(tgt.Port) + "\x00" + tgt.KeyFile
+		if seen[key] {
+			fmt.Fprintf(os.Stderr, "toktop: %s named more than once; attaching it once\n", tgt.Host)
+			continue
+		}
+		seen[key] = true
 		targets = append(targets, tgt)
 	}
 	return targets, nil
