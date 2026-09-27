@@ -506,11 +506,32 @@ const ERROR_HEADERS = {
   ...SECURITY_HEADERS,
 };
 
-function errorResponse(status, body, extraHeaders = {}) {
+// Every error answer carries the same Server-Timing the page and image
+// answers do: a failed request is the one a visitor reports, and its time at
+// the edge is part of that report. Without it the timing series only describes
+// the requests that worked.
+function errorResponse(started, status, body, extraHeaders = {}) {
   return new Response(body, {
     status,
-    headers: { ...ERROR_HEADERS, ...extraHeaders },
+    headers: {
+      ...ERROR_HEADERS,
+      "server-timing": serverTiming(started),
+      ...extraHeaders,
+    },
   });
+}
+
+// One failure, one line and one answer. The line names the status the client
+// got and the milliseconds the edge spent, so one pivot off a visitor's
+// report says whether it succeeded and how slowly; the answer carries the
+// same numbers as headers.
+function failRequest(request, started, status, event, body, fields, extraHeaders) {
+  logFailure(request, event, {
+    status,
+    duration_ms: Date.now() - started,
+    ...fields,
+  });
+  return errorResponse(started, status, body, extraHeaders);
 }
 
 // What the edge spent on the answer, in Server-Timing (RFC 8941), so the
@@ -584,13 +605,11 @@ export default {
     try {
       return await handle(request, env, started);
     } catch (err) {
-      logFailure(request, "unhandled", {
+      return failRequest(request, started, 500, "unhandled", "internal error", {
         method: request.method,
         path: new URL(request.url).pathname,
-        duration_ms: Date.now() - started,
         error: String(err?.message ?? err),
       });
-      return errorResponse(500, "internal error");
     }
   },
 };
@@ -599,13 +618,19 @@ async function handle(request, env, started) {
   const url = new URL(request.url);
   if (IMAGE_PATHS.has(url.pathname)) {
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return errorResponse(405, "method not allowed", { allow: "GET, HEAD" });
+      return errorResponse(started, 405, "method not allowed", { allow: "GET, HEAD" });
     }
     if (!env?.ASSETS) {
-      // Every image on the page is now a 404 and /health still answers ok, so
-      // this is the line that names the binding as the reason.
-      logFailure(request, "assets-unbound", { path: url.pathname });
-      return errorResponse(404, "not found");
+      // Every image on the page is now a 404 and /health reports the missing
+      // binding, so this is the line that names the request behind it.
+      return failRequest(
+        request,
+        started,
+        404,
+        "assets-unbound",
+        "not found",
+        { path: url.pathname },
+      );
     }
     // Images are already compressed. Clone-with-headers keeps
     // Accept-Encoding (a forbidden header), so this is a new request
@@ -630,13 +655,13 @@ async function handle(request, env, started) {
       // The client sees "not found" and cannot tell a capture that was never
       // uploaded from a store that is failing. Both are deploy-level, so both
       // get a line: the status names which one it was.
-      logFailure(request, asset.status === 404 || asset.status === 410 ? "asset-missing" : "asset-store-error", {
-        path: url.pathname,
-        status: asset.status,
-      });
-      return errorResponse(
+      return failRequest(
+        request,
+        started,
         asset.status,
+        asset.status === 404 || asset.status === 410 ? "asset-missing" : "asset-store-error",
         request.method === "HEAD" ? null : assetErrorBody(asset.status),
+        { path: url.pathname },
       );
     }
     const headers = new Headers(asset.headers);
@@ -657,23 +682,37 @@ async function handle(request, env, started) {
     return new Response(asset.body, { status: asset.status, headers });
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return errorResponse(405, "method not allowed", { allow: "GET, HEAD" });
+    return errorResponse(started, 405, "method not allowed", { allow: "GET, HEAD" });
   }
   if (url.pathname === "/health") {
     // Uptime probes hit this continuously; caching it would only blur
     // what the last probe actually saw. HEAD must carry the GET headers
     // and no body (RFC 9110).
-    const healthBody = "ok\n";
+    //
+    // The probe reports degraded while the asset binding is missing rather
+    // than ok: the page still serves, but every capture it shows is a 404,
+    // so a probe that keeps saying ok describes a site nobody can use. That
+    // is the same call the ingest /healthz makes when it is refusing every
+    // event, and it is what makes `make site-deploy` fail a deploy that
+    // shipped without its assets instead of waiting out a green probe.
+    const degraded = !env?.ASSETS;
+    const healthBody = degraded
+      ? "degraded: no asset binding; the dashboard captures are not served\n"
+      : "ok\n";
     const healthHeaders = {
       "content-type": "text/plain; charset=utf-8",
       "cache-control": "no-store",
       "content-length": String(new TextEncoder().encode(healthBody).byteLength),
+      "server-timing": serverTiming(started),
       ...SECURITY_HEADERS,
     };
     if (request.method === "HEAD") {
-      return new Response(null, { headers: healthHeaders });
+      return new Response(null, { status: degraded ? 503 : 200, headers: healthHeaders });
     }
-    return new Response(healthBody, { headers: healthHeaders });
+    return new Response(healthBody, {
+      status: degraded ? 503 : 200,
+      headers: healthHeaders,
+    });
   }
   // One page: anything else is that page too, rather than a 404 nobody
   // learns anything from.
@@ -682,7 +721,7 @@ async function handle(request, env, started) {
     request,
   );
   if (chosen === null) {
-    return errorResponse(406, request.method === "HEAD" ? null : "not acceptable", {
+    return errorResponse(started, 406, request.method === "HEAD" ? null : "not acceptable", {
       vary: VARY,
     });
   }

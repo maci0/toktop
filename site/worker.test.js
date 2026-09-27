@@ -16,6 +16,7 @@ const call = (headers = {}, init = {}) =>
       method: init.method ?? "GET",
       headers,
     }),
+    init.env,
   );
 
 const identityBody = await call().then((r) => r.text());
@@ -250,15 +251,17 @@ const SECURITY_HEADER_NAMES = [
 ];
 
 test("non-GET methods and /health keep their contract", async () => {
-  const denied = await call({}, { method: "POST" });
+  const env = staticAssets();
+  const denied = await call({}, { method: "POST", env });
   expect(denied.status).toBe(405);
   expect(denied.headers.get("allow")).toBe("GET, HEAD");
   expect(denied.headers.get("content-type")).toBe("text/plain; charset=utf-8");
   expect(denied.headers.get("cache-control")).toBe("no-store");
-  const health = await call({}, { path: "/health" });
+  const health = await call({}, { path: "/health", env });
   expect(health.status).toBe(200);
+  expect(await health.text()).toBe("ok\n");
   expect(health.headers.get("cache-control")).toBe("no-store");
-  const healthHead = await call({}, { method: "HEAD", path: "/health" });
+  const healthHead = await call({}, { method: "HEAD", path: "/health", env });
   expect(healthHead.status).toBe(200);
   expect(healthHead.headers.get("content-type")).toBe(health.headers.get("content-type"));
   expect(healthHead.headers.get("content-length")).toBe(health.headers.get("content-length"));
@@ -268,6 +271,20 @@ test("non-GET methods and /health keep their contract", async () => {
       expect(res.headers.get(name)).not.toBeNull();
     }
   }
+});
+
+test("/health reports degraded while the asset binding is missing", async () => {
+  const degraded = await call({}, { path: "/health", env: {} });
+  expect(degraded.status).toBe(503);
+  expect(await degraded.text()).toBe(
+    "degraded: no asset binding; the dashboard captures are not served\n",
+  );
+  expect(degraded.headers.get("cache-control")).toBe("no-store");
+  const head = await call({}, { method: "HEAD", path: "/health", env: {} });
+  expect(head.status).toBe(503);
+  expect(head.headers.get("content-length")).toBe(degraded.headers.get("content-length"));
+  expect((await head.arrayBuffer()).byteLength).toBe(0);
+  expect((await call({}, { path: "/health", env: staticAssets() })).status).toBe(200);
 });
 
 test("every page answer carries the security headers, not only revalidations", async () => {
@@ -553,8 +570,11 @@ const assetBytes = (name) => statSync(join(PUBLIC, name)).size;
 // taking longer to send it, which is the other half of time to first byte and
 // the half a cold isolate controls. Every page and image answer therefore
 // carries the edge's own cost in Server-Timing, where a RUM script or a
-// visitor's own devtools can read it.
-test("pages and images report the edge cost in Server-Timing", async () => {
+// visitor's own devtools can read it. The failures carry it too: a failed
+// request is the one a visitor reports, and its time at the edge is part of
+// that report, so a timing series that covered only the served requests would
+// describe exactly the ones nobody is asking about.
+test("every answer, served or failed, reports the edge cost in Server-Timing", async () => {
   const dur = (value) => /^edge;dur=(\d+)$/.exec(value ?? "")?.[1];
   for (const headers of [{}, { "accept-encoding": "br" }]) {
     const res = await call(headers);
@@ -565,6 +585,14 @@ test("pages and images report the edge cost in Server-Timing", async () => {
   expect(dur(revalidated.headers.get("server-timing"))).toBeDefined();
   const image = await imageCall("/dashboard.png", {}, { env: staticAssets() });
   expect(dur(image.headers.get("server-timing"))).toBeDefined();
+  const failures = [
+    await call({}, { method: "POST" }),
+    await call({ "accept-encoding": "identity;q=0" }),
+    await call({}, { path: "/health", env: staticAssets() }),
+  ];
+  for (const res of failures) {
+    expect(dur(res.headers.get("server-timing"))).toBeDefined();
+  }
 });
 
 // Two requests, both from this origin: the document and the one hero image
@@ -873,7 +901,11 @@ test("an unhandled throw answers 500 and logs the request that caused it", async
     expect(line.method).toBe("GET");
     expect(line.path).toBe("/dashboard.png");
     expect(line.error).toBe("asset store unreachable");
+    expect(line.status).toBe(500);
     expect(typeof line.duration_ms).toBe("number");
+    // The failing request is measurable the same way a served one is, so a
+    // visitor's report and the log agree on what it cost.
+    expect(res.headers.get("server-timing")).toMatch(/dur=\d+(?:\.\d+)?$/);
   } finally {
     logs.restore();
   }
@@ -886,7 +918,7 @@ test("asset failures log their status; served requests log nothing", async () =>
     const served = await imageCall("/dashboard.webp", {}, { env });
     expect(served.status).toBe(200);
     expect((await call({ "cf-ray": "healthy-TOK" })).status).toBe(200);
-    expect((await call({}, { path: "/health" })).status).toBe(200);
+    expect((await call({}, { path: "/health", env })).status).toBe(200);
     expect(logs.parse()).toEqual([]);
 
     const unbound = await imageCall("/dashboard.avif", {}, { env: {} });
@@ -904,18 +936,26 @@ test("asset failures log their status; served requests log nothing", async () =>
     );
     expect(broken.status).toBe(502);
     expect(logs.parse()).toEqual([
-      { event: "assets-unbound", ray: "", path: "/dashboard.avif" },
+      {
+        event: "assets-unbound",
+        ray: "",
+        status: 404,
+        path: "/dashboard.avif",
+        duration_ms: expect.any(Number),
+      },
       {
         event: "asset-missing",
         ray: "",
-        path: "/dashboard.avif",
         status: 404,
+        path: "/dashboard.avif",
+        duration_ms: expect.any(Number),
       },
       {
         event: "asset-store-error",
         ray: "",
-        path: "/dashboard.avif",
         status: 502,
+        path: "/dashboard.avif",
+        duration_ms: expect.any(Number),
       },
     ]);
   } finally {

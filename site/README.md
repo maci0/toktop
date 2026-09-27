@@ -41,7 +41,12 @@ dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 `/dashboard-1280.avif`, `/dashboard-768.avif`, `/dashboard.webp`,
 `/dashboard-1280.webp` and `/dashboard-768.webp`,
 and answers every other path with the page (a one-page site should not 404
-on a typo). Wrong methods are `405` with `Allow: GET, HEAD`. Image paths
+on a typo). Wrong methods are `405` with `Allow: GET, HEAD`. `/health` reports
+`degraded` with a `503` while the asset binding is missing, rather than `ok`:
+the page still serves then, but every capture it shows is a 404, so a probe
+saying `ok` describes a site nobody can use. A deploy that shipped without its
+assets therefore fails `make site-deploy` instead of passing on a green probe.
+Image paths
 without an asset binding, and 404/5xx from the asset store, are `no-store`
 so a missing file is not cached as a day-long success. Error bodies are
 `text/plain`, matching `/health`: a failure the asset store reports is
@@ -81,8 +86,11 @@ that one request wait for the sum of the three rather than the slowest one.
 
 ## Timing
 
-Page and image answers carry `Server-Timing: edge;dur=<ms>`, the time the
-Worker spent before writing the response. A byte-count test cannot see a
+Every answer carries `Server-Timing: edge;dur=<ms>`, the time the
+Worker spent before writing the response, failures included: a failed request
+is the one a visitor reports, and a timing series that covered only the served
+requests would describe exactly the ones nobody is asking about. A byte-count
+test cannot see a
 regression here: the page can send the same 3,454 bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
@@ -100,11 +108,13 @@ a line per visit would bury the few that name a broken deploy.
 | `unhandled` | a throw reached the top of `fetch`; the client gets a plain 500 instead of the edge's opaque 1101 page |
 | `asset-missing` | the asset store answered 404 or 410 for a capture, the client gets the same `not found` either way |
 | `asset-store-error` | the asset store answered 5xx |
-| `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 while `/health` still answers `ok` |
+| `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 and `/health` reports `degraded` |
 | `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size |
 
-Each line carries the request's `cf-ray` (empty off Cloudflare), plus the path,
-method, status or reason as the event needs. That is the pivot from a failure
+Each line that answers a request carries the request's `cf-ray` (empty off
+Cloudflare), the `status` the client was given, the `duration_ms` the edge
+spent getting there, plus the path, method or reason as the event needs. That
+is the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. A `405` or a
 `406` is not logged: the client did something the route does not do, the
