@@ -294,6 +294,33 @@ func TestCumulativeBaselineSurvivesOversizedLine(t *testing.T) {
 	}
 }
 
+// The owner scan buffers a line the record path accepts. With a smaller cap
+// bufio.Scanner stopped on ErrTooLong, owns() saw fewer than ownerScanLines
+// and returned "undecided", so readNew bailed on every poll and the session
+// was never read again.
+func TestOwnerScanAcceptsARecordSizedHeaderLine(t *testing.T) {
+	store := withStore(t, "codex")
+	work := t.TempDir()
+	path := filepath.Join(store, "rollout-1.jsonl")
+
+	append_(t, path, strings.Repeat("x", maxLineBytes-1))
+	append_(t, path, codexMeta(work))
+	append_(t, path, codexTokens(120, 1300))
+
+	w := Watch("codex", work, time.Now())
+	w.poll(nil)
+	if mine, decided := w.owns(path); !decided || !mine {
+		t.Fatalf("owns = (%v, %v), want (true, true) for a header the record path accepts", mine, decided)
+	}
+	append_(t, path, codexTokens(220, 1400))
+	w.poll(nil)
+	// The first poll seeds the cumulative baseline at 120; 220 is the growth
+	// this poll reports. Before the cap fix the file was never read at all.
+	if got := w.Sample().Output; got != 100 {
+		t.Fatalf("output tokens %d, want 100: the oversized leading line blocked the read", got)
+	}
+}
+
 func TestCumulativeSessionStartedDuringTheReviewCountsInFull(t *testing.T) {
 	store := withStore(t, "codex")
 	work := t.TempDir()

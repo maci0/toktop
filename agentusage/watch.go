@@ -1245,7 +1245,12 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 		return w.ownsZstd(path, f)
 	}
 	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 64<<10), 4<<20)
+	// maxLineBytes, not a smaller cap: a record the record path accepts must
+	// not stop this scan. bufio.Scanner aborts on ErrTooLong rather than
+	// skipping, so a header line between the two caps left the scan short of
+	// ownerScanLines, returned "undecided", and blocked readNew on every poll
+	// for the life of the session.
+	sc.Buffer(make([]byte, 0, appendReaderBytes), maxLineBytes)
 	lines := 0
 	for lines < ownerScanLines && sc.Scan() {
 		line := bytes.TrimPrefix(sc.Bytes(), []byte("\xef\xbb\xbf"))
