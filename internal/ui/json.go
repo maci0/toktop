@@ -32,6 +32,7 @@ type jsonReport struct {
 	Version    string       `json:"version"`
 	Demo       bool         `json:"demo,omitempty"`
 	DemoSeed   int64        `json:"demo_seed,omitempty"`
+	DemoOrigin string       `json:"demo_origin,omitempty"`
 	At         time.Time    `json:"at"`
 	UptimeSecs float64      `json:"uptime_secs"`
 	EnginesUp  int          `json:"engines_up"`
@@ -143,6 +144,16 @@ type jsonGPU struct {
 
 const bytesPerMB = 1 << 20
 
+// originStamp renders the pinned demo origin, empty for a run that started on
+// the wall clock. The instant is reported as given rather than in the local
+// zone, so a capture taken under two timezones still names the same origin.
+func originStamp(at time.Time) string {
+	if at.IsZero() {
+		return ""
+	}
+	return at.UTC().Format(time.RFC3339)
+}
+
 func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 	now := frameNow(s, time.Time{})
 	sum := core.Summarize(s.Agents, now)
@@ -152,6 +163,7 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 		Version:    cfg.Version,
 		Demo:       cfg.Demo,
 		DemoSeed:   cfg.DemoSeed,
+		DemoOrigin: originStamp(cfg.DemoOrigin),
 		At:         now,
 		UptimeSecs: s.Uptime.Seconds(),
 		OutTokPS:   outAgg,

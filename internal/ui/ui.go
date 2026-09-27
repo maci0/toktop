@@ -19,7 +19,11 @@ type Config struct {
 	// DemoSeed is the seed the demo source draws from, shown next to the
 	// DEMO tag: a demo frame is reproducible from it, so the frame itself
 	// has to say which run produced it.
-	DemoSeed   int64
+	DemoSeed int64
+	// DemoOrigin is the pinned start of the simulated timeline (--origin),
+	// zero when the run started on the wall clock. Reported with the seed so
+	// the two inputs a replay needs are both in the output.
+	DemoOrigin time.Time
 	IngestAddr string
 	PollEvery  time.Duration // sampling cadence; anchors the chart timescale
 	Prober     func()        // nil disables manual probing

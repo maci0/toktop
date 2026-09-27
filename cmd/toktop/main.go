@@ -89,6 +89,14 @@ func main() {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		os.Exit(2)
 	}
+	// Parsed before anything reads it: a bad --origin aborts the run rather
+	// than leaving the demo on the wall clock, which is the one input the
+	// operator pinned the origin to remove.
+	origin, err := parseOrigin(f.origin)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
+		os.Exit(2)
+	}
 	// The plain report and the JSON report render no sized frame, so a frame
 	// override is named as unused there rather than validated: rejecting
 	// TOKTOP_COLUMNS=10 for a frame that is never composed aborts a run
@@ -217,6 +225,12 @@ func main() {
 	switch {
 	case f.demo:
 		demoSrc = demo.NewSource(f.interval, f.seed)
+		// Pinned before the first Now: the origin is the one input the seed
+		// does not decide, and left on the wall clock two runs of one seed
+		// differ in every stamp while agreeing on every value.
+		if !origin.IsZero() {
+			demoSrc.SetOrigin(origin)
+		}
 		go demoSrc.Run(ctx, ch)
 		prober = demoSrc.ProbeAll
 		recorder = demoSrc
@@ -322,6 +336,7 @@ func main() {
 	}
 	if demoSrc != nil {
 		cfg.DemoSeed = demoSrc.Seed()
+		cfg.DemoOrigin = origin
 	}
 
 	if f.once {

@@ -29,6 +29,9 @@ func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	if set["seed"] && !f.demo {
 		fmt.Fprintln(os.Stderr, "toktop: --seed has no effect without --demo")
 	}
+	if set["origin"] && !f.demo {
+		fmt.Fprintln(os.Stderr, "toktop: --origin has no effect without --demo")
+	}
 	if set["frames"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --frames has no effect without --once")
 	} else if set["frames"] && f.plain {
@@ -235,6 +238,30 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 		return fmt.Errorf("--frames must be <= %d (chart history length), got %d", core.HistoryLen, frames)
 	}
 	return nil
+}
+
+// parseOrigin turns --origin into the instant the demo timeline starts at.
+// RFC3339 and bare Unix seconds are both accepted, so a replay can be written
+// either way; an empty value is the wall clock at launch (the source's own
+// default), reported as a zero time so the caller pins nothing.
+//
+// Rejection is loud: a mistyped instant would otherwise leave the run on the
+// wall clock, and the operator replaying a captured frame would get a second
+// run that differs only in timestamps, which is exactly the difference they
+// pinned the origin to remove.
+func parseOrigin(s string) (time.Time, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, nil
+	}
+	if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return time.Unix(secs, 0).UTC(), nil
+	}
+	at, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("--origin must be an RFC3339 instant or Unix seconds, got %q", s)
+	}
+	return at, nil
 }
 
 // validateSSHKeyFlag rejects an explicitly empty --ssh-key. The flag names a

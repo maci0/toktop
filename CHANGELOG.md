@@ -23,6 +23,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   every artifact arrived, and a job killed after the release exists leaves
   the already-published guard refusing every retry of that tag.
 
+- `--origin` pins the instant a `--demo` timeline starts at, as an RFC3339
+  instant or Unix seconds. The seed decided every simulated value but not the
+  instant they are stamped with, so two runs of one seed agreed on every number
+  and differed in every timestamp, and `--once --json` of the same seed could
+  not be diffed. With an origin, the seed plus the origin replay a run byte for
+  byte; the JSON report carries the pinned instant as `demo_origin`, and
+  without `--origin` it is omitted and the timeline still starts at the wall
+  clock. An `--origin` that parses as neither form aborts the run.
+
 - `agentusage.ThinkingRate` reports reasoning tokens per second between two
   samples, under the same rules as `Rate` and `InputRate`. `Sample.Thinking`
   and `Delta.Thinking` were already public, so a consumer showing a thinking

@@ -34,6 +34,7 @@ type cliFlags struct {
 	frames    int
 	noReload  bool
 	seed      int64
+	origin    string
 	sshKey    string
 	bearer    string
 	showVer   bool
@@ -63,6 +64,7 @@ func registerFlags() *cliFlags {
 		topFS.IntVar(&cli.frames, "frames", 2, fmt.Sprintf("with --once: snapshots to accumulate before rendering (max %d)", core.HistoryLen))
 		topFS.BoolVar(&cli.noReload, "no-hot-reload", false, "disable restart-on-rebuild (dev convenience)")
 		topFS.Int64Var(&cli.seed, "seed", 42, "demo RNG seed")
+		topFS.StringVar(&cli.origin, "origin", "", "with --demo: RFC3339 or Unix-seconds instant the simulated timeline starts at, so a seed replays byte for byte; unpinned, it starts at the wall clock")
 		topFS.StringVar(&cli.sshKey, "ssh-key", "", "private key for ssh:// targets (overrides ~/.ssh/config)")
 		topFS.StringVar(&cli.bearer, "bearer", "", "bearer token sent to --add endpoints only (OmniRoute etc.)")
 		topFS.BoolVar(&cli.showVer, "version", false, "print version and exit")

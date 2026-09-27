@@ -521,6 +521,11 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   wait before rendering changes)
 --seed N          demo RNG seed; the demo frame shows the seed it ran
                   with, and the same seed replays the run
+--origin TIME     with --demo: pin the instant the simulated timeline
+                  starts at (RFC3339 or Unix seconds), so a seed and an
+                  origin replay a run byte for byte; without it the timeline
+                  starts at the wall clock, and the JSON report omits
+                  `demo_origin`
 --no-hot-reload   disable restart-on-rebuild while running
 --version         print version and exit
 --help, -h        show usage, examples and environment fallbacks
@@ -552,6 +557,20 @@ toktop --demo --once --json | jq -r '.engines[] | select(.ok) | .label'
 The chart histories are not in it: they are the frame's own buffer, sized by
 how long the process ran, so a consumer wanting a series should sample
 `--once --json` at a steady `--interval` instead.
+
+A demo run reproduces from its seed and its origin, the two inputs a replay
+needs. With both, two runs render the same bytes:
+
+```sh
+toktop --demo --seed 7 --origin 2026-01-01T00:00:00Z --once --json --frames 5 \
+  >run-a.json
+toktop --demo --seed 7 --origin 2026-01-01T00:00:00Z --once --json --frames 5 \
+  >run-b.json
+cmp run-a.json run-b.json
+```
+
+Without `--origin` the timeline starts at the wall clock, so the values repeat
+and the timestamps do not; the JSON report then omits `demo_origin`.
 
 ## Environment variables
 
