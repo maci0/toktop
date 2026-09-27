@@ -169,7 +169,11 @@ func hostInfoLinux(s *core.SysSample) {
 	if h.amdgpu != "" {
 		s.Drivers["amdgpu"] = h.amdgpu
 	}
-	s.NPUs = slices.Clone(h.npus)
+	// h.npus is hostStaticInfo's own copy, made for this call and shared with
+	// nobody: the cache below it hands out a clone and holds the original. The
+	// sample takes it as is, so a steady-state sample costs no second copy of
+	// a slice that never changes once filled.
+	s.NPUs = h.npus
 }
 
 func prettyOSName() string {

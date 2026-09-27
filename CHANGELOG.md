@@ -13,6 +13,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Performance
+
+- Polling costs less per frame on every host. A transcript record's working
+  directory is resolved once per directory instead of once per record, a
+  definition-backed agent re-derives its transcript roots only when the
+  definitions file changes, a Prometheus scrape is matched against the few
+  family names that can reach a metric instead of being lowercased and sorted
+  wholesale, the amdgpu sysfs walk caches which cards are AMD's rather than
+  re-globbing `/sys/class/drm` every poll, an ingested NDJSON line is no
+  longer copied a second time just to name its JSON kind, and the zstd
+  transcript decoder reserves its accumulator once and stops a frame at the
+  budget instead of decoding one frame past it.
+
 ### Changed
 
 - toktop.ai answers a revalidation or a refused encoding before it builds a

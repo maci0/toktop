@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -16,20 +18,66 @@ import (
 // VRAM accounting, busy percentage and hwmon temperatures with no tooling,
 // which covers AMD GPUs when rocm-smi is absent (common on desktops).
 func init() {
-	platformExtras = func(context.Context) []core.GPUDevice { return scanAmdSysfs("/sys/class/drm") }
+	platformExtras = func(context.Context) []core.GPUDevice { return scanAmdSysfs(defaultDrmRoot) }
 }
 
-func scanAmdSysfs(drmRoot string) []core.GPUDevice {
+// defaultDrmRoot is the real sysfs mount. scanAmdSysfs walks it through the
+// card cache; any other root (a test's fixture) is walked directly.
+const defaultDrmRoot = "/sys/class/drm"
+
+// amdCards caches which /sys/class/drm cards are amdgpu-bound. The set of
+// cards a host has changes only when a GPU is added, while the poll runs
+// every interval: without this, a machine with no AMD GPU (every NVIDIA or
+// Intel one, where rocm-smi is absent and this path is the fallback) globs
+// /sys/class/drm and stats each card for an answer that is permanently empty.
+// A cached empty list is retried on the same spacing a missing vendor CLI is,
+// so a GPU added mid-session is still found.
+var amdCards struct {
+	sync.Mutex
+	dirs []string
+	at   time.Time
+}
+
+func amdCardDirs() []string {
+	amdCards.Lock()
+	defer amdCards.Unlock()
+	if time.Since(amdCards.at) < toolRetry {
+		return amdCards.dirs
+	}
+	amdCards.dirs = findAmdCards(defaultDrmRoot)
+	amdCards.at = time.Now()
+	return amdCards.dirs
+}
+
+// findAmdCards is the discovery half of the sysfs walk: the directories under
+// drmRoot that carry amdgpu's VRAM accounting.
+func findAmdCards(drmRoot string) []string {
 	cards, err := filepath.Glob(filepath.Join(drmRoot, "card[0-9]*"))
 	if err != nil {
 		return nil
 	}
-	var devs []core.GPUDevice
+	out := make([]string, 0, len(cards))
 	for _, card := range cards {
 		dev := filepath.Join(card, "device")
 		if _, err := os.Stat(filepath.Join(dev, "mem_info_vram_used")); err != nil {
 			continue // not an amdgpu-bound card
 		}
+		out = append(out, card)
+	}
+	return out
+}
+
+func scanAmdSysfs(drmRoot string) []core.GPUDevice {
+	if drmRoot == defaultDrmRoot {
+		return readAmdCards(amdCardDirs())
+	}
+	return readAmdCards(findAmdCards(drmRoot))
+}
+
+func readAmdCards(cards []string) []core.GPUDevice {
+	var devs []core.GPUDevice
+	for _, card := range cards {
+		dev := filepath.Join(card, "device")
 		d := core.GPUDevice{Vendor: "amd"}
 		if _, rest, ok := strings.Cut(filepath.Base(card), "card"); ok {
 			d.Index, _ = strconv.Atoi(rest)

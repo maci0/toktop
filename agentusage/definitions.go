@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"golang.org/x/text/unicode/norm"
 )
@@ -110,7 +111,13 @@ var (
 	// rather than adapters. They ship here so both this tool and gauntlet read
 	// them without a definitions file.
 	defs = builtinDefs()
+	// defsGen counts the loads of defs. A watcher derives its adapter from a
+	// spec four times a second; the spec it reads cannot have changed unless
+	// this moved, so an unchanged counter turns that rebuild into a load.
+	defsGen atomic.Uint64
 )
+
+func bumpDefsGen() { defsGen.Add(1) }
 
 // builtinDefs are the definitions compiled into this build, which
 // ResetDefinitions restores.
@@ -134,6 +141,7 @@ func ResetDefinitions() {
 	defsMu.Lock()
 	defer defsMu.Unlock()
 	defs = builtinDefs()
+	bumpDefsGen()
 }
 
 // SpecFor reports the transcript location registered for an agent, whether it
@@ -289,6 +297,9 @@ func LoadDefinitions(path string) error {
 	defer defsMu.Unlock()
 	for _, p := range pending {
 		defs[p.name] = p.spec
+	}
+	if len(pending) > 0 {
+		bumpDefsGen()
 	}
 	return nil
 }

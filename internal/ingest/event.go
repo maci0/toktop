@@ -179,12 +179,19 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 // same "expected a JSON object" wording Decode-into-struct already used
 // for arrays. encoding/json treats null as a zero struct, which is why
 // this check sits in front of Unmarshal.
-func jsonRootKind(raw json.RawMessage) string {
-	s := strings.TrimSpace(string(raw))
-	if s == "" {
+//
+// The leading byte answers it, so the raw slice is scanned in place: a
+// stream of thousands of events would otherwise copy and trim every line a
+// second time before the parse that actually reads it.
+func jsonRootKind(raw []byte) string {
+	i := 0
+	for i < len(raw) && (raw[i] == ' ' || raw[i] == '\t' || raw[i] == '\n' || raw[i] == '\r') {
+		i++
+	}
+	if i == len(raw) {
 		return "empty"
 	}
-	switch s[0] {
+	switch raw[i] {
 	case '{':
 		return "object"
 	case '[':

@@ -304,10 +304,29 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 	return false, true
 }
 
+// dirVerdictMax bounds the sameDir memo. A watcher's own store names a
+// handful of projects; a store spanning hundreds only costs one cleared map.
+const dirVerdictMax = 256
+
 func (w *Watcher) sameDir(cwd string) bool {
 	if sameSpelling(cwd, w.dir) {
 		return true
 	}
-	resolved, err := filepath.EvalSymlinks(cwd)
-	return err == nil && sameSpelling(resolved, w.dir)
+	if mine, seen := w.dirVerdict[cwd]; seen {
+		return mine
+	}
+	mine := false
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		mine = sameSpelling(resolved, w.dir)
+	}
+	// Lazily: a Watcher built by Watch carries the map, one assembled by a
+	// caller or a test does not, and the verdict is worth caching either way.
+	if w.dirVerdict == nil {
+		w.dirVerdict = map[string]bool{}
+	}
+	if len(w.dirVerdict) >= dirVerdictMax {
+		clear(w.dirVerdict)
+	}
+	w.dirVerdict[cwd] = mine
+	return mine
 }

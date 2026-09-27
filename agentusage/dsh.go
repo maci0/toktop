@@ -47,6 +47,11 @@ const (
 	// with every individual frame well inside the cap. The walk stops at the
 	// cap instead, and the remaining frames are read on the next poll.
 	zstdMaxPlainBytes = 32 << 20
+	// zstdInitialPlainBytes is the accumulator's first capacity. A poll reads
+	// one tail of at most zstdTailBytes compressed, which decodes to a small
+	// fraction of a megabyte of events in practice; one reservation covers the
+	// whole walk instead of a realloc per frame.
+	zstdInitialPlainBytes = 64 << 10
 )
 
 // zstdTailBytes is the most newly-appended compressed bytes one poll will
@@ -259,6 +264,10 @@ func decodeZstdPrefix(src []byte) (plain []byte, consumed int, err error) {
 	if err != nil {
 		return nil, 0, err
 	}
+	// One reservation for the whole walk. Without it every frame reallocates
+	// and copies the accumulator so far, so a window of N small frames costs
+	// O(N^2) bytes moved.
+	plain = make([]byte, 0, zstdInitialPlainBytes)
 	off := 0
 	for off < len(src) && len(plain) < zstdMaxPlainBytes {
 		n, ok := zstdFrameLen(src[off:])
@@ -269,8 +278,18 @@ func decodeZstdPrefix(src []byte) (plain []byte, consumed int, err error) {
 		if derr != nil {
 			return plain, off, derr
 		}
+		// The cap is checked per frame, not once per loop: a frame is allowed
+		// to decode to zstdMaxDecodeMemory, so testing len(plain) alone let one
+		// frame carry the accumulator a full frame past the budget. What does
+		// not fit stays unconsumed and is read on the next poll.
+		if len(plain)+len(out) > zstdMaxPlainBytes {
+			break
+		}
 		plain = append(plain, out...)
 		off += n
+	}
+	if len(plain) == 0 {
+		return nil, off, nil
 	}
 	return plain, off, nil
 }

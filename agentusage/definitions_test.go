@@ -15,14 +15,18 @@ import (
 )
 
 // addDef registers a definition directly and removes it when the test ends.
+// The generation moves with it: a watcher caches the adapter it derived, and
+// the counter is what tells it the spec it read is no longer the one loaded.
 func addDef(t *testing.T, name string, spec Spec) {
 	t.Helper()
 	defsMu.Lock()
 	defs[name] = spec
+	bumpDefsGen()
 	defsMu.Unlock()
 	t.Cleanup(func() {
 		defsMu.Lock()
 		delete(defs, name)
+		bumpDefsGen()
 		defsMu.Unlock()
 	})
 }

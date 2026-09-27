@@ -38,6 +38,19 @@ type Watcher struct {
 	// only grew would then look untouched and its records would be lost.
 	stamps map[string]fileStamp
 	owner  map[string]bool // file -> belongs to this working directory (cached)
+	// dirVerdict memoizes sameDir per cwd string. A store under ~/.claude
+	// repeats the same handful of project directories on every record, and
+	// each miss costs a full EvalSymlinks walk; the map turns that per-record
+	// cost into a map probe. It is cleared when it outgrows dirVerdictMax,
+	// so a store full of one-off cwds cannot grow it without bound.
+	dirVerdict map[string]bool
+	// defsGen is the definitions generation w.ad was derived from, and
+	// fromDefs whether it was derived at all: see refreshAdapter.
+	defsGen  uint64
+	fromDefs bool
+	// roots is the expanded form of ad.roots(w.dir), cached for the same
+	// reason the adapter is: it is recomputed on every openTranscript.
+	roots []string
 	// zstdCarry holds the unterminated trailing record of a zstd transcript,
 	// which the frame-boundary read in consumeZstd cannot tell from a
 	// complete one. Its head is prepended to the next window's first line.
@@ -121,7 +134,8 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now,
 		offsets: map[string]int64{}, preexisting: map[string]bool{}, stamps: map[string]fileStamp{},
 		zstdCarry: map[string][]byte{},
-		owner:     map[string]bool{}, base: map[string]int{}, baseThink: map[string]int{},
+		owner:     map[string]bool{}, dirVerdict: map[string]bool{},
+		base: map[string]int{}, baseThink: map[string]int{},
 		baseInput: map[string]int{},
 		seen:      map[string]values{}, total: map[string]int{},
 	}
@@ -284,7 +298,7 @@ func dirSpellings(dir string) []string {
 // watcher's roots. A symlink swapped to point outside is refused, so a
 // writable store cannot pull in a file from elsewhere.
 func (w *Watcher) openTranscript(path string) (*os.File, error) {
-	for _, root := range w.ad.roots(w.dir) {
+	for _, root := range w.rootsLocked() {
 		if root == "" {
 			continue
 		}
@@ -294,6 +308,20 @@ func (w *Watcher) openTranscript(path string) (*os.File, error) {
 		}
 	}
 	return nil, os.ErrNotExist
+}
+
+// rootsLocked returns this watcher's expanded roots, deriving them the first
+// time. openTranscript runs once per changed transcript per poll, and
+// ad.roots re-expands ~ and substitutes {dir} on every call; the roots of a
+// fixed adapter and directory do not move, so they are computed once and
+// dropped again when refreshAdapter swaps the adapter.
+//
+// Caller holds pollMu.
+func (w *Watcher) rootsLocked() []string {
+	if w.roots == nil {
+		w.roots = w.ad.roots(w.dir)
+	}
+	return w.roots
 }
 
 func openUnder(root, path string) (*os.File, error) {

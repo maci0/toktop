@@ -208,7 +208,7 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 		return w.cached
 	}
 	var out []string
-	for _, root := range w.ad.roots(w.dir) {
+	for _, root := range w.rootsLocked() {
 		if root == "" {
 			continue
 		}

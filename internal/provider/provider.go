@@ -368,13 +368,28 @@ func splitMetric(line string) (string, float64, bool) {
 // classify maps scraped families onto our Metrics using fuzzy, version-tolerant
 // name matching across engines (vLLM, SGLang, Triton/TRT-LLM, llama.cpp…).
 func classify(fam map[string]float64, m *Metrics) {
-	lower := make(map[string]float64, len(fam))
+	// A busy vLLM publishes thousands of families per poll and only a handful
+	// can match a branch below: every one of them names tokens, requests, a
+	// cache or throughput. Filtering first (case-insensitively, so the common
+	// path allocates nothing) keeps the lowercasing and the sort proportional
+	// to the matches rather than to the exposition.
+	matched := make([]string, 0, 16)
+	values := make([]float64, 0, 16)
 	for k, v := range fam {
-		lower[strings.ToLower(k)] = v
+		if !classifiable(k) {
+			continue
+		}
+		matched = append(matched, strings.ToLower(k))
+		values = append(values, v)
+	}
+	lower := make(map[string]float64, len(matched))
+	for i, n := range matched {
+		lower[n] = values[i]
 	}
 	// Iterate in sorted order: several names can contest one scalar field,
 	// and random map order would flip the winner (and the rendered queue
-	// depth or KV percentage) between polls on identical input.
+	// depth or KV percentage) between polls on identical input. Sorting the
+	// filtered names is the same order sorting all of them would give.
 	for _, n := range slices.Sorted(maps.Keys(lower)) {
 		v := lower[n]
 		hasTok := strings.Contains(n, "token")
@@ -426,4 +441,47 @@ func classify(fam map[string]float64, m *Metrics) {
 			}
 		}
 	}
+}
+
+// classifiable reports whether a family name can reach any branch of classify.
+// The four substrings are exactly what those branches test for, and
+// "time_to_first_token" is covered by "token".
+func classifiable(name string) bool {
+	return containsFold(name, "token") || containsFold(name, "req") ||
+		containsFold(name, "cache") || containsFold(name, "throughput")
+}
+
+// containsFold is strings.Contains with ASCII case folding and no allocation.
+// Prometheus names are ASCII, and classify's own tests run against a
+// lowercased copy; this is the pre-filter that decides whether to make one.
+func containsFold(s, sub string) bool {
+	if len(sub) == 0 {
+		return true
+	}
+	first := lowerASCII(sub[0])
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if lowerASCII(s[i]) != first {
+			continue
+		}
+		if equalFoldASCII(s[i:i+len(sub)], sub) {
+			return true
+		}
+	}
+	return false
+}
+
+func equalFoldASCII(a, b string) bool {
+	for i := 0; i < len(b); i++ {
+		if lowerASCII(a[i]) != lowerASCII(b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + 'a' - 'A'
+	}
+	return c
 }

@@ -318,17 +318,38 @@ func adapterFor(tool string) (adapter, bool) {
 // reloaded definition reaches a watcher that is already running. A registered
 // adapter (a built-in, or an explicit RegisterSpec) is fixed for the process
 // and is left alone, which also keeps a test's patched adapter in place.
+//
+// A watcher derives from definitions four times a second, and the derivation
+// clones the spec's roots, expands ~ and substitutes {dir} in each: all of it
+// discarded work unless a definitions file was reloaded in between. The
+// generation counter says whether that happened, and the steady state is one
+// atomic load.
 func (w *Watcher) refreshAdapter() {
 	if _, registered := registeredAdapter(w.tool); registered {
+		return
+	}
+	gen := defsGen.Load()
+	if w.fromDefs && w.defsGen == gen {
 		return
 	}
 	spec, defined := definedSpec(w.tool)
 	if !defined {
 		return
 	}
-	if ad, ok := specAdapter(spec); ok {
-		w.ad = ad
+	ad, ok := specAdapter(spec)
+	if !ok {
+		return
 	}
+	// A load that landed while this derived leaves the adapter and the
+	// counter disagreeing; recording the newer one would pin a stale adapter
+	// for the watcher's life, so leave both unset and derive again next poll.
+	if defsGen.Load() != gen {
+		return
+	}
+	w.ad = ad
+	w.roots = nil // the old adapter's expanded roots belong to the old one
+	w.defsGen = gen
+	w.fromDefs = true
 }
 
 // Supported reports whether live usage can be read for an agent.
