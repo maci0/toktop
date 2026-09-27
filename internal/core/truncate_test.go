@@ -96,3 +96,36 @@ func TestClampFieldComposesToNFCAndCapsClusters(t *testing.T) {
 		t.Error("ClampField with n <= 0 must be empty")
 	}
 }
+
+// An engine-supplied model id reaches the dashboard, the probe body and the
+// --json report, so ModelName is the single place its size and character set
+// are settled.
+func TestModelNameBoundsEngineSuppliedID(t *testing.T) {
+	cases := []struct{ name, in, want string }{
+		{"plain", "llama-3.1-8b-instruct.Q4_K_M", "llama-3.1-8b-instruct.Q4_K_M"},
+		{"surrounding space", "  qwen2:7b  ", "qwen2:7b"},
+		{"sgr recolor", "\x1b[31mllama3\x1b[0m", "llama3"},
+		{"osc52 clipboard", "\x1b]52;c;YU9UQw==\x07llama3", "llama3"},
+		{"control characters", "ll\x00a\x07m3", "llam3"},
+		{"empty", "", ""},
+		{"only escapes", "\x1b[31m\x1b[0m", ""},
+	}
+	for _, c := range cases {
+		if got := ModelName(c.in); got != c.want {
+			t.Errorf("ModelName(%s) = %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+func TestModelNameCapsLongID(t *testing.T) {
+	got := ModelName("m" + strings.Repeat("x", ModelNameMax*4))
+	if n := uniseg.GraphemeClusterCount(got); n != ModelNameMax {
+		t.Errorf("ModelName kept %d clusters, want %d", n, ModelNameMax)
+	}
+	// A flag cut in half renders as a broken glyph; the cap must land between
+	// clusters.
+	flags := ModelName(strings.Repeat("\U0001F1E9\U0001F1EA", 400))
+	if n := uniseg.GraphemeClusterCount(flags); n != ModelNameMax || !utf8.ValidString(flags) {
+		t.Errorf("ModelName(400 flags) = %d clusters, valid=%v", n, utf8.ValidString(flags))
+	}
+}

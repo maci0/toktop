@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net"
@@ -866,5 +867,64 @@ func TestGetJSONClosesBodyOnRedirectError(t *testing.T) {
 	}
 	if n := live.Load(); n > 0 {
 		t.Fatalf("redirect error left %d connection(s) open", n)
+	}
+}
+
+// A model id is engine-chosen data. It reaches the dashboard, the probe
+// request body and the --json report, so every listing path must trim,
+// sanitize and cap it before it becomes a ModelInfo.
+func TestPollBoundsEngineSuppliedModelNames(t *testing.T) {
+	const esc = "\x1b"
+	const bel = "\a"
+	oversized := strings.Repeat("z", core.ModelNameMax*3)
+	// The listings are marshaled rather than written as literal JSON: a raw
+	// control byte inside a JSON string does not decode, and the poll would
+	// fail before any name reached the cap.
+	listing, err := json.Marshal(map[string]any{"data": []map[string]any{
+		{"id": esc + "]52;c;YU9UQw==" + bel + "llama3", "context_length": 4096},
+		{"id": oversized, "context_length": 4096},
+		{"id": esc + "[31m" + esc + "[0m", "context_length": 4096},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ps, err := json.Marshal(map[string]any{"models": []map[string]any{
+		{"name": " " + oversized + " ", "size_vram": 1},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Write(listing)
+		case "/api/ps":
+			w.Write(ps)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	m, err := NewOpenAICompat(srv.URL, "localai", core.KindLocalAI).Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Models) != 2 {
+		t.Fatalf("models = %+v, want 2: an id of pure escapes names no model", m.Models)
+	}
+	if m.Models[0].Name != "llama3" {
+		t.Errorf("model[0] = %q, want llama3 with the escape stripped", m.Models[0].Name)
+	}
+	if m.Models[1].Name != strings.Repeat("z", core.ModelNameMax) {
+		t.Errorf("model[1] = %d chars, want %d", len(m.Models[1].Name), core.ModelNameMax)
+	}
+
+	o, err := NewOllama(srv.URL).Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(o.Models) != 1 || o.Models[0].Name != strings.Repeat("z", core.ModelNameMax) {
+		t.Errorf("ollama models = %+v, want one id of %d chars", o.Models, core.ModelNameMax)
 	}
 }

@@ -71,9 +71,10 @@ const probeLineMax = 16 << 10
 const probeStreamMax = 128 << 10
 
 // ModelNameMax caps the engine-supplied model id interpolated into the
-// generation request. /v1/models can return megabyte strings; HuggingFace
-// ids fit in well under this.
-const ModelNameMax = 256
+// generation request. It is core.ModelNameMax, the bound the provider layer
+// already stored ids under, so a name that reached a snapshot is one this
+// request sends unchanged.
+const ModelNameMax = core.ModelNameMax
 
 const promptText = "Count from one to twenty as words."
 

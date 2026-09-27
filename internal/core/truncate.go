@@ -59,6 +59,24 @@ func ClampField(s string, n int) string {
 // failure messages.
 const SnippetCap = 256
 
+// ModelNameMax caps an engine-supplied model id. The id is server-chosen
+// data: a /v1/models listing on a misbehaving or hostile engine answers with
+// megabyte strings, and one of those would otherwise ride every snapshot, the
+// probe request and the --json report at full length. HuggingFace ids fit in
+// well under this.
+const ModelNameMax = 256
+
+// ModelName is the one shape an engine-supplied model id takes in this
+// program: trimmed, terminal-sanitized, capped at ModelNameMax. Every
+// ModelInfo built from a listing or a health endpoint goes through it, so an
+// engine cannot put a control character or an unbounded string into the
+// dashboard, into a probe body, or into the machine-readable report. The
+// probe's own cap is the same bound, so a name that survives here is one the
+// probe will send unchanged.
+func ModelName(s string) string {
+	return SanitizeText(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
+}
+
 // Snippet collapses raw bytes to at most SnippetCap characters (grapheme
 // clusters) on one line, cutting between characters so a trailing emoji or
 // accented letter from an engine's body is never sliced in half.

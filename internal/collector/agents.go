@@ -80,6 +80,8 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 			return false
 		}
 	}
+	// AppendSorted also trims to the window, so a caller cannot keep one
+	// event too many or one too few.
 	c.agents = core.AppendSorted(c.agents, ev, core.AgentHistoryLen, core.AgentCmp)
 	if id != "" {
 		// The ledger is keyed on the recording instant, not the event's own

@@ -37,9 +37,9 @@ func (o *Ollama) poll(ctx context.Context) (*Metrics, error) {
 		return nil, err
 	}
 	for _, mm := range ps.Models {
-		name := mm.Name
+		name := core.ModelName(mm.Name)
 		if name == "" {
-			name = mm.Model
+			name = core.ModelName(mm.Model)
 		}
 		if name == "" {
 			continue

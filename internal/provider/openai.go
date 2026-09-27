@@ -63,8 +63,8 @@ func (o *OpenAICompat) poll(ctx context.Context) (*Metrics, error) {
 	haveModels := modelsErr == nil
 	if haveModels {
 		for _, d := range lm.Data {
-			if d.ID != "" {
-				mi := core.ModelInfo{Name: d.ID}
+			if name := core.ModelName(d.ID); name != "" {
+				mi := core.ModelInfo{Name: name}
 				if n := max(d.ContextLength, d.MaxContextLen); n > 0 {
 					mi.CtxMax = uint64(n)
 				}
@@ -116,10 +116,11 @@ func enrichLMStudio(ctx context.Context, base string, m *Metrics) bool {
 		if d.State != "" && !strings.EqualFold(d.State, "loaded") {
 			continue
 		}
-		if d.ID == "" {
-			continue // a listing entry with no id names no model
+		name := core.ModelName(d.ID)
+		if name == "" { // no id, or an id made only of control characters
+			continue // names no model
 		}
-		mi := core.ModelInfo{Name: d.ID}
+		mi := core.ModelInfo{Name: name}
 		if d.MaxContextLen > 0 {
 			mi.CtxMax = uint64(d.MaxContextLen)
 		}
@@ -148,10 +149,11 @@ func enrichLemonade(ctx context.Context, base string, m *Metrics) bool {
 	case len(h.AllLoaded) > 0:
 		m.Models = m.Models[:0]
 		for _, mm := range h.AllLoaded {
-			if mm.ModelName == "" {
+			name := core.ModelName(mm.ModelName)
+			if name == "" {
 				continue
 			}
-			mi := core.ModelInfo{Name: mm.ModelName}
+			mi := core.ModelInfo{Name: name}
 			if mm.CtxSize > 0 {
 				// CtxMax is rendered as an int64, so a float ctx_size
 				// past that range would read back as a negative context
@@ -162,7 +164,9 @@ func enrichLemonade(ctx context.Context, base string, m *Metrics) bool {
 			m.Models = append(m.Models, mi)
 		}
 	case h.ModelLoaded != "":
-		m.Models = []core.ModelInfo{{Name: h.ModelLoaded}}
+		if name := core.ModelName(h.ModelLoaded); name != "" {
+			m.Models = []core.ModelInfo{{Name: name}}
+		}
 	}
 	return true
 }

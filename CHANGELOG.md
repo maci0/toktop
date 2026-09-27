@@ -68,6 +68,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - A session's own age is floored at zero rather than reported as ending before
   it began when the clock steps back mid-run. `--once --json` serialized the
   negative `uptime_secs` straight out.
+- A model id an engine reports is trimmed, stripped of terminal control
+  characters and capped at 256 characters before it becomes a snapshot entry,
+  on every listing path (`/v1/models`, the LM Studio and Lemonade native
+  feeds, Ollama's `/api/ps`). A model listing is engine-chosen data: a
+  misbehaving or hostile server could return megabyte ids or embed an escape
+  sequence, and each one rode every snapshot, the probe request body and the
+  `--json` report at full length.
 - `toktop update --help` names the `--repo` argument the way its own usage
   line does (`owner/name`) instead of the type name Go's flag package
   reports (`string`).
