@@ -425,6 +425,10 @@ func (b *progressBody) Read(p []byte) (int, error) {
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	if in := len(eventSlots); in >= cap(eventSlots) {
+		// The same Retry-After the refused POSTs carry: a 503 that names no
+		// delay leaves a client to invent one, and the slot frees as soon as a
+		// stalled body gives up.
+		w.Header().Set("Retry-After", "1")
 		w.WriteHeader(http.StatusServiceUnavailable)
 		fmt.Fprintf(w, "degraded: %d/%d event streams in flight; events are being refused\n", in, cap(eventSlots))
 		return

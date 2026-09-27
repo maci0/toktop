@@ -2219,6 +2219,11 @@ func TestHealthzReportsSaturation(t *testing.T) {
 	if !strings.Contains(string(body), "event streams in flight") {
 		t.Errorf("healthz body names no reason: %q", body)
 	}
+	// A 503 that names no delay leaves a poller to invent one; the refused
+	// POSTs carry the same second.
+	if got := resp.Header.Get("Retry-After"); got != "1" {
+		t.Errorf("healthz Retry-After = %q, want 1", got)
+	}
 
 	pw.Close()
 	<-stalled

@@ -119,13 +119,14 @@ Every externally reachable input, with its code location:
 
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
    NDJSON stream), `GET`/`HEAD /healthz`
-   (internal/ingest/server.go; routes registered at :347+, the 405 `Allow`
-   header names `GET, HEAD`). Binds `127.0.0.1:8420` unless `--ingest`
-   says otherwise (cmd/toktop/flags.go); any address is accepted, including
-   routable interfaces. An empty `--ingest` is rejected (validateIngestAddr,
-   validate.go) because `net.Listen` would treat it as `:0` (every
-   interface, ephemeral port). A routable bind prints a startup warning naming
-   the unauthenticated exposure (endpoints.go, routableBind). Runs
+   (internal/ingest/server.go; routes registered from the endpoint table at
+   :257, the 405 `Allow` header names `GET, HEAD`). Binds `127.0.0.1:8420`
+   unless `--ingest` says otherwise (cmd/toktop/flags.go); any address is
+   accepted, including routable interfaces. An empty `--ingest` is rejected
+   (validateIngestAddr, validate.go) because `net.Listen` would treat it as
+   `:0` (every interface, ephemeral port). A routable bind prints a startup
+   warning naming the unauthenticated exposure (endpoints.go, routableBind).
+   Runs
    in demo mode too. `--no-ingest` turns it off (main.go).
 2. **CLI arguments**: top-level flags including `--bearer` (secret),
    `--ssh-key`, `--add URL` (repeatable), `--ingest ADDR`, `--agents`,

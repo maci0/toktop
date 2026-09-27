@@ -51,7 +51,8 @@ without an asset binding, and 404/5xx from the asset store, are `no-store`
 so a missing file is not cached as a day-long success. Error bodies are
 `text/plain`, matching `/health`: a failure the asset store reports is
 rewritten into that envelope, status kept, rather than passing the store's
-own HTML error page through at an image path.
+own HTML error page through at an image path. A `HEAD` that fails answers with
+those same headers and no body, as a served `HEAD` does.
 
 The page carries an ETag derived from its own bytes: reloads and visits
 past the five-minute freshness window answer with an empty 304 instead of

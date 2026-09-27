@@ -605,11 +605,22 @@ export default {
     try {
       return await handle(request, env, started);
     } catch (err) {
-      return failRequest(request, started, 500, "unhandled", "internal error", {
-        method: request.method,
-        path: new URL(request.url).pathname,
-        error: String(err?.message ?? err),
-      });
+      // HEAD carries the GET headers and no body (RFC 9110), on the failure
+      // path as on the served one: a HEAD that throws is as reachable as a
+      // GET that does, and a body under it is the one answer the runtime
+      // will not strip for us.
+      return failRequest(
+        request,
+        started,
+        500,
+        "unhandled",
+        request.method === "HEAD" ? null : "internal error",
+        {
+          method: request.method,
+          path: new URL(request.url).pathname,
+          error: String(err?.message ?? err),
+        },
+      );
     }
   },
 };

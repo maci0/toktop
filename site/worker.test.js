@@ -911,6 +911,25 @@ test("an unhandled throw answers 500 and logs the request that caused it", async
   }
 });
 
+test("a HEAD that throws answers 500 with no body, like every other HEAD", async () => {
+  const logs = captureLogs();
+  try {
+    const env = {
+      ASSETS: { fetch: () => Promise.reject(new Error("asset store unreachable")) },
+    };
+    const res = await worker.fetch(new Request(`${ORIGIN}/dashboard.png`, { method: "HEAD" }), env);
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("");
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    const [line] = logs.parse();
+    expect(line.event).toBe("unhandled");
+    expect(line.method).toBe("HEAD");
+    expect(line.status).toBe(500);
+  } finally {
+    logs.restore();
+  }
+});
+
 test("asset failures log their status; served requests log nothing", async () => {
   const logs = captureLogs();
   try {

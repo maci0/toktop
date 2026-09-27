@@ -254,7 +254,7 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 | endpoint | purpose |
 |---|---|
 | `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
-| `GET /healthz` | liveness probe, answers `ok`; `503` naming the in-flight count while every event slot is held |
+| `GET /healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held |
 
 Event fields are all optional; anything omitted gets the default:
 
@@ -265,7 +265,7 @@ Event fields are all optional; anything omitted gets the default:
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
 | `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`; custom kinds pass through lowercased, capped at 24 characters |
-| `prompt_tokens` / `output_tokens` / `thinking_tokens` | integer | `0` | negative values and values above 2^40 clamp to `0`; a whole JSON number such as `100.0` counts; thinking is the reasoning share of output when the agent says so |
+| `prompt_tokens` / `output_tokens` / `thinking_tokens` | integer | `0` | negative values and values above 2^40 clamp to `0`; a whole JSON number such as `100.0` counts; a count outside the 64-bit integer range is a `400` naming the field instead of a clamp; thinking is the reasoning share of output when the agent says so |
 | `via_engine` | string | - | monitored engine already counting this output; aggregates skip the event; capped at 128 characters |
 | `note` | string | - | free-form, capped at 512 characters; a note that is nothing but a directory is reduced to its last two components, with a path under `$HOME` folded to `~`, so client and project names above the checkout never reach the feed |
 
@@ -296,9 +296,9 @@ Every POST is logged to stderr as one structured line (`req`, `method`,
 `error`).
 Wrong-method and unknown-path requests log the same way, so a harness
 posting to `/events` is not silent. `GET /healthz` is not logged. It answers
-`503` with a one-line reason while all 64 event slots are held, because the
-endpoint is refusing every POST then and `ok` would describe a service that
-accepts nothing. Event
+`503` with `Retry-After: 1` and a one-line reason while all 64 event slots are
+held, because the endpoint is refusing every POST then and `ok` would describe
+a service that accepts nothing. Event
 bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. Responses carry `X-Request-Id`,
 echoed from the request when the sender set one.
