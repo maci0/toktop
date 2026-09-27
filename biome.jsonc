@@ -10,5 +10,28 @@
   // so turning one on now would be a whole-tree reformat, not a gate. Lint is
   // the part that catches defects; formatting stays a reviewer's eye.
   "formatter": { "enabled": false },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } }
+  "linter": {
+    "enabled": true,
+    "rules": {
+      // The preset alone is Biome's default set, which leaves the correctness
+      // and a11y groups largely unrun. Those are the groups that catch a bad
+      // header, a bad status, or a misused async call in edge code, and the
+      // tree passes both today apart from the one rule disabled below.
+      "preset": "recommended",
+      "a11y": "error",
+      // In the correctness group but assumes a Qwik app, which this is not:
+      // useQwikValidLexicalScope flags every ordinary closure capture. There is
+      // no Qwik build here for the rule to be right about.
+      "correctness": { "useQwikValidLexicalScope": "off" },
+    },
+  },
+  "overrides": [
+    {
+      // worker.test.js runs under bun, not workerd, and is never deployed, so
+      // a node: import there is a test harness detail, not a bundle-bloat
+      // defect.
+      "includes": ["site/worker.test.js"],
+      "linter": { "rules": { "correctness": { "noNodejsModules": "off" } } },
+    },
+  ],
 }
