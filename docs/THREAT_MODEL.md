@@ -11,7 +11,11 @@ they live and what already stands in their way.
   three drifted claims listed in the documentation-claims section below: the
   ingest kind default (M5), the discovery port bound (M22, now gap 9), and
   the site forwarding claim. M13's ssh algorithm claim was re-verified
-  against the pinned x/crypto source and upheld.
+  against the pinned x/crypto source and upheld. A second pass the same day
+  re-anchored every `site/worker.js` line reference, which had all drifted
+  against a longer revision of that file, corrected the worker's
+  request-bytes claim, and added the environment, CLI, and agentusage
+  surface the first pass had missed (see the documentation-claims section).
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -78,8 +82,15 @@ What is worth stealing, corrupting, or denying:
   (engine model names, remote vitals, event fields) into a TTY; escape-sequence
   injection would hijack clipboard, cursor, or title.
 - **Agent session stores** (only with `--agents`): JSONL transcripts under
-  agent home dirs, dsh's default `session.v<N>.jsonl.zstd` (concatenated zstd
-  frames, agentusage/dsh.go), crush's project database `.crush/crush.db`
+  agent home dirs. The default set is wider than this file previously named:
+  claude (`~/.claude/projects`, agentusage/claude.go, 15), codex
+  (`~/.codex/sessions`, agentusage/codex.go, 31), qwen
+  (`~/.qwen/projects`), copilot (`~/.copilot/session-state`), clanker
+  (its token log inside the repository it runs in, registry.go, 93-107), and
+  the built-in pi, prime-agent, and feynman definitions
+  (agentusage/definitions.go, 115-121). Beyond plain JSONL, dsh's default
+  `session.v<N>.jsonl.zstd` (concatenated zstd frames, agentusage/dsh.go),
+  crush's project database `.crush/crush.db`
   (agentusage/crush_sqlite.go, gated by the `sqlite` build tag and
   no extra flag), and opencode's `~/.local/share/opencode/opencode.db` or
   `$XDG_DATA_HOME/opencode/opencode.db` (agentusage/opencode_sqlite.go,
@@ -107,8 +118,9 @@ What is worth stealing, corrupting, or denying:
 Every externally reachable input, with its code location:
 
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
-   NDJSON stream), `GET /healthz`
-   (internal/ingest/server.go). Binds `127.0.0.1:8420` unless `--ingest`
+   NDJSON stream), `GET`/`HEAD /healthz`
+   (internal/ingest/server.go; routes registered at :347+, the 405 `Allow`
+   header names `GET, HEAD`). Binds `127.0.0.1:8420` unless `--ingest`
    says otherwise (cmd/toktop/flags.go); any address is accepted, including
    routable interfaces. An empty `--ingest` is rejected (validateIngestAddr,
    validate.go) because `net.Listen` would treat it as `:0` (every
@@ -117,10 +129,16 @@ Every externally reachable input, with its code location:
    in demo mode too. `--no-ingest` turns it off (main.go).
 2. **CLI arguments**: top-level flags including `--bearer` (secret),
    `--ssh-key`, `--add URL` (repeatable), `--ingest ADDR`, `--agents`,
-   `--opencode-db` (cmd/toktop/flags.go); positional
-   `ssh://[user@]host[:port]` targets (interpretArgs / ParseTarget); and the
+   `--opencode-db`, and the demo-path `--demo`, `--probe`, `--interval`,
+   `--frames`, `--seed` (cmd/toktop/flags.go, 42-61); positional
+   `ssh://[user@]host[:port]` targets (interpretArgs / ParseTarget); the
    `update` subcommand with `--check` and `--repo owner/name`
-   (cmd/toktop/update.go). `--repo` is checked with `ValidateRepo`
+   (cmd/toktop/update.go, 67-72); and the `help` and `version` subcommands
+   (cmd/toktop/main.go, 42-53), which accept arbitrary trailing arguments
+   (`runHelp(os.Stdout, os.Args[2:])`) and are reachable in forwarded form as
+   `toktop --help update` (main.go, 60-65). `--seed` fixes the demo RNG, and
+   demo mode is the one path where the ingest endpoint runs against a
+   synthetic recorder. `--repo` is checked with `ValidateRepo`
    (owner/name only). `--add` rejects non-http(s), missing host, and userinfo,
    and refuses the same endpoint twice, since two polls of it read as twice
    the tokens (validateAddURL, parseAdd, endpoints.go). An `ssh://` URL that
@@ -140,6 +158,24 @@ Every externally reachable input, with its code location:
    `--opencode-db` is on, which it is by default with `--agents`), and
    `TOKTOP_SCREENSHOT_FONT` (scripts/screenshot.py
    only; the binary ignores it).
+   Three more shape where toktop connects or what it reads, and were missing
+   from this list before this pass:
+   - `USER` then `USERNAME` supply the ssh login user when an `ssh://` target
+     names no user, before falling back to the passwd database
+     (`currentUser`, internal/remote/client.go, 78-89). A hostile value
+     redirects the ssh connection to a different account on the same host;
+     it is a destination input, not a display string.
+   - `HOME` / `USERPROFILE` via `os.UserHomeDir` outranks every other path
+     root this model discusses: `~/.ssh/config`, the default identity set,
+     `~/.gauntlet/agents.json`, every built-in transcript root, the opencode
+     store, and the `~` redaction in internal/core/redact.go, 24. A hostile
+     value relocates all of them.
+   - `PROCESSOR_IDENTIFIER` is read on Windows only and rendered into the
+     system strip (internal/sysmon/sysmon_windows.go, 35).
+   `WINDIR` is a second font-path input to scripts/screenshot.py, 41.
+   `NO_COLOR`, `CLICOLOR*`, `TERM`, and `COLORTERM` are read by the
+   lipgloss/termenv renderer, not by this repository's code, though
+   cmd/toktop/help.go, 60 advertises `NO_COLOR`.
 4. **Self-update network fetches** (outbound HTTPS): latest-release lookup on
    api.github.com, then download of the checksums archive and platform asset
    named by that response (internal/selfupdate/selfupdate.go).
@@ -170,8 +206,15 @@ Every externally reachable input, with its code location:
    only): `/proc` (Linux) or `ps`/`lsof` (Darwin) finds coding-agent
    processes; their JSONL transcripts are read every second via `agentusage`
    (internal/agentwatch/agentwatch.go; agentusage/watcher.go),
-   including dsh's default concatenated-zstd logs (agentusage/dsh.go). With
-   the `sqlite` build tag, crush's `.crush/crush.db` is opened automatically
+   including dsh's default concatenated-zstd logs (agentusage/dsh.go). On
+   Linux, attributing an agent to the same engine walks the descriptors of
+   *other* processes: `socketInodes` reads `/proc/<pid>/fd` and matches the
+   inodes against `/proc/net/tcp` and `/proc/net/tcp6`
+   (agentusage/peers_linux.go, 26-126; the Darwin equivalent spawns one `lsof`
+   per matched pid, agentusage/discover_darwin.go, 78-92 and peers_darwin.go,
+   23-31). A process belonging to another user yields an empty result, which
+   callers must read as "unknown", not as "a different engine".
+   With the `sqlite` build tag, crush's `.crush/crush.db` is opened automatically
    for each watched working directory (agentusage/crush_sqlite.go).
    opencode's machine-wide SQLite store is a second gate: the tag plus
    `--opencode-db`, on by default with `--agents` and disabled with
@@ -236,30 +279,46 @@ Deployment surface:
   signature step exists. Tag names that reach ldflags and dist filenames are
   refused unless they are a safe identifier (release.yml).
 - The marketing site is a single Cloudflare Worker serving one static page
-  from an embedded string (site/worker.js): GET/HEAD only (:470-472 for
-  images, :517-519 for the page), a `/health` route (:520-535), ETag
-  revalidation with a weak validator (:278-302, :544),
-  content negotiation (brotli, zstd, gzip, identity)
+  from an embedded string (site/worker.js): GET/HEAD only (the method guard
+  runs twice, at :602 for image paths and :660 for the page, and any other
+  method gets 405 with `allow: GET, HEAD`), a `/health` route (:663-678),
+  weak FNV ETag over the page with weak `If-None-Match` matching (ETAG,
+  :335-346, 690-702), content negotiation (brotli, zstd, gzip, identity)
   compressed once per isolate, keyed by `Vary: Accept-Encoding` on every
-  page response (VARY :414, PAGE_CACHE_CONTROL :409, representationFor
-  :388-404), and hardening headers
+  page response (VARY :492, PAGE_CACHE_CONTROL :487, representationFor
+  :465-481), and hardening headers
   (nosniff, HSTS, referrer-policy, CSP
   `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`) on every
-  page and image response (SECURITY_HEADERS, :416-423; the same set adds
+  page and image response (SECURITY_HEADERS, :494-501; the same set adds
   `x-frame-options: DENY` and an HSTS of `max-age=31536000` with no
   `includeSubDomains`). wrangler.jsonc sets
   `assets.run_worker_first` so /dashboard.png and related images hit that
   Worker path instead of the asset pipeline; it also publishes the worker on
-  workers.dev and binds toktop.ai / www.toktop.ai. The only request bytes
-  inspected are the method, path, If-None-Match, If-Modified-Since, and
-  Accept-Encoding headers, compared as strings; nothing is stored or echoed
-  into the page. The one forward is on image paths: the Worker re-issues the
-  request to `env.ASSETS` carrying only `if-none-match` and
-  `if-modified-since` (worker.js, 484-490), and an asset-store failure
+  workers.dev and binds toktop.ai / www.toktop.ai. `env.ASSETS` is its only
+  binding (site/wrangler.jsonc, 12), so the Worker holds no secret;
+  `observability.enabled` is true (wrangler.jsonc, 23) and Workers Logs are
+  therefore the one place request data is persisted.
+  The one forward is on image paths: the Worker re-issues the request to
+  `env.ASSETS` carrying the full request URL (so any query string rides
+  along) but forwarding only `if-none-match` and `if-modified-since`
+  (worker.js, 614-624), and an asset-store failure
   becomes a one-line text/plain body rather than the store's HTML error
-  page (:490-511). `style-src 'unsafe-inline'` is idle:
+  page (:630-642). `style-src 'unsafe-inline'` is idle:
   the HTML is a compile-time string.
+  Three behaviors were missing from this paragraph before this pass. Any path
+  that is neither in `IMAGE_PATHS` (:563) nor `/health` serves the marketing
+  page with 200, not a 404 (the catch-all, :679-712). A client that refuses
+  every offered coding gets 406 with `vary: Accept-Encoding` (:685-689).
+  An unbound `env.ASSETS` logs and returns 404 (:605-610), and any throw
+  becomes a 500 with the body `internal error` (:583-596); both answers go
+  out through ERROR_HEADERS (:503-514), which is otherwise undescribed.
+  Finally, the set of request bytes the Worker inspects is larger than this
+  file previously claimed: `logFailure` (:531-537) also reads the
+  caller-controlled `cf-ray` header and writes it to Workers Logs, alongside
+  `path` on the `assets-unbound`, `asset-missing`, and `asset-store-error`
+  lines. The values are JSON-encoded, so this is not injection into the log,
+  but a caller can write arbitrary strings into the log stream.
   Deployment is a local make target, not a CI job: `make site-deploy`
   takes `dist/site.lock`, runs `bunx wrangler@4.126.0 deploy` with ambient
   Cloudflare credentials, records `dist/site.deployed`, polls
@@ -347,7 +406,14 @@ Deployment surface:
   read-only (sqlite.go, `_query_only=1`, `_defensive=1`, `_dqs=0`,
   and `trusted_schema=OFF` in the DSN).
   Transcript and crush paths that leave their root via a planted symlink are
-  refused (watcher.go; crush_sqlite.go).
+  refused (watcher.go; crush_sqlite.go; candidates.go).
+  The *content* of a transcript is untrusted too, not just its path: a
+  `cwd` read out of the session JSON decides whether that session's tokens
+  are credited to the watched directory at all (`owns` and `sameDir`,
+  agentusage/transcript.go, 263-305; the adapters' `sessionCwd` at
+  claude.go, 19 and codex.go, 16). A writer of a watched store therefore
+  chooses which project's tokens are attributed to which directory, in
+  addition to choosing the store's contents.
 
 Privilege transitions: toktop gains no privileges at runtime (no setuid,
 no sudo). The ssh connection is the one place code acts with authority beyond
@@ -504,11 +570,26 @@ ports that are then exposed on local loopback (client.go).
 - *Tampering*: a writable transcript or crush/opencode database can inject
   dashboard rows the same way ingest can; sanitization still applies at
   ingest-equivalent recording and at render (M2). Planted symlinks out of
-  the transcript root or crush project are refused (M29).
+  the transcript root or crush project are refused (M29). Separately, a
+  writable store chooses its own `cwd` header, so it can claim a session
+  that belongs to another project or disown one that does
+  (transcript.go, 263-305); ownership only moves token counts between
+  directory rows, it does not cross a trust boundary.
+- *Information disclosure*: on Linux the same-engine attribution walks
+  `/proc/<pid>/fd` of other processes and reads the kernel TCP tables
+  (peers_linux.go, 26-126). Another user's pid returns nothing (the read
+  fails and is reported as unknown), but where pids are readable to the
+  operator the remote endpoints of those processes are read into the
+  attribution logic. The result is used for a same-engine verdict and is not
+  rendered as inventory.
 - *Denial of service*: a huge transcript or database is opened read-only and
   queried with bounds (maxSaneTokens 1<<40, agentusage/sample.go);
   JSONL is tailed from the attach point rather than replayed in full
-  (agentusage/watcher.go). dsh zstd frames are size-capped
+  (agentusage/watcher.go). One transcript record is capped at `maxLineBytes`
+  8 MiB with a 64 KiB `appendReaderBytes` fill
+  (agentusage/transcript.go, 108-171), and the ownership scan is capped at
+  `ownerScanLines`, with a record-free scan refused durably rather than
+  re-read every poll. dsh zstd frames are size-capped
   (`zstdMaxFrameBytes`, `WithDecoderMaxMemory` in agentusage/dsh.go).
 
 ## Existing mitigations map
@@ -536,7 +617,7 @@ Controls verified in code, with the threats they cover:
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance | credential handling in headless runs (B4) | auth.go |
 | M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution (B5) | selfupdate.go |
 | M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | validate.go validateFlags, validateOnceEnv, validateIngestAddr; endpoints.go validateAddURL; main.go logActiveConfig; agentusage/definitions.go, 143-167 |
-| M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check | vulnerable-dependency drift (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, Makefile |
+| M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, 8); the release workflow holds `contents: write` (.github/workflows/release.yml, 7), which is the scope that can push a tag and its assets, so it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift (deployment surface); release-channel write scope | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 7, Makefile |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (discover.go, 70-74), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 9) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
@@ -545,19 +626,79 @@ Controls verified in code, with the threats they cover:
 | M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, 81, 100-107 |
 | M27: logRemote rewrites non-loopback peer addresses to `"remote"` on the audit line and on http.Server.ErrorLog | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | server.go |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go |
-| M29: Transcript and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watcher.go; crush_sqlite.go |
+| M29: Transcript, candidate-walk, and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused. The ownership scan is capped at `ownerScanLines` and refused durably when no header is found, so an undecided session is not re-read on every poll | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watcher.go, 316; agentusage/candidates.go, 88 (`walkTranscripts`); agentusage/crush_sqlite.go, 118 |
 
 Documentation claims checked against code this pass (2026-09-27):
 
-- Three claims in this file were wrong about the code and are corrected
-  above: M5 said an unknown event kind defaults to `turn`, while
+- The site paragraph's line references were all wrong. It cited the page
+  method guard at :517-519, `/health` at :520-535, `SECURITY_HEADERS` at
+  :416-423, the `env.ASSETS` forward at :484-490, and the page as served from
+  `representationFor` :388-404. In the current file those anchors are :660,
+  :663-678, :494-501, :614-624, and :465-481. The file grew past the
+  revision the citations were written against. Every site reference has been
+  re-anchored, because this file's own maintenance rule is that a line
+  reference is what lets the next pass diff a claim against code.
+- The site paragraph claimed "the only request bytes inspected are the
+  method, path, If-None-Match, If-Modified-Since, and Accept-Encoding
+  headers" and that nothing is stored. `logFailure` also reads the
+  caller-controlled `cf-ray` header and writes it, with `path`, into Workers
+  Logs (worker.js, 531-537, and the `assets-unbound`, `asset-missing`,
+  `asset-store-error` lines). `observability.enabled` is true
+  (site/wrangler.jsonc, 23). Corrected above; the values are JSON-encoded,
+  so the exposure is arbitrary caller-chosen strings in a log stream, not
+  injection.
+- The site paragraph did not say what an unknown path answers. It is the
+  marketing page with 200, not a 404 (the catch-all, worker.js, 679-712).
+  405 (with `allow: GET, HEAD`) and 406 answers also exist. Corrected.
+- The forward to `env.ASSETS` passes the whole request URL, so a query string
+  rides along; the previous wording said it carried only two headers, true
+  of headers and silent on the URL. Corrected.
+- The agent-store asset named dsh, crush, and opencode only. The default
+  `--agents` path also tails claude, codex, qwen, copilot, clanker, and the
+  built-in pi, prime-agent, and feynman definitions
+  (agentusage/registry.go, 58-121; agentusage/claude.go, 15; codex.go, 31).
+  None of those names appeared anywhere in this file. Corrected.
+- The env list presented itself as the inventory but omitted `USER` /
+  `USERNAME`, which choose the ssh login account
+  (internal/remote/client.go, 78-89), `HOME` / `USERPROFILE`, which relocates
+  every home-relative path this model reasons about, `PROCESSOR_IDENTIFIER`
+  on Windows, and `WINDIR` in the screenshot script. `NO_COLOR` and the
+  color env vars are read by lipgloss/termenv rather than by this
+  repository. Corrected.
+- The CLI entry point omitted the `help` and `version` subcommands, which
+  take arbitrary trailing arguments (cmd/toktop/main.go, 42-65), and the
+  `--demo`, `--probe`, `--interval`, `--frames`, `--seed`, `--version`, and
+  `--help` flags. Corrected.
+- The ingest entry point said `GET /healthz`; the route registers GET and
+  HEAD (internal/ingest/server.go, 347+, and the 405 `Allow` header).
+- M29 named two `os.OpenRoot` sites; `walkTranscripts`
+  (agentusage/candidates.go, 88) is a third, re-run every second over each
+  transcript root.
+- M20 listed the supply-chain controls but not that CI runs
+  `permissions: contents: read` while the release workflow holds
+  `contents: write` (.github/workflows/ci.yml, 8;
+  .github/workflows/release.yml, 7). That scope is what a workflow or
+  runner compromise would use against the update channel of summary risk 3.
+- B7 named symlink escape and root choice but not that transcript *content*
+  supplies the `cwd` that decides session ownership
+  (agentusage/transcript.go, 263-305), nor that Linux same-engine
+  attribution reads `/proc/<pid>/fd` of other processes
+  (agentusage/peers_linux.go, 26-126). Both are now boundaries, and the
+  first is gap 10.
+- gap 5 cited the uncapped identification decoders at discover.go 249, 303,
+  319; they are at 252, 306, 322. The claim itself is correct and was
+  re-verified: none of the three passes an `io.LimitReader` to
+  `json.NewDecoder`, while the poll path does
+  (internal/provider/provider.go, 88, 113).
+- The three claims the first pass corrected stand: M5 said an unknown event
+  kind defaults to `turn`, while
   internal/ingest/event.go, 63-70 keeps a nonempty unknown kind
   (lowercased, sanitized, 24-rune cap) and only an empty or
   sanitize-to-empty kind becomes `turn`; M22 said every discovery port is
   bounded 16-bit, which holds for the `/proc/net/tcp` parser but not for
   the shell-probe fallback (now gap 9); the site paragraph said nothing
   is forwarded anywhere, while image requests are re-issued to
-  `env.ASSETS` carrying the two revalidation headers. M13's ssh
+  `env.ASSETS`. M13's ssh
   algorithm claim was re-checked against
   golang.org/x/crypto v0.57.0 `ssh/common.go`, 163-176 and upheld:
   `ssh.SupportedAlgorithms()` carries only RSA-SHA2, ECDSA and Ed25519
@@ -674,7 +815,8 @@ Recorded as threats with locations; fixes do not happen in this document:
 5. **Identification responses are decoded without a body cap** (Low-Medium,
    new this pass): the engine-identification decoders in
    `json.NewDecoder(resp.Body)` take no `io.LimitReader`, unlike the poll path
-   (internal/provider/provider.go, 83, 108). Enabling path: any process that
+   (internal/provider/provider.go, 88, 113;
+   internal/provider/discover.go, 252, 306, 322). Enabling path: any process that
    answers on a scanned well-known port, or any engine reached through an ssh
    relay, can stream a JSON body that never ends. The 700 ms `scanTimeout`
    client (internal/provider/discover.go, 20, 62) bounds how long, not how
@@ -711,6 +853,25 @@ Recorded as threats with locations; fixes do not happen in this document:
    and failed probes, not code execution. Bounding the fallback the way
    `parseNetTCP` is bounded, and extending the fuzz target to it, belongs
    to sec-review.
+10. **A watched transcript's own `cwd` decides session ownership** (Low, new
+    this pass): `owns` reads a working directory out of the session JSON
+    and compares it to the watched directory
+    (agentusage/transcript.go, 263-305; `sessionCwd` at claude.go, 19,
+    codex.go, 16). A writer of a watched store can therefore claim a
+    session belonging to another project, or disown its own, moving token
+    counts between directory rows. It is an attribution-integrity issue
+    within the operator's own stores, not a boundary crossing, and the
+    `ownerScanLines` cap means the scan is bounded. Belongs to sec-review if
+    the attribution is meant to be authoritative.
+11. **`USER` / `USERNAME` choose the ssh login account** (Low, new this
+    pass): `currentUser` prefers them over the passwd database when an
+    `ssh://` target names no user (internal/remote/client.go, 78-89). A
+    hostile value authenticates as a different account on the target host,
+    with whatever the offered key unlocks there. The blast radius is bounded
+    by the keys the operator already offered, and every other path root in
+    this model follows `HOME`, which the same hostile environment controls;
+    treating `USER` and `HOME` as trusted same-user input belongs to
+    sec-review only if toktop is ever run with a less trusted environment.
 
 ## Response readiness (notes only)
 
