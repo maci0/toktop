@@ -258,6 +258,19 @@ func (w *Watcher) discover(ctx context.Context) {
 		w.stopOne(t)
 	}
 
+	// Exited trackers are stopped here, before any watcher is installed, not
+	// at the end of the pass. The handover below promotes a follower onto the
+	// store a dead tracker was still tailing, and until that tracker is
+	// stopped its poll loop keeps running: two watchers on one store, each
+	// reporting growth under its own PID, so the collector's id window cannot
+	// merge them and every token written in the overlap counts twice. stopOne
+	// also reports the dead watcher's final growth, so the stopped tracker's
+	// share lands before the follower's baseline is taken and the two
+	// partitions do not overlap.
+	for _, t := range exited {
+		w.stopOne(t)
+	}
+
 	// A store is followed once. Two watchers tailing the same transcripts each
 	// report the same growth under their own PID, and the two records carry
 	// different sample ids, so the collector's id window cannot merge them and
@@ -405,9 +418,6 @@ func (w *Watcher) discover(ctx context.Context) {
 				w.report(t, s)
 			})
 		}(t, startCtx[i])
-	}
-	for _, t := range exited {
-		w.stopOne(t)
 	}
 
 	w.matchEngines()

@@ -143,6 +143,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   instant, and the report printed it to whole seconds, so the value a replay is
   fed back named an instant up to a second earlier and the replayed run
   stamped every frame ahead of the capture it was read from.
+- Two watchers never tail one agent's transcripts at once. A discovery pass
+  stopped the trackers whose process had gone at its end, after it had already
+  handed the store one of them held to a surviving process on the same store.
+  The dead watcher's poll loop kept running through that handover, so both
+  reported the same growth under their own PID, and two different sample ids
+  are exactly what the collector's id window cannot merge: every token written
+  between the two reads was counted twice. Discovery now stops the exited
+  trackers before it installs any watcher, so the survivor's baseline is taken
+  only once the dead watcher's final growth has been reported, and the two
+  readings partition the same transcripts instead of overlapping them.
 - `--frames` is named as a wait-only knob under `--once --json`, the way it
   already was under `--once --plain`. Both reports render the last snapshot
   alone, so the count buys the wait before the render and nothing else, and a
