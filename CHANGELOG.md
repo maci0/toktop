@@ -13,6 +13,103 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-09-27
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.15.0).
+
+### Breaking
+
+- An ingested event's `note` that is nothing but a path is stored reduced to
+  its last two components. Before this release a note was kept as the sender
+  wrote it, with only a path under `$HOME` folded to `~`, so
+  `/home/you/clients/Acme/migrator` reached the feed, the live dashboard and
+  the `--once --plain` report as `~/clients/Acme/migrator`; the feed now holds
+  `Acme/migrator`. Everything above the checkout is where a client's name and
+  a project index sit, and a feed redirected into a file or a journal kept
+  them. A note counts as a bare path when it is a single token carrying a `/`
+  or `\`, or spelled from `~`; a note with a space, a tab or a `·` in it is
+  free text and is still stored as written, past the home fold. A sender
+  whose note is a path cannot opt out of the shortening: put any other text in
+  the note (`checkout: /home/you/clients/Acme/migrator`) and the whole string
+  is kept with `$HOME` folded. The field is a display label, and
+  [README.md](README.md#agent-feed-api) says so per field.
+
+### Added
+
+- `toktop --once --json` prints the last snapshot as one JSON object on
+  stdout: the aggregate throughput, every engine with its rates, queue
+  depths and models, the agent feed and per-agent rates, the probe samples
+  and the host vitals. It is the machine-readable counterpart of
+  `--once --plain`, for a script that wants the numbers; the chart
+  histories stay out of it, since a series is sampled across runs rather
+  than read from one frame's buffer.
+- `agentusage.Sample.Delta` returns the growth between two samples, and
+  whether there was any. A watcher reports the running total, so every
+  program emitting events had to difference two samples itself and decide
+  what a transcript rewritten under the watcher means; this is that rule in
+  one call, and reports no growth rather than a negative count.
+- `agentusage.Watcher.Run` documents the 250ms default it uses for a
+  non-positive poll interval, and the runnable examples now cover the
+  delta, engine-overlap, and polling calls the package had only prose for.
+- A `--add` endpoint on plain `http://` whose host is not this machine is
+  named at startup, because the bearer token crosses the network in
+  cleartext there.
+- An agent definition (`usage.suffixes`) can name more than one transcript
+  extension, for an agent that writes a compressed file by default and a plain
+  one when compression is off.
+- A key that has nothing to act on (`p` with no engines, `t` before any
+  throughput, `a` with no engines to swap to) says so on the footer for a few
+  seconds instead of being swallowed.
+- The help overlay is titled `KEYS`.
+- `docs/PRIVACY.md` lists what toktop reads, sends and stores.
+- Every release publishes `toktop_<version>_buildinfo.txt` next to the
+  binaries, naming the commit, Go toolchain, build tags, and flags behind the
+  bytes. A checksum list proves a download arrived intact; this says what
+  produced it.
+- `agentusage.UnregisterSpec` removes a spec `RegisterSpec` added and restores
+  the adapter it displaced, so a program (or its own tests) can take a
+  registration back out of the process-wide registry.
+- `agentusage.ResetDefinitions` drops every definition `LoadDefinitions`
+  added, leaving the ones compiled into the build. It is the undo that call
+  otherwise had none of, for a test that loads a definitions file.
+- `agentusage.ErrCollidingDefinitions` names the one cause of a rejected
+  definitions file that a caller can act on differently from bad JSON: two
+  agent names in the file that reduce to the same key.
+- `agentusage.Watcher.Err` reports that a watcher `agentusage.Watch` returned
+  is nil because the agent keeps nothing readable, and matches the new
+  `agentusage.ErrUnsupportedTool`. It is safe on a nil `*Watcher`, like
+  `Tool` and `Dir`.
+- `agentusage.SpecFor` reports the transcript location registered for an
+  agent, roots as written, so a program can see which entries a definitions
+  file registered and which it skipped. A `{dir}` root placeholder is
+  documented on `agentusage.Spec`.
+- `agentusage.Watcher.SetNow` overrides the clock that stamps published
+  samples, so a caller running on an injected timeline gets samples stamped
+  on it and derives the same event ids from the same readings. Transcript
+  mtimes, `since` and the recency window stay wall time, because that is the
+  clock the filesystem and the session stores record in.
+- A first `ssh://` contact says the key was pinned, naming the host and the
+  fingerprint. Trust on first use is silent, so a fresh config directory, a
+  different account, or a container with no store accepted whatever key was
+  presented, with nothing in the output to notice.
+- toktop.ai writes one JSON object per line to Workers Logs when a request
+  fails, each carrying the `cf-ray` of the request behind it, so a failure a
+  visitor reports pivots to the edge request that caused it. Only failures log:
+  a served page is the steady state, and a line per visit would bury the few
+  that name a broken deploy. `site/README.md` lists the events.
+- toktop.ai answers with a `Server-Timing: edge;dur=<ms>` header, so the
+  number a visitor or a RUM script reads is the time to first byte from the
+  Worker rather than an unbreakable share of a round trip.
+
+### Security
+
+- The release binaries are linked with `-bindnow`, so the Linux builds carry
+  full RELRO rather than partial. The Go linker emits `DT_BIND_NOW` for
+  nothing on its own, so the dynamic symbol table stayed writable for the
+  life of the process. It is a no-op on macOS and Windows, so one flag set
+  covers every release platform.
+
 ### Performance
 
 - Polling costs less per frame on every host. A transcript record's working
@@ -48,6 +145,103 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   reports through the same channel, so a monitored engine address that will
   not parse was being shown as an ingest outage with a "restart toktop to
   restore ingest" remedy that would not fix it.
+- The in-app help overlay lists exactly the keys the footer advertises, under
+  the same conditions. `p`, `t` and `a` are now left out of the reference when
+  they have nothing to act on, instead of being advertised and then doing
+  nothing when pressed.
+- The throughput charts place each history sample on the time grid instead of
+  testing every sample against every column. A 200-column frame over three
+  engines' retention went from about 7.7ms to 2.8ms to draw, and what is drawn
+  is unchanged: a sample still lands in every column within half a cadence of
+  it, boundaries included.
+- A remote's GPU row and driver versions drop when the remote stops reporting
+  a GPU. The retained vitals sample was parsed into in place, so a card that
+  went away (driver unloaded, vendor CLI uninstalled, the host turned into a
+  VM) stayed on the dashboard for the rest of the run. A dump cut short
+  before the last section still keeps the last good reading.
+- `--demo` draws its probe samples from a second seeded stream, separate from
+  the one the frames draw. A probe wave fired from the UI goroutine, or by
+  `--probe` on real time, could land between two ticks and shift every value
+  the next frame reported, so the same `--seed` replayed differently depending
+  on when the key was pressed. Frame values now depend on the seed and the
+  frames elapsed, probe values on the seed and the waves run.
+- `$GAUNTLET_HOME` is honored only when it is an absolute path, like the XDG
+  base directories. A relative one resolved `agents.json` against the working
+  directory, where a missing file is not an error: the agents it defined
+  never appeared, looking like agents producing no tokens. The ignored value
+  is named at startup under `--agents`.
+- The README no longer says a non-loopback `--ingest` bind is rejected. It is
+  warned about at startup and runs, because a relay on another host is a
+  legitimate setup.
+- The same `--add` endpoint named twice is a usage error. Each `--add` builds
+  its own provider and the dashboard sums them, so the duplicate read as
+  double the tokens instead of as the mistake it was.
+- Unknown `TOKTOP_*` variables are reported in sorted order, so the same set
+  of names reads the same way in every capture of the startup output.
+- `toktop --help` ends with the exit codes (`0`, `1`, `2`, `130`) and the
+  split between results on stdout and status on stderr.
+  `toktop update --help` gained the examples block the top-level screen
+  already had, and says `--check` is pipeable.
+- `toktop --help` lists the `TOKTOP_*` variables a run reads, their ranges,
+  and that a flag beats the variable it mirrors, instead of only pointing at
+  the README. Its exit-code line now says that `130` covers `--once` and
+  `toktop update`, while the live dashboard quits on `q` or Ctrl+C with `0`.
+- `toktop version --version` prints the version, as `toktop update
+  --version` already did; only a real extra argument is a usage error now.
+- A knob that `--once --plain` never reads is named, like every other flag
+  passed into a mode that ignores it. `$TOKTOP_COLUMNS`, `$TOKTOP_LINES`
+  and `--frames` set alongside `--plain` were silently dropped.
+- An `Idempotency-Key` (or an event `id`) names one logical operation and one
+  sender. The README says so, and its example mints a per-send key instead of
+  a fixed `turn-1`: two POSTs under one key derive the same ids, so the
+  second one's events decode and store nothing, visible only as `stored` below
+  `accepted`.
+- `--ingest` bound to a host *name* other than `localhost` now warns about
+  the unauthenticated endpoint, as a literal non-loopback address always
+  has; a loopback address or `localhost` stays quiet.
+- A successful `POST /v1/events` answers `{"accepted":N,"stored":M}` and its
+  log line carries `stored` too, so a sender (or an operator reading stderr)
+  can see that a replayed id decoded and stored nothing.
+- toktop.ai's section nav links `Run`, the first-run command block that had an
+  anchor but no link.
+- The `ssh://` discovery sweep sends at most the first 4096 bytes of each
+  remote process's command line, which is all an engine match reads.
+- The `DEMO` tag names the seed the run drew from (`DEMO seed 42`), and
+  `--once --plain --demo` leads with `[demo seed 42]`. A demo frame is
+  reproducible from that seed alone, so the frame has to carry it.
+- A malformed event line in an NDJSON POST names the body offset it failed at,
+  so the offending line is findable in a long stream.
+- A dashboard image that the asset store cannot serve answers with the site's
+  own `text/plain` error body instead of the store's HTML error page.
+- Ingested events are deduplicated through an id index instead of a scan of
+  the retained window, which normalized every retained id under the lock the
+  emit path needs. A sender posting a large stream no longer pays a full
+  window walk per line.
+- Intel GPU metrics run one process per device concurrently, each with its own
+  timeout. On a multi-device node the last device used to start only after
+  three timeout windows had elapsed and could be dropped by them.
+- Chart samples carry the instant they were taken instead of a time derived
+  from their position in the history and the poll interval. A scrape that ran
+  long, or coalesced ticks after a stalled frame, used to draw a window that
+  was shorter than the time it claimed to cover; the axis now follows the
+  recorded stamps, so a slow engine shows its real spacing and a stall shows
+  as a gap.
+- An engine request that answers with a redirect is no longer followed off the
+  origin it started on: the hop is refused and the engine reports the
+  redirect. Every engine request starts at an address nobody authenticated as
+  a toktop peer (a scanned loopback port, or a port forwarded over `ssh://`),
+  so a redirect turned that read into a request to any URL the host can reach,
+  including instance metadata, and the answer reached the dashboard. A hop
+  within the origin still follows, which also means an `https` to `http`
+  downgrade is no longer followed with the engine token attached. An engine
+  that answers a poll with a cross-origin redirect now fails that poll where
+  it used to follow.
+- toktop.ai revalidates a dashboard capture within an hour of its cache
+  expiring instead of within a week. The captures are served under stable
+  names, so nothing but a revalidation retires the copy a browser is holding
+  when a deploy re-captures, and a week of that put a week-old screenshot on
+  the page. The cost is one cheap conditional request on a visit that is
+  already past `max-age`.
 
 ### Fixed
 
@@ -172,241 +366,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   suffixes the previous definition had, so a redirect was not walked until
   that window expired, and the tree the spec had just disowned kept being
   read in the meantime.
-
-### Breaking
-
-- An ingested event's `note` that is nothing but a path is stored reduced to
-  its last two components. Before this release a note was kept as the sender
-  wrote it, with only a path under `$HOME` folded to `~`, so
-  `/home/you/clients/Acme/migrator` reached the feed, the live dashboard and
-  the `--once --plain` report as `~/clients/Acme/migrator`; the feed now holds
-  `Acme/migrator`. Everything above the checkout is where a client's name and
-  a project index sit, and a feed redirected into a file or a journal kept
-  them. A note counts as a bare path when it is a single token carrying a `/`
-  or `\`, or spelled from `~`; a note with a space, a tab or a `·` in it is
-  free text and is still stored as written, past the home fold. A sender
-  whose note is a path cannot opt out of the shortening: put any other text in
-  the note (`checkout: /home/you/clients/Acme/migrator`) and the whole string
-  is kept with `$HOME` folded. The field is a display label, and
-  [README.md](README.md#agent-feed-api) says so per field.
-
-### Added
-
-- `toktop --once --json` prints the last snapshot as one JSON object on
-  stdout: the aggregate throughput, every engine with its rates, queue
-  depths and models, the agent feed and per-agent rates, the probe samples
-  and the host vitals. It is the machine-readable counterpart of
-  `--once --plain`, for a script that wants the numbers; the chart
-  histories stay out of it, since a series is sampled across runs rather
-  than read from one frame's buffer.
-- `agentusage.Sample.Delta` returns the growth between two samples, and
-  whether there was any. A watcher reports the running total, so every
-  program emitting events had to difference two samples itself and decide
-  what a transcript rewritten under the watcher means; this is that rule in
-  one call, and reports no growth rather than a negative count.
-- `agentusage.Watcher.Run` documents the 250ms default it uses for a
-  non-positive poll interval, and the runnable examples now cover the
-  delta, engine-overlap, and polling calls the package had only prose for.
-- A `--add` endpoint on plain `http://` whose host is not this machine is
-  named at startup, because the bearer token crosses the network in
-  cleartext there.
-- An agent definition (`usage.suffixes`) can name more than one transcript
-  extension, for an agent that writes a compressed file by default and a plain
-  one when compression is off.
-- A key that has nothing to act on (`p` with no engines, `t` before any
-  throughput, `a` with no engines to swap to) says so on the footer for a few
-  seconds instead of being swallowed.
-- The help overlay is titled `KEYS`.
-- `docs/PRIVACY.md` lists what toktop reads, sends and stores.
-- Every release publishes `toktop_<version>_buildinfo.txt` next to the
-  binaries, naming the commit, Go toolchain, build tags, and flags behind the
-  bytes. A checksum list proves a download arrived intact; this says what
-  produced it.
-- `agentusage.UnregisterSpec` removes a spec `RegisterSpec` added and restores
-  the adapter it displaced, so a program (or its own tests) can take a
-  registration back out of the process-wide registry.
-- `agentusage.ResetDefinitions` drops every definition `LoadDefinitions`
-  added, leaving the ones compiled into the build. It is the undo that call
-  otherwise had none of, for a test that loads a definitions file.
-- `agentusage.ErrCollidingDefinitions` names the one cause of a rejected
-  definitions file that a caller can act on differently from bad JSON: two
-  agent names in the file that reduce to the same key.
-- `agentusage.Watcher.Err` reports that a watcher `agentusage.Watch` returned
-  is nil because the agent keeps nothing readable, and matches the new
-  `agentusage.ErrUnsupportedTool`. It is safe on a nil `*Watcher`, like
-  `Tool` and `Dir`.
-- `agentusage.SpecFor` reports the transcript location registered for an
-  agent, roots as written, so a program can see which entries a definitions
-  file registered and which it skipped. A `{dir}` root placeholder is
-  documented on `agentusage.Spec`.
-- `agentusage.Watcher.SetNow` overrides the clock that stamps published
-  samples, so a caller running on an injected timeline gets samples stamped
-  on it and derives the same event ids from the same readings. Transcript
-  mtimes, `since` and the recency window stay wall time, because that is the
-  clock the filesystem and the session stores record in.
-- A first `ssh://` contact says the key was pinned, naming the host and the
-  fingerprint. Trust on first use is silent, so a fresh config directory, a
-  different account, or a container with no store accepted whatever key was
-  presented, with nothing in the output to notice.
-- toktop.ai writes one JSON object per line to Workers Logs when a request
-  fails, each carrying the `cf-ray` of the request behind it, so a failure a
-  visitor reports pivots to the edge request that caused it. Only failures log:
-  a served page is the steady state, and a line per visit would bury the few
-  that name a broken deploy. `site/README.md` lists the events.
-- toktop.ai answers with a `Server-Timing: edge;dur=<ms>` header, so the
-  number a visitor or a RUM script reads is the time to first byte from the
-  Worker rather than an unbreakable share of a round trip.
-
-### Security
-
-- The release binaries are linked with `-bindnow`, so the Linux builds carry
-  full RELRO rather than partial. The Go linker emits `DT_BIND_NOW` for
-  nothing on its own, so the dynamic symbol table stayed writable for the
-  life of the process. It is a no-op on macOS and Windows, so one flag set
-  covers every release platform.
-
-### Changed
-
-- toktop.ai answers a revalidation or a refused encoding before it builds a
-  compressed copy of the page. A 304 and a 406 carry no body, and both waited
-  on the brotli, zstd and gzip pipeline first. An isolate that only ever
-  serves revalidations now builds no representation at all.
-- The feed panel's error line is rendered as the message arrives, and its
-  badge now reads "feed error" rather than "ingest down". The agent watch
-  reports through the same channel, so a monitored engine address that will
-  not parse was being shown as an ingest outage with a "restart toktop to
-  restore ingest" remedy that would not fix it.
-- The in-app help overlay lists exactly the keys the footer advertises, under
-  the same conditions. `p`, `t` and `a` are now left out of the reference when
-  they have nothing to act on, instead of being advertised and then doing
-  nothing when pressed.
-- The throughput charts place each history sample on the time grid instead of
-  testing every sample against every column. A 200-column frame over three
-  engines' retention went from about 7.7ms to 2.8ms to draw, and what is drawn
-  is unchanged: a sample still lands in every column within half a cadence of
-  it, boundaries included.
-- A remote's GPU row and driver versions drop when the remote stops reporting
-  a GPU. The retained vitals sample was parsed into in place, so a card that
-  went away (driver unloaded, vendor CLI uninstalled, the host turned into a
-  VM) stayed on the dashboard for the rest of the run. A dump cut short
-  before the last section still keeps the last good reading.
-- `--demo` draws its probe samples from a second seeded stream, separate from
-  the one the frames draw. A probe wave fired from the UI goroutine, or by
-  `--probe` on real time, could land between two ticks and shift every value
-  the next frame reported, so the same `--seed` replayed differently depending
-  on when the key was pressed. Frame values now depend on the seed and the
-  frames elapsed, probe values on the seed and the waves run.
-- `$GAUNTLET_HOME` is honored only when it is an absolute path, like the XDG
-  base directories. A relative one resolved `agents.json` against the working
-  directory, where a missing file is not an error: the agents it defined
-  never appeared, looking like agents producing no tokens. The ignored value
-  is named at startup under `--agents`.
-- The README no longer says a non-loopback `--ingest` bind is rejected. It is
-  warned about at startup and runs, because a relay on another host is a
-  legitimate setup.
-- The same `--add` endpoint named twice is a usage error. Each `--add` builds
-  its own provider and the dashboard sums them, so the duplicate read as
-  double the tokens instead of as the mistake it was.
-- Unknown `TOKTOP_*` variables are reported in sorted order, so the same set
-  of names reads the same way in every capture of the startup output.
-- `toktop --help` ends with the exit codes (`0`, `1`, `2`, `130`) and the
-  split between results on stdout and status on stderr.
-  `toktop update --help` gained the examples block the top-level screen
-  already had, and says `--check` is pipeable.
-- `toktop --help` lists the `TOKTOP_*` variables a run reads, their ranges,
-  and that a flag beats the variable it mirrors, instead of only pointing at
-  the README. Its exit-code line now says that `130` covers `--once` and
-  `toktop update`, while the live dashboard quits on `q` or Ctrl+C with `0`.
-- `toktop version --version` prints the version, as `toktop update
-  --version` already did; only a real extra argument is a usage error now.
-- A knob that `--once --plain` never reads is named, like every other flag
-  passed into a mode that ignores it. `$TOKTOP_COLUMNS`, `$TOKTOP_LINES`
-  and `--frames` set alongside `--plain` were silently dropped.
-- An `Idempotency-Key` (or an event `id`) names one logical operation and one
-  sender. The README says so, and its example mints a per-send key instead of
-  a fixed `turn-1`: two POSTs under one key derive the same ids, so the
-  second one's events decode and store nothing, visible only as `stored` below
-  `accepted`.
-- `--ingest` bound to a host *name* other than `localhost` now warns about
-  the unauthenticated endpoint, as a literal non-loopback address always
-  has; a loopback address or `localhost` stays quiet.
-- A successful `POST /v1/events` answers `{"accepted":N,"stored":M}` and its
-  log line carries `stored` too, so a sender (or an operator reading stderr)
-  can see that a replayed id decoded and stored nothing.
-- toktop.ai's section nav links `Run`, the first-run command block that had an
-  anchor but no link.
-- The `ssh://` discovery sweep sends at most the first 4096 bytes of each
-  remote process's command line, which is all an engine match reads.
-- The `DEMO` tag names the seed the run drew from (`DEMO seed 42`), and
-  `--once --plain --demo` leads with `[demo seed 42]`. A demo frame is
-  reproducible from that seed alone, so the frame has to carry it.
-- A malformed event line in an NDJSON POST names the body offset it failed at,
-  so the offending line is findable in a long stream.
-- A dashboard image that the asset store cannot serve answers with the site's
-  own `text/plain` error body instead of the store's HTML error page.
-- Ingested events are deduplicated through an id index instead of a scan of
-  the retained window, which normalized every retained id under the lock the
-  emit path needs. A sender posting a large stream no longer pays a full
-  window walk per line.
-- Intel GPU metrics run one process per device concurrently, each with its own
-  timeout. On a multi-device node the last device used to start only after
-  three timeout windows had elapsed and could be dropped by them.
-- Chart samples carry the instant they were taken instead of a time derived
-  from their position in the history and the poll interval. A scrape that ran
-  long, or coalesced ticks after a stalled frame, used to draw a window that
-  was shorter than the time it claimed to cover; the axis now follows the
-  recorded stamps, so a slow engine shows its real spacing and a stall shows
-  as a gap.
-- An engine request that answers with a redirect is no longer followed off the
-  origin it started on: the hop is refused and the engine reports the
-  redirect. Every engine request starts at an address nobody authenticated as
-  a toktop peer (a scanned loopback port, or a port forwarded over `ssh://`),
-  so a redirect turned that read into a request to any URL the host can reach,
-  including instance metadata, and the answer reached the dashboard. A hop
-  within the origin still follows, which also means an `https` to `http`
-  downgrade is no longer followed with the engine token attached. An engine
-  that answers a poll with a cross-origin redirect now fails that poll where
-  it used to follow.
-- toktop.ai revalidates a dashboard capture within an hour of its cache
-  expiring instead of within a week. The captures are served under stable
-  names, so nothing but a revalidation retires the copy a browser is holding
-  when a deploy re-captures, and a week of that put a week-old screenshot on
-  the page. The cost is one cheap conditional request on a visit that is
-  already past `max-age`.
-
-### Fixed
-
-- `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
-  windows, instead of leaving them on the wall clock. A program driving a
-  simulated timeline stepped time forward and still read the file set a
-  full-length run would have dropped, so a replay was not reproducible.
-  Transcript mtimes and `since` stay wall time.
-- An engine answering a version endpoint with a bare invalid byte, an escape
-  sequence, or a quoted line break no longer has that text cached as its
-  version and re-rendered every frame.
-- `agentusage.LoadDefinitions` skips a `usage` entry naming an agent a
-  compiled-in adapter already reads (claude, codex, dsh). Registering it left
-  `SpecFor` reporting transcript roots that no watcher read, since the adapter
-  outranks every definition. A definition still replaces a compiled-in
-  *definition*, which is what pi, prime-agent and feynman are.
-- The ingest endpoint audits an accept failure that stops it, on the same
-  logger, at error level, with the bound address and the reason. It was one
-  unstructured stderr line that ignored `$TOKTOP_LOG_LEVEL`, so a feed that
-  stopped accepting left no line to filter for.
-- `toktop` exits 2 when every ssh target it was given fails to attach,
-  instead of starting a dashboard showing only local engines with the reason
-  on a stderr line the alternate screen hides.
-- A monitored engine address that fails, recovers, and fails again is
-  reported to the operator again. The first report silenced every recurrence
-  of the same message, including one that appeared after a real recovery.
-- A relative `XDG_DATA_HOME` is named at startup while opencode's session
-  database is read, and a relative `XDG_CONFIG_HOME` with an `ssh://` target,
-  the way a relative `GAUNTLET_HOME` already was. Both fell back to the
-  default directory in silence, so the paths they named were never used.
-- `toktop update` strips a trailing newline from `GITHUB_TOKEN` (what
-  `export GITHUB_TOKEN=$(cat token)` leaves behind) and refuses one that
-  appears anywhere in the value, instead of letting the request fail on an
-  invalid header that named the transport rather than the variable.
 - An `ssh://` target that stops answering says so. A failed poll kept the last
   good sample and said nothing, so once that sample went past the staleness
   window the ssh readings dropped out of the frame and the local host's numbers
@@ -1218,7 +1177,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/maci0/toktop/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/maci0/toktop/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/maci0/toktop/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/maci0/toktop/compare/v0.12.0...v0.13.0
