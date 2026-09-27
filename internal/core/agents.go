@@ -55,12 +55,12 @@ const (
 // empty or unusable.
 const AgentAnonymous = "anonymous"
 
-// AgentNameField normalizes an event's agent name: sanitize, cap, then
-// collapse a mixed-script spoof ("сlaude" for "claude") and an empty result
+// AgentNameField normalizes an event's agent name: sanitize, fold to one
+// line, cap, then collapse a mixed-script spoof ("сlaude" for "claude") and an empty result
 // to AgentAnonymous. Both producers run it, so the feed cannot hold a name
 // only one of them approved.
 func AgentNameField(s string) string {
-	s = ClampField(SanitizeText(s), AgentNameMax)
+	s = ClampField(SingleLine(s), AgentNameMax)
 	if MixedScriptIdentity(s) {
 		return AgentAnonymous
 	}

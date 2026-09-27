@@ -38,13 +38,14 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	}
 	// Event fields are attacker-shaped text (any local process or peer
 	// able to reach this endpoint): strip terminal escape sequences and
-	// control characters before the values are stored and later rendered.
+	// control characters, and fold to one line, before the values are
+	// stored and later rendered into a cell of a row.
 	// Defaults come after sanitization: a value the sanitizer empties
 	// (pure escape sequences) must not slip past the fallback.
-	ev.ID = core.ClampField(core.SanitizeText(ev.ID), core.AgentIDMax)
+	ev.ID = core.ClampField(core.SingleLine(ev.ID), core.AgentIDMax)
 	ev.Agent = core.AgentNameField(ev.Agent)
-	ev.Model = core.ClampField(core.SanitizeText(ev.Model), core.AgentModelMax)
-	ev.ViaEngine = core.ClampField(core.SanitizeText(ev.ViaEngine), core.AgentViaMax)
+	ev.Model = core.ClampField(core.SingleLine(ev.Model), core.AgentModelMax)
+	ev.ViaEngine = core.ClampField(core.SingleLine(ev.ViaEngine), core.AgentViaMax)
 	// Free-form fields are capped so one giant event cannot dominate the
 	// retained feed, and the note gets the same treatment a locally watched
 	// working directory gets (core.ShortDir): a note naming a working
@@ -52,7 +53,7 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// path under $HOME names the account. It reaches the feed, the live
 	// dashboard and the --once --plain report, which is often redirected
 	// into a file or a journal.
-	ev.Note = core.ClampField(core.RedactHome(shortNote(core.SanitizeText(ev.Note))), core.AgentNoteMax)
+	ev.Note = core.ClampField(core.RedactHome(shortNote(core.SingleLine(ev.Note))), core.AgentNoteMax)
 	// Token counts are unsigned quantities; negative or absurd values
 	// are junk from a misbehaving sender and must not enter the
 	// retained feed (summing MaxInt64 across events wraps the totals).
@@ -62,7 +63,7 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	switch ev.Kind {
 	case core.AgentKindTurn, core.AgentKindTool, core.AgentKindError, core.AgentKindNote:
 	default:
-		ev.Kind = core.ClampField(core.SanitizeText(strings.ToLower(ev.Kind)), core.AgentKindMax)
+		ev.Kind = core.ClampField(core.SingleLine(strings.ToLower(ev.Kind)), core.AgentKindMax)
 	}
 	if ev.Kind == "" {
 		ev.Kind = core.AgentKindTurn

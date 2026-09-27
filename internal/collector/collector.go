@@ -414,7 +414,10 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 	outR, inR := c.ring(c.histOut, key), c.ring(c.histIn, key)
 	switch {
 	case r.err != nil:
-		ps.Err = r.err.Error()
+		// Folded for the same reason the audit log folds it: an engine error
+		// can echo a model or config path under the operator's home, and
+		// this text reaches the dashboard and both reports.
+		ps.Err = core.RedactHome(r.err.Error())
 	case r.m == nil:
 		ps.Err = "empty poll result"
 	default:

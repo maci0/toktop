@@ -89,6 +89,27 @@ func unsafeRune(r rune) bool {
 	return false
 }
 
+// SingleLine is SanitizeText for a field that occupies one cell of a
+// dashboard row, one line of a report, or one field of a log line.
+//
+// SanitizeText keeps newlines and tabs, which is right for text that is laid
+// out as a block. Every renderer here measures a cell with lipgloss.Width
+// (the widest of its newline-separated segments) and splits the rendered row
+// on newlines into separate frame rows, so a newline left in an
+// engine-supplied model name, agent name or event note does not stay inside
+// its cell: the rest of the field becomes a row of its own. A sender that
+// reaches the unauthenticated ingest endpoint, or a process squatting a
+// discovered engine port, could then print a line the dashboard would read as
+// its own output ("up 9/9 engines", "agent stopped") and spend row budget
+// that pushes the real rows off the pane. Folding here is the same collapse
+// logcfg.Field applies, so an audit line and a cell agree.
+func SingleLine(s string) string {
+	if !strings.ContainsAny(s, " \t\n\r\v\f") && !needsSanitize(s) {
+		return s // fast path: one printable word, nothing to fold
+	}
+	return strings.Join(strings.Fields(SanitizeText(s)), " ")
+}
+
 // MixedScriptIdentity reports a name that mixes Latin letters with Cyrillic
 // or Greek. Those alphabets supply lookalikes for Latin (Cyrillic с vs c),
 // so "сlaude" would render next to a real "claude" as the same agent.

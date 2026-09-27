@@ -130,7 +130,7 @@ func feedLine(ev core.AgentEvent) string {
 	case core.AgentKindNote:
 		st = styleWarn
 	}
-	name := shorten(core.SanitizeText(ev.Agent), 16)
+	name := shorten(core.SingleLine(ev.Agent), 16)
 	// ▲ output / ▼ prompt, same directions as the header rates. Output
 	// first so a feed row scans like the header: out, then in.
 	tok := fmt.Sprintf("▲%s ▼%s", fmtCount(ev.OutputTokens), fmtCount(ev.PromptTokens))
@@ -142,14 +142,14 @@ func feedLine(ev core.AgentEvent) string {
 		// zone (or none, which decodes as UTC); render the viewer's clock.
 		styleDim.Render(ev.At.Local().Format("15:04:05")),
 		st.Render(icon + " " + name),
-		styleDim.Render(shorten(core.SanitizeText(ev.Model), 20)),
+		styleDim.Render(shorten(core.SingleLine(ev.Model), 20)),
 		tok,
 	}
 	if ev.ViaEngine != "" {
-		parts = append(parts, dim("via "+shorten(core.SanitizeText(ev.ViaEngine), 18)))
+		parts = append(parts, dim("via "+shorten(core.SingleLine(ev.ViaEngine), 18)))
 	}
 	if ev.Note != "" {
-		parts = append(parts, styleWarn.Render(shorten(core.SanitizeText(ev.Note), 28)))
+		parts = append(parts, styleWarn.Render(shorten(core.SingleLine(ev.Note), 28)))
 	}
 	return strings.Join(parts, "  ")
 }

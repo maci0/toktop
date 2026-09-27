@@ -321,3 +321,24 @@ func TestDiscover(t *testing.T) {
 		t.Fatalf("Discover() provider = %+v, want %s as %s", ours[0], engine, core.KindSGLang)
 	}
 }
+
+// A process squatting on a well-known engine port answers the scan with a
+// body it controls, so the identification decoders read untrusted bytes. A
+// well-formed body past the cap must not be decoded: it is a scan answer that
+// grew without bound, and the process it would have identified is whatever
+// sent it.
+func TestScanDecodersRefuseOversizedBody(t *testing.T) {
+	pad := strings.Repeat("a", jsonBodyMax)
+	for path, body := range map[string]string{
+		"/get_model_info": `{"model_path":"/m","pad":"` + pad + `"}`,
+		"/v1/models":      `{"data":[{"id":"mlx-community/x"}],"pad":"` + pad + `"}`,
+		"/api/ps":         `{"models":[{"name":"llama3"}],"pad":"` + pad + `"}`,
+	} {
+		if len(body) <= jsonBodyMax {
+			t.Fatalf("fixture for %s is %d bytes, not past the %d cap", path, len(body), jsonBodyMax)
+		}
+		if kind := httptestKind(t, map[string]fakeRoute{path: {200, body}}); kind != "" {
+			t.Errorf("identify on an oversized %s body = %q, want no identification", path, kind)
+		}
+	}
+}

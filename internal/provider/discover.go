@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -87,6 +88,16 @@ func scanGet(ctx context.Context, url string) (*http.Response, error) {
 		return nil, err
 	}
 	return resp, nil
+}
+
+// decodeScanJSON decodes a scan response under the same cap every other
+// engine body in this package gets. Discovery talks to whatever is listening
+// on a well-known port, so a body is untrusted by construction: without the
+// cap a process that answers one of these ports with an endless JSON document
+// grows the decoder until the dashboard is killed, and the ports it can
+// squat are the ones an engine would have used.
+func decodeScanJSON(resp *http.Response, out any) bool {
+	return json.NewDecoder(io.LimitReader(resp.Body, jsonBodyMax)).Decode(out) == nil
 }
 
 func procCandidateURLs() []string {
@@ -257,7 +268,7 @@ func sglangInfoOK(ctx context.Context, base string) bool {
 	var body struct {
 		ModelPath string `json:"model_path"`
 	}
-	return json.NewDecoder(resp.Body).Decode(&body) == nil && body.ModelPath != ""
+	return decodeScanJSON(resp, &body) && body.ModelPath != ""
 }
 
 // idsLookMLX reports whether any served model id looks like an MLX build
@@ -301,7 +312,7 @@ func isOllama(ctx context.Context, base string) bool {
 	var body struct {
 		Models []json.RawMessage `json:"models"`
 	}
-	return json.NewDecoder(resp.Body).Decode(&body) == nil && body.Models != nil
+	return decodeScanJSON(resp, &body) && body.Models != nil
 }
 
 type modelsResp struct {
@@ -321,7 +332,7 @@ func getOpenAIModels(ctx context.Context, base string) *modelsResp {
 	// serving no model yet still speaks the API, and the switch in identify
 	// reaches every kind only on this branch. Absent "data" leaves the slice
 	// nil, which is the shape of an endpoint that is not a listing.
-	if json.NewDecoder(resp.Body).Decode(&mr) != nil || mr.Data == nil {
+	if !decodeScanJSON(resp, &mr) || mr.Data == nil {
 		return nil
 	}
 	return &mr

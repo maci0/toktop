@@ -70,6 +70,35 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   plus U+0301) is folded out of audit lines and diagnostics in the composed
   spelling a process carries. The redaction compared bytes, so the same account
   survived whenever the two spellings disagreed.
+- An engine-supplied model name, an agent name, a note, an engine or remote
+  error, and every other field the dashboard renders into one cell of a row
+  are folded to a single line. A newline in one of them used to become a row
+  of its own: the renderers measure a cell as its widest segment and split a
+  rendered row on newlines, so a sender at the unauthenticated ingest
+  endpoint, or a process squatting a discovered engine port, could print a
+  line the dashboard reads as its own output and spend row budget that pushed
+  the real rows off the pane.
+- `--add` refuses a URL carrying a query string or a fragment. Every request
+  is built by appending a path to the base, so such a URL never worked, and
+  the query is where an api key tends to be written: the value reached the
+  audit log, the dashboard and both reports whole, which is where the help
+  screen says a credential does not go.
+- `toktop update --check` prints the release page URL only when it is an
+  https GitHub URL, the rule the release assets already pass. The value is
+  documented for `url=$(toktop update --check)`, so it lands in a shell
+  expansion.
+- A dsh session window of nothing but newlines is walked rather than
+  materialized. A few kilobytes of compressed newlines decompress to 8 MiB,
+  and splitting that into a slice cost about 1.2 GB of allocations on the
+  poll that read it; any process able to write the session file could make
+  the dashboard do that every 250 ms.
+- A poll over a dsh window, an engine scan and an engine error text is
+  bounded: the identification decoders read what answers on a well-known
+  engine port, which is untrusted by construction, and now cap the body the
+  way every other engine read in this program does. An engine error string is
+  sanitized and folded like every other engine-supplied field, and the engine
+  and remote error text the dashboard shows has the home directory folded out
+  of it, as the audit log already did.
 - `TOKTOP_LOG_LEVEL` is no longer reported as unused under `--no-ingest`. The
   variable sets the floor for every audit log the process writes, and the
   engine collector, the ssh client and the `--add` attach path all write one;

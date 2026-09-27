@@ -444,7 +444,7 @@ func streamReadErr(ctx context.Context, err error, tokens int) error {
 // render time. core.ClampField is the cap; the unrecognized-junk path below
 // gets terminal sanitization from core.Snippet instead.
 func engineErrorText(s string) string {
-	return core.ClampField(s, core.SnippetCap)
+	return core.ClampField(core.SingleLine(s), core.SnippetCap)
 }
 
 // sseErrorMessage extracts an engine-reported failure from a streaming data

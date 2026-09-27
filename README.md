@@ -488,8 +488,9 @@ toktop help       same as --help; `toktop help update` / `toktop help version`
 toktop version    same as --version
 --demo            simulated fleet, zero setup
 --add URL         attach an openai-compatible http(s) endpoint (repeatable,
-                  once per endpoint; host required, no userinfo; use
-                  --bearer / $TOKTOP_BEARER)
+                  once per endpoint; host required; no userinfo, query or
+                  fragment, since the URL is echoed to the log and the
+                  reports; use --bearer / $TOKTOP_BEARER)
 ssh://user@host   positional; monitor remote hosts (repeatable;
                   ssh://[user@]host[:port] only, no password in the URL)
 --ssh-key PATH    private key for ssh targets (overrides ~/.ssh/config;

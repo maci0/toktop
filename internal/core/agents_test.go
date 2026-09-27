@@ -29,14 +29,13 @@ func TestAgentNameField(t *testing.T) {
 		// Stripped, not replaced: the clean part of the name survives, so a
 		// display-name escape cannot erase a real agent from the feed.
 		{"a CSI wrapper", "\x1b[1mclaude\x1b[0m", "claude"},
-		// Two gaps SanitizeText leaves open by design, pinned here so a
-		// change to either is a deliberate one: it keeps whitespace, and it
-		// keeps newlines and tabs because layout text needs them. The
-		// only-empty check does not catch a name made of blanks. The feed
-		// line is rendered from this value (ui/feed.go), so a name carrying
-		// a newline reaches a line-oriented renderer unaltered.
-		{"whitespace only", "   ", "   "},
-		{"an embedded newline", "clau\nde", "clau\nde"},
+		// The feed renders a name into one cell of a row (ui/feed.go), and
+		// a newline in a cell becomes a row of its own, so a name is
+		// folded to one line here: "clau\nde" would print as two lines,
+		// the second of which the dashboard reads as its own output. A
+		// name of blanks is no name at all.
+		{"whitespace only", "   ", AgentAnonymous},
+		{"an embedded newline", "clau\nde", "clau de"},
 		// A spoof: a name that is byte-for-byte one agent and reads as
 		// another. There is no honest version of this string.
 		{"a cyrillic es", "сlaude", AgentAnonymous},

@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"io"
 	"os"
-	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -188,26 +187,35 @@ func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values
 	if err != nil && n == 0 {
 		return nil, 0, false
 	}
-	lines := slices.Collect(bytes.SplitSeq(plain, []byte("\n")))
 	head := w.zstdCarry[path]
 	w.zstdCarry[path] = nil
-	for i, line := range lines {
+	first := true
+	// One line of lookahead instead of a slice of them. The split is lazy, so
+	// the lines cost nothing until they are parsed, and a window that
+	// decompresses to megabytes of newlines (which any process able to write
+	// the file can produce) never becomes millions of slice headers held at
+	// once. A line is processed once the next one proves it terminated; the
+	// last one is the unterminated tail.
+	var pending []byte
+	havePending := false
+	take := func(line []byte, terminated bool) {
 		line = bytes.TrimRight(line, "\r")
-		if i == 0 && len(head) > 0 {
+		if first && len(head) > 0 {
 			line = append(head, line...)
 		}
-		if i < len(lines)-1 {
+		first = false
+		if terminated {
 			if len(line) == 0 {
-				continue
+				return
 			}
 			// Same record cap the plain JSONL path applies (consumeAppend): a
 			// frame can decompress to more than maxLineBytes, and the parser
 			// rejects it either way, so drop it and keep reading.
 			if len(line) > maxLineBytes {
-				continue
+				return
 			}
 			recs = w.collect(recs, line)
-			continue
+			return
 		}
 		// The unterminated tail. A complete record whose writer omitted the
 		// final newline still parses, so it counts; anything else waits.
@@ -221,6 +229,15 @@ func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values
 				w.zstdCarry[path] = bytes.Clone(line)
 			}
 		}
+	}
+	for line := range bytes.SplitSeq(plain, []byte("\n")) {
+		if havePending {
+			take(pending, true)
+		}
+		pending, havePending = line, true
+	}
+	if havePending {
+		take(pending, false)
 	}
 	return recs, off + int64(n), true
 }

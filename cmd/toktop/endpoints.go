@@ -77,8 +77,9 @@ func parseAdd(v string, target *[]string) error {
 }
 
 // validateAddURL rejects values that cannot be polled as an OpenAI-compatible
-// engine: missing scheme, non-http(s), no host, or credentials in the URL
-// (those belong in --bearer / $TOKTOP_BEARER, not in argv or logs).
+// engine: missing scheme, non-http(s), no host, or credentials anywhere in
+// the URL (userinfo, query, fragment; those belong in --bearer /
+// $TOKTOP_BEARER, not in argv or logs).
 func validateAddURL(raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -98,6 +99,18 @@ func validateAddURL(raw string) error {
 	}
 	if u.User != nil {
 		return errors.New("URL must not contain userinfo; set --bearer or $TOKTOP_BEARER")
+	}
+	// A query or fragment is refused for the same reason, and because the
+	// value never works: every request is built by appending a path to the
+	// base, so "?api_key=..." is both a credential in argv (readable from
+	// process listings) and one the audit log, the dashboard and the
+	// --plain and --json reports all echo whole. The token belongs in
+	// --bearer or $TOKTOP_BEARER, which are never printed.
+	if u.RawQuery != "" || u.ForceQuery {
+		return errors.New("URL must not contain a query string; set --bearer or $TOKTOP_BEARER")
+	}
+	if u.Fragment != "" {
+		return errors.New("URL must not contain a fragment")
 	}
 	return nil
 }

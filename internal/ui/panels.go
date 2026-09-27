@@ -87,7 +87,7 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	// the block did not, so two engines of one kind read as the same line. A
 	// label that only repeats the badge adds nothing and is dropped.
 	room := w - lipgloss.Width(row) - 1
-	label := strings.TrimSpace(core.SanitizeText(p.Label))
+	label := strings.TrimSpace(core.SingleLine(p.Label))
 	if !strings.EqualFold(label, strings.TrimSpace(p.Kind)) {
 		label = shorten(label, min(labelCells, max(room, 0)))
 	} else {
@@ -101,16 +101,16 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	// primaryModel returns for that read as a model named "-". The plain report
 	// drops the same placeholder; the block does too.
 	if model := primaryModel(p); model != "" && model != "-" && room > modelMinCell {
-		row += " " + styleValue.Render(shorten(core.SanitizeText(model), room-1))
+		row += " " + styleValue.Render(shorten(core.SingleLine(model), room-1))
 		room = 0
 	}
 	if p.Version != "" && room > versionCells {
-		row += " " + dim("v"+shorten(core.SanitizeText(p.Version), 12))
+		row += " " + dim("v"+shorten(core.SingleLine(p.Version), 12))
 	}
 	line1 := clip(row, w)
 	block := []string{line1}
 	if !p.OK {
-		return append(block, styleBad.Render("  "+clip(shorten(core.SanitizeText(p.Err), w-3), w-3)))
+		return append(block, styleBad.Render("  "+clip(shorten(core.SingleLine(p.Err), w-3), w-3)))
 	}
 	// The stats get first claim on the width and the kv bar takes what is
 	// left: sizing the bar from the pane alone pushed "wait 12" off the right

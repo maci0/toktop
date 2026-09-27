@@ -67,14 +67,14 @@ const SnippetCap = 256
 const ModelNameMax = 256
 
 // ModelName is the one shape an engine-supplied model id takes in this
-// program: trimmed, terminal-sanitized, capped at ModelNameMax. Every
+// program: trimmed, terminal-sanitized, folded to one line, capped at ModelNameMax. Every
 // ModelInfo built from a listing or a health endpoint goes through it, so an
 // engine cannot put a control character or an unbounded string into the
 // dashboard, into a probe body, or into the machine-readable report. The
 // probe's own cap is the same bound, so a name that survives here is one the
 // probe will send unchanged.
 func ModelName(s string) string {
-	return SanitizeText(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
+	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
 }
 
 // Snippet collapses raw bytes to at most SnippetCap characters (grapheme

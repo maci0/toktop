@@ -134,6 +134,15 @@ func reportRelease(out, status io.Writer, rel *selfupdate.Release, check bool) (
 		if err != nil {
 			return outputStatus(err), false
 		}
+		// The help screen documents this as `url=$(toktop update --check)`,
+		// so the value lands in a shell expansion. It is release data, and
+		// the release's own asset URLs are checked against GitHub's hosts
+		// before anything is fetched; the page URL is held to the same
+		// rule rather than printed as it arrived.
+		if !selfupdate.TrustedReleaseURL(rel.HTMLURL) {
+			_, err = fmt.Fprintln(status, "toktop: the release names no GitHub release page; not printing it for capture")
+			return outputStatus(err), false
+		}
 		_, err = fmt.Fprintln(out, rel.HTMLURL)
 		return outputStatus(err), false
 	}

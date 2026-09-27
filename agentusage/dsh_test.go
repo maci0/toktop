@@ -8,7 +8,9 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -470,4 +472,37 @@ func zstdAtFrameBoundary(src []byte, off int) bool {
 		seen += n
 	}
 	return seen == off
+}
+
+// A window of nothing but newlines decodes to megabytes that hold no record.
+// Materializing the split would cost a slice header per newline, so the read
+// walks it lazily instead: the poll must cost the same whatever the window
+// holds, and the records around the empty run still count.
+func TestDshZstdWindowOfNewlinesCostsNoAllocations(t *testing.T) {
+	store := withStore(t, "dsh")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl.zstd")
+	w := Watch("dsh", work, time.Now())
+	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\n"))
+
+	// 8 MiB of newlines compresses to a few hundred bytes, which is the
+	// whole point: the amplification is in the decompressed window.
+	appendBytes(t, path, zstdFrame(t, strings.Repeat("\n", 8<<20)))
+	appendBytes(t, path, zstdFrame(t, dshMessage(77, 0, 1)+"\n"))
+
+	// Bytes, not allocation count: materializing the split is a handful of
+	// doubling reallocations of one very large array, so the count stays
+	// small while the bytes do not. The read of the window is the one that
+	// pays, so it is the first poll that is measured.
+	var before, after runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&before)
+	w.poll(nil)
+	runtime.ReadMemStats(&after)
+	if cost := after.TotalAlloc - before.TotalAlloc; cost > 8*maxLineBytes {
+		t.Fatalf("poll over a newline-only window allocated %d bytes, want a bounded walk", cost)
+	}
+	if got := w.Sample().Output; got != 77 {
+		t.Fatalf("output %d, want 77: the record after the empty run still counts", got)
+	}
 }

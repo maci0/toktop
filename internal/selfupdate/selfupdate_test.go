@@ -314,3 +314,28 @@ func TestFileChecksumRejectsOversized(t *testing.T) {
 		t.Fatalf("fileChecksum err = %v, want exceeds error", err)
 	}
 }
+
+// `toktop update --check` prints the release page for shell capture, so the
+// page URL is held to the GitHub-host rule the downloads already pass.
+func TestTrustedReleaseURL(t *testing.T) {
+	for _, ok := range []string{
+		"https://github.com/maci0/toktop/releases/tag/v0.15.0",
+		"https://api.github.com/repos/maci0/toktop/releases/1",
+	} {
+		if !TrustedReleaseURL(ok) {
+			t.Errorf("TrustedReleaseURL(%q) = false, want true", ok)
+		}
+	}
+	for _, bad := range []string{
+		"",
+		"http://github.com/maci0/toktop/releases/tag/v1",
+		"https://evil.example/releases/tag/v1",
+		"https://github.com.evil.example/x",
+		"javascript:alert(1)",
+		"https://user:pass@github.com/x",
+	} {
+		if TrustedReleaseURL(bad) {
+			t.Errorf("TrustedReleaseURL(%q) = true, want false", bad)
+		}
+	}
+}

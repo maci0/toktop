@@ -598,8 +598,8 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 		PromptTokens:   core.ClampEventTokens(int64(d.Input)),
 		OutputTokens:   core.ClampEventTokens(int64(d.Output)),
 		ThinkingTokens: core.ClampEventTokens(int64(d.Thinking)),
-		ViaEngine:      core.ClampField(core.SanitizeText(via), core.AgentViaMax),
-		Note:           core.ClampField(core.RedactHome(core.SanitizeText(note(dir, d.Thinking, via))), core.AgentNoteMax),
+		ViaEngine:      core.ClampField(core.SingleLine(via), core.AgentViaMax),
+		Note:           core.ClampField(core.RedactHome(core.SingleLine(note(dir, d.Thinking, via))), core.AgentNoteMax),
 	})
 }
 

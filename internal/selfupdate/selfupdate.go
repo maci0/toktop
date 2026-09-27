@@ -164,6 +164,14 @@ func githubDownloadHost(host string) bool {
 	return strings.HasSuffix(h, ".githubusercontent.com")
 }
 
+// TrustedReleaseURL reports whether raw is a GitHub release page over https.
+// The release page is only printed (`toktop update --check` documents
+// `url=$(...)` for it), never fetched, but it is release data landing in a
+// shell expansion, so it is held to the same host rule the downloads are.
+func TrustedReleaseURL(raw string) bool {
+	return githubAssetURL(raw)
+}
+
 func githubAssetURL(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {

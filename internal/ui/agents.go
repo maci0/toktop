@@ -67,11 +67,11 @@ func agentSummary(rates []core.AgentRate) string {
 		// Agent names arrive from the ingest endpoint and agent definitions
 		// on disk; they pass the terminal sanitizer like every other
 		// untrusted field (feedLine does the same at render time).
-		name := core.SanitizeText(r.Agent)
+		name := core.SingleLine(r.Agent)
 		cell := styleValue.Render(name)
 		switch {
 		case r.ViaEngine != "":
-			cell += " " + dim("via "+shorten(core.SanitizeText(r.ViaEngine), 16))
+			cell += " " + dim("via "+shorten(core.SingleLine(r.ViaEngine), 16))
 		case r.TokPS > 0:
 			cell += " " + styleOK.Render(fmtRate(r.TokPS)) + dim(" tok/s")
 		default:
@@ -127,7 +127,7 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 			since = dim("idle " + fmtDur(d))
 		}
 		if r.ViaEngine != "" {
-			via := dim("via " + shorten(core.SanitizeText(r.ViaEngine), 18))
+			via := dim("via " + shorten(core.SingleLine(r.ViaEngine), 18))
 			if since == "" {
 				since = via
 			} else {
@@ -149,7 +149,7 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 
 // agentMiniLine is the compact-strip counterpart of one agentRows cell.
 func agentMiniLine(r core.AgentRate) string {
-	name := core.SanitizeText(r.Agent)
+	name := core.SingleLine(r.Agent)
 	line := styleValue.Render(name) + " "
 	switch {
 	case r.TokPS > 0:
@@ -158,7 +158,7 @@ func agentMiniLine(r core.AgentRate) string {
 		line += dim(fmtCount(r.Tokens) + " tok")
 	}
 	if r.ViaEngine != "" {
-		line += " " + dim("via "+shorten(core.SanitizeText(r.ViaEngine), 16))
+		line += " " + dim("via "+shorten(core.SingleLine(r.ViaEngine), 16))
 	}
 	return line
 }

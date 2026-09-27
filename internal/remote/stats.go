@@ -168,7 +168,11 @@ func (s *Stats) poll(ctx context.Context) {
 		// Keep the last good sample; the reason rides along so the UI can
 		// name the target that stopped answering instead of dropping the
 		// ssh readings and leaving local numbers to pass for the remote's.
-		s.err = core.Snippet([]byte(err.Error()))
+		// Snippet collapses it to one sanitized line; the home fold is the
+		// one the audit log already applies, so a remote whose error names a
+		// path under the operator's home does not put that account name into
+		// a dashboard or a report the operator is told to paste into issues.
+		s.err = core.RedactHome(core.Snippet([]byte(err.Error())))
 		s.failedPolls++
 		// The UI shows the reason on the frame it happens to be drawn on and
 		// the frame is replaced a second later. The audit log gets the start of

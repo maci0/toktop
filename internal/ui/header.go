@@ -74,7 +74,7 @@ func (m Model) renderHeader() string {
 				target = "remote"
 			}
 			segs = append(segs, headerSeg{text: styleBad.Render(
-				strip(dotBad) + " ssh " + core.SanitizeText(target) + ": " + core.SanitizeText(m.snap.Sys.RemoteErr))})
+				strip(dotBad) + " ssh " + core.SingleLine(target) + ": " + core.SingleLine(m.snap.Sys.RemoteErr))})
 		case m.snap.Sys.RemoteHost != "":
 			segs = append(segs, headerSeg{text: styleInfo.Render("via ssh:" + core.SanitizeText(m.snap.Sys.RemoteHost))})
 		}

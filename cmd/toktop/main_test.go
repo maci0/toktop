@@ -1504,6 +1504,12 @@ func TestValidateAddURL(t *testing.T) {
 		{raw: "http://localhost:65535"},
 		{raw: "http://user:pass@127.0.0.1:8000", wantErr: "userinfo"},
 		{raw: "http://user@127.0.0.1:8000", wantErr: "userinfo"},
+		// A credential in the query is one the audit log, the dashboard and
+		// both reports echo whole, and it never works: every request appends
+		// a path to the base.
+		{raw: "http://127.0.0.1:8000?api_key=sk-secret", wantErr: "query"},
+		{raw: "http://127.0.0.1:8000/?", wantErr: "query"},
+		{raw: "http://127.0.0.1:8000/v1#secret", wantErr: "fragment"},
 	}
 	for _, tt := range tests {
 		err := validateAddURL(tt.raw)

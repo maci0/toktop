@@ -178,3 +178,23 @@ func TestSanitizeTextDropsInvalidUTF8(t *testing.T) {
 		t.Errorf("literal replacement character was altered: %q", got)
 	}
 }
+
+// A field rendered into one cell must stay one cell: the renderers split a
+// row on newlines into frame rows, so a newline in an untrusted name becomes
+// a line the dashboard reads as its own output.
+func TestSingleLineFoldsNewlinesAndBlanks(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"claude", "claude"},
+		{"clau\nde", "clau de"},
+		{"clau\r\nde", "clau de"},
+		{"a\tb", "a b"},
+		{"\n\n", ""},
+		{"up 9/9 engines\nall clear", "up 9/9 engines all clear"},
+		{"\x1b[31mred\x1b[0m", "red"},
+	}
+	for _, tc := range cases {
+		if got := SingleLine(tc.in); got != tc.want {
+			t.Errorf("SingleLine(%q) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
