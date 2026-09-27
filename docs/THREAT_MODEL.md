@@ -7,18 +7,19 @@ they live and what already stands in their way.
 
 - **Last reviewed:** 2026-09-27 (every claim below re-read against code at
   this commit: ingest, bearer, provider, probe, remote, selfupdate, selfreload,
-  gpu, logcfg, agentusage, workflows, Makefile, site/worker.js). Six controls
-  landed after the previous pass and are now in the mitigations table: the
-  identification decoders are capped like the poll path (which closes the last
-  unbounded read of an engine body, so the former gap 5 is gone and the rest
-  renumber), `core.SingleLine` folds a newline out of a dashboard cell, the
-  `--add` URL refuses a query and a fragment, `toktop update --check` prints a
-  release page only when it names a GitHub host, a remote's quoted stderr is
-  tail-capped, and the agentusage package has its own logger. `--origin` is a
-  new demo-only flag and is listed as an entry point. Line references in the
-  ingest, ssh, collector, provider and core citations were re-anchored: the
-  maintenance rule asks for a symbol beside every number, so the numbers that
-  moved carry the symbol with them. No risk changed rank.
+  gpu, logcfg, agentwatch, agentusage, workflows, Makefile, site/worker.js).
+  This pass covered the nine commits since the previous one. Three controls
+  landed and are in the mitigations table: `make release` refuses a non-dev
+  `VERSION` built from a dirty or non-git tree (M37), a store is followed by
+  one transcript watcher at a time (M38), and the clocks and callbacks a
+  running goroutine reads are taken under a lock rather than raced (M39).
+  `site/worker.js` grew to 914 lines and its `/health` answer is now an inline
+  branch rather than a named `handleHealth`, so every worker citation is
+  re-anchored to the symbol or the branch that replaced it, and the new
+  `/favicon.ico` route is named in the deployment surface. The selfupdate and
+  ingest citations moved with 63481ad, d6c6677, and the update-path error
+  reporting in 6080810; the numbers that moved carry the symbol beside them.
+  No risk changed rank.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -45,8 +46,8 @@ Resolved since 2026-08-25: the previous ranking's "bearer token sent to every
 probed endpoint" is closed by origin-scoped token application
 (commit 21e3feb); see mitigations M1. The previous claim that `--repo` is
 interpolated into the GitHub API path with no owner/name check is closed by
-`ValidateRepo` (selfupdate.go, 96-118, called from Check at :180 and from
-`toktop update` at cmd/toktop/update.go). Nothing in this table is
+`ValidateRepo` (selfupdate.go, 124, called from `Check` at :217 and from
+`toktop update` at cmd/toktop/update.go, 96). Nothing in this table is
 demonstrated by attacking anything; every claim cites code read at review time.
 
 ## Assets
@@ -152,12 +153,12 @@ Every externally reachable input, with its code location:
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
    NDJSON stream), `GET`/`HEAD /healthz`
    (internal/ingest/server.go; routes registered from the endpoint table at
-   `ingestEndpoints`, :260-263, the 405 `Allow` header names `GET, HEAD` at
+   `ingestEndpoints`, :265-268, the 405 `Allow` header names `GET, HEAD` at
    the method guard). The health route is a
    load report, not a bare liveness probe: it answers 503 with a
    `degraded: N/64 event streams in flight` line and the same
    `Retry-After` a refused POST carries while every decode slot is held
-   (`handleHealth`, :465), so it cannot report `ok` for an endpoint that
+   (`handleHealth`, :494), so it cannot report `ok` for an endpoint that
    is accepting nothing. Binds `127.0.0.1:8420`
    unless `--ingest` says otherwise (cmd/toktop/flags.go); any address is
    accepted, including routable interfaces. An empty `--ingest` is rejected
@@ -260,11 +261,11 @@ Every externally reachable input, with its code location:
 4. **Self-update network fetches** (outbound HTTPS): latest-release lookup on
    api.github.com, then download of the checksums archive and platform asset
    named by that response (internal/selfupdate/selfupdate.go).
-   Asset URLs must be GitHub download hosts (trustedAssetURL, :89-91,
-   enforced at :263-265);
-   redirects off those hosts are refused (githubRedirect, :161-174). The asset
+   Asset URLs must be GitHub download hosts (`githubAssetURL`, enforced by
+   `trustedAssetURL` in `applyTo`, :324);
+   redirects off those hosts are refused (`githubRedirect`, :197-212). The asset
    is verified against the downloaded checksums and size-capped before anything
-   is renamed over the running binary (:255-300).
+   is renamed over the running binary (`applyTo` :314-396).
 5. **SSH client sessions** (outbound): shell scripts executed on the remote
    for discovery and vitals (internal/remote/discover.go;
    internal/remote/stats.go); all returned text is parsed locally, and
@@ -332,16 +333,17 @@ Every externally reachable input, with its code location:
     `bunx wrangler@4.126.0 deploy` / `rollback` inside `site/`, then poll
     `https://toktop.ai/health` 6 times, 10s apart, and exit non-zero when
     the site never answers `ok`; a failed deploy names
-    `make site-rollback` as the next step (Makefile `site-deploy` 595 /
-    `site-rollback` 603, WRANGLER 58, SITE_LOCK 68, SITE_DEPLOYED 78,
-    SITE_ROLLED_BACK 79, SITE_HEALTH_URL 63,
-    SITE_HEALTH_TRIES 64, SITE_HEALTH_WAIT 65). A rollback undoes the most recent
+    `make site-rollback` as the next step (Makefile `site-deploy` 644 /
+    `site-rollback` 652, WRANGLER 57, SITE_LOCK 67, SITE_DEPLOYED 77,
+    SITE_ROLLED_BACK 78, SITE_HEALTH_URL 62,
+    SITE_HEALTH_TRIES 63, SITE_HEALTH_WAIT 64). A rollback undoes the most recent
     deployment whoever shipped it, so a deploy that reported success records
     `dist/site.deployed` and a rollback moves it to `dist/site.rolled-back`:
     a second rollback has nothing of this tree's to undo and exits 0 without
     calling wrangler. The poll is a presence-and-binding check, not an
     identity check: `/health` answers 503 rather than `ok` while the worker's
-    asset binding is unbound (site/worker.js, `handleHealth` 772-799), so a
+    asset binding is unbound (site/worker.js, the `/health` branch at
+   :822-852), so a
     deploy that shipped without `/dashboard.png` fails the gate, but an upload
     that never took effect still answers `ok` from the version already live.
     The deploy tool is fetched from the
@@ -362,9 +364,11 @@ Deployment surface:
   Dependabot updates modules, actions, and `scripts/` pip deps
   (.github/dependabot.yml); tag pushes build release binaries for six
   platforms plus a CycloneDX SBOM (.github/workflows/release.yml, Makefile
-  `release`/`sbom`). Release artifacts ship SHA-256 checksums only; no
+  `release` 808, `sbom` 398). Release artifacts ship SHA-256 checksums only; no
   signature step exists. Tag names that reach ldflags and dist filenames are
-  refused unless they are a safe identifier (release.yml). The
+  refused unless they are a safe identifier (release.yml), and a non-dev
+  `VERSION` cannot be cut from a dirty or non-git tree at all (M37,
+  Makefile `check-release-source`). The
   already-published guard reads `gh release view` with `GH_TOKEN` set from
   the job token and admits only a 404, so an auth failure, a rate limit or an
   outage can no longer read as a free version (release.yml, 44-70; M36).
@@ -373,29 +377,31 @@ Deployment surface:
   holds, and re-verifies every downloaded asset against the release's own
   `checksums.txt`, so an upload that arrived short or altered fails the
   release instead of reaching an installer (release.yml, `release-verify`
-  step; Makefile `release-verify`, 814).
+  step; Makefile `release-verify`, 906).
   The site deploy credential is documented rather than invented here: the
   operator exports `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, or
   logs in through wrangler's own OAuth store, and no CI job deploys the site
   (CONTRIBUTING.md, 178-191).
 - The marketing site is a single Cloudflare Worker serving one static page
-  from an embedded string (site/worker.js, 844 lines): GET/HEAD only (the
-  method guard runs twice, at :708-712 for image paths and :765-770 for the
+  from an embedded string (site/worker.js, 914 lines): GET/HEAD only (the
+  method guard runs twice, at :758-763 for image paths and :817-821 for the
   page, and any other method gets 405 with `allow: GET, HEAD`), a `/health`
-  route (`handleHealth`, :772-799), weak FNV ETag over the page with weak
-  `If-None-Match` matching (ETAG_HASH 371, ETAG 382, `ifNoneMatchMatches`
-  388, the 304 answer :817-828), content negotiation (brotli, zstd, gzip,
-  identity) compressed once per isolate, keyed by `Vary: Accept-Encoding` on
-  every page response (VARY 546, PAGE_CACHE_CONTROL 541, `representationFor`
-  519), and hardening headers
+  route (the inline branch at :822-852), a `/favicon.ico` route answered from
+  bytes embedded in the Worker itself, needing no asset binding and no
+  compression (`FAVICON_PATH`, :79, answered at :859-871), weak FNV ETag over
+  the page with weak `If-None-Match` matching (ETAG_HASH 402, ETAG 413,
+  `ifNoneMatchMatches` 419, the 304 answer :887-896), content negotiation
+  (brotli, zstd, gzip, identity) compressed once per isolate, keyed by
+  `Vary: Accept-Encoding` on every page response (VARY 577,
+  PAGE_CACHE_CONTROL 572, `representationFor` 550), and hardening headers
   (nosniff, HSTS, referrer-policy, CSP
   `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`) on every
-  page, image, and health response (SECURITY_HEADERS 548; the same set
+  page, image, health, and favicon response (SECURITY_HEADERS 579; the same set
   adds `x-frame-options: DENY` and an HSTS of `max-age=31536000` with no
   `includeSubDomains`). Every answer also carries
   `server-timing: edge;dur=<ms>`, which names the worker itself, not any
-  origin (`serverTiming`, 618). wrangler.jsonc sets
+  origin (`serverTiming`, 649). wrangler.jsonc sets
   `assets.run_worker_first` with `html_handling: none` and
   `not_found_handling: none`, so /dashboard.png and related images hit that
   Worker path instead of the asset pipeline; it also publishes the worker on
@@ -406,34 +412,35 @@ Deployment surface:
   The one forward is on image paths: the Worker re-issues the request to
   `env.ASSETS` carrying the full request URL (so any query string rides
   along) but forwarding only `if-none-match` and `if-modified-since`
-  (worker.js, 719-727, the fetch itself at :727), and an asset-store failure
+  (worker.js, 775-778, the fetch itself at :777), and an asset-store failure
   becomes a one-line text/plain body rather than the store's HTML error
-  page (`assetErrorBody` 640, used at :747), with `cache-control: no-store`
-  on any non-200/304 answer so a 404 cannot stick (:742-746).
+  page (`assetErrorBody` 690, used at :796), with `cache-control: no-store`
+  on any non-200/304 answer so a 404 cannot stick (:810).
   `style-src 'unsafe-inline'` is idle:
   the HTML is a compile-time string.
-  Any path that is neither in `IMAGE_PATHS` (:662) nor `/health` serves
-  the marketing page with 200, not a 404 (the catch-all, :802-844). A client
+  Any path that is neither in `IMAGE_PATHS` (:712), `/health`, nor
+  `/favicon.ico` serves
+  the marketing page with 200, not a 404 (the catch-all, :873-913). A client
   that refuses every offered coding gets 406 with `vary: Accept-Encoding`
-  (`refusesEveryCoding` :498, `notAcceptable` :584). An unbound
+  (`refusesEveryCoding` :529, `notAcceptable` :615). An unbound
   `env.ASSETS` on an image path logs and returns 404
-  (:717), and any throw becomes a 500 with the body `internal error`
-  (:692-704); both answers go out through ERROR_HEADERS (:557), which is
+  (:765-768), and any throw becomes a 500 with the body `internal error`
+  (:741-747); both answers go out through ERROR_HEADERS (:588), which is
   otherwise undescribed.
   `/health` is a binding check, not a presence check: with `env.ASSETS`
   unbound it answers 503 with
   `degraded: no asset binding; the dashboard captures are not served`
-  rather than `ok` (:772-799), because the page still serves while every
+  rather than `ok` (:822-852), because the page still serves while every
   capture it shows is a 404. `make site-deploy` polls it with
   `curl -fsS` (Makefile, 521), which fails on that 503, so a deploy that
   shipped without its assets cannot report success. What the poll still
   cannot tell is *which* version answered: an upload that never took effect
   leaves an older live version with its bindings answering `ok`.
   Finally, the set of request bytes and strings the Worker inspects is
-  larger than a first reading suggests: `logFailure` (:627) writes a
+  larger than a first reading suggests: `logFailure` (:674) writes a
   JSON line carrying the caller-controlled `cf-ray` header, plus `method` and
-  `path` on the `assets-unbound`, `asset-missing`, `asset-store-error`, and
-  `unhandled` lines (`failRequest`, :601). The unhandled line adds
+  `path` on the `method-not-allowed`, `assets-unbound`, `asset-missing`,
+  `asset-store-error`, and `unhandled` lines (`failRequest`, :632). The unhandled line adds
   `error: String(err?.message ?? err)`, a thrown message from the asset store
   or the runtime rather than from the caller. The values are JSON-encoded, so
   this is not injection into the log, but a caller can write arbitrary
@@ -442,15 +449,18 @@ Deployment surface:
   takes `dist/site.lock`, runs `bunx wrangler@4.126.0 deploy` with ambient
   Cloudflare credentials, records `dist/site.deployed`, polls
   `https://toktop.ai/health` 6 times at 10s,
-  and points at `make site-rollback` on failure. It depends on `site-lint`
-  and `site-check` (Makefile, 595; `site-lint` 480, `site-check` 472), so the same biome lint and
+  and points at `make site-rollback` on failure. It depends on `site-lint`,
+  `site-check`, and `check-wrangler-doc` (Makefile, 644; `site-lint` 529,
+  `site-check` 521, `check-wrangler-doc` 632, which fails the deploy when
+  the WRANGLER pin in CONTRIBUTING.md and the one this document names have
+  drifted apart), so the same biome lint and
   `bun test` the CI workflow runs gate a local deploy too; `site-rollback`
   has no such dependency, deliberately, so a broken worker can still be
   undone. The lock, the poll and
   the failure exit are shared with `make site-rollback`, so a rollback
   cannot race a deploy and cannot report success over a site that is not
   answering, and the recorded marker makes the rollback itself run once
-  (Makefile, `site-deploy` 595, `site-rollback` 603, health wait 514-529).
+  (Makefile, `site-deploy` 644, `site-rollback` 652, health wait 570-576).
 
 ## Trust boundaries and data flow
 
@@ -584,7 +594,7 @@ ports that are then exposed on local loopback (client.go).
   quota, so 64 stalled local POSTs still hold 64 descriptors and goroutines
   and the 65th legitimate sender is refused with them (gap 5); nothing
   attributes a slot to a peer, so one process can occupy all of them.
-  MaxHeaderBytes is 16 KiB (server.go, 76).
+  MaxHeaderBytes is 16 KiB (server.go, 81).
 - *Elevation of privilege*: none; event content reaches only parsing and
   rendering.
 
@@ -673,18 +683,20 @@ ports that are then exposed on local loopback (client.go).
   hot-reload cannot take this path (exec_windows.go).
 - *Spoofing/tampering* (`toktop update`): the release lookup and downloads
   ride TLS. `ValidateRepo` admits only a GitHub owner/name
-  (selfupdate.go); Check builds the URL with `url.JoinPath`
-  (:184-186). Asset URLs must be GitHub download hosts, and redirects off
-  those hosts are refused (:161-174, 263-265). The asset must match the
-  release's own checksums.txt (:267-291), so a network attacker cannot
+  (selfupdate.go, :124); `Check` builds the URL with `url.JoinPath`
+  (:220). Asset URLs must be GitHub download hosts, and redirects off
+  those hosts are refused (selfupdate.go, :197-212 and :324). The asset
+  must match the release's own checksums.txt (`applyTo` :314-396), so a
+  network attacker cannot
   substitute a binary. The trust anchor is the repo itself: whoever controls
   the repo (or its release pipeline) ships a binary that verifies against its
   own checksums. No external signature (Sigstore/GPG) closes that gap today;
   summary risk 3.
-- *Denial of service*: downloads capped at 256 MiB asset / 1 MiB compressed
-  checksums / 2 MiB decompressed checksums (selfupdate.go);
+- *Denial of service*: downloads capped at 256 MiB asset (`maxAssetBytes`,
+  selfupdate.go, :64) / 1 MiB compressed checksums / 2 MiB decompressed
+  checksums;
   a truncated or hostile mirror fails verification and leaves the running
-  binary untouched (:295-297).
+  binary untouched (`applyTo`).
 
 **B6 (user configs):**
 - *Elevation of privilege*: `--repo owner/name` redirects the update channel
@@ -738,7 +750,7 @@ Controls verified in code, with the threats they cover:
 | M1: Origin-scoped bearer application. Token attached only to `Allow`-admitted origins, populated exclusively from operator `--add` URLs; `CheckRedirect` deletes the header on any hop off the original origin or outside the allow set, capped at 10 hops; `Set` blanks a token containing CR or LF, so an argv or env value cannot inject a header | Credential harvesting by scanned ports, forwarded remotes, and probes (B2/B4 disclosure; previous summary risk 1, fixed in commit 21e3feb); credential loss to a redirect target; header injection through a hostile token | internal/bearer/bearer.go, `Set` 42, `CheckRedirect` 99, `admits` 116; cmd/toktop/attach.go, 38; call sites provider/discover.go, 266; provider.go, 94; probe.go, 477; tests internal/bearer/bearer_test.go |
 | M2: Terminal escape/control-char sanitizer applied both at ingest and at render time (C0/C1 including UTF-8-encoded C1; bidi overrides/isolates; zero-width format; variation selectors), plus `core.SingleLine` for a field that occupies one cell, one report line or one log line: it folds the newlines and tabs `SanitizeText` keeps for block text into single spaces, because every renderer here measures a cell by its widest line and splits a rendered row on newlines into frame rows. Without it, a sender reaching the unauthenticated ingest endpoint or a process squatting a discovered port could print a line the dashboard reads as its own output ("up 9/9 engines", "agent stopped") and spend row budget that pushes the real rows off the pane. Mixed Latin+Cyrillic/Greek agent names collapse to `anonymous`. Every one of the three renderings applies the sanitizer, including the machine-readable one, so the JSON report is no less sanitized than the frame | OSC/CSI clipboard-cursor-title injection from engines, remotes, and events; a forged own-output line and row-budget displacement in the frame; mixed-script impersonation of agent names (asset: terminal integrity, dashboard integrity) | internal/core/sanitize.go, `SingleLine` 106; ingest side server.go; render side internal/ui/ui.go, internal/ui/plain.go, internal/ui/format.go, internal/ui/agents.go, internal/ui/json.go; model ids go through `core.ModelName` (M34) |
 | M3: Ingest body cap 1 MiB + MaxBytesReader | unbounded upload into decode loop (B1 DoS) | server.go |
-| M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go, 72-80, 405-420, 435-449, 518, 587-596) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
+| M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go, `newServer` 77-87, `progressBody` 436-484, the armed write deadline at 547-548 with its calls at 552, 564, 619 and 628, and the keep-alive clear at 640) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
 | M5: Event field caps (an `id` past 128 characters, or one that is nothing but whitespace or control characters, is refused with a `400` naming the field rather than clamped, since the id is the dedup key and a clamped one folds distinct keys onto one stored id; the display fields clamp: agent 64, model 128, via_engine 128, note 512; a kind outside the four known ones is lowercased, sanitized and clamped to 24 runes rather than replaced, so `kind: "banana"` reaches the feed as `banana` (folded to one line by `core.SingleLine`, so a kind cannot add a row); only a kind that is empty or sanitizes to empty becomes `turn`) + a note that is nothing but a working directory reduced to its last two components and folded through `core.RedactHome`, so a pushed path cannot name the account in a dashboard the operator redirects into a file (`shortNote`/`pathNote`, event.go, 90-130) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) + event-id dedup ledger bounded by a 15 min horizon and a 4096-entry cap, so a replay stays recognizable past the display ring and the ledger cannot grow without bound | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering); a dropped event from two ids clamped onto one dedup key; a pushed `$HOME` path in a retained note reaching a shared report | server.go; event.go:45-71, 90-130, 121-137, 183-189; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
 | M6: Event timestamp skew clamp: stamps >2 min in the future reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing) | server.go |
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go |
@@ -752,24 +764,27 @@ Controls verified in code, with the threats they cover:
 | M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | endpoints.go |
 | M16: Remote shell scripts: static bodies, only locally generated integers interpolated; no secret material sent to remote scripts | command injection into remote shell (B3 elevation) | discover.go; stats.go |
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance. A remote's stderr is quoted into a local error only as a sanitized tail of `stderrTailClusters` 300 grapheme clusters (`stderrTail`, client.go, 547-566, over `core.TailClusters`), and that error string is home-folded before it reaches a frame the operator is told to paste into an issue (internal/remote/stats.go, `poll`, 168-176), so a hostile remote cannot flood the local error or put an operator home path into a diagnostic report through a command that fails | credential handling in headless runs (B4); unbounded remote-chosen text in a displayed error, and a home path in a reported one (B3/B4 disclosure) | auth.go; remote/client.go, `stderrTail`; core/truncate.go, `TailClusters` 49 |
-| M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install. `toktop update --check` prints `rel.HTMLURL` for shell capture, and that page URL is held to the same GitHub-host rule as an asset (`TrustedReleaseURL`); a release naming no GitHub page is reported and nothing is printed for the `url=$(toktop update --check)` capture the help screen documents | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution, and a release-supplied URL captured into a shell variable (B5) | selfupdate.go, `TrustedReleaseURL` 171-173; cmd/toktop/update.go, `reportRelease` 134-149 |
+| M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install. `toktop update --check` prints `rel.HTMLURL` for shell capture, and that page URL is held to the same GitHub-host rule as an asset (`TrustedReleaseURL`); a release naming no GitHub page is reported and nothing is printed for the `url=$(toktop update --check)` capture the help screen documents | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution, and a release-supplied URL captured into a shell variable (B5) | selfupdate.go, `ValidateRepo` 124, `Check` 212, `applyTo` 314, `TrustedReleaseURL` 176; cmd/toktop/update.go, `reportRelease` 134-149 |
 | M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo, query and fragment rejected; `--origin` parsed as RFC3339 or Unix seconds and refused when malformed, and both `--seed` and `--origin` named as having no effect without `--demo`; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, a silently reduced `--agents` watch set, a `?api_key=` credential in argv and in every rendered surface, and a demo replay that differs from the capture it was meant to reproduce | validate.go validateFlags, validateOnceEnv, validateIngestAddr, warnIgnoredFlags, parseOrigin; endpoints.go validateAddURL; main.go logActiveConfig | 
-| M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check, and two drift gates that make the CI build matrix and its build tags answerable to the Makefile targets the release job runs (`make check-ci-platforms`, `make check-ci-tags`, .github/workflows/ci.yml, 66-74), so a platform that stops being vetted in CI cannot silently keep being published. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, 8); the release workflow is read for the whole job and asks for `contents: write` only on the publish step (.github/workflows/release.yml, 11 and 147), which is the scope that can push a tag and its assets, so it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift, an unvetted shipped platform, and release-channel write scope (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 11 and 147, Makefile |
+| M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check, the release-source gate (M37), and two drift gates that make the CI build matrix and its build tags answerable to the Makefile targets the release job runs (`make check-ci-platforms` 620, `make check-ci-tags` 603; .github/workflows/ci.yml, 66-74), so a platform that stops being vetted in CI cannot silently keep being published. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, 8); the release workflow is read for the whole job and asks for `contents: write` only on the publish step (.github/workflows/release.yml, 11 and 147), which is the scope that can push a tag and its assets, so it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift, an unvetted shipped platform, and release-channel write scope (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 11 and 147, Makefile |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (discover.go, 41-48, the parse at :45), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 8) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; sample.go; opencode_sqlite.go |
 | M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go; internal/ingest/server_test.go |
-| M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, 76, `setSecurityHeaders` 109-116 |
-| M27: `logcfg.Remote` rewrites a non-loopback peer address to `"remote"` on the audit line, and `logcfg.RedactAddrs`/`RedactHandler` apply the same rewrite to text in the message, so a peer IP cannot reach stderr even when `http.Server.ErrorLog` interpolates it into a handshake or panic line | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | internal/logcfg/logcfg.go, `Remote` 156, `RedactAddrs` 174, `RedactHandler` 184; server.go, 77-80 |
+| M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, 81, `setSecurityHeaders` 114 |
+| M27: `logcfg.Remote` rewrites a non-loopback peer address to `"remote"` on the audit line, and `logcfg.RedactAddrs`/`RedactHandler` apply the same rewrite to text in the message, so a peer IP cannot reach stderr even when `http.Server.ErrorLog` interpolates it into a handshake or panic line | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | internal/logcfg/logcfg.go, `Remote` 156, `RedactAddrs` 174, `RedactHandler` 184; server.go, 86-87 |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go |
 | M29: Transcript, candidate-walk, and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused. The ownership scan is capped at `ownerScanLines` and refused durably when no header is found, so an undecided session is not re-read on every poll. A definition withdrawn from `agents.json` takes its adapter with it: `refreshAdapter` returns without one and `walkCandidates` stops (`adGone`, agentusage/candidates.go, 288), so a reload that drops an agent cannot leave the previous adapter walking the store it disowned for the life of the process | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watcher.go, 340; agentusage/candidates.go, 225 (`walkTranscripts`); agentusage/crush_sqlite.go, 124; agentusage/registry.go, `refreshAdapter` |
-| M30: In-flight POST cap. `eventSlots` (server.go, :390) is a process-wide counting channel of `maxInFlightEvents` 64 (`:384`) acquired before the body is read; a POST that cannot take a slot is refused immediately with 503 and one shared `Retry-After: 1` (RFC 9110 whole seconds) rather than queued. `handleHealth` reports the same degraded state with the same delay, so a probe that keeps saying `ok` while every POST is refused cannot be believed. `stallReason` names which of the two 408 bounds broke (`no body bytes for 1m` vs `stream exceeded the 10m lifetime`), since the raw i/o timeout is identical for both and the two have opposite sender-side fixes | a local pile-up of stalled POST bodies holding an fd and goroutine each for a minute (B1 DoS); a sender or health probe inventing a shorter retry interval than the slots free (B1 DoS) | internal/ingest/server.go, `maxInFlightEvents` 375-390, `stallReason` 451, `handleHealth` 465, the shared `retryAfterSeconds` 401-405 with the refusals at :523 and :534-546, the 408 body :645 |
+| M30: In-flight POST cap. `eventSlots` (server.go, :401) is a process-wide counting channel of `maxInFlightEvents` 64 (`:395`) acquired before the body is read; a POST that cannot take a slot is refused immediately with 503 and one shared `Retry-After: 1` (RFC 9110 whole seconds) rather than queued. `handleHealth` reports the same degraded state with the same delay, so a probe that keeps saying `ok` while every POST is refused cannot be believed. `stallReason` names which of the two 408 bounds broke (`no body bytes for 1m` vs `stream exceeded the 10m lifetime`), since the raw i/o timeout is identical for both and the two have opposite sender-side fixes | a local pile-up of stalled POST bodies holding an fd and goroutine each for a minute (B1 DoS); a sender or health probe inventing a shorter retry interval than the slots free (B1 DoS) | internal/ingest/server.go, `maxInFlightEvents` 386-401, `stallReason` 477, `handleHealth` 494, the shared `retryAfterSeconds` 412-416 with the refusals at :501 and :563-571, the 408 body :677 |
 | M31: `--ssh-key` is rejected when set to an empty value (exit 2). An empty value is indistinguishable from the flag never being given: the run silently fell back to `~/.ssh/config` and authenticated with a key the operator did not choose | silent identity substitution from a mistyped or quoted-empty flag (B4 disclosure) | cmd/toktop/validate.go, 206-220; cmd/toktop/main.go, 164-172 |
 | M32: `currentUser` validates `USER` and `USERNAME` through `validTargetField` before handing either to the transport and falls through to the passwd database when either is empty or would fail validation; the passwd name is passed through `basenameLogin` so a Windows `DOMAIN\user` yields `user`. `TOKTOP_SSH_PASSWORD` moved behind the exported `remote.PasswordEnv` constant so the startup warning that names an unusable variable spells it the way the code reads it | a hostile environment redirecting the ssh connection to a different account, or naming an invalid string the transport would reject later as a password failure (B6) | internal/remote/client.go, 81-104; internal/remote/target.go, 258; internal/remote/auth.go, 93-107; cmd/toktop/validate.go, 137-147 |
 | M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick (B5 DoS) | cmd/toktop/main.go, `parseTargets` 548-568; internal/remote/client.go, `Forward`; internal/gpu/gpu.go, 90-121 |
 | M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 86-91, `ModelName` 100-102; call sites internal/provider/openai.go, 66, 119, 152, 167; internal/provider/ollama.go, 40-42; internal/probe/probe.go, `ModelNameMax` 73-77 |
-| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, 53; internal/remote/client.go, 29; internal/collector/collector.go, 36; internal/gpu/gpu.go, 123; cmd/toktop/attach.go, 29; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 104, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own `logField` (client.go, 33) additionally runs `RedactAddrs` over the text. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; and a destination the operator typed (an engine `addr`, an ssh `target`) is not a peer address, so nothing short of the home fold removes it | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68, `HomeHandler` 79, `Field` 149; internal/core/redact.go, `RedactHome` 24 |
+| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, 58; internal/remote/client.go, 29; internal/collector/collector.go, 36; internal/gpu/gpu.go, 123; cmd/toktop/attach.go, 29; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 104, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own `logField` (client.go, 33) additionally runs `RedactAddrs` over the text. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; and a destination the operator typed (an engine `addr`, an ssh `target`) is not a peer address, so nothing short of the home fold removes it | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68, `HomeHandler` 79, `Field` 149; internal/core/redact.go, `RedactHome` 24 |
+| M37: `make release` refuses a non-dev `VERSION` built from a tree that cannot be tied to the bytes shipped. `check-release-source` fails the cut when `git rev-parse HEAD` fails (a source export, where buildinfo has no commit to record and `SOURCE_DATE_EPOCH` falls back to 0, dating every archive member to the epoch) and, unless `ALLOW_DIRTY=1` is passed by name, when `git status --porcelain` is nonempty; a non-numeric `SOURCE_DATE_EPOCH` is refused too. `VERSION=dev` is exempt, since a dev build is a local artifact whose manifest records the tree honestly. This is the reproducibility half of the update channel's trust story: an artifact whose bytes do not match the commit the release page points at cannot be re-derived or audited by anyone who downloads it | a release cut from an uncommitted or non-git tree, shipping binaries that buildinfo names a commit for while the archive members carry something else, against the same trust anchor as summary risk 3 (B5 tampering/repudiation) | Makefile, `check-release-source` 780-806, a prerequisite of `release` 808 |
+| M38: One watcher per agent store. `discover` stops the trackers of exited processes before it installs a follower onto a store a dead tracker was still tailing (`for _, t := range exited { w.stopOne(t) }` ahead of the install, internal/agentwatch/agentwatch.go, 270-272), and `stopOne` reports the dead watcher's final growth first, so the follower's baseline is taken after the stopped tracker's last sample. Two watchers on one store each report the same growth under their own PID, and the collector's id window cannot merge two sample ids, so every token written in the overlap is counted twice | doubled token counts and a follower whose baseline overlaps the partition it replaced: a dashboard-integrity defect on a path a process exit alone triggers, with no hostile input (B7 tampering) | internal/agentwatch/agentwatch.go, 270-272; test internal/agentwatch/handover_test.go |
+| M39: Clocks and callbacks a running goroutine reads are taken under a lock rather than raced. The ingest server's `SetNow` writes `s.now` under `nowMu` and `instant` reads it under `RLock` (internal/ingest/server.go, 322-340); the agent watcher guards the two fields `SetNow` and `SetOnError` write with `clockMu`, because every tracker's own reader goroutine stamps events from that clock (internal/agentwatch/agentwatch.go, `clockMu` with `reportError` releasing the lock before calling a caller-supplied sink); `gpu.Sample` collects its per-tool results under a local mutex | a data race on the demo clock or the error sink between a handler goroutine and a tracker, which is a correctness and availability fault rather than a boundary crossing, recorded here because the ingest clock is set from demo mode and a race there lands in the same audit surface as B1 | internal/ingest/server.go, 322-340; internal/agentwatch/agentwatch.go, `clockMu`, `reportError`; internal/gpu/gpu.go, `Sample` 208-213; tests internal/ingest/server_test.go, internal/agentwatch/concurrency_test.go |
 | M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, 44-70 |
 
 Documentation claims checked against code on 2026-09-27. What this pass
@@ -786,16 +801,31 @@ reads as a claim about the code when it is not one.
   a cap. Gap 10 is written against what `currentUser` validation cannot see
   (any well-formed name is still accepted, and `HOME` is not validated at
   all), with M32 recording the control.
-- M31-M36 all exist in the code: the empty `--ssh-key` refusal, the
+- M31-M39 all exist in the code: the empty `--ssh-key` refusal, the
   `currentUser` validation, the repeated-target and per-port forward dedup
   with the vendor-CLI output cap, the `eval_duration` range refusal folded
   into M10, the shared engine model-name bound, the log handler redaction,
-  and the authenticated release guard. None changes the ranking in the
-  summary.
+  the authenticated release guard, the release-source gate, the single-watcher
+  rule, and the lock on the injected clock and error sink. None changes the
+  ranking in the summary.
 - The `strconv.Atoi` in the shell-probe fallback is at
   internal/remote/discover.go, :45, and the claim is unchanged: `p > 0` is
   still the only check on that path, and `FuzzParseDiscoveryOutput` still
   covers the `/proc/net/tcp` parser alone (gap 8).
+- `/health` still answers 503 with the unbound-binding line, and
+  `make site-deploy` still polls it with `curl -fsS` inside `wait_for_site`
+  (Makefile, 570), so the gate holds. The new `/favicon.ico` route is
+  answered from bytes embedded in the Worker (worker.js, 79 and 859-871) and
+  reaches neither `env.ASSETS` nor a compressed body, so it adds no new
+  forward to the asset store, and it carries the same `SECURITY_HEADERS` set
+  as every other answer (`nosniff` and the CSP among them). Its bytes are a
+  compile-time constant in the Worker, so a caller controls the path and
+  nothing else about it.
+- `make site-deploy` gained a `check-wrangler-doc` prerequisite (Makefile,
+  644, the check at 632-641). It fails the deploy when the `WRANGLER` pin in
+  CONTRIBUTING.md and the one this document names have drifted apart, so
+  gap 7's unpinned deploy tool cannot be fixed in one place and left stale in
+  the other.
 
 Other claims checked against code on this pass, all of which hold as written:
 
@@ -808,7 +838,7 @@ Other claims checked against code on this pass, all of which hold as written:
   `ok` for an upload that never took effect.
 - Every answer carries `server-timing: edge;dur=<ms>`. It names the worker,
   not an origin, so it adds no disclosure.
-- `failRequest` (:601) adds `error: String(err?.message ?? err)` to the
+- `failRequest` (:632) adds `error: String(err?.message ?? err)` to the
   unhandled-500 line, so a thrown message from the asset store or the runtime
   reaches Workers Logs alongside the caller-controlled `cf-ray`. The
   caller-controlled set is unchanged in kind: JSON-encoded, so still
@@ -850,7 +880,7 @@ Other claims checked against code on this pass, all of which hold as written:
   the built-in pi, prime-agent, and feynman definitions
   (agentusage/registry.go, 93-121; agentusage/claude.go, 15; codex.go, 31).
 - The ingest route registers GET and HEAD on `/healthz`
-  (internal/ingest/server.go, `ingestEndpoints`, 260-263, and the 405 `Allow`
+  (internal/ingest/server.go, `ingestEndpoints`, 265-268, and the 405 `Allow`
   header written by the shared method guard); the `help` and `version` subcommands take arbitrary
   trailing arguments (cmd/toktop/main.go, 55-76).
 - `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are honored only when absolute. A
@@ -872,8 +902,8 @@ Other claims checked against code on this pass, all of which hold as written:
 - SECURITY.md states there is no dedicated disclosure contact and no
   supported-version matrix, and that `toktop update` fetches the latest
   release. That matches selfupdate.go: `Check` always hits
-  `/releases/latest` (:184-186), the named repo defaults to `maci0/toktop`
-  (:40-41), and `NewerThan` is exact-tag inequality (:217-222), so there is
+  `/releases/latest` (:220), the named repo defaults to `maci0/toktop`
+  (`DefaultRepo`, :42), and `NewerThan` is exact-tag inequality (:267), so there is
   no channel of old majors to support. It invents no reporting SLA, and its
   link to this file resolves.
 
@@ -957,7 +987,7 @@ Recorded as threats with locations; fixes do not happen in this document:
    sec-review.
 5. **Ingest slots are a count, not a per-peer quota** (Low): the endpoint
    refuses more than `maxInFlightEvents` 64 concurrent POST
-   bodies and advertises `Retry-After` (M30, server.go, 375-390, 534-546),
+   bodies and advertises `Retry-After` (M30, server.go, 386-401, 563-571),
    so a flood is refused rather than absorbed. What the cap does not carry is
    a sender identity: one local process can hold every slot, and the 65th honest sender
    is refused alongside it. Per-peer attribution needs a peer notion this
@@ -969,7 +999,7 @@ Recorded as threats with locations; fixes do not happen in this document:
    for the re-exec half.
 7. **Site deploy runs from a developer shell** (Low): `make site-deploy`
    fetches wrangler from the npm registry at run time and uses ambient
-   Cloudflare credentials (Makefile, `site-deploy` 595). The credential's blast radius
+   Cloudflare credentials (Makefile, `site-deploy` 644). The credential's blast radius
    is a Cloudflare account, and the deploy tool is not lockfile-pinned; a
    registry compromise or a hijacked developer machine reaches the published
    site. The `/health` poll and `site-rollback` are the only recovery
@@ -1036,14 +1066,14 @@ Recorded as threats with locations; fixes do not happen in this document:
   and the same floor, `TOKTOP_LOG_LEVEL` (internal/logcfg), so the floor
   moves for all of them at once and none of them is silent because its own
   endpoint is off:
-  - the ingest server (`logcfg.Logger()` at internal/ingest/server.go, 53):
+  - the ingest server (`logcfg.Logger()` at internal/ingest/server.go, 58):
     POST /v1/events, 404/405, and recovered handler panics. Default info
     includes successful POSTs; warn/error suppress them, and error also
     suppresses 4xx rejections. Successful health checks are not logged
     (server.go). Request ids can be supplied by callers (server.go), so they
     provide correlation, not sender identity. A body that trips a deadline
     names which bound it broke, in the 408 body rather than a log line
-    (M30, `stallReason` server.go, 451, used at :645), so an operator can
+    (M30, `stallReason` server.go, 477, used at :677), so an operator can
     tell a peer that stopped sending from one whose stream outlived the
     10-minute bound without reading the source for which branch fired.
   - the ssh client (`var audit = logcfg.Logger`, internal/remote/client.go,
@@ -1112,9 +1142,11 @@ Recorded as threats with locations; fixes do not happen in this document:
 - Every entry point, boundary, and mitigation line keeps its file reference so
   the next pass can diff claims against code mechanically.
 - A reference into a file that changes often names the symbol as well as the
-  line. `site/worker.js` is 844 lines and every citation in this file moved
+  line. `site/worker.js` is 914 lines and every citation in this file moved
   when it grew; a symbol survives a comment insertion, a line number does
-  not.
+  not. Its `/health` answer stopped being a named function in the process,
+  which is the case the rule exists for: a name that is gone cannot be
+  followed, so the citation names the branch that replaced it.
 - New entry point in code => add it here in the same change. Same for a new
   control: a bound, a cap, a validation, or a redaction that did not exist
   when this file was written gets its `M` row in the change that lands it,
