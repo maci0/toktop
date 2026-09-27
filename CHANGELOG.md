@@ -33,6 +33,20 @@ support channel (see SECURITY.md).
   ones, so the next append reports only the growth; a cumulative adapter
   (codex) previously reported the whole session total as new output.
 
+### Fixed
+
+- The error a mid-stream `POST /v1/events` failure returns now says how to
+  recover from it. A stream whose events carry their own `id`, or that was
+  sent without `Idempotency-Key`, is resumed by sending the remaining lines.
+  A stream under `Idempotency-Key` whose events omit `id` must be replayed in
+  full: a resumed POST numbers its first line 1 again, so its events take the
+  ids of lines already recorded and are dropped as duplicates.
+- `toktop update` and the `ssh://` host key store sweep their staging files
+  before writing, so a run killed between staging a file and renaming it does
+  not leave a partial file in the install directory or the config directory
+  for good. A staging file young enough to be a download in flight is left
+  alone.
+
 ### Changed
 
 - `--ingest` bound to a host *name* other than `localhost` now warns about

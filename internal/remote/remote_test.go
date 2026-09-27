@@ -10,8 +10,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -665,5 +667,64 @@ func TestKnownHostsPathHonorsXDGConfigHome(t *testing.T) {
 	want := filepath.Join(tmp, "toktop", "known_hosts")
 	if got != want {
 		t.Fatalf("knownHostsPath() = %q, want %q", got, want)
+	}
+}
+
+// A toktop killed between staging the store and renaming it leaves a partial
+// file nothing else ever looks for. The next write to the store clears it; a
+// staging file young enough to be another process's write, and any other file
+// in the directory, must survive.
+func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_hosts")
+	crashed := filepath.Join(dir, knownHostsTempPrefix+"crashed")
+	if err := os.WriteFile(crashed, []byte("half a store"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * staleTempAge)
+	if err := os.Chtimes(crashed, old, old); err != nil {
+		t.Fatal(err)
+	}
+	inFlight := filepath.Join(dir, knownHostsTempPrefix+"in-flight")
+	if err := os.WriteFile(inFlight, []byte("writing"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(unrelated, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeKnownHosts(path, map[string]string{"a.example:22": "a.example:22 ssh-ed25519 AAAA"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(crashed); !os.IsNotExist(err) {
+		t.Errorf("a staging file from a killed run should be swept: %v", err)
+	}
+	if _, err := os.Stat(inFlight); err != nil {
+		t.Errorf("a fresh staging file may be another process's write: %v", err)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Errorf("the sweep must not touch other files: %v", err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("the store itself must be written: %v", err)
+	}
+	// A second write converges: the directory holds the store, the in-flight
+	// file, and nothing the sweep added.
+	if err := writeKnownHosts(path, map[string]string{"a.example:22": "a.example:22 ssh-ed25519 AAAA"}); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, e := range entries {
+		names = append(names, e.Name())
+	}
+	want := []string{knownHostsTempPrefix + "in-flight", "config.toml", "known_hosts"}
+	slices.Sort(names)
+	if !slices.Equal(names, want) {
+		t.Fatalf("directory = %v, want %v", names, want)
 	}
 }

@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // checksumsArchive packs a listing the way the release workflow does.
@@ -236,6 +237,56 @@ func TestApplyTwiceLeavesTargetUnchanged(t *testing.T) {
 	got, err := os.ReadFile(target)
 	if err != nil || string(got) != string(payload) {
 		t.Fatalf("target = %q (%v), want the installed binary", got, err)
+	}
+}
+
+// A killed update leaves its staging file next to the installed binary. The
+// next run has to clear it, otherwise every attempt piles another partial
+// download into the directory. A file young enough to be a download in
+// flight, and anything that is not a staging file, must survive the sweep.
+func TestApplySweepsTempFilesLeftByAKilledRun(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho new\n")
+	h := sha256.Sum256(payload)
+	rel := releaseServer(t, payload, hex.EncodeToString(h[:]))
+
+	dir := t.TempDir()
+	target := filepath.Join(dir, "toktop")
+	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	crashed := filepath.Join(dir, updateTempPrefix+"crashed")
+	if err := os.WriteFile(crashed, []byte("half a download"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-2 * staleTempAge)
+	if err := os.Chtimes(crashed, old, old); err != nil {
+		t.Fatal(err)
+	}
+	inFlight := filepath.Join(dir, updateTempPrefix+"in-flight")
+	if err := os.WriteFile(inFlight, []byte("downloading"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	unrelated := filepath.Join(dir, "toktop.yaml")
+	if err := os.WriteFile(unrelated, []byte("keep me"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := applyTo(context.Background(), rel, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(crashed); !os.IsNotExist(err) {
+		t.Errorf("a staging file from a killed run should be swept: %v", err)
+	}
+	if _, err := os.Stat(inFlight); err != nil {
+		t.Errorf("a fresh staging file may be a download in flight: %v", err)
+	}
+	if _, err := os.Stat(unrelated); err != nil {
+		t.Errorf("the sweep must not touch other files: %v", err)
+	}
+	// And the run itself leaves nothing behind.
+	matches, _ := filepath.Glob(filepath.Join(dir, updateTempPrefix+"*"))
+	if len(matches) != 1 || matches[0] != inFlight {
+		t.Fatalf("staging files after the sweep: %v, want only the in-flight one", matches)
 	}
 }
 

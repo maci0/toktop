@@ -1236,6 +1236,129 @@ func TestIngestReportsReplayStoredNothing(t *testing.T) {
 }
 
 // A server with no recorder would answer 202 for every event and show none,
+// postKeyed sends body under an Idempotency-Key and returns the status plus
+// the response text.
+func postKeyed(t *testing.T, url, body, key string) (int, string) {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if key != "" {
+		req.Header.Set("Idempotency-Key", key)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.StatusCode, string(b)
+}
+
+// A mid-stream failure leaves the earlier lines recorded, and the error says
+// so. For a keyed stream the recovery is a replay of the whole request, not a
+// resume of the remainder: a resumed POST numbers its first line 1 again, so
+// its events land on ids the feed already holds. Telling the sender to resume
+// would lose the rest of the stream without a word.
+func TestKeyedStreamFailureAsksForReplayNotResume(t *testing.T) {
+	rec := &onceRecorder{}
+	s := startIngest(t, rec)
+	url := "http://" + s.Addr() + "/v1/events"
+	key := "batch-42"
+	broken := `{"agent":"coder","output_tokens":5}` + "\n" +
+		`{"agent":"coder","prompt_tokens":"many"}`
+	fixed := `{"agent":"coder","output_tokens":5}` + "\n" +
+		`{"agent":"coder","prompt_tokens":7}`
+
+	code, msg := postKeyed(t, url, broken, key)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body = %q)", code, msg)
+	}
+	if !strings.Contains(msg, "1 earlier event in this stream was recorded") {
+		t.Errorf("error must report what was kept: %q", msg)
+	}
+	if !strings.Contains(msg, "resend the whole request") {
+		t.Errorf("a keyed stream must be replayed, not resumed: %q", msg)
+	}
+
+	// The replay is the whole fixed stream: line 1 collapses onto the event
+	// already stored, line 2 is new. Two runs, one feed.
+	code, got := postKeyed(t, url, fixed, key)
+	if code != http.StatusAccepted || !strings.Contains(got, `"accepted":2,"stored":1`) {
+		t.Fatalf("replay: status = %d, body = %q", code, got)
+	}
+	if len(rec.evs) != 2 {
+		t.Fatalf("events = %d, want 2", len(rec.evs))
+	}
+	if rec.evs[1].PromptTokens != 7 {
+		t.Errorf("second event = %+v, want the corrected line", rec.evs[1])
+	}
+}
+
+// Why the message says replay: a resumed keyed POST reuses the derived ids of
+// the lines it never sent, and the collector drops them as duplicates. A
+// sender must see this, not infer it from a silent 202 with stored=0.
+func TestKeyedStreamResumeCollidesWithKeptLines(t *testing.T) {
+	rec := &onceRecorder{}
+	s := startIngest(t, rec)
+	url := "http://" + s.Addr() + "/v1/events"
+	key := "batch-43"
+	stream := `{"agent":"coder","output_tokens":5}` + "\n" +
+		`{"agent":"coder","output_tokens":6}` + "\n" +
+		`{"agent":"coder","prompt_tokens":"many"}`
+
+	if code, _ := postKeyed(t, url, stream, key); code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+	if len(rec.evs) != 2 {
+		t.Fatalf("events kept before the failure = %d, want 2", len(rec.evs))
+	}
+
+	// The remaining line, resent on its own under the same key: it numbers
+	// itself 1, the id line 1 already holds, and the feed ignores it.
+	code, got := postKeyed(t, url, `{"agent":"coder","output_tokens":9}`+"\n", key)
+	if code != http.StatusAccepted || !strings.Contains(got, `"stored":0`) {
+		t.Fatalf("resume: status = %d, body = %q", code, got)
+	}
+	if len(rec.evs) != 2 {
+		t.Fatalf("a resumed keyed line must not displace a kept one: %d events", len(rec.evs))
+	}
+
+	// A fresh key is a new logical operation, so the same line is kept.
+	if code, _ := postKeyed(t, url, `{"agent":"coder","output_tokens":9}`+"\n", "batch-44"); code != http.StatusAccepted {
+		t.Fatalf("status = %d", code)
+	}
+	if len(rec.evs) != 3 || rec.evs[2].OutputTokens != 9 {
+		t.Fatalf("events = %+v, want the new line kept", rec.evs)
+	}
+}
+
+// An unkeyed stream has no derived ids, so a resume is the safe recovery: the
+// kept lines are not resent and the remaining ones cannot collide.
+func TestUnkeyedStreamFailureAsksForResume(t *testing.T) {
+	rec := &onceRecorder{}
+	s := startIngest(t, rec)
+	url := "http://" + s.Addr() + "/v1/events"
+	stream := `{"agent":"coder","output_tokens":5}` + "\n" +
+		`{"agent":"coder","prompt_tokens":"many"}`
+
+	code, msg := postKeyed(t, url, stream, "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body = %q)", code, msg)
+	}
+	if !strings.Contains(msg, "resend the remaining") {
+		t.Errorf("an unkeyed stream is resumed, not replayed: %q", msg)
+	}
+	if strings.Contains(msg, "Idempotency-Key") {
+		t.Errorf("no key was sent, so the error must not name one: %q", msg)
+	}
+}
+
 // with /healthz still reporting ok. Refuse it instead of binding.
 func TestNewServerNeedsRecorder(t *testing.T) {
 	s, err := newServer("127.0.0.1:0", nil, slog.New(slog.DiscardHandler))

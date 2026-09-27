@@ -261,6 +261,14 @@ omit `id`). Without either, replaying the kept lines would duplicate them.
 Such a replay answers `202` with `stored` below `accepted` and logs the
 same pair, so a sender can tell the two apart.
 
+Recovery after a mid-stream failure depends on how the events were keyed, and
+the error says which one to use. Resume the stream (send the remaining lines)
+when the events carry their own `id` or the POST had no `Idempotency-Key`.
+Replay the whole request under the same `Idempotency-Key` when its events
+omit `id`: a derived id is the key plus the line's position, so a resumed
+POST numbers its first line 1 again and the feed would drop it as a
+duplicate of an event it never sent.
+
 ## Zero vendor libraries
 
 Host vitals and engine stats come from procfs/sysfs/sysctl, vendor CLIs it shells out to

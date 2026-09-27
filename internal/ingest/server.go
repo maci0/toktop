@@ -511,16 +511,30 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(br)
 	defer r.Body.Close()
 	replayKey := clientEventKey(r)
+	// keyedStream is set once a line arrives without its own id, so its
+	// identity was derived from the POST key and its position in the body.
+	// Such a line can only be recovered by replaying the whole request.
+	keyedStream := false
 	// fail reports a stream-level error. Events decode-and-record one by one,
 	// so everything before the failing line is already in the feed; saying so
-	// lets senders resume after the failure instead of replaying the whole
-	// stream and duplicating what was kept.
+	// lets a sender recover without duplicating what was kept.
 	fail := func(status int, msg string, extra ...any) {
 		if n > 0 {
 			if n == 1 {
 				msg += "; 1 earlier event in this stream was recorded"
 			} else {
 				msg += fmt.Sprintf("; %d earlier events in this stream were recorded", n)
+			}
+			// Resuming with the remaining lines is right only when the kept
+			// events carry no derived id. A derived id is the POST key plus
+			// the line's 1-based index, so a resumed POST numbers its first
+			// line 1 again: its events land on ids the feed already holds and
+			// are dropped as duplicates, losing the rest of the stream
+			// silently. The key makes a full replay safe instead.
+			if keyedStream {
+				msg += "; resend the whole request with the same Idempotency-Key"
+			} else {
+				msg += "; resend the remaining events to continue"
 			}
 		}
 		armWrite()
@@ -584,6 +598,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		// omitted one, the POST-level key plus this line's index stands in,
 		// so retrying the whole request does not double-count.
 		if ev.ID == "" {
+			keyedStream = replayKey != ""
 			ev.ID = derivedEventID(replayKey, n+1)
 		}
 		if s.rec.RecordAgent(ev) {

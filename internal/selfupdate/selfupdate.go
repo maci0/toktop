@@ -277,7 +277,8 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 	}
 
 	dir := filepath.Dir(self)
-	tmp, err := os.CreateTemp(dir, ".toktop-update-*")
+	sweepStaleTemps(dir)
+	tmp, err := os.CreateTemp(dir, updateTempPrefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("cannot write next to %s: %w", self, err)
 	}
@@ -307,6 +308,39 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 		return "", fmt.Errorf("cannot replace %s: %w", self, err)
 	}
 	return self, nil
+}
+
+// updateTempPrefix names the staging file a download is written to before it
+// is renamed over the running binary.
+const updateTempPrefix = ".toktop-update-"
+
+// staleTempAge is how old a leftover staging file has to be before the next
+// update removes it. A crash or a kill between CreateTemp and the rename
+// leaves a partial download sitting next to the installed binary, and every
+// rerun would add another. The age gate is what keeps the sweep from
+// deleting a download another toktop is writing right now.
+const staleTempAge = 24 * time.Hour
+
+// sweepStaleTemps removes staging files an earlier run did not get to clean
+// up. A leftover is inert: it is never executed and never renamed, so the
+// cost of leaving it is litter in the user's install directory that only the
+// next update can clear. Anything it cannot remove is left alone.
+func sweepStaleTemps(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-staleTempAge)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), updateTempPrefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue // a download in flight, or a name that just vanished
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }
 
 // install puts the verified binary in place.
