@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 const runTimeout = 2500 * time.Millisecond
@@ -86,6 +87,14 @@ func lookup(name string) (string, bool) {
 	return ti.path, ti.ok
 }
 
+// run invokes a vendor CLI and reports its stdout. A failure returns
+// (nil, false) and is audited once per outage, not once per poll.
+//
+// The audit matters because the alternative is indistinguishable from the
+// truth: a driver that has been unloaded, a wedged nvidia-smi, a container
+// whose GPU device vanished all blank the GPU row, and a machine with no GPU
+// at all looks identical on screen. Without a line naming the tool and its
+// reason, an operator debugging a missing GPU readout has nothing to read.
 func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
 	c, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
@@ -97,14 +106,74 @@ func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
 	// wedged or hostile nvidia-smi on PATH has no reason to stop: the sampler
 	// runs it several times per tick, so an uncapped read is a memory
 	// exhaustion the dashboard cannot defend against. Over the cap the write
-	// fails, the read end closes under the tool, and the call is reported as a
-	// miss like any other.
+	// fails, the read end closes under the tool, and the call is audited and
+	// reported as a miss like any other.
 	var out cappedOutput
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
+		noteRunFailure(path, err)
 		return nil, false
 	}
+	noteRunOK(path)
 	return out.buf.Bytes(), true
+}
+
+// audit builds the logger for the vendor-CLI lines. A var so a test can point
+// it at a handler it can read.
+var audit = logcfg.Logger
+
+// runState tracks whether a vendor CLI is currently failing, so the audit log
+// records the start of an outage once and its end once, rather than one line
+// per poll. A run lasting days would otherwise write a line every interval
+// for a tool that was uninstalled hours ago.
+var runState sync.Map // tool path -> *toolRun
+
+type toolRun struct {
+	mu     sync.Mutex
+	failed bool
+	since  time.Time
+}
+
+// noteRunFailure records the start of an outage. Repeat failures of a tool
+// already recorded as failing add nothing: the line for the start of the
+// outage named the reason, and every later poll would only repeat it.
+func noteRunFailure(path string, err error) {
+	s, _ := runState.LoadOrStore(path, &toolRun{})
+	t := s.(*toolRun)
+	t.mu.Lock()
+	first := !t.failed
+	if first {
+		t.failed, t.since = true, time.Now()
+	}
+	t.mu.Unlock()
+	if !first {
+		return
+	}
+	audit().Warn("toktop: gpu vendor tool failed",
+		"tool", logcfg.Field(path, 256),
+		"error", logcfg.Field(err.Error(), 256))
+}
+
+// noteRunOK clears a recorded outage and says so, so a tool that comes back is
+// distinguishable on the log from one that never failed.
+func noteRunOK(path string) {
+	s, ok := runState.Load(path)
+	if !ok {
+		return
+	}
+	t := s.(*toolRun)
+	t.mu.Lock()
+	if !t.failed {
+		t.mu.Unlock()
+		return
+	}
+	t.failed = false
+	downFor := time.Since(t.since)
+	t.mu.Unlock()
+	runState.Delete(path)
+	audit().Info("toktop: gpu vendor tool answering again",
+		"tool", logcfg.Field(path, 256),
+		"down_for", downFor.Round(time.Second))
 }
 
 // maxToolOutput is the most stdout one vendor CLI may contribute. A healthy

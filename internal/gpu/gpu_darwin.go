@@ -75,8 +75,14 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	groupKill(cmd)            // the profiler is a wrapper whose children must not outlive it
 	out, err := cmd.Output()
 	if err != nil {
+		// Audited like every other vendor CLI in this package: an empty GPU row
+		// is what both a Mac with no readable GPU and a profiler that failed
+		// look like, and the retry window above would otherwise hide the
+		// difference for the rest of the session.
+		noteRunFailure("system_profiler", err)
 		return nil
 	}
+	noteRunOK("system_profiler")
 	var doc struct {
 		Displays []map[string]any `json:"SPDisplaysDataType"`
 	}

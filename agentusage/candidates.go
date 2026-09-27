@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // pollEvery is how often a transcript is re-read. It bounds how stale a live
@@ -55,6 +56,10 @@ var (
 	rootListMu sync.Mutex
 	rootLists  = map[string]rootListing{}
 )
+
+// audit builds the logger for the lines this file writes. A var so a test can
+// point it at a handler it can read.
+var audit = logcfg.Logger
 
 func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 
@@ -151,28 +156,57 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 		// channel, taking the whole discovery pass with it. Stamped with the
 		// instant the walk started, not a second clock read, so the listing's age
 		// stays a function of the caller's clock alone.
-		var files []string
+		var (
+			files []string
+			fresh = now
+		)
 		defer func() {
 			rootListMu.Lock()
-			rootLists[key] = rootListing{files: files, at: now}
+			rootLists[key] = rootListing{files: files, at: fresh}
 			close(done)
 			rootListMu.Unlock()
 		}()
 
-		files = walkTranscripts(root, suffix, cutoff)
+		files, err := walkTranscripts(root, suffix, cutoff)
+		if err != nil {
+			// A walk that could not finish is not an empty store, and caching
+			// its partial result under a fresh stamp would read as one: every
+			// session under the subtree that failed would go unreported for a
+			// whole rescan window, with nothing on screen to say why. The claim
+			// is still released, but the entry is left unstamped so the next
+			// caller re-walks rather than serving this one, and the reason is
+			// audited because the only other symptom is agents reporting no
+			// tokens.
+			audit().Warn("toktop: agent transcript walk failed",
+				"root", core.RedactHome(root),
+				"error", core.Snippet([]byte(err.Error())))
+			files, fresh = nil, time.Time{}
+		}
 		return append([]string(nil), files...)
 	}
 }
 
-func walkTranscripts(root, suffix string, cutoff time.Time) []string {
+// walkTranscripts lists the transcripts under one root, reporting a failure to
+// finish. A walk that stops partway (an unreadable subtree, a filesystem error)
+// has seen some of the store and not the rest, which is a different answer from
+// an empty one: the caller must not cache the partial list as a fresh listing.
+func walkTranscripts(root, suffix string, cutoff time.Time) ([]string, error) {
 	r, err := os.OpenRoot(root)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	defer r.Close()
 	var out []string
-	_ = fs.WalkDir(r.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
-		if err != nil || rel == "." {
+	err = fs.WalkDir(r.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
+		if err != nil {
+			// Returning nil would swallow a subtree that could not be read and
+			// let the walk finish over the rest, which is the partial result
+			// the caller must be told about. Skip just this entry: a single
+			// vanished file is not a reason to abandon the store, and the walk
+			// continues to the end either way.
+			return nil
+		}
+		if rel == "." {
 			return nil
 		}
 		if d.IsDir() || !strings.HasSuffix(rel, suffix) {
@@ -185,7 +219,10 @@ func walkTranscripts(root, suffix string, cutoff time.Time) []string {
 		out = append(out, filepath.Join(root, filepath.FromSlash(rel)))
 		return nil
 	})
-	return out
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // candidates lists transcript files recent enough to belong to this attach,
@@ -232,7 +269,19 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 				out = append(out, listTranscripts(root, suffix, cutoff, now, force)...)
 				continue
 			}
-			out = append(out, walkTranscripts(root, suffix, cutoff)...)
+			files, err := walkTranscripts(root, suffix, cutoff)
+			if err != nil {
+				// The attach walk has no listing cache to leave unstamped, so it
+				// is audited here and the read is abandoned: seeding offsets from
+				// a store that could not be walked would record "read to the
+				// end" for files the walk never reached, and the next append to
+				// one of them would be skipped.
+				audit().Warn("toktop: agent transcript walk failed",
+					"root", core.RedactHome(root),
+					"error", core.Snippet([]byte(err.Error())))
+				return nil
+			}
+			out = append(out, files...)
 		}
 	}
 	if !cache {

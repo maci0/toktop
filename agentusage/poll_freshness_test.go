@@ -4,9 +4,12 @@
 package agentusage
 
 import (
+	"bytes"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -303,5 +306,47 @@ func appendLine(t *testing.T, path string, out int) {
 	line := `{"type":"assistant","message":{"usage":{"output_tokens":` + fmt.Sprint(out) + `}}}` + "\n"
 	if _, err := f.WriteString(line); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A walk that cannot finish is not an empty store. Caching its partial result
+// under a fresh stamp would report every session under the failed subtree as
+// absent for a whole rescan window, and the only symptom on screen would be an
+// agent that produces no tokens. The entry must be left unstamped so the next
+// caller re-walks, and the failure must be audited.
+func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
+	var lines bytes.Buffer
+	old := audit
+	audit = func() *slog.Logger {
+		return slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+	defer func() { audit = old }()
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		rootLists = map[string]rootListing{}
+		rootListMu.Unlock()
+	})
+
+	now := time.Now()
+	key := rootListKey("/nonexistent/transcript/root", ".jsonl")
+	// A root that cannot be opened is the simplest walk that does not finish.
+	if got := listTranscripts("/nonexistent/transcript/root", ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+		t.Fatalf("failed walk listed %v, want nothing", got)
+	}
+
+	rootListMu.Lock()
+	c, ok := rootLists[key]
+	rootListMu.Unlock()
+	if !ok {
+		t.Fatal("the failed walk left no entry at all: the claim was never released")
+	}
+	if c.walk != nil {
+		t.Fatal("the failed walk still holds its claim: later callers would park forever")
+	}
+	if !c.at.IsZero() {
+		t.Fatalf("the failed walk cached a listing stamped %s; the next caller serves it as a fresh empty store", c.at)
+	}
+	if !strings.Contains(lines.String(), "agent transcript walk failed") {
+		t.Fatalf("the failed walk wrote no audit line:\n%s", lines.String())
 	}
 }

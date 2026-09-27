@@ -3,8 +3,10 @@
 package gpu
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -120,5 +122,52 @@ func TestRunReturnsOutputUnderTheCap(t *testing.T) {
 	}
 	if len(out) != 1024 {
 		t.Fatalf("run returned %d bytes, want 1024", len(out))
+	}
+}
+
+// A vendor CLI that fails is indistinguishable on screen from a host with no
+// GPU of that kind: the row is simply empty, and the sampler retries on the
+// same spacing for the rest of the session. run must record the failure once,
+// name the tool and the reason, and say so again when the tool recovers, so an
+// operator debugging a blank GPU row has something to read.
+func TestRunAuditsOutageOnceAndRecovery(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	defer func() { audit = old }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	const tool = "/nonexistent/vendor-cli"
+	for range 3 {
+		if _, ok := run(ctx, tool, "--query"); ok {
+			t.Fatalf("run reported success for a tool that does not exist")
+		}
+	}
+	if n := strings.Count(lines.String(), "gpu vendor tool failed"); n != 1 {
+		t.Fatalf("audited %d outage lines for three failing polls, want 1:\n%s", n, lines.String())
+	}
+	if !strings.Contains(lines.String(), "vendor-cli") {
+		t.Fatalf("the outage line does not name the tool:\n%s", lines.String())
+	}
+
+	lines.Reset()
+	noteRunOK(tool)
+	if !strings.Contains(lines.String(), "gpu vendor tool answering again") {
+		t.Fatalf("recovery wrote no line:\n%s", lines.String())
+	}
+	// A recovery clears the latch, so a tool that breaks again is reported
+	// afresh instead of being silenced by the outage it just recovered from.
+	lines.Reset()
+	if _, ok := run(ctx, tool, "--query"); ok {
+		t.Fatal("run reported success for a tool that does not exist")
+	}
+	if !strings.Contains(lines.String(), "gpu vendor tool failed") {
+		t.Fatalf("a second outage after a recovery wrote no line:\n%s", lines.String())
 	}
 }
