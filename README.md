@@ -179,7 +179,7 @@ func main() {
 		}
 		wg.Go(func() {
 			var prev agentusage.Sample
-			w.Run(ctx, 250*time.Millisecond, func(cur agentusage.Sample) {
+			w.Run(ctx, agentusage.DefaultPollInterval, func(cur agentusage.Sample) {
 				if d, ok := cur.Delta(prev); ok {
 					fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, d.Output, d.Input)
 				}

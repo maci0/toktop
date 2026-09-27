@@ -15,7 +15,7 @@ import (
 // readNew consumes the bytes appended to one transcript since the last poll.
 //
 // Polling revisits every recent transcript on the caller's interval (never
-// faster than pollEvery), and most of them are idle, so the mtime check
+// faster than DefaultPollInterval), and most of them are idle, so the mtime check
 // happens on a plain stat: an untouched file costs one syscall instead of
 // open+stat+close.
 //

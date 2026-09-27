@@ -656,6 +656,36 @@ func TestSpecSuffixesMatchEveryExtension(t *testing.T) {
 	}
 }
 
+// A single suffix that is blank once trimmed is no suffix at all, so the spec
+// falls back to the default rather than matching nothing, and a padded value
+// names the same extension as an unpadded one.
+func TestSpecSuffixIsTrimmed(t *testing.T) {
+	store, work := t.TempDir(), t.TempDir()
+	if err := RegisterSpec("padsuffix", Spec{Roots: []string{store}, Suffix: "  .jsonl  "}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { UnregisterSpec("padsuffix") })
+	w := Watch("padsuffix", work, time.Now())
+	append_(t, filepath.Join(store, "a.jsonl"),
+		`{"role":"assistant","cwd":`+jsonPath(work)+`,"usage":{"output_tokens":90}}`)
+	w.poll(nil)
+	if got := w.Sample().Output; got != 90 {
+		t.Fatalf("output %d, want 90: a padded suffix should still name .jsonl", got)
+	}
+
+	if err := RegisterSpec("blanksuffix", Spec{Roots: []string{store}, Suffix: "   "}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { UnregisterSpec("blanksuffix") })
+	ad, ok := adapterFor("blanksuffix")
+	if !ok {
+		t.Fatal("a spec with roots should resolve to an adapter")
+	}
+	if got := ad.fileSuffixes(); len(got) != 1 || got[0] != defaultSuffix {
+		t.Fatalf("suffixes %q, want the default %q", got, defaultSuffix)
+	}
+}
+
 func TestRegisterSpecValidates(t *testing.T) {
 	if err := RegisterSpec("", Spec{Roots: []string{"/tmp"}}); !errors.Is(err, ErrEmptyTool) {
 		t.Errorf("nameless spec = %v, want ErrEmptyTool", err)

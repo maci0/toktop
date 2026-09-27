@@ -15,10 +15,15 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// pollEvery is how often a transcript is re-read. It bounds how stale a live
-// rate can be, so it is tighter than the directory rescan: reading one growing
-// file is cheap, walking a store of thousands is not.
-const pollEvery = 250 * time.Millisecond
+// DefaultPollInterval is how often a transcript is re-read, and what
+// [Watcher.Run] polls at when its interval is not positive. It bounds how stale
+// a live rate can be, so it is tighter than the directory rescan: reading one
+// growing file is cheap, walking a store of thousands is not.
+//
+// It is exported so a caller naming an interval explicitly passes the package's
+// own default rather than a number copied out of this documentation, which
+// drifts the moment either side changes.
+const DefaultPollInterval = 250 * time.Millisecond
 
 // rescanEvery bounds how often the transcript store is walked. Session stores
 // hold thousands of files and new ones appear rarely, so walking on every poll

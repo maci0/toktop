@@ -43,7 +43,7 @@ func Example() {
 			// growth is the sample to measure from next time, whether the agent
 			// was quiet or its transcript was rewritten under the watcher.
 			var prev agentusage.Sample
-			w.Run(ctx, 250*time.Millisecond, func(cur agentusage.Sample) {
+			w.Run(ctx, agentusage.DefaultPollInterval, func(cur agentusage.Sample) {
 				if d, ok := cur.Delta(prev); ok {
 					fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, d.Output, d.Input)
 				}
@@ -225,7 +225,7 @@ func ExampleWatcher_Run() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	var prev agentusage.Sample
-	w.Run(ctx, 250*time.Millisecond, func(cur agentusage.Sample) {
+	w.Run(ctx, agentusage.DefaultPollInterval, func(cur agentusage.Sample) {
 		if d, ok := cur.Delta(prev); ok {
 			fmt.Printf("%d output, %d prompt at %s\n", d.Output, d.Input, d.At.Format(time.TimeOnly))
 		}

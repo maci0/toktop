@@ -408,13 +408,13 @@ func (w *Watcher) seedBaseline(path string) {
 // transcript replaced the figures.
 //
 // every is how often the transcripts are re-read; a non-positive value uses
-// the package default (250ms).
+// [DefaultPollInterval], which is also the value to pass for that default.
 func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sample)) {
 	if w == nil {
 		return
 	}
 	if every <= 0 {
-		every = pollEvery
+		every = DefaultPollInterval
 	}
 	// A first read straight away: an agent that reports early should show a
 	// rate early, rather than waiting out a tick.

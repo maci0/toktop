@@ -147,6 +147,9 @@ var (
 	ErrUnsupportedTool = errors.New("agent has no readable usage source")
 )
 
+// defaultSuffix is the transcript extension a [Spec] that names none matches.
+const defaultSuffix = ".jsonl"
+
 // specAdapter builds the file adapter a definition's spec describes. Pure: it
 // writes nothing, so both RegisterSpec and adapterFor can use it.
 func specAdapter(spec Spec) (adapter, bool) {
@@ -165,18 +168,21 @@ func specAdapter(spec Spec) (adapter, bool) {
 		return out
 	}
 	// Blank suffixes are not patterns: one would match every file under the
-	// root, and the parser would then be pointed at the agent's config.
+	// root, and the parser would then be pointed at the agent's config. Suffix
+	// gets the same treatment, so a spec written by hand with a padded value
+	// falls back to the default rather than searching for files whose names end
+	// in spaces.
 	suffixes := make([]string, 0, len(spec.Suffixes))
 	for _, s := range spec.Suffixes {
-		if strings.TrimSpace(s) != "" {
+		if s = strings.TrimSpace(s); s != "" {
 			suffixes = append(suffixes, s)
 		}
 	}
-	suffix := spec.Suffix
+	suffix := strings.TrimSpace(spec.Suffix)
 	if len(suffixes) > 0 {
 		suffix = ""
 	} else if suffix == "" {
-		suffix = ".jsonl"
+		suffix = defaultSuffix
 	}
 	kind := perMessage
 	if spec.Cumulative {

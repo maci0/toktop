@@ -69,11 +69,13 @@ type Spec struct {
 	//
 	// Roots name directories; the suffix chooses the files inside them.
 	Roots []string `json:"roots"`
-	// Suffix filters transcript files (default ".jsonl").
+	// Suffix filters transcript files (default ".jsonl"). Surrounding
+	// whitespace is trimmed, and a value left blank by that falls back to the
+	// default rather than matching nothing.
 	Suffix string `json:"suffix,omitempty"`
 	// Suffixes matches several extensions, for an agent that writes more than
 	// one (compressed by default, plain when compression is off). It replaces
-	// Suffix when set.
+	// Suffix when set, and blank entries among them are ignored.
 	Suffixes []string `json:"suffixes,omitempty"`
 	// Cumulative says the counters already include everything before them, so
 	// the first value seen becomes a baseline. Default is per message.

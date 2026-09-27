@@ -16,7 +16,12 @@ type Sample struct {
 	// separately: what the model spent before it wrote anything the user sees.
 	Thinking int
 	// Total is the largest per-request context size seen, not a sum: summing
-	// those would count the same conversation once per turn.
+	// those would count the same conversation once per turn. It is a level
+	// rather than a running total, so it has no [Delta] field: a caller showing
+	// a context window reads cur.Total off the current sample, and does not
+	// report it as growth. A sample that only grows Total still reaches a Run
+	// callback, and cur.Delta(prev) reports no growth for it, since no tokens
+	// were spent.
 	Total int
 	// Input is billed prompt tokens, accrued per request the same way Output is.
 	Input int
