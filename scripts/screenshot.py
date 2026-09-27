@@ -167,8 +167,8 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
     except ImportError as e:
         print(f"screenshot.py: missing dependency ({e})", file=sys.stderr)
         print(
-            "install with: uv run --isolated --no-project "
-            "--with-requirements scripts/requirements.txt scripts/screenshot.py",
+            "install with: make scripts-env, then run "
+            "dist/scripts-env/bin/python scripts/screenshot.py",
             file=sys.stderr,
         )
         raise SystemExit(1) from e

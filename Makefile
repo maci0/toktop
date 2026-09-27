@@ -101,6 +101,13 @@ UV_MIN := $(shell tr -d ' \t\r\n' < .uv-version 2>/dev/null)
 ifeq ($(UV_MIN),)
 $(error .uv-version missing or empty; scripts-check and CI need a uv version)
 endif
+# The Python tool env, built under dist/ (gitignored) by `uv pip install`.
+# Not `uv run --with-requirements`: that resolves and installs the same pins
+# but discards the `--hash` lines in the requirements files, so a swapped file
+# on the index installed silently. `uv pip install` verifies each hash it is
+# given, which is what scripts/requirements-dev.txt documents.
+SCRIPTS_ENV := $(CURDIR)/$(DIST)/scripts-env
+SCRIPTS_BIN := $(SCRIPTS_ENV)/bin
 
 # Pin locale and timezone for every recipe: glob expansion order and formatted
 # dates must not follow the invoking shell's environment into artifacts
@@ -360,19 +367,40 @@ tidy: ## tidy go.mod and go.sum
 tidy-check: ## fail if go.mod or go.sum would change
 	$(GO) mod tidy -diff
 
-.PHONY: scripts-check
-scripts-check: ## black and ruff over scripts/ (same pins as CI)
+.PHONY: require-uv
+require-uv: ## fail unless uv is on PATH at or above UV_MIN
 	@command -v uv >/dev/null 2>&1 || { \
-		echo "make scripts-check: uv is not on PATH (need >= $(UV_MIN); pins are scripts/requirements-dev.txt)" >&2; \
+		echo "make: uv is not on PATH (need >= $(UV_MIN); pins are scripts/requirements-dev.txt)" >&2; \
 		exit 1; \
 	}
 	@have=$$(uv --version | awk '{print $$2}'); \
 		if [ "$$(printf '%s\n%s\n' "$(UV_MIN)" "$$have" | sort -V | head -1)" != "$(UV_MIN)" ]; then \
-			echo "make scripts-check: uv $$have on PATH, need >= $(UV_MIN) (CI installs $(UV_MIN))" >&2; \
+			echo "make: uv $$have on PATH, need >= $(UV_MIN) (CI installs $(UV_MIN))" >&2; \
 			exit 1; \
 		fi
-	uv run --isolated --no-project --with-requirements scripts/requirements-dev.txt black --check scripts/
-	uv run --isolated --no-project --with-requirements scripts/requirements-dev.txt ruff check scripts/
+
+# Rebuilds the env when either requirements file moves, so an edited pin or a
+# corrected hash is picked up without `make clean`.
+.PHONY: scripts-env
+scripts-env: $(SCRIPTS_BIN)/.stamp ## Python tool env under dist/, hashes verified
+
+$(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt
+	@$(MAKE) --no-print-directory require-uv
+	@mkdir -p $(DIST)
+	@uv venv --quiet --clear $(SCRIPTS_ENV)
+	@VIRTUAL_ENV=$(SCRIPTS_ENV) uv pip install --quiet -r scripts/requirements-dev.txt
+	@touch $@
+
+.PHONY: scripts-check
+scripts-check: ## black and ruff over scripts/ (same pins as CI)
+	@$(MAKE) --no-print-directory scripts-env
+	$(SCRIPTS_BIN)/black --check scripts/
+	$(SCRIPTS_BIN)/ruff check scripts/
+
+.PHONY: screenshot
+screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.txt OUT=docs/images/dashboard.png [SCALE COLS ROWS]
+	@$(MAKE) --no-print-directory scripts-env
+	$(SCRIPTS_BIN)/python scripts/screenshot.py $(CAPTURE) $(OUT) $(SCALE) $(COLS) $(ROWS)
 
 .PHONY: check
 check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)

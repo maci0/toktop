@@ -87,18 +87,19 @@ sleep 60 && tmux send-keys -t shot p   # let the charts fill, then probe
 sleep 40                               # and let the probes answer
 tmux capture-pane -e -p -t shot > .scratch/capture.txt
 tmux kill-session -t shot
-uv run --isolated --no-project --with-requirements scripts/requirements.txt \
-  scripts/screenshot.py .scratch/capture.txt docs/images/dashboard.png 2 180 50
+make screenshot CAPTURE=.scratch/capture.txt OUT=docs/images/dashboard.png \
+  SCALE=2 COLS=180 ROWS=50
 ```
 
 The trailing arguments are scale, columns and rows; passing the pane geometry
 keeps the renderer from re-deriving it and wrapping. `VERSION` is stamped into
 the header, so pass the version being released rather than `dev`. Rendering
 needs a Meslo Nerd Font installed, or `TOKTOP_SCREENSHOT_FONT` pointing at a
-regular-weight `.ttf`. The `uv run` flags match `make scripts-check` so uv
-does not create a `.venv` from `pyproject.toml`. `-c "$PWD"` is what puts the
-pane in this checkout: a detached session otherwise starts wherever the tmux
-server did, and `./toktop` is not there.
+regular-weight `.ttf`. `make screenshot` builds the same env under `dist/`
+that `make scripts-check` uses, so the renderer runs the same pins with the
+same wheel hashes. `-c "$PWD"` is what puts the pane in this checkout: a
+detached session otherwise starts wherever the tmux server did, and
+`./toktop` is not there.
 
 The image's pixel size is repeated in `site/worker.js` as the `og:image`
 dimensions. Copy the PNG into `site/public/dashboard.png` and rebuild the
@@ -183,9 +184,11 @@ both sqlite tag halves), `make site-lint` (biome over the Worker, at the
 `BIOME` pin in the Makefile, config in `biome.jsonc`), `make site-check`
 (`bun test site/`), `make scripts-check`, and `make repro-check-pair`.
 `scripts-check` installs the exact versions in
-`scripts/requirements-dev.txt` into an isolated env (black, ruff, plus the
-renderer deps). Pure-Python pins carry a wheel sha256; bumping one of those
-lines means updating the hash too. Do not run unpinned `uvx black` /
+`scripts/requirements-dev.txt` into an isolated env under `dist/`
+(`make scripts-env`, black, ruff, plus the renderer deps). Pure-Python pins
+carry a wheel sha256; bumping one of those lines means updating the hash too,
+and the install fails if a fetched file does not match. Do not run unpinned
+`uvx black` /
 `uvx ruff`: those resolve to whatever PyPI returns today. Platform-specific
 files also need `make vet-cross` (the same gate `release.yml` runs before
 shipping).
