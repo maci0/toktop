@@ -4,7 +4,7 @@
 // Run with `bun test site/` from the repository root (no other deps needed).
 
 import { expect, test } from "bun:test";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import worker from "./worker.js";
@@ -165,7 +165,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4003);
+    expect(bytes.byteLength).toBe(4081);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -384,6 +384,134 @@ test("section titles are sentence case on the body scale, not marketing labels",
   expect(identityBody.includes("max-width: 62ch")).toBe(true);
 });
 
+// The page is a picture of a terminal, so it has to be the same terminal.
+// Three files carry the palette (this worker, internal/ui/theme.go,
+// scripts/screenshot.py) in three languages, and nothing in the build ties
+// them together: a hex edited in one leaves a site that no longer matches the
+// dashboard it is showing. These are the checks that make the comments in
+// those files true rather than aspirational.
+const repoFile = (rel) => readFileSync(join(import.meta.dir, "..", ...rel), "utf8");
+const repoHexes = (rel) => repoFile(rel).match(/#[0-9a-f]{6}/gi) ?? [];
+
+const themeHex = (token) =>
+  repoFile(["internal", "ui", "theme.go"]).match(
+    new RegExp(`${token}\\s*=\\s*lipgloss\\.Color\\("(#[0-9a-f]{6})"\\)`),
+  )?.[1];
+
+// scripts/screenshot.py states its colors as RGB tuples; read them back as the
+// hex the TUI uses so the two are compared in one notation.
+const shotPalette = () => {
+  const src = repoFile(["scripts", "screenshot.py"]);
+  const toHex = (tuple) =>
+    `#${tuple
+      .match(/\d+/g)
+      .map((n) => Number(n).toString(16).padStart(2, "0"))
+      .join("")}`;
+  const named = (name) => {
+    const m = src.match(new RegExp(`^${name}: RGB = (\\(\\d+, \\d+, \\d+\\))`, "m"));
+    if (m == null) throw new Error(`${name} not found in scripts/screenshot.py`);
+    return toHex(m[1]);
+  };
+  const block = src.match(/^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m);
+  if (block == null) throw new Error("ANSI16 not found in scripts/screenshot.py");
+  const ansi = {};
+  for (const [, index, tuple] of block[1].matchAll(/^\s*(\d+): (\(\d+, \d+, \d+\))/gm)) {
+    ansi[index] = toHex(tuple);
+  }
+  return { bg: named("BG"), fg: named("FG_DEFAULT"), ansi };
+};
+const SHOT = shotPalette();
+
+// The five values internal/ui/theme.go names as shared with the site, by CSS
+// token on the dark scheme and, where the renderer has an SGR slot for them,
+// by that slot's index.
+const SHARED = [
+  ["cBase", "--dark-bg"],
+  ["cText", "--dark-fg"],
+  ["cDim", "--dark-dim"],
+  ["cGreen", "--dark-accent", 2],
+  ["cYellow", "--dark-warm", 3],
+];
+
+test("the page ships the terminal's palette, not one of its own", () => {
+  for (const [token, cssVar, sgr] of SHARED) {
+    const hex = themeHex(token);
+    expect(hex, `${token} not found in internal/ui/theme.go`).toBeDefined();
+    expect(
+      identityBody.includes(`${cssVar}: ${hex}`),
+      `${cssVar} does not carry theme.go ${token} (${hex})`,
+    ).toBe(true);
+    if (sgr != null) {
+      expect(SHOT.ansi[sgr], `scripts/screenshot.py ANSI16[${sgr}]`).toBe(hex);
+    }
+  }
+  // The two the renderer states outside the ANSI table: the page background
+  // behind the capture, and the text a cell sets no color for.
+  expect(SHOT.bg).toBe(themeHex("cBase"));
+  expect(SHOT.fg).toBe(themeHex("cText"));
+});
+
+// The renderer also paints the TUI's status colors, which the page has no
+// token for: they are the heat ramp and the kind badges, in the capture the
+// site is showing.
+test("the capture renderer paints the status colors of the dashboard", () => {
+  for (const [token, sgr] of [
+    ["cBorder", 0],
+    ["cRed", 1],
+    ["cBlue", 4],
+    ["cCyan", 6],
+  ]) {
+    expect(SHOT.ansi[sgr], `scripts/screenshot.py ANSI16[${sgr}]`).toBe(themeHex(token));
+  }
+});
+
+// Every hex the page ships is a named token. A hex written straight into a
+// rule is the start of a second palette, which is how a site stops being one.
+test("the page paints in named tokens only", () => {
+  const named = new Set(
+    [...identityBody.matchAll(/--(?:dark-)?[\w-]+:\s*(#[0-9a-f]{6})/gi)].map(([, hex]) =>
+      hex.toLowerCase(),
+    ),
+  );
+  const loose = [...identityBody.matchAll(/#[0-9a-f]{6}/gi)]
+    .map(([hex]) => hex.toLowerCase())
+    .filter((hex) => !named.has(hex));
+  expect(loose).toEqual([]);
+  expect(named.size).toBe(14); // seven dark, seven light
+});
+
+// The identity is phosphor green on cool dark. Violet is the default this
+// product does not have, and in a one-line palette edit it would be invisible
+// in the diff, so it is named here rather than left to a reviewer's eye.
+test("no purple or violet in the palette of any of the three files", () => {
+  for (const rel of [["site"], ["internal", "ui", "theme.go"], ["scripts", "screenshot.py"]]) {
+    const violets = rel.length === 1 ? servedVioletHexes() : repoHexes(rel).filter(isViolet);
+    expect(violets, `${rel.join("/")} has a violet`).toEqual([]);
+  }
+
+  function servedVioletHexes() {
+    return [...new Set(identityBody.match(/#[0-9a-f]{6}/gi) ?? [])].filter(isViolet);
+  }
+
+  function isViolet(hex) {
+    const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255);
+    const [max, min] = [Math.max(r, g, b), Math.min(r, g, b)];
+    const delta = max - min;
+    if (delta / max < 0.25) return false; // a neutral or a near-neutral has no hue to get wrong
+    const hue =
+      60 *
+      (max === r
+        ? ((g - b) / delta) % 6
+        : max === g
+          ? (b - r) / delta + 2
+          : (r - g) / delta + 4);
+    // 230-315 degrees covers indigo (239-245) through violet, which is the
+    // band Tailwind's indigo-500 and violet-600 sit in. cBlue sits at 217 and
+    // the sand ANSI16[5] the renderer uses at 26, so both stay clean.
+    return hue > 230 && hue < 315;
+  }
+});
+
 test("accessibility contracts: skip link, motion preferences, focus indicators, and landmarks", () => {
   expect(identityBody.includes('class="skip-link"')).toBe(true);
   expect(identityBody.includes("prefers-reduced-motion: no-preference")).toBe(true);
@@ -406,9 +534,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   const brotli = new Uint8Array(
     await (await call({ "accept-encoding": "br" })).arrayBuffer(),
   ).byteLength;
-  expect(identity).toBe(11303);
-  expect(gzipped).toBe(4003);
-  expect(brotli).toBe(3344);
+  expect(identity).toBe(11741);
+  expect(gzipped).toBe(4081);
+  expect(brotli).toBe(3414);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);

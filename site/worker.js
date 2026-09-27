@@ -16,6 +16,40 @@ const HERO_SIZES = "(max-width: 640px) calc(100vw - 1.7rem - 2px), calc(min(76re
 const HERO_AVIF_SRCSET = "/dashboard-1280.avif 1280w, /dashboard.avif 1920w";
 const HERO_WEBP_SRCSET = "/dashboard-1280.webp 1280w, /dashboard.webp 1920w";
 
+// The palette, named once. toktop is a terminal: the page is a picture of one,
+// and the same hexes are the TUI's (internal/ui/theme.go) and the capture
+// renderer's (scripts/screenshot.py). Spelling a hex a second time here is a
+// hex that can drift from the product it depicts, so the CSS, the light scheme
+// and the favicon all read these names. site/worker.test.js pins the agreement
+// across the three files.
+const DARK = {
+  bg: "#0d1117",
+  panel: "#11161d",
+  line: "#222b36",
+  fg: "#d7dde5",
+  dim: "#7d8895",
+  accent: "#4cc38a",
+  warm: "#e3b341",
+};
+const LIGHT = {
+  bg: "#fbfbf9",
+  panel: "#f3f3ee",
+  line: "#e3e3de",
+  fg: "#1b1f24",
+  dim: "#5c6570",
+  accent: "#1a7f4b",
+  warm: "#8c5f00",
+};
+
+// The h1 cursor block, in the panel and accent colors: the icon is the mark the
+// page already ends on, not a placeholder glyph.
+const FAVICON = `data:image/svg+xml,${encodeURIComponent(
+  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+    `<rect width="100" height="100" fill="${DARK.panel}"/>` +
+    `<rect x="37" y="25" width="26" height="50" fill="${DARK.accent}"/>` +
+    `</svg>`,
+)}`;
+
 const HTML = htmlForWire(`<!doctype html>
 <html lang="en">
 <head>
@@ -36,7 +70,7 @@ const HTML = htmlForWire(`<!doctype html>
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://toktop.ai/dashboard.png">
 <!-- the icon is the h1 cursor block in the accent and panel colors, not a placeholder emoji -->
-<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20100%20100'%3E%3Crect%20width='100'%20height='100'%20fill='%2311161d'/%3E%3Crect%20x='37'%20y='25'%20width='26'%20height='50'%20fill='%234cc38a'/%3E%3C/svg%3E">
+<link rel="icon" href="${FAVICON}">
 <style>
   :root {
     /* Both schemes are styled here; declaring them lets the browser match
@@ -44,14 +78,21 @@ const HTML = htmlForWire(`<!doctype html>
        blocks grow light-styled scrollbars on the dark theme, invisible
        against --panel (WCAG 1.4.11). */
     color-scheme: dark light;
-    --bg: #0d1117; --panel: #11161d; --line: #222b36;
-    --fg: #d7dde5; --dim: #7d8895; --accent: #4cc38a; --warm: #e3b341;
+    /* The dark scheme is named separately because the capture frame below
+       wants it in both schemes; the page tokens just point at it. */
+    --dark-bg: ${DARK.bg}; --dark-panel: ${DARK.panel}; --dark-line: ${DARK.line};
+    --dark-fg: ${DARK.fg}; --dark-dim: ${DARK.dim};
+    --dark-accent: ${DARK.accent}; --dark-warm: ${DARK.warm};
+    --bg: var(--dark-bg); --panel: var(--dark-panel); --line: var(--dark-line);
+    --fg: var(--dark-fg); --dim: var(--dark-dim);
+    --accent: var(--dark-accent); --warm: var(--dark-warm);
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --bg: #fbfbf9; --panel: #f3f3ee; --line: #e3e3de;
-      --fg: #1b1f24; --dim: #5c6570; --accent: #1a7f4b; --warm: #8c5f00;
+      --bg: ${LIGHT.bg}; --panel: ${LIGHT.panel}; --line: ${LIGHT.line};
+      --fg: ${LIGHT.fg}; --dim: ${LIGHT.dim};
+      --accent: ${LIGHT.accent}; --warm: ${LIGHT.warm};
     }
   }
   * { box-sizing: border-box; }
@@ -139,14 +180,19 @@ const HTML = htmlForWire(`<!doctype html>
      target instead of leaning on the spacing exception. */
   footer > * { padding: .3rem 0; }
   /* The screenshot is the product, not a decoration: a dark terminal
-     frame so the capture never sits on the light-scheme paper. */
+     frame so the capture never sits on the light-scheme paper. The frame
+     re-points the page tokens at the dark scheme, so it is a terminal in
+     both schemes without repeating a hex, and the light page can never
+     recolor the product. */
   .shot {
+    --bg: var(--dark-bg); --panel: var(--dark-panel);
+    --line: var(--dark-line); --dim: var(--dark-dim);
     margin: 0; border: 1px solid var(--line);
-    background: #0d1117; overflow: hidden;
+    background: var(--bg); overflow: hidden;
   }
   .shot figcaption {
     margin: 0; padding: .55rem 1rem; font-size: 13px;
-    color: #7d8895; background: #11161d; border-bottom: 1px solid #222b36;
+    color: var(--dim); background: var(--panel); border-bottom: 1px solid var(--line);
   }
   .shot img { display: block; width: 100%; height: auto; }
   section { scroll-margin-top: 4rem; }

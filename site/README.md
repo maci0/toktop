@@ -14,7 +14,15 @@ credentials come from the environment (`CLOUDFLARE_API_TOKEN`, or a `wrangler`
 login already on the machine); nothing about them is written to this repo.
 
 `worker.js` holds the HTML: it is a template literal, so there is nothing to
-bundle. The Worker answers `/health` with `ok` for uptime checks, serves the
+bundle. The palette lives in the `DARK` and `LIGHT` objects at the top of that
+file, and the CSS, the light scheme and the favicon all interpolate from them:
+toktop is a terminal, and a hex written into a rule is the start of a second
+palette. The same colors are the TUI's (`internal/ui/theme.go`) and the capture
+renderer's (`scripts/screenshot.py`); the three files are in three languages, so
+`bun test site/` is what keeps them one palette, and it fails on a hex that
+drifts, on a one-off hex in a rule, and on a violet anywhere in the three.
+
+The Worker answers `/health` with `ok` for uptime checks, serves the
 dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 `/dashboard-1280.avif`, `/dashboard.webp` and `/dashboard-1280.webp`,
 and answers every other path with the page (a one-page site should not 404
@@ -43,7 +51,7 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 3,917 bytes rather than 11,090 bytes in the local Worker response test.
+transfers 4,081 bytes rather than 11,741 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 Source comments
@@ -84,8 +92,8 @@ width on tablets. Both formats retain their 1280w and 1920w candidates. Served f
 this Worker so a deploy updates share cards and the page together.
 `wrangler.jsonc` sets `run_worker_first` so those image paths hit the Worker
 (cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline. Measured
-against the current source with Bun 1.4.2: 11,026 bytes identity / 3,907 gzip /
-3,256 brotli for the HTML (previously 11,090 / 3,917 / 3,269), still inside the
+against the current source with Bun 1.4.2: 11,741 bytes identity / 4,081 gzip /
+3,414 brotli for the HTML, still inside the
 ~14 KB initial congestion window. The PNG original is the one download no
 srcset narrows, so it carries a ceiling of its own in the same test. The budget
 is pinned by a test, so drift fails `bun test site/`; numbers above are
