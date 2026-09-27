@@ -430,4 +430,14 @@ func TestCrushSinceQueryCanUseUpdatedAtIndex(t *testing.T) {
 	if !strings.Contains(plan, "idx_sessions_updated_at") {
 		t.Fatalf("sargable predicate did not use updated_at index:\n%s", plan)
 	}
+	// Every row of this store is read on some poll, so a branch that scans
+	// reads the whole table no matter how well the other branches do. A plan
+	// can also name the index and still scan: SQLite plans each branch of a
+	// disjunction or a compound separately, and a branch it cannot index is a
+	// full scan that the index name elsewhere in the plan does not excuse.
+	for _, step := range strings.Split(plan, "\n") {
+		if strings.HasPrefix(step, "SCAN sessions") {
+			t.Fatalf("a branch of the since predicate scans the table:\n%s", plan)
+		}
+	}
 }
