@@ -171,7 +171,7 @@ const maxLineBytes = 8 << 20
 const appendReaderBytes = 64 << 10
 
 func (w *Watcher) collect(recs []values, line []byte) []values {
-	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
+	line = bytes.TrimPrefix(line, utf8BOM)
 	v, cwd, ok := w.ad.parse(line)
 	if !ok {
 		return recs
@@ -284,7 +284,7 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 	sc.Buffer(make([]byte, 0, appendReaderBytes), maxLineBytes)
 	lines := 0
 	for lines < ownerScanLines && sc.Scan() {
-		line := bytes.TrimPrefix(sc.Bytes(), []byte("\xef\xbb\xbf"))
+		line := bytes.TrimPrefix(sc.Bytes(), utf8BOM)
 		if cwd, ok := w.ad.sessionCwd(line); ok {
 			mine := w.sameDir(cwd)
 			w.owner[path] = mine

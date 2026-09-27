@@ -5,6 +5,7 @@ package agentusage
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -441,5 +442,71 @@ func TestSplitASCIISpaceKeepsUnicodeSpaces(t *testing.T) {
 	}
 	if got := splitASCIISpace("   "); len(got) != 0 {
 		t.Fatalf("blank input produced %q", got)
+	}
+}
+
+func TestWalkCoversEverySubtreePastTheInlineScratch(t *testing.T) {
+	// walk holds the children it still has to descend into in an array that
+	// fits most envelopes without allocating. A record with more non-scalar
+	// members than that array holds must still be walked whole, and the
+	// working directory must still resolve the way a sorted visit would:
+	// the smallest key name at the shallowest level wins.
+	var b strings.Builder
+	b.WriteString(`{"cwd":"/home/u/proj","zz":{"total_tokens":1}`)
+	for i := range 12 {
+		fmt.Fprintf(&b, `,"k%02d":{"usage":{"output_tokens":%d}}`, i, i+1)
+	}
+	b.WriteString(`,"aa":{"cwd":"/home/u/other","output_tokens":7}}`)
+	ev, ok := parseJSON([]byte(b.String()))
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	if ev.Usage.Output != 12 { // k11, the largest of the sibling subtrees
+		t.Fatalf("output = %d, want 12 (a member past the inline scratch was skipped)", ev.Usage.Output)
+	}
+	if ev.Usage.Total != 1 {
+		t.Fatalf("total = %d, want 1 (nested under the last key in map order)", ev.Usage.Total)
+	}
+	if ev.Cwd != "/home/u/proj" {
+		t.Fatalf("cwd = %q, want /home/u/proj (this level outranks any subtree)", ev.Cwd)
+	}
+}
+
+func TestCwdPicksTheSmallestKeyName(t *testing.T) {
+	// Two working directories at the same level: the smaller key wins, which
+	// is what visiting the level in sorted order decided. Go's map order is
+	// randomized per range, so an unguarded first-wins would disagree with
+	// itself between polls on the very line transcript.go caches.
+	line := []byte(`{"workdir":"/home/u/second","cwd":"/home/u/first"}`)
+	first, ok := parseJSON(line)
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	for i := range 50 {
+		ev, ok := parseJSON(line)
+		if !ok || ev != first {
+			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
+		}
+	}
+	if first.Cwd != "/home/u/first" {
+		t.Fatalf("cwd = %q, want /home/u/first", first.Cwd)
+	}
+}
+
+func TestFoldKeyOnlyMovesASCII(t *testing.T) {
+	// The tables hold ASCII names, so a rune whose lowercase form is ASCII
+	// must not be folded into one of them: "K" (U+212A KELVIN SIGN) is not
+	// a producer's spelling of "k".
+	for _, k := range []string{"Output_Tokens", "usage", "", "ünïcode", "MiXeD"} {
+		got := foldKey(k)
+		want := strings.Map(func(r rune) rune {
+			if r >= 'A' && r <= 'Z' {
+				return r + ('a' - 'A')
+			}
+			return r
+		}, k)
+		if got != want {
+			t.Fatalf("foldKey(%q) = %q, want %q", k, got, want)
+		}
 	}
 }
