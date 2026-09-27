@@ -1925,6 +1925,13 @@ func TestProbeAllTargetSelection(t *testing.T) {
 			c := New([]provider.Provider{fp.asProvider()}, time.Second)
 			emitOnce(t, c)
 			c.ProbeAll()
+			t.Cleanup(func() {
+				waitFor(t, func() bool {
+					c.probeMu.Lock()
+					defer c.probeMu.Unlock()
+					return len(c.probeInflight) == 0
+				}, "probe still running")
+			})
 			if tc.want == "" {
 				waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
 					"probe ran against a model that must be skipped")

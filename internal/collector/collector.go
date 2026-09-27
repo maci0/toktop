@@ -31,9 +31,21 @@ const (
 // time.NewTicker panic on the first Run.
 const defaultInterval = time.Second
 
-// audit builds the process logger for the engine health lines. A var so a
-// test can point it at a handler it can read.
-var audit = logcfg.Logger
+// auditFn builds the process logger for the engine health lines. A test
+// swaps it for a handler it can read. The swap and the read take the same
+// lock: a probe goroutine from an earlier test still calls audit after the
+// next test has installed its own logger.
+var (
+	auditMu sync.Mutex
+	auditFn = logcfg.Logger
+)
+
+func audit() *slog.Logger {
+	auditMu.Lock()
+	fn := auditFn
+	auditMu.Unlock()
+	return fn()
+}
 
 // downState is one engine's current outage: when it started and the reason
 // the first failed poll gave.

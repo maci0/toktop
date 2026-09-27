@@ -22,11 +22,17 @@ import (
 func captureAudit(t *testing.T) *bytes.Buffer {
 	t.Helper()
 	var buf bytes.Buffer
-	old := audit
-	audit = func() *slog.Logger {
+	auditMu.Lock()
+	old := auditFn
+	auditFn = func() *slog.Logger {
 		return slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
-	t.Cleanup(func() { audit = old })
+	auditMu.Unlock()
+	t.Cleanup(func() {
+		auditMu.Lock()
+		auditFn = old
+		auditMu.Unlock()
+	})
 	return &buf
 }
 
