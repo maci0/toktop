@@ -138,6 +138,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The `demo_origin` a `--json` report names keeps the sub-second precision of
+  the `--origin` it was pinned to. `--origin` takes a fractional RFC 3339
+  instant, and the report printed it to whole seconds, so the value a replay is
+  fed back named an instant up to a second earlier and the replayed run
+  stamped every frame ahead of the capture it was read from.
 - `--frames` is named as a wait-only knob under `--once --json`, the way it
   already was under `--once --plain`. Both reports render the last snapshot
   alone, so the count buys the wait before the render and nothing else, and a

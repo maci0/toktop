@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -91,6 +92,47 @@ func TestDemoRunReplaysByteForByte(t *testing.T) {
 	}
 	if !strings.Contains(a, `"demo_seed": 7`) {
 		t.Error("the report does not carry the seed, so a replay of it cannot name the input it needs")
+	}
+}
+
+// The origin a report prints is the one a replay is fed back, so it has to
+// carry the instant whole. --origin accepts a fractional RFC 3339 instant and
+// the timeline is laid out from it: an origin printed to whole seconds named
+// a different instant, and every stamp in the replayed run moved by the
+// fraction that was dropped.
+func TestDemoOriginRoundTripsSubSecondPrecision(t *testing.T) {
+	const originArg = "2026-01-02T03:04:05.5Z"
+	render := func(originArg string) (string, string) {
+		origin, err := parseOrigin(originArg)
+		if err != nil {
+			t.Fatalf("parseOrigin(%q): %v", originArg, err)
+		}
+		s := demo.NewSource(10*time.Millisecond, 7)
+		s.SetOrigin(origin)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := make(chan core.Snapshot, 1)
+		go s.Run(ctx, ch)
+		cfg := ui.Config{Version: "test", Demo: true, DemoSeed: s.Seed(), DemoOrigin: origin, PollEvery: 10 * time.Millisecond}
+		out, err := ui.JSONFrame(cfg, <-ch)
+		if err != nil {
+			t.Fatalf("JSONFrame: %v", err)
+		}
+		var rep struct {
+			DemoOrigin string `json:"demo_origin"`
+		}
+		if err := json.Unmarshal([]byte(out), &rep); err != nil {
+			t.Fatalf("decode report: %v", err)
+		}
+		return out, rep.DemoOrigin
+	}
+	capture, reported := render(originArg)
+	if reported != originArg {
+		t.Fatalf("report names origin %q, want %q: feeding it back replays a different run", reported, originArg)
+	}
+	replay, _ := render(reported)
+	if capture != replay {
+		t.Fatalf("a run replayed from its own reported origin did not reproduce:\nfirst:\n%s\nsecond:\n%s", capture, replay)
 	}
 }
 
