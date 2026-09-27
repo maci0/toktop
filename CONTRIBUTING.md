@@ -16,8 +16,9 @@
 - `bun` at the version in `.bun-version` for `make site-check` and
   `make site-lint`. The targets refuse a different version on PATH, matching
   CI's `bun-version-file`.
-- `uv` >= 0.12.6 for `make scripts-check` (CI installs 0.12.6; black/ruff
-  pins in `scripts/requirements-dev.txt`). The target names a too-old uv
+- `uv` at or above the version in `.uv-version` for `make scripts-check`
+  (CI installs that file's version via `version-file`; black/ruff pins in
+  `scripts/requirements-dev.txt`). The target names a too-old uv
   rather than failing on an unknown flag.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
@@ -150,8 +151,8 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
 | `make site-lint` | biome over `site/` at the Makefile `BIOME` pin (CI parity) |
 | `make site-check` | `bun test site/` |
-| `make site-deploy` | deploy the site Worker at the `WRANGLER` pin, then poll `/health` |
-| `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op |
+| `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
+| `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |

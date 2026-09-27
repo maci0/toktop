@@ -91,9 +91,13 @@ GOTAGS  := $(if $(TAGS),-tags $(TAGS),)
 # RACE=0 skips it (and the C compiler) for a faster edit cycle.
 RACE    ?= 1
 race_flag = $(if $(filter 0,$(RACE)),,-race )
-# Lower bound for `make scripts-check`. CI installs this exact version
-# (.github/workflows/ci.yml setup-uv); a newer uv on PATH is fine.
-UV_MIN := 0.12.6
+# Lower bound for `make scripts-check`, read from .uv-version. That file is
+# what CI installs (setup-uv version-file), so one string covers both; a newer
+# uv on PATH is fine.
+UV_MIN := $(shell tr -d ' \t\r\n' < .uv-version 2>/dev/null)
+ifeq ($(UV_MIN),)
+$(error .uv-version missing or empty; scripts-check and CI need a uv version)
+endif
 
 # Pin locale and timezone for every recipe: glob expansion order and formatted
 # dates must not follow the invoking shell's environment into artifacts
@@ -276,6 +280,11 @@ site-lint: require-bun ## biome-lint site/ at the BIOME pin (CI parity)
 # availability check: a deploy that uploaded cleanly but never took effect
 # still passes here and is found by a visitor.
 #
+# site-deploy runs the two site gates first, so what reaches production is the
+# tree the merge gate accepted; nothing else stands between a local edit and
+# the live site. site-rollback deliberately does not: the point of a rollback
+# is to work on a tree that does not pass.
+#
 # Both targets take $(SITE_LOCK) for the whole recipe, deploy and rollback
 # alike: two of these running at once would leave whichever upload reached the
 # platform last, and a rollback racing a deploy restores whichever version
@@ -284,9 +293,9 @@ site-lint: require-bun ## biome-lint site/ at the BIOME pin (CI parity)
 #
 # $(SITE_GUARD) opens the recipe: one shell takes the lock, arms the trap that
 # releases it, and defines wait_for_site for the recipe to call once the
-# platform call is done. Every site-* recipe must open with it and carry the
-# rest of its work on the same recipe line: a second line is a second shell,
-# so the trap would fire and free the lock before the deploy ran.
+# platform call is done. Every recipe that calls wrangler must open with it
+# and carry the rest of its work on the same recipe line: a second line is a
+# second shell, so the trap would fire and free the lock before the deploy ran.
 define SITE_GUARD
 mkdir -p $(DIST); \
 if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
@@ -309,7 +318,7 @@ wait_for_site() { \
 endef
 
 .PHONY: site-deploy
-site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wait for /health
+site-deploy: require-bun site-lint site-check ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
 	@$(SITE_GUARD) \
 	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
 	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
