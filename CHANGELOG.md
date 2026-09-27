@@ -65,8 +65,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   number a visitor or a RUM script reads is the time to first byte from the
   Worker rather than an unbreakable share of a round trip.
 
+### Security
+
+- The release binaries are linked with `-bindnow`, so the Linux builds carry
+  full RELRO rather than partial. The Go linker emits `DT_BIND_NOW` for
+  nothing on its own, so the dynamic symbol table stayed writable for the
+  life of the process. It is a no-op on macOS and Windows, so one flag set
+  covers every release platform.
+
 ### Changed
 
+- An ingested event's `note` that is nothing but a directory is reduced to its
+  last two components, the way a locally watched agent's working directory
+  already was. A pushed path reached the feed whole, and everything above the
+  checkout is where a client's name and a project index sit. A note carrying
+  any other text is still stored as the sender wrote it, past the home fold.
+- The in-app help overlay lists exactly the keys the footer advertises, under
+  the same conditions. `p`, `t` and `a` are now left out of the reference when
+  they have nothing to act on, instead of being advertised and then doing
+  nothing when pressed.
 - The throughput charts place each history sample on the time grid instead of
   testing every sample against every column. A 200-column frame over three
   engines' retention went from about 7.7ms to 2.8ms to draw, and what is drawn
@@ -163,6 +180,47 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- An `ssh://` target that stops answering says so. A failed poll kept the last
+  good sample and said nothing, so once that sample went past the staleness
+  window the ssh readings dropped out of the frame and the local host's numbers
+  passed for the watched one's. The header now names the target and the reason
+  it stopped answering, and `--once --plain` prints the same after `via ssh:`.
+- `GET /health` on the ingest endpoint answers `503` with
+  `degraded: <in-flight>/<max> event streams in flight; events are being
+  refused` while every decode slot is held, instead of `ok` at a moment the
+  endpoint is refusing every POST. The `503` body in a rejected POST now names
+  the same number the probe reports.
+- A rate or a count no longer picks its unit on the value before rounding.
+  999.5 tokens/s rendered as a unitless `1000` and 999,500 as `1000k`, while
+  a count of 999,950 rendered as `1000.0k`; the unit is now chosen on the
+  rounded value, so those read `1.0k`, `999.5k` and `1.0M`, and one magnitude
+  keeps one spelling across a boundary.
+- A probe row on a narrow pane keeps at least the first eight characters of
+  the model name. The column width went to zero around 62 columns, which
+  dropped the model from both probe rows entirely and left two lines that
+  named no model at all.
+- A frame with no stamp on it no longer reports every agent as live. An
+  unstamped snapshot measured each agent against a span of billions of years,
+  which is negative, so every recency threshold passed and the whole feed read
+  `live`. A frame with no instant to measure against now leaves the recency
+  cell blank, and an agent last stamped in the future by a sender whose clock
+  runs ahead reads idle rather than live.
+- A generation error reported by an engine, and a version string answered by
+  one, are capped and stripped of terminal escape sequences on every path. The
+  recognized error shapes passed through as sent, and a `"version"` member was
+  held verbatim for as long as the cache kept it, so an engine that answered
+  with megabytes of text or an escape sequence reached the readout and the
+  render width.
+- JSON keys, `/proc` and CLI field names, unit suffixes and DNS host labels
+  fold ASCII case only. `strings.ToLower` also folds runes whose lowercase
+  form is ASCII, so a key spelled with U+0130 (which lowercases to `i` plus a
+  combining dot) or U+212A (KELVIN SIGN, which lowercases to `k`) satisfied a
+  match its producer never wrote, which for a sensor key is a value the
+  operator did not measure.
+- `toktop update` asks the release host for identity bytes when it downloads
+  the binary, as it already did for the checksums archive. A transport that
+  transparently decompressed the body would write the wrong bytes and hash
+  bytes nobody else hashed, and the check would fail on a good release.
 - A dsh session log whose record straddles a Zstandard frame boundary is read
   as one record. The read stopped at frame boundaries and counted each half as
   its own line, so neither parsed and both were dropped, under-reporting the
@@ -173,9 +231,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   wait deadline, so a lock that could not be unlinked kept the loop running
   with no sleep and no way out. The break is retried only once the removal
   actually took, and the deadline and the poll gap hold on every path.
-- A `CUDA Version:` line that appears before the `Driver Version:` line in
-  `/proc/driver/nvidia/version` is read. The scan for it was gated on the
-  driver line having already been seen, so a driver that wrote CUDA first
+- A `CUDA Version:` line is read from `/proc/driver/nvidia/version` whether it
+  sits before or after the `Driver Version:` line. The scan for it was gated on
+  the driver line having already been seen, and separately returned at the
+  driver line without looking further, while `CUDA Version:` is a trailing line
+  of its own in some driver builds, so a driver that wrote it in either order
   reported its version with the CUDA row silently missing.
 - An event `id` (or a derived `Idempotency-Key` id) stays deduplicated for 15
   minutes instead of only while the event sits in the 512-event display ring.
