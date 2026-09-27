@@ -143,7 +143,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `scripts-check` + `repro-check-pair` |
-| `make fmt` / `make format` | rewrite files with gofmt -s |
+| `make fmt` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
 | `make tidy` | run `go mod tidy` to clean up go.mod and go.sum |
 | `make lint` | staticcheck over both halves of the sqlite tag gate |

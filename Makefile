@@ -345,9 +345,6 @@ site-rollback: require-bun ## roll the site Worker back to the version before th
 fmt: ## rewrite all Go files with gofmt (including simplifications)
 	$(GOFMT) -s -w .
 
-.PHONY: format
-format: fmt ## alias for fmt
-
 .PHONY: fix
 fix: ## apply go fix modernization autofixes, then gofmt
 	$(GO) fix ./...

@@ -68,23 +68,36 @@ func httpStatus(url string, resp *http.Response) error {
 	return errors.New(msg)
 }
 
-func getJSON(ctx context.Context, url string, out any) error {
+// get issues one authorized GET and returns a 200 response whose body the
+// caller must close. A redirect error carries the last response along, so
+// that body is closed here rather than leaked to the caller's error path.
+func get(ctx context.Context, c *http.Client, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return fmt.Errorf("%s: %w", url, err)
+		return nil, fmt.Errorf("%s: %w", url, err)
 	}
 	bearer.Apply(req)
-	resp, err := httpClient.Do(req)
+	resp, err := c.Do(req)
 	if err != nil {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		return fmt.Errorf("%s: %w", url, err)
+		return nil, fmt.Errorf("%s: %w", url, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		err := httpStatus(url, resp)
+		resp.Body.Close()
+		return nil, err
+	}
+	return resp, nil
+}
+
+func getJSON(ctx context.Context, url string, out any) error {
+	resp, err := get(ctx, httpClient, url)
+	if err != nil {
+		return err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return httpStatus(url, resp)
-	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out); err != nil {
 		return fmt.Errorf("%s: %w", url, err)
 	}
@@ -94,22 +107,11 @@ func getJSON(ctx context.Context, url string, out any) error {
 // getText fetches a URL with the given client; the caller's context bounds
 // the request alongside any client timeout.
 func getText(ctx context.Context, c *http.Client, url string) (string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	resp, err := get(ctx, c, url)
 	if err != nil {
-		return "", fmt.Errorf("%s: %w", url, err)
-	}
-	bearer.Apply(req)
-	resp, err := c.Do(req)
-	if err != nil {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return "", fmt.Errorf("%s: %w", url, err)
+		return "", err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return "", httpStatus(url, resp)
-	}
 	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
