@@ -8,6 +8,11 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+// maxFeedEvents bounds the agent feed rows the plain report prints. A module
+// constant beside maxSummaryAgents, which caps the rate summary two sections
+// up, so both row caps read as one policy.
+const maxFeedEvents = 8
+
 // PlainTextFrame renders one snapshot as a linear, text-only report: the
 // non-visual counterpart to the dashboard frame. That frame draws charts as
 // braille dot-matrix rows, panels as box-drawing borders and meters as bar
@@ -274,7 +279,6 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 		}
 		return
 	}
-	const maxFeedEvents = 8
 	start := max(len(s.Agents)-maxFeedEvents, 0)
 	for _, ev := range s.Agents[start:] {
 		model := strings.TrimSpace(core.SanitizeText(ev.Model))

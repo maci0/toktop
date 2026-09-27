@@ -26,6 +26,11 @@ const (
 	emaAlpha = 0.35
 )
 
+// defaultInterval is the poll period New falls back to when the caller passes
+// a non-positive one. A zero or negative interval would otherwise make
+// time.NewTicker panic on the first Run.
+const defaultInterval = time.Second
+
 // audit builds the process logger for the engine health lines. A var so a
 // test can point it at a handler it can read.
 var audit = logcfg.Logger
@@ -111,7 +116,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 	}
 	providers = deduped
 	if interval <= 0 {
-		interval = time.Second
+		interval = defaultInterval
 	}
 	// One clock read for both the default and the start stamp: a second read
 	// would leave started a hair later than the clock it is compared against,
@@ -127,6 +132,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		lastModel:     map[string]string{},
 		kvPct:         map[string]float64{},
 		agentIDs:      map[string]time.Time{},
+		down:          map[string]downState{},
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
 		now:           time.Now,
@@ -309,11 +315,14 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
 	}
 }
 
+// result is one engine's poll outcome, paired so the fan-out can write each
+// engine's slot without a lock.
+type result struct {
+	m   *provider.Metrics
+	err error
+}
+
 func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
-	type result struct {
-		m   *provider.Metrics
-		err error
-	}
 	results := make([]result, len(c.providers))
 	var wg sync.WaitGroup
 	for i, p := range c.providers {
@@ -358,71 +367,13 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	snap.Probes = slices.Clone(c.probes)
 	snap.Sys = cloneSys(sys)
 	for i, r := range results {
-		p := c.providers[i]
-		ps := core.ProviderSnapshot{
-			Label: p.Label,
-			Kind:  p.Kind,
-			Addr:  p.Addr,
-		}
-		// Per-provider state is keyed by providerKey: the endpoint when the
-		// provider has one, the label otherwise, so labels repeat across
-		// instances of the same engine kind without sharing baselines.
-		key := providerKey(p)
-		// ring() (not a bare map index): a provider whose first poll failed
-		// has no history yet, and indexing the map there would deref nil.
-		outR, inR := c.ring(c.histOut, key), c.ring(c.histIn, key)
-		if r.err != nil {
-			ps.Err = r.err.Error()
-		} else if r.m == nil {
-			ps.Err = "empty poll result"
-		} else {
-			ps.OK = true
-			if was, ok := c.down[key]; ok {
-				delete(c.down, key)
-				recovered = append(recovered, healthChange{p, was, now.Sub(was.since)})
-			}
-			ps.Models = r.m.Models
-			ps.Running = r.m.Running
-			ps.Waiting = r.m.Waiting
-			ps.TTFTms = r.m.TTFTms
-			if port := urlPort(p.Addr); port > 0 && isLoopbackURL(p.Addr) {
-				if proc, ok := byPort[port]; ok {
-					ps.PID, ps.ProcRSS, ps.ProcCPU = proc.PID, proc.RSS, proc.CPUPct
-				}
-			}
-			if r.m.Version != "" {
-				ps.Version = r.m.Version
-			}
-			if name := probe.SelectModel(r.m.Models); name != "" {
-				c.lastModel[key] = name
+		ps, change, changed := c.providerSnapshot(c.providers[i], r, now, byPort)
+		if changed {
+			// The two kinds are exclusive: an engine either answered or did not.
+			if ps.Err != "" {
+				failed = append(failed, change)
 			} else {
-				// Successful poll with nothing loaded: a stale id would
-				// make the next 'p' JIT-load (or bill) a cold model, and
-				// an unloaded engine has no KV cache in use.
-				delete(c.lastModel, key)
-				delete(c.kvPct, key)
-			}
-			if r.m.HasKV {
-				ps.KVPct = r.m.KVPct
-				c.kvPct[key] = ps.KVPct
-			} else {
-				ps.KVPct = c.kvPct[key]
-			}
-			outPS, inPS := c.rates(key, r.m, now)
-			ps.OutTokPS = outPS
-			ps.InTokPS = inPS
-			outR.push(outPS, now)
-			inR.push(inPS, now)
-		}
-		ps.OutHist, ps.OutStamps = outR.copy(), outR.times()
-		ps.InHist, ps.InStamps = inR.copy(), inR.times()
-		if ps.Err != "" {
-			if _, ok := c.down[key]; !ok {
-				if c.down == nil {
-					c.down = make(map[string]downState)
-				}
-				c.down[key] = downState{since: now, reason: ps.Err}
-				failed = append(failed, healthChange{p, downState{now, ps.Err}, 0})
+				recovered = append(recovered, change)
 			}
 		}
 		snap.Providers = append(snap.Providers, ps)
@@ -437,6 +388,81 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	case out <- snap:
 	case <-ctx.Done():
 	}
+}
+
+// providerSnapshot builds one engine's snapshot entry from its poll result,
+// updating the per-key baselines, history rings and health state that entry is
+// keyed on. Call with c.mu held.
+//
+// The health transition the poll caused is returned separately so emit can
+// collect the whole sweep's transitions and log them after the lock: an engine
+// going away is the dependency failure an operator needs named, and a slow
+// stderr must not stall the poll loop the snapshot depends on. changed is
+// false when this engine did not cross the answering boundary.
+func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, change healthChange, changed bool) {
+	ps = core.ProviderSnapshot{
+		Label: p.Label,
+		Kind:  p.Kind,
+		Addr:  p.Addr,
+	}
+	// Per-provider state is keyed by providerKey: the endpoint when the
+	// provider has one, the label otherwise, so labels repeat across
+	// instances of the same engine kind without sharing baselines.
+	key := providerKey(p)
+	// ring() (not a bare map index): a provider whose first poll failed
+	// has no history yet, and indexing the map there would deref nil.
+	outR, inR := c.ring(c.histOut, key), c.ring(c.histIn, key)
+	switch {
+	case r.err != nil:
+		ps.Err = r.err.Error()
+	case r.m == nil:
+		ps.Err = "empty poll result"
+	default:
+		ps.OK = true
+		if was, ok := c.down[key]; ok {
+			delete(c.down, key)
+			change, changed = healthChange{p, was, now.Sub(was.since)}, true
+		}
+		ps.Models = r.m.Models
+		ps.Running = r.m.Running
+		ps.Waiting = r.m.Waiting
+		ps.TTFTms = r.m.TTFTms
+		if port := urlPort(p.Addr); port > 0 && isLoopbackURL(p.Addr) {
+			if proc, ok := byPort[port]; ok {
+				ps.PID, ps.ProcRSS, ps.ProcCPU = proc.PID, proc.RSS, proc.CPUPct
+			}
+		}
+		if r.m.Version != "" {
+			ps.Version = r.m.Version
+		}
+		if name := probe.SelectModel(r.m.Models); name != "" {
+			c.lastModel[key] = name
+		} else {
+			// Successful poll with nothing loaded: a stale id would
+			// make the next 'p' JIT-load (or bill) a cold model, and
+			// an unloaded engine has no KV cache in use.
+			delete(c.lastModel, key)
+			delete(c.kvPct, key)
+		}
+		if r.m.HasKV {
+			ps.KVPct = r.m.KVPct
+			c.kvPct[key] = ps.KVPct
+		} else {
+			ps.KVPct = c.kvPct[key]
+		}
+		ps.OutTokPS, ps.InTokPS = c.rates(key, r.m, now)
+		outR.push(ps.OutTokPS, now)
+		inR.push(ps.InTokPS, now)
+	}
+	ps.OutHist, ps.OutStamps = outR.copy(), outR.times()
+	ps.InHist, ps.InStamps = inR.copy(), inR.times()
+	if ps.Err != "" {
+		if _, ok := c.down[key]; !ok {
+			c.down[key] = downState{since: now, reason: ps.Err}
+			change, changed = healthChange{p, downState{now, ps.Err}, 0}, true
+		}
+	}
+	return ps, change, changed
 }
 
 // healthChange is one engine crossing into or out of the answering state.

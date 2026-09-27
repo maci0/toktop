@@ -451,16 +451,14 @@ func (b *progressBody) Read(p []byte) (int, error) {
 // stallReason names the bound a 408 broke on. The idle window and the
 // absolute lifetime are separate conditions with opposite fixes (send
 // sooner, send less), and they both surface as the same i/o timeout, so a
-// bare "request stalled" leaves the sender to guess which one it hit.
+// bare "request stalled" leaves the sender to guess which one it hit. A
+// decode error always follows a read, and every read arms a deadline, so
+// one of the two always fired.
 func (b *progressBody) stallReason() string {
-	switch {
-	case b.last.IsZero():
-		return "request stalled before any read was armed"
-	case b.last.Before(b.until):
+	if b.last.Before(b.until) {
 		return fmt.Sprintf("request stalled: no body bytes for %s", bodyIdleTimeout)
-	default:
-		return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", maxEventLifetime)
 	}
+	return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", maxEventLifetime)
 }
 
 // handleHealth answers the liveness probe. Plain text like every other
@@ -556,28 +554,25 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(br)
 	defer r.Body.Close()
 	replayKey := clientEventKey(r)
-	// keyedStream tracks whether the last id-less line had an identity derived
-	// from the POST key and its position in the body. Such a line can only be
-	// recovered by replaying the whole request.
-	keyedStream := false
 	// fail reports a stream-level error. Events decode-and-record one by one,
 	// so everything before the failing line is already in the feed; saying so
 	// lets a sender recover without duplicating what was kept.
-	fail := func(status int, msg string, extra ...any) {
-		if n > 0 {
+	fail := func(res streamResult) {
+		msg := res.msg
+		if res.decoded > 0 {
 			// accepted counts what the wire carried, stored what the feed took.
 			// A replayed stream decodes every line and records none, so naming
 			// the decoded count "recorded" would send a sender looking for
 			// events the feed never had.
-			if stored == n {
-				if n == 1 {
+			if res.stored == res.decoded {
+				if res.decoded == 1 {
 					msg += "; 1 earlier event in this stream was recorded"
 				} else {
-					msg += fmt.Sprintf("; %d earlier events in this stream were recorded", n)
+					msg += fmt.Sprintf("; %d earlier events in this stream were recorded", res.decoded)
 				}
 			} else {
 				msg += fmt.Sprintf("; %d earlier events in this stream were received, %d recorded",
-					n, stored)
+					res.decoded, res.stored)
 			}
 			// Resuming with the remaining lines is right only when the kept
 			// events carry no derived id. A derived id is the POST key plus
@@ -585,84 +580,20 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			// line 1 again: its events land on ids the feed already holds and
 			// are dropped as duplicates, losing the rest of the stream
 			// silently. The key makes a full replay safe instead.
-			if keyedStream {
+			if res.keyed {
 				msg += "; resend the whole request with the same Idempotency-Key"
 			} else {
 				msg += "; resend the remaining events to continue"
 			}
 		}
 		armWrite()
-		reject(status, msg, extra...)
+		reject(res.status, msg, res.extra...)
 	}
-	for {
-		var raw json.RawMessage
-		if err := dec.Decode(&raw); err != nil {
-			if n > 0 && errors.Is(err, io.EOF) {
-				break // clean end of stream after at least one event
-			}
-			if errors.Is(err, io.EOF) {
-				fail(http.StatusBadRequest, "empty body: expected one JSON object or an NDJSON stream")
-				return
-			}
-			if errors.Is(err, os.ErrDeadlineExceeded) {
-				fail(http.StatusRequestTimeout, progress.stallReason())
-				return
-			}
-			if maxBytes, ok := errors.AsType[*http.MaxBytesError](err); ok {
-				// A size failure is not a JSON failure; senders need the
-				// distinction to know trimming (not re-encoding) is the fix.
-				fail(http.StatusRequestEntityTooLarge,
-					fmt.Sprintf("event stream exceeds %d byte cap", maxBytes.Limit))
-				return
-			}
-			if _, ok := errors.AsType[*net.OpError](err); ok {
-				fail(http.StatusBadRequest, clientJSONError(err),
-					"body_error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256))
-				return
-			}
-			fail(http.StatusBadRequest, clientJSONError(err))
-			return
-		}
-		// Null unmarshals into a struct as zeros; the body must be an object.
-		if kind := jsonRootKind(raw); kind != "object" {
-			fail(http.StatusBadRequest, "bad json: expected a JSON object or NDJSON stream, got "+kind)
-			return
-		}
-		var wire agentEventWire
-		if err := json.Unmarshal(raw, &wire); err != nil {
-			fail(http.StatusBadRequest, clientJSONError(err))
-			return
-		}
-		ev, err := eventFromWire(wire)
-		if err != nil {
-			msg := err.Error()
-			if errors.Is(err, errBadTS) {
-				msg = "bad ts: " + msg
-			}
-			fail(http.StatusBadRequest, msg)
-			return
-		}
-		now := s.instant()
-		if ev.At.IsZero() {
-			ev.At = now
-		} else if ev.At.Sub(now) > maxEventSkew {
-			ev.At = now
-		}
-		// Body id wins: that is the event's own identity. When the sender
-		// omitted one, the POST-level key plus this line's index stands in,
-		// so retrying the whole request does not double-count.
-		if ev.ID == "" {
-			keyedStream = replayKey != ""
-			ev.ID = derivedEventID(replayKey, n+1)
-		}
-		if s.rec.RecordAgent(ev) {
-			stored++
-		}
-		n++
-		if state != nil {
-			state.accepted = n
-			state.stored = stored
-		}
+	res := s.decodeStream(dec, progress, replayKey, state)
+	n, stored = res.decoded, res.stored
+	if res.status != 0 {
+		fail(res)
+		return
 	}
 	armWrite()
 	w.Header().Set("Content-Type", "application/json")
@@ -678,6 +609,109 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	_ = rc.SetWriteDeadline(time.Time{}) // keep-alive must not inherit the write cap
 	done(http.StatusAccepted, n, stored, "")
+}
+
+// streamResult is how a decoded body ended. status is zero for a clean end of
+// stream, and carries the status to answer the sender with otherwise. keyed
+// records whether the last id-less line's id came from the POST key and that
+// line's position, which is what decides the sender's recovery hint.
+type streamResult struct {
+	decoded int
+	stored  int
+	keyed   bool
+	status  int
+	msg     string
+	extra   []any
+}
+
+// decodeStream decodes the request body one JSON object at a time, recording
+// each as it goes, and reports how the stream ended. Events are recorded
+// before the next line is read, so a body that fails halfway leaves everything
+// before the failing line in the feed; the returned counts say so.
+func (s *Server) decodeStream(dec *json.Decoder, progress *progressBody, replayKey string, state *requestState) streamResult {
+	var r streamResult
+	// keyed tracks whether the last id-less line had an identity derived from
+	// the POST key and its position in the body. Such a line can only be
+	// recovered by replaying the whole request.
+	var keyed bool
+	for {
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			if r.decoded > 0 && errors.Is(err, io.EOF) {
+				return r // clean end of stream after at least one event
+			}
+			switch {
+			case errors.Is(err, io.EOF):
+				r.status, r.msg = http.StatusBadRequest, "empty body: expected one JSON object or an NDJSON stream"
+			case errors.Is(err, os.ErrDeadlineExceeded):
+				r.status, r.msg = http.StatusRequestTimeout, progress.stallReason()
+			default:
+				return r.decodeFailure(err, keyed)
+			}
+			return r
+		}
+		// Null unmarshals into a struct as zeros; the body must be an object.
+		if kind := jsonRootKind(raw); kind != "object" {
+			r.status = http.StatusBadRequest
+			r.msg = "bad json: expected a JSON object or NDJSON stream, got " + kind
+			return r
+		}
+		var wire agentEventWire
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			return r.decodeFailure(err, keyed)
+		}
+		ev, err := eventFromWire(wire)
+		if err != nil {
+			r.status, r.msg = http.StatusBadRequest, err.Error()
+			if errors.Is(err, errBadTS) {
+				r.msg = "bad ts: " + r.msg
+			}
+			return r
+		}
+		now := s.instant()
+		if ev.At.IsZero() {
+			ev.At = now
+		} else if ev.At.Sub(now) > maxEventSkew {
+			ev.At = now
+		}
+		// Body id wins: that is the event's own identity. When the sender
+		// omitted one, the POST-level key plus this line's index stands in,
+		// so retrying the whole request does not double-count.
+		if ev.ID == "" {
+			keyed = replayKey != ""
+			ev.ID = derivedEventID(replayKey, r.decoded+1)
+		}
+		if s.rec.RecordAgent(ev) {
+			r.stored++
+		}
+		r.decoded++
+		r.keyed = keyed
+		if state != nil {
+			state.accepted = r.decoded
+			state.stored = r.stored
+		}
+	}
+}
+
+// decodeFailure classifies a failure that came out of the JSON decoder itself,
+// which distinguishes a body too large, a broken read, and a malformed object.
+func (r streamResult) decodeFailure(err error, keyed bool) streamResult {
+	r.keyed = keyed
+	if maxBytes, ok := errors.AsType[*http.MaxBytesError](err); ok {
+		// A size failure is not a JSON failure; senders need the distinction to
+		// know trimming (not re-encoding) is the fix.
+		r.status = http.StatusRequestEntityTooLarge
+		r.msg = fmt.Sprintf("event stream exceeds %d byte cap", maxBytes.Limit)
+		return r
+	}
+	if _, ok := errors.AsType[*net.OpError](err); ok {
+		r.status = http.StatusBadRequest
+		r.msg = clientJSONError(err)
+		r.extra = []any{"body_error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256)}
+		return r
+	}
+	r.status, r.msg = http.StatusBadRequest, clientJSONError(err)
+	return r
 }
 
 // clientJSONError turns an encoding/json decode failure into a sender-facing

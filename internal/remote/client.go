@@ -317,10 +317,17 @@ var (
 	forwardDialTimeout = 8 * time.Second
 )
 
+// keepaliveMisses is how many unanswered probes close the connection. Three
+// unanswered probes turn silent network death into a closed session within
+// about a minute, which is long enough to ride out a dropped packet or a brief
+// stall and short enough that a dead peer does not sit on a frozen dashboard.
+const keepaliveMisses = 3
+
 // keepalive turns silent network death into a closed connection within about
-// a minute (3 unanswered probes) instead of a hung session. Each probe races
-// a bounded wait: SendRequest alone would block forever on a peer that stops
-// replying without closing TCP, so the miss counter would never advance.
+// a minute (keepaliveMisses unanswered probes) instead of a hung session. Each
+// probe races a bounded wait: SendRequest alone would block forever on a peer
+// that stops replying without closing TCP, so the miss counter would never
+// advance.
 func (c *Client) keepalive() {
 	defer close(c.keepaliveDone)
 	t := time.NewTicker(keepaliveEvery)
@@ -337,7 +344,7 @@ func (c *Client) keepalive() {
 			continue
 		}
 		misses++
-		if misses >= 3 {
+		if misses >= keepaliveMisses {
 			// watchClose records the drop; this says why, since an unanswered
 			// keepalive and a peer that closed the socket need different
 			// investigations and the wire error alone cannot tell them apart.

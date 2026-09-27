@@ -211,42 +211,7 @@ func closedDone() chan struct{} {
 // discover starts following new agent processes and forgets exited ones.
 func (w *Watcher) discover(ctx context.Context) {
 	found := w.runningAgents()
-	live := make(map[int]bool, len(found))
-
-	w.mu.Lock()
-	var newProcs []agentusage.Process
-	var replaced, exited []*tracked
-	for _, p := range found {
-		live[p.PID] = true
-		t, seen := w.tracked[p.PID]
-		switch {
-		case !seen:
-			newProcs = append(newProcs, p)
-		case sameProcess(t.proc, p):
-			// still the same OS process
-		default:
-			// PID reused by a different process. Drop the stale tracker
-			// now so the insert below does not treat it as still live.
-			delete(w.tracked, p.PID)
-			replaced = append(replaced, t)
-			newProcs = append(newProcs, p)
-		}
-	}
-	for pid, t := range w.tracked {
-		if !live[pid] {
-			delete(w.tracked, pid)
-			exited = append(exited, t)
-		}
-	}
-	w.mu.Unlock()
-	sortTracked(exited)
-	// The replaced set is collected from the tracked map, so its order is the
-	// map's. Stopping by PID keeps the sequence of stops, and the events they
-	// emit, the same on every pass.
-	sortTracked(replaced)
-	slices.SortFunc(newProcs, func(a, b agentusage.Process) int {
-		return cmp.Compare(a.PID, b.PID)
-	})
+	newProcs, replaced, exited := w.classify(found)
 
 	// Stop the reused-PID tracker before attaching its replacement: two
 	// watchers tailing the same transcripts would double-count growth.
@@ -263,14 +228,7 @@ func (w *Watcher) discover(ctx context.Context) {
 	// the follower exits.
 	var started []*tracked
 	var startCtx []context.Context
-	w.mu.Lock()
-	claimed := make(map[string]bool)
-	for _, t := range w.tracked {
-		if t.watch != nil {
-			claimed[storeKey(t.proc)] = true
-		}
-	}
-	w.mu.Unlock()
+	claimed := w.claimedStores()
 
 	// attach gives p its own watcher. follow inserts a tracker with none.
 	//
@@ -359,14 +317,74 @@ func (w *Watcher) discover(ctx context.Context) {
 		w.stopOne(t)
 	}
 
+	w.matchEngines()
+}
+
+// classify sorts the processes found on this pass against the ones already
+// tracked: those to start following, the trackers a reused PID has taken over
+// from, and the trackers whose process is gone. Each set is returned in a
+// fixed order, so the sequence of stops, and the events they emit, is the
+// same on every pass.
+func (w *Watcher) classify(found []agentusage.Process) (newProcs []agentusage.Process, replaced, exited []*tracked) {
+	live := make(map[int]bool, len(found))
+	w.mu.Lock()
+	for _, p := range found {
+		live[p.PID] = true
+		t, seen := w.tracked[p.PID]
+		switch {
+		case !seen:
+			newProcs = append(newProcs, p)
+		case sameProcess(t.proc, p):
+			// still the same OS process
+		default:
+			// PID reused by a different process. Drop the stale tracker
+			// now so the insert below does not treat it as still live.
+			delete(w.tracked, p.PID)
+			replaced = append(replaced, t)
+			newProcs = append(newProcs, p)
+		}
+	}
+	for pid, t := range w.tracked {
+		if !live[pid] {
+			delete(w.tracked, pid)
+			exited = append(exited, t)
+		}
+	}
+	w.mu.Unlock()
+	// The replaced and exited sets are collected from the tracked map, so their
+	// order is the map's.
+	sortTracked(replaced)
+	sortTracked(exited)
+	slices.SortFunc(newProcs, func(a, b agentusage.Process) int {
+		return cmp.Compare(a.PID, b.PID)
+	})
+	return newProcs, replaced, exited
+}
+
+// claimedStores names the transcript stores an existing watcher already
+// follows, so a second process on the same store is tracked without one.
+func (w *Watcher) claimedStores() map[string]bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	claimed := make(map[string]bool)
+	for _, t := range w.tracked {
+		if t.watch != nil {
+			claimed[storeKey(t.proc)] = true
+		}
+	}
+	return claimed
+}
+
+// matchEngines records which engine each tracked agent is generating through.
+// Re-read every pass rather than once at discovery: an agent connects to its
+// engine after it starts, and may switch engines mid-session. One table read
+// covers every tracked pid; matching each agent against each engine
+// separately would reread /proc/net/tcp per pair.
+func (w *Watcher) matchEngines() {
 	w.mu.Lock()
 	pids := slices.Sorted(maps.Keys(w.tracked))
 	w.mu.Unlock()
 
-	// Re-checked every pass rather than once at discovery: an agent connects
-	// to its engine after it starts, and may switch engines mid-session.
-	// One table read covers every tracked pid; matching each agent against
-	// each engine separately would reread /proc/net/tcp per pair.
 	endpoints, labels, err := w.engineEndpoints()
 	w.engineError(err)
 	matched := agentusage.MatchingEndpoints(pids, endpoints)

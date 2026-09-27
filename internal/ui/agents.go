@@ -263,12 +263,8 @@ func nearestCadenceIndex(d, cadence time.Duration) int {
 	if shifted%cadence < 0 {
 		q--
 	}
-	if q > math.MaxInt {
-		return math.MaxInt
-	}
-	if q < math.MinInt {
-		return math.MinInt
-	}
+	// q is a Duration, so the guard above already kept it inside the int range
+	// a 64-bit int holds: no second clamp is needed.
 	return int(q)
 }
 

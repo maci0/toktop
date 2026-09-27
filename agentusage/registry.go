@@ -119,7 +119,6 @@ var adapters = map[string]adapter{
 	// of that directory, not the ones it hosts for other projects.
 	"dsh": {
 		roots:      func(string) []string { return []string{home(".dsh", "sessions")} },
-		suffix:     dshZstdSuffix,
 		suffixes:   []string{dshZstdSuffix, ".jsonl"},
 		kind:       perMessage,
 		parse:      parseDsh,

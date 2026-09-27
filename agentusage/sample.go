@@ -144,21 +144,25 @@ func counter(n int) int {
 	return n
 }
 
-// counter64 is counter for values that arrive as int64 from a database
-// column, so a magnitude that does not fit in int is rejected before the
-// conversion rather than wrapping.
-func counter64(n int64) int {
-	if n < 0 || n > maxSaneTokens || n > math.MaxInt {
-		return 0
-	}
-	return int(n)
-}
-
+// clampSane is the one statement of the ceiling counter enforces: a negative
+// or absurd magnitude reads as absent, the same judgment asInt makes for the
+// generic walker.
 func clampSane(n int64) int64 {
 	if n < 0 || n > maxSaneTokens {
 		return 0
 	}
 	return n
+}
+
+// counter64 is counter for values that arrive as int64 from a database
+// column, so a magnitude that does not fit in int is rejected before the
+// conversion rather than wrapping.
+func counter64(n int64) int {
+	c := clampSane(n)
+	if c > math.MaxInt {
+		return 0
+	}
+	return int(c)
 }
 
 // satAdd sums two non-negative counters, saturating instead of wrapping: a

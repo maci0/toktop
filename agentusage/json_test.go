@@ -524,6 +524,49 @@ func TestCwdPicksTheSmallestKeyName(t *testing.T) {
 	}
 }
 
+func TestCwdSkipsAnEmptyValue(t *testing.T) {
+	// The smaller key wins, but an empty value names no directory at all: a
+	// record spelling an empty cwd beside a real one reports the real one, or
+	// the record carries no working directory and ownership falls through to
+	// the launch path alone.
+	line := []byte(`{"cwd":"","project_dir":"/home/u/proj"}`)
+	first, ok := parseJSON(line)
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	for i := range 50 {
+		ev, ok := parseJSON(line)
+		if !ok || ev != first {
+			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
+		}
+	}
+	if first.Cwd != "/home/u/proj" {
+		t.Fatalf("cwd = %q, want /home/u/proj", first.Cwd)
+	}
+}
+
+func TestCwdIsDeterministicAcrossSiblingSubtrees(t *testing.T) {
+	// Two subtrees, each naming one working directory, neither at the top of
+	// the record: subtrees are descended in key order, so "message" is read
+	// before "metadata" and its directory is the one the record reports. Map
+	// iteration order would otherwise pick a winner per line, and the same
+	// line would attribute itself to a different directory on each poll.
+	line := []byte(`{"metadata":{"cwd":"/home/u/second"},"message":{"project_dir":"/home/u/first"}}`)
+	first, ok := parseJSON(line)
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	for i := range 50 {
+		ev, ok := parseJSON(line)
+		if !ok || ev != first {
+			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
+		}
+	}
+	if first.Cwd != "/home/u/first" {
+		t.Fatalf("cwd = %q, want /home/u/first", first.Cwd)
+	}
+}
+
 func TestFoldKeyOnlyMovesASCII(t *testing.T) {
 	// The tables hold ASCII names, so a rune whose lowercase form is ASCII
 	// must not be folded into one of them: "K" (U+212A KELVIN SIGN) is not

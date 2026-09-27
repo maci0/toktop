@@ -33,6 +33,15 @@ import (
 // allowed to outlive the poll that started it.
 const PollTimeout = 1500 * time.Millisecond
 
+// jsonBodyMax and textBodyMax cap what a single engine response may contribute
+// to this process. An engine answering with a body larger than either is
+// truncated and the read still succeeds, so a runaway endpoint costs the frame
+// the tail rather than the process its memory.
+const (
+	jsonBodyMax = 4 << 20
+	textBodyMax = 8 << 20
+)
+
 // Metrics is the raw engine state a single poll yields. Rates are derived by
 // the collector from successive samples.
 type Metrics struct {
@@ -104,7 +113,7 @@ func getJSON(ctx context.Context, url string, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(out); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, jsonBodyMax)).Decode(out); err != nil {
 		return fmt.Errorf("%s: %w", url, err)
 	}
 	return nil
@@ -118,7 +127,7 @@ func getText(ctx context.Context, c *http.Client, url string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, textBodyMax))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
 	}

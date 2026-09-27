@@ -64,10 +64,14 @@ var scanClient = &http.Client{Timeout: scanTimeout, CheckRedirect: bearer.CheckR
 // scanGet issues one identification GET through scanClient with the bearer
 // token applied. The response body, when present, must be closed by the
 // caller; err is nil only for HTTP 200.
+//
+// Failures carry the URL like every other request in this package: identify
+// probes a dozen endpoints in a row, and a bare "http 404 Not Found" does not
+// say which one answered that way.
 func scanGet(ctx context.Context, url string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", url, err)
 	}
 	bearer.Apply(req)
 	resp, err := scanClient.Do(req)
@@ -75,11 +79,12 @@ func scanGet(ctx context.Context, url string) (*http.Response, error) {
 		if resp != nil {
 			resp.Body.Close()
 		}
-		return nil, err
+		return nil, fmt.Errorf("%s: %w", url, err)
 	}
 	if resp.StatusCode != http.StatusOK {
+		err := httpStatus(url, resp)
 		resp.Body.Close()
-		return nil, fmt.Errorf("http %s", resp.Status)
+		return nil, err
 	}
 	return resp, nil
 }

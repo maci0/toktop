@@ -171,11 +171,10 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 			w.seedBaseline(path)
 		}
 	}
-	// The seeding walk serves attach bookkeeping, not reads: leave the listing
-	// unstamped so the first poll re-walks and sees sessions created between
-	// attach and then. From that poll on, empty and non-empty listings share the
-	// same rescanEvery freshness window.
-	w.scanned = time.Time{}
+	// The listing above is a seeding walk, not a poll, so scanned is left
+	// unstamped: the first poll re-walks and sees sessions created between
+	// attach and then. From that poll on, empty and non-empty listings share
+	// the same rescanEvery freshness window.
 	return w
 }
 

@@ -133,19 +133,25 @@ func walk(node any, ev *jsonEvent, depth int) {
 		// different directory on each poll.
 		//
 		// Deciding the winner by comparison rather than by sorting the keys
-		// is what keeps the loop allocation-free: the subtree order the sort
-		// used to impose is unobservable, since counters merge by maximum and
-		// a directory found here is never overwritten from below.
+		// is what keeps the loop allocation-free: a directory found here is
+		// never overwritten from below, so only the choice within this one map
+		// needs an order.
 		var (
-			stack    [inlineKids]any
-			kids     = stack[:0]
-			cwdKey   string
+			stack  [inlineKids]any
+			kids   = stack[:0]
+			kstack [inlineKids]string
+			kkids  = kstack[:0]
+			cwdKey string
+			// cwdValue is the value the winning key carries. An empty one
+			// names no directory at all, so it never wins: a record spelling
+			// `{"cwd":"", "project_dir":"/w"}` reports the working directory
+			// under the shorter key and loses the only path it has.
 			cwdValue string
 		)
 		for k, child := range v {
 			lower := foldKey(k)
 			if str, isString := child.(string); isString {
-				if cwdKeys[lower] && (cwdKey == "" || k < cwdKey) {
+				if str != "" && cwdKeys[lower] && (cwdKey == "" || k < cwdKey) {
 					cwdKey, cwdValue = k, str
 				}
 				continue // other string fields are not content, not a counter
@@ -158,7 +164,19 @@ func walk(node any, ev *jsonEvent, depth int) {
 			default:
 				if !payloadKeys[lower] {
 					kids = append(kids, child)
+					kkids = append(kkids, k)
 				}
+			}
+		}
+		// Subtrees are descended in key order. Comparing the working
+		// directory across them picks whichever carries the smaller key, so a
+		// random walk order would let two subtrees that each name one
+		// alternate as the winner from line to line. The sort is bounded by
+		// inlineKids and allocates nothing.
+		for i := 1; i < len(kids); i++ {
+			for j := i; j > 0 && kkids[j-1] > kkids[j]; j-- {
+				kkids[j-1], kkids[j] = kkids[j], kkids[j-1]
+				kids[j-1], kids[j] = kids[j], kids[j-1]
 			}
 		}
 		if ev.Cwd == "" {
