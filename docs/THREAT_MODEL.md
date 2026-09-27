@@ -7,7 +7,11 @@ they live and what already stands in their way.
 
 - **Last reviewed:** 2026-09-27 (every claim below re-read against code at
   this commit: ingest, bearer, provider, probe, remote, selfupdate, selfreload,
-  gpu, agentusage, workflows, Makefile, site/worker.js)
+  gpu, agentusage, workflows, Makefile, site/worker.js). That pass corrected
+  three drifted claims listed in the documentation-claims section below: the
+  ingest kind default (M5), the discovery port bound (M22, now gap 9), and
+  the site forwarding claim. M13's ssh algorithm claim was re-verified
+  against the pinned x/crypto source and upheld.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -139,8 +143,9 @@ Every externally reachable input, with its code location:
 5. **SSH client sessions** (outbound): shell scripts executed on the remote
    for discovery and vitals (internal/remote/discover.go;
    internal/remote/stats.go); all returned text is parsed locally, and
-   discovery ports are parsed as 16-bit with zero rejected
-   (discover.go).
+   discovery ports from the `/proc/net/tcp` sweep are parsed as 16-bit with
+   zero rejected (discover.go, 106-109; the shell-probe fallback at
+   70-74 checks only `p > 0`, see gap 9).
 6. **SSH loopback relays**: `Forward` binds one `127.0.0.1:0` listener per
    remote engine port and pipes accepted connections through ssh direct-tcpip
    (internal/remote/client.go). The map of remote-port to local-port
@@ -165,10 +170,11 @@ Every externally reachable input, with its code location:
    `--opencode-db`, on by default with `--agents` and disabled with
    `--opencode-db=false` (cmd/toktop/main.go; agentusage/source.go).
    Agent definitions, including transcript roots, load once at startup from
-   `$GAUNTLET_HOME/agents.json` or `~/.gauntlet/agents.json`; a missing file
+   `$GAUNTLET_HOME/agents.json` or `~/.gauntlet/agents.json`, and only on
+   the `--agents` path; a missing file
    is a no-op, but a malformed one aborts startup with exit 2 rather than
-   silently watching a reduced agent set (cmd/toktop/main.go, 220-225;
-   agentusage/definitions.go, 143-164).
+   silently watching a reduced agent set (cmd/toktop/main.go, 141-146;
+   agentusage/definitions.go, 143-167).
 9. **Config files read at startup**: `~/.ssh/config` (HostName/User/Port/
    IdentityFile override target fields, internal/remote/target.go),
    the known_hosts store (knownhosts.go), and
@@ -177,9 +183,11 @@ Every externally reachable input, with its code location:
    known_hosts store (knownhosts.go, 19-28).
 10. **Self hot-reload**: polls the running executable's stat identity and
     restarts into it when changed (internal/selfreload/selfreload.go,
-    exec_unix.go; cmd/toktop/main.go). Default-on in interactive
-    Unix runs; `--no-hot-reload` disables. Windows Watch still fires, but
-    Restart only prints and the process then exits (exec_windows.go).
+    exec_unix.go; cmd/toktop/main.go). The watcher is armed on every
+    platform whenever the live TUI runs (main.go, 344), default on;
+    `--no-hot-reload` disables it. Only the re-exec is Unix: on Windows
+    Watch still fires, but Restart only prints and the process then exits
+    (exec_windows.go).
 11. **Local system introspection**: `/proc` and sysctl reads
     (internal/procs/, internal/sysmon/), vendor CLIs executed from `$PATH`:
     nvidia-smi, rocm-smi, xpu-smi (internal/gpu/gpu.go),
@@ -214,21 +222,29 @@ Deployment surface:
   signature step exists. Tag names that reach ldflags and dist filenames are
   refused unless they are a safe identifier (release.yml).
 - The marketing site is a single Cloudflare Worker serving one static page
-  from an embedded string (site/worker.js): GET/HEAD only (:383-388), a
-  `/health` route (:389-404), ETag revalidation with a weak validator
-  (:407-417), content negotiation (brotli, zstd, gzip, identity)
+  from an embedded string (site/worker.js): GET/HEAD only (:470-472 for
+  images, :517-519 for the page), a `/health` route (:520-535), ETag
+  revalidation with a weak validator (:278-302, :544),
+  content negotiation (brotli, zstd, gzip, identity)
   compressed once per isolate, keyed by `Vary: Accept-Encoding` on every
-  page response (VARY / PAGE_HEADERS, :308-330), and hardening headers
+  page response (VARY :414, PAGE_CACHE_CONTROL :409, representationFor
+  :388-404), and hardening headers
   (nosniff, HSTS, referrer-policy, CSP
   `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`) on every
-  page and image response (SECURITY_HEADERS, :313-320). wrangler.jsonc sets
+  page and image response (SECURITY_HEADERS, :416-423; the same set adds
+  `x-frame-options: DENY` and an HSTS of `max-age=31536000` with no
+  `includeSubDomains`). wrangler.jsonc sets
   `assets.run_worker_first` so /dashboard.png and related images hit that
   Worker path instead of the asset pipeline; it also publishes the worker on
   workers.dev and binds toktop.ai / www.toktop.ai. The only request bytes
   inspected are the method, path, If-None-Match, If-Modified-Since, and
-  Accept-Encoding headers, compared as strings; nothing is stored, echoed
-  into the page, or forwarded anywhere. `style-src 'unsafe-inline'` is idle:
+  Accept-Encoding headers, compared as strings; nothing is stored or echoed
+  into the page. The one forward is on image paths: the Worker re-issues the
+  request to `env.ASSETS` carrying only `if-none-match` and
+  `if-modified-since` (worker.js, 484-490), and an asset-store failure
+  becomes a one-line text/plain body rather than the store's HTML error
+  page (:490-511). `style-src 'unsafe-inline'` is idle:
   the HTML is a compile-time string.
   Deployment is a local make target, not a CI job: `make site-deploy`
   takes `dist/site.lock`, runs `bunx wrangler@4.126.0 deploy` with ambient
@@ -263,8 +279,10 @@ Deployment surface:
   text, cmdline dumps, loadavg/meminfo/CPU/OS/kernel strings, nvidia-smi CSV or
   rocm-smi JSON (stats.go, discover.go). Authentication is the ssh
   handshake itself; after that the data crosses unvalidated except by parsers
-  (numbers parse-or-zero, e.g. stats.go and gpu.go; ports parse as
-  16-bit with zero rejected, discover.go) and the renderer's sanitizer.
+  (numbers parse-or-zero, e.g. stats.go and gpu.go; the `/proc/net/tcp`
+  sweep parses ports as 16-bit with zero rejected, discover.go, 106-109,
+  while the shell-probe fallback checks only `p > 0`, discover.go, 70-74)
+  and the renderer's sanitizer.
   Remote command stderr is sanitized before it is appended to a local error
   (client.go).
 - **B3b: local processes -> remote engines (via B3 relays).** Forward's
@@ -280,7 +298,11 @@ Deployment surface:
   internal/provider/discover.go, internal/provider/provider.go, and
   internal/probe/probe.go, 419); every other destination is filtered out
   inside `Apply` (bearer.go, 55-63, 75-83), so discovery scans and
-  ssh-forwarded remote engines never carry it. There is no
+  ssh-forwarded remote engines never carry it. `CheckRedirect`
+  (bearer.go, 65-73) strips the header on any hop leaving the original
+  origin, and `Set` (bearer.go, 31-39) discards a token containing CR or
+  LF, so neither a redirect nor a hostile env value can move or inject it.
+  There is no
   `bearer.Token` accessor; the only outbound path is Apply. It is never
   written to disk or logs.
   SSH password: env or TTY prompt (auth.go), held in memory, used only
@@ -386,10 +408,12 @@ ports that are then exposed on local loopback (client.go).
 - *Elevation*: remote input never becomes local command text; remote-side
   scripts interpolate only locally generated integers (probeScript,
   discover.go), so no injection path into the remote shell either.
-  Discovery output cannot plant impossible tunnels either: listening ports
-  parse as 16-bit with zero rejected (discover.go, fuzz-pinned by
-  FuzzParseDiscoveryOutput), so a hostile /proc dump cannot name an out-of-
-  range forward target.
+  Discovery output mostly cannot plant impossible tunnels either: listening
+  ports from the `/proc/net/tcp` sweep parse as 16-bit with zero rejected
+  (discover.go, 106-109, fuzz-pinned by FuzzParseDiscoveryOutput), so a
+  hostile /proc dump cannot name an out-of-range forward target. The
+  shell-probe fallback that runs when that sweep yields nothing is not
+  bounded the same way (gap 9).
 
 **B3b:**
 - *Spoofing/tampering*: a local process that finds the ephemeral port can
@@ -476,11 +500,11 @@ Controls verified in code, with the threats they cover:
 
 | Control | Covers | Location |
 |---|---|---|
-| M1: Origin-scoped bearer application. Token attached only to `Allow`-admitted origins, populated exclusively from operator `--add` URLs | Credential harvesting by scanned ports, forwarded remotes, and probes (B2/B4 disclosure; previous summary risk 1, fixed in commit 21e3feb) | internal/bearer/bearer.go; cmd/toktop/main.go; call sites discover.go; provider.go; probe.go; tests internal/bearer/bearer_test.go |
+| M1: Origin-scoped bearer application. Token attached only to `Allow`-admitted origins, populated exclusively from operator `--add` URLs; `CheckRedirect` deletes the header on any hop off the original origin or outside the allow set, capped at 10 hops; `Set` blanks a token containing CR or LF, so an argv or env value cannot inject a header | Credential harvesting by scanned ports, forwarded remotes, and probes (B2/B4 disclosure; previous summary risk 1, fixed in commit 21e3feb); credential loss to a redirect target; header injection through a hostile token | internal/bearer/bearer.go, 31-39, 65-73, 75-83; cmd/toktop/main.go; call sites discover.go; provider.go; probe.go; tests internal/bearer/bearer_test.go |
 | M2: Terminal escape/control-char sanitizer applied both at ingest and at render time (C0/C1 including UTF-8-encoded C1; bidi overrides/isolates; zero-width format; variation selectors). Mixed Latin+Cyrillic/Greek agent names collapse to `anonymous` | OSC/CSI clipboard-cursor-title injection from engines, remotes, and events; mixed-script impersonation of agent names (asset: terminal integrity, dashboard integrity) | internal/core/sanitize.go; ingest side server.go; render side internal/ui/ui.go, internal/ui/plain.go, internal/ui/format.go, internal/ui/agents.go |
 | M3: Ingest body cap 1 MiB + MaxBytesReader | unbounded upload into decode loop (B1 DoS) | server.go |
 | M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go, 438-444, 495-497) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
-| M5: Event field clamps (id 128, agent 64, model 128, via_engine 128, note 512; kind clamped to 24 runes only when it is not one of the four known kinds, unknown kinds defaulting to `turn`) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering) | server.go; event.go:44-70, 177-183; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
+| M5: Event field clamps (id 128, agent 64, model 128, via_engine 128, note 512; a kind outside the four known ones is lowercased, sanitized and clamped to 24 runes rather than replaced, so `kind: "banana"` reaches the feed as `banana`; only a kind that is empty or sanitizes to empty becomes `turn`) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering) | server.go; event.go:44-70, 177-183; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
 | M6: Event timestamp skew clamp: stamps >2 min in the future reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing) | server.go |
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go |
 | M8: Engine response caps: 4 MiB JSON, 8 MiB text, 256-rune error snippets | memory blowup and log flooding from hostile engines (B2 DoS/disclosure) | provider/provider.go httpStatus; core.Snippet |
@@ -494,10 +518,10 @@ Controls verified in code, with the threats they cover:
 | M16: Remote shell scripts: static bodies, only locally generated integers interpolated; no secret material sent to remote scripts | command injection into remote shell (B3 elevation) | discover.go; stats.go |
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance | credential handling in headless runs (B4) | auth.go |
 | M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution (B5) | selfupdate.go |
-| M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | validate.go validateFlags, validateOnceEnv, validateIngestAddr; endpoints.go validateAddURL; main.go logActiveConfig, 220-225; agentusage/definitions.go, 143-164 |
+| M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | validate.go validateFlags, validateOnceEnv, validateIngestAddr; endpoints.go validateAddURL; main.go logActiveConfig; agentusage/definitions.go, 143-167 |
 | M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check | vulnerable-dependency drift (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, Makefile |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
-| M22: Remote discovery ports parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
+| M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (discover.go, 70-74), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 9) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; watch.go; opencode_sqlite.go |
 | M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go; internal/ingest/server_test.go |
@@ -508,11 +532,24 @@ Controls verified in code, with the threats they cover:
 
 Documentation claims checked against code this pass (2026-09-27):
 
+- Three claims in this file were wrong about the code and are corrected
+  above: M5 said an unknown event kind defaults to `turn`, while
+  internal/ingest/event.go, 63-70 keeps a nonempty unknown kind
+  (lowercased, sanitized, 24-rune cap) and only an empty or
+  sanitize-to-empty kind becomes `turn`; M22 said every discovery port is
+  bounded 16-bit, which holds for the `/proc/net/tcp` parser but not for
+  the shell-probe fallback (now gap 9); the site paragraph said nothing
+  is forwarded anywhere, while image requests are re-issued to
+  `env.ASSETS` carrying the two revalidation headers. M13's ssh
+  algorithm claim was re-checked against
+  golang.org/x/crypto v0.57.0 `ssh/common.go`, 163-176 and upheld:
+  `ssh.SupportedAlgorithms()` carries only RSA-SHA2, ECDSA and Ed25519
+  host keys, no `ssh-rsa` and no DSA.
 - README states a malformed `agents.json` "is reported at startup rather than
   silently shrinking the watch" (README.md, 92-95). That matches the code;
   this file previously said it warns and falls back to the built-in set, which
   was wrong in both directions: the loader exits 2
-  (cmd/toktop/main.go, 220-225). Corrected above.
+  (cmd/toktop/main.go, 141-146). Corrected above.
 - README "Zero vendor libraries", "Engines: how discovery works", and the SSH
   auth chain match the code paths cited above, including ioreg on Darwin.
 - README documents the post-21e3feb scoping accurately: "--bearer TOKEN ...
@@ -643,6 +680,18 @@ Recorded as threats with locations; fixes do not happen in this document:
    controls: the poll proves the site answers, not that this tree is what
    answers, and `dist/site.lock` serializes the two make targets against
    each other but not against a deploy run outside them.
+9. **Discovery port bound missing on the shell-probe fallback** (Low, new
+   this pass): when the `/proc/net/tcp` sweep returns nothing, `Discover`
+   falls back to probing well-known ports through the remote shell and
+   parses the remote's stdout with `strconv.Atoi`, accepting anything
+   `p > 0` (internal/remote/discover.go, 70-74). `FuzzParseDiscoveryOutput`
+   covers the `/proc/net/tcp` parser only, so the fallback is the one path
+   where a hostile remote can name an out-of-range forward port
+   (`Discovery.Listening` -> `ForwardSet`, discover.go, 44-48). The forward
+   simply fails to dial such a port, so the impact is a poisoned tunnel set
+   and failed probes, not code execution. Bounding the fallback the way
+   `parseNetTCP` is bounded, and extending the fuzz target to it, belongs
+   to sec-review.
 
 ## Response readiness (notes only)
 
