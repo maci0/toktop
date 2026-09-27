@@ -491,6 +491,10 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 --once            render one frame and exit (use when piping or redirecting)
 --plain           with --once: linear text report instead of the dashboard
                   frame (screen-reader friendly)
+--json            with --once: print the final snapshot as one JSON object on
+                  stdout instead of a frame, for scripts (--plain has no
+                  effect alongside it; TOKTOP_COLUMNS / TOKTOP_LINES have no
+                  effect with either)
 --frames N        with --once: snapshots to accumulate before rendering
                   (max 180, the chart history length; with --plain only the
                   wait before rendering changes)
@@ -504,12 +508,29 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 Password auth for ssh targets: interactive prompt, or `TOKTOP_SSH_PASSWORD`.
 
 Flags come before the positional `ssh://` targets; a flag written after one is
-a usage error that says so. Results (the rendered frame, the version, the
-release URL) go to stdout and progress, warnings and errors to stderr, so
-`toktop --once >frame.txt` and `toktop version` stay pipeable. Exit codes: `0`
+a usage error that says so. Results (the rendered frame, the JSON report, the
+version, the release URL) go to stdout and progress, warnings and errors to
+stderr, so `toktop --once >frame.txt` and `toktop version` stay pipeable.
+Exit codes: `0`
 success, `1` runtime failure, `2` usage error, `130` interrupted (`--once` and
 `toktop update`; the live dashboard quits on `q` or Ctrl+C, which is a clean
 `0`).
+
+## Scripting
+
+`toktop --once --json` prints the last snapshot as one JSON object: the
+aggregate throughput, every engine with its rates, queue depths and models,
+the agent feed and per-agent rates, the probe samples and the host vitals.
+It is the machine-readable counterpart of `--once --plain`, for a script that
+wants the numbers rather than a report:
+
+```sh
+toktop --demo --once --json | jq -r '.engines[] | select(.ok) | .label'
+```
+
+The chart histories are not in it: they are the frame's own buffer, sized by
+how long the process ran, so a consumer wanting a series should sample
+`--once --json` at a steady `--interval` instead.
 
 ## Environment variables
 

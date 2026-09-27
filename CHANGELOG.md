@@ -51,6 +51,9 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `toktop update --help` names the `--repo` argument the way its own usage
+  line does (`owner/name`) instead of the type name Go's flag package
+  reports (`string`).
 - A `TOKTOP_SSH_PASSWORD` that is set but empty is now named. A headless run
   said "set TOKTOP_SSH_PASSWORD" to an operator who had set it, and a
   terminal run prompted as if the variable had never been exported.
@@ -155,6 +158,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- `toktop --once --json` prints the last snapshot as one JSON object on
+  stdout: the aggregate throughput, every engine with its rates, queue
+  depths and models, the agent feed and per-agent rates, the probe samples
+  and the host vitals. It is the machine-readable counterpart of
+  `--once --plain`, for a script that wants the numbers; the chart
+  histories stay out of it, since a series is sampled across runs rather
+  than read from one frame's buffer.
 - `agentusage.Sample.Delta` returns the growth between two samples, and
   whether there was any. A watcher reports the running total, so every
   program emitting events had to difference two samples itself and decide

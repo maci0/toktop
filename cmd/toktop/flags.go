@@ -30,6 +30,7 @@ type cliFlags struct {
 	opencode  bool
 	once      bool
 	plain     bool
+	jsonOut   bool
 	frames    int
 	noReload  bool
 	seed      int64
@@ -55,6 +56,7 @@ func registerFlags() *cliFlags {
 		topFS.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (default on; needs a build with -tags sqlite; --opencode-db=false skips it)")
 		topFS.BoolVar(&cli.once, "once", false, "render one frame and exit (non-interactive; use when piping)")
 		topFS.BoolVar(&cli.plain, "plain", false, "with --once: render a linear text report instead of the dashboard frame (screen-reader friendly)")
+		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once: print the final snapshot as JSON on stdout instead of a frame (for scripts)")
 		topFS.IntVar(&cli.frames, "frames", 2, fmt.Sprintf("with --once: snapshots to accumulate before rendering (max %d)", core.HistoryLen))
 		topFS.BoolVar(&cli.noReload, "no-hot-reload", false, "disable restart-on-rebuild (dev convenience)")
 		topFS.Int64Var(&cli.seed, "seed", 42, "demo RNG seed")

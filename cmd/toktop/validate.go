@@ -18,47 +18,53 @@ import (
 // Mode and environment validation, and the warnings for flags and env vars
 // that were set but cannot take effect.
 
-func warnIgnoredFlags(set map[string]bool, demo, once, plain, agents, noIngest bool, nAdd, nRemote int) {
-	if set["opencode-db"] && !agents {
+func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
+	if set["opencode-db"] && !f.agents {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db has no effect without --agents")
 	}
-	if set["ingest"] && noIngest {
+	if set["ingest"] && f.noIngest {
 		fmt.Fprintln(os.Stderr, "toktop: --ingest has no effect with --no-ingest")
 	}
-	if set["seed"] && !demo {
+	if set["seed"] && !f.demo {
 		fmt.Fprintln(os.Stderr, "toktop: --seed has no effect without --demo")
 	}
-	if set["frames"] && !once {
+	if set["frames"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --frames has no effect without --once")
-	} else if set["frames"] && plain {
+	} else if set["frames"] && f.plain {
 		// The plain report renders the last snapshot as a linear list; there
 		// is no chart for the earlier frames to fill, so the count only buys
 		// the wait before it. Gated on once so a --frames --plain run with no
 		// --once is not also told how --once would use it.
 		fmt.Fprintln(os.Stderr, "toktop: --frames only sets how long --once waits with --plain; the text report renders the last snapshot")
 	}
-	if set["plain"] && !once {
+	if set["plain"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect without --once")
 	}
-	if set["no-hot-reload"] && once {
+	if set["json"] && !f.once {
+		fmt.Fprintln(os.Stderr, "toktop: --json has no effect without --once")
+	}
+	if set["json"] && f.plain {
+		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect with --json; the JSON report replaces the text report")
+	}
+	if set["no-hot-reload"] && f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --no-hot-reload has no effect with --once")
 	}
-	if demo && set["add"] {
+	if f.demo && set["add"] {
 		fmt.Fprintln(os.Stderr, "toktop: --add has no effect with --demo")
 	}
-	if demo && set["bearer"] {
+	if f.demo && set["bearer"] {
 		fmt.Fprintln(os.Stderr, "toktop: --bearer has no effect with --demo")
 	}
-	if set["bearer"] && !demo && nAdd == 0 {
+	if set["bearer"] && !f.demo && nAdd == 0 {
 		fmt.Fprintln(os.Stderr, "toktop: --bearer has no effect without --add")
 	}
-	if demo && set["ssh-key"] {
+	if f.demo && set["ssh-key"] {
 		fmt.Fprintln(os.Stderr, "toktop: --ssh-key has no effect with --demo")
 	}
-	if demo && nRemote > 0 {
+	if f.demo && nRemote > 0 {
 		fmt.Fprintln(os.Stderr, "toktop: ssh:// targets have no effect with --demo")
 	}
-	if set["ssh-key"] && !demo && nRemote == 0 {
+	if set["ssh-key"] && !f.demo && nRemote == 0 {
 		fmt.Fprintln(os.Stderr, "toktop: --ssh-key has no effect without an ssh:// target")
 	}
 }
@@ -66,12 +72,13 @@ func warnIgnoredFlags(set map[string]bool, demo, once, plain, agents, noIngest b
 // warnIgnoredFrameEnv names TOKTOP_COLUMNS / TOKTOP_LINES when they are set
 // but no sized frame is rendered: the overrides only size the --once
 // dashboard frame, and a silently ignored variable looks like a broken knob,
-// same as a flag passed into a mode that never reads it. The --plain report
-// is unsized by construction, so it reads neither. Without --once there is
+// same as a flag passed into a mode that never reads it. The --plain and
+// --json reports are unsized by construction, so they read neither, and the
+// message names which of the two replaced the frame. Without --once there is
 // no report at all, so that is the reason named first: --plain is itself
 // already named as having no effect there.
-func warnIgnoredFrameEnv(once, plain bool) {
-	if once && !plain {
+func warnIgnoredFrameEnv(once, plain, jsonOut bool) {
+	if once && !plain && !jsonOut {
 		return
 	}
 	for _, name := range [...]string{"TOKTOP_COLUMNS", "TOKTOP_LINES"} {
@@ -82,7 +89,13 @@ func warnIgnoredFrameEnv(once, plain bool) {
 			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", name)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
+		// Both --plain and --json replace the sized frame with a report that
+		// has no layout to size, and each says which one it was.
+		if plain {
+			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --json; the JSON report is not a sized frame\n", name)
 	}
 }
 

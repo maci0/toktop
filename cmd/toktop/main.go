@@ -89,11 +89,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		os.Exit(2)
 	}
-	// The plain report renders no sized frame, so a frame override is named
-	// as unused there rather than validated: rejecting TOKTOP_COLUMNS=10 for
-	// a frame that is never composed aborts a run whose output does not read
-	// the variable at all.
-	if f.once && !f.plain {
+	// The plain report and the JSON report render no sized frame, so a frame
+	// override is named as unused there rather than validated: rejecting
+	// TOKTOP_COLUMNS=10 for a frame that is never composed aborts a run
+	// whose output does not read the variable at all.
+	if f.once && !f.plain && !f.jsonOut {
 		if err := validateOnceEnv(); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 			os.Exit(2)
@@ -138,8 +138,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
 	}
 	warnUnknownEnv()
-	warnIgnoredFlags(explicit, f.demo, f.once, f.plain, f.agents, f.noIngest, len(f.adds), len(remoteTargets))
-	warnIgnoredFrameEnv(f.once, f.plain)
+	warnIgnoredFlags(explicit, f, len(f.adds), len(remoteTargets))
+	warnIgnoredFrameEnv(f.once, f.plain, f.jsonOut)
 	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, len(f.adds), len(remoteTargets))
 	warnIgnoredGauntletHome(f.agents)
 	warnIgnoredXDGHome(opencodeOn, !f.demo && len(remoteTargets) > 0)
@@ -325,7 +325,7 @@ func main() {
 	}
 
 	if f.once {
-		if code := runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain); code != 0 {
+		if code := runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain, f.jsonOut); code != 0 {
 			os.Exit(code)
 		}
 		return
@@ -446,17 +446,23 @@ func waitForFrames(ctx context.Context, ch <-chan core.Snapshot, n int, wait tim
 // validateOnceEnv rejected unusable values before this runs. With plain, the
 // frame is a linear text report instead of the dashboard layout: the braille
 // chart rows and box-drawing borders of the visual frame read as noise (or
-// silence) through a screen reader.
-func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.Snapshot, n int, plain bool) int {
+// silence) through a screen reader. With jsonOut, the snapshot itself is
+// printed instead of either report, for a script reading the numbers.
+func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.Snapshot, n int, plain, jsonOut bool) int {
+	// The JSON report is unsized: it is one object, not a frame, so the
+	// terminal size and TOKTOP_COLUMNS / TOKTOP_LINES have nothing to
+	// compose and are not read.
 	w, h := 120, 38
-	if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= frameColumnsMin && th >= frameLinesMin {
-		w, h = min(tw, frameColumnsMax), min(th, frameLinesMax)
-	}
-	if v, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax); err == nil && set {
-		w = v
-	}
-	if v, set, err := frameEnv("TOKTOP_LINES", frameLinesMin, frameLinesMax); err == nil && set {
-		h = v
+	if !jsonOut {
+		if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= frameColumnsMin && th >= frameLinesMin {
+			w, h = min(tw, frameColumnsMax), min(th, frameLinesMax)
+		}
+		if v, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax); err == nil && set {
+			w = v
+		}
+		if v, set, err := frameEnv("TOKTOP_LINES", frameLinesMin, frameLinesMax); err == nil && set {
+			h = v
+		}
 	}
 	// Snapshots land one poll interval apart, so a slow-polling host needs a
 	// proportionally patient wait: a fixed cap would abort a healthy
@@ -472,6 +478,17 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 			return 130
 		}
 		return 1
+	}
+	if jsonOut {
+		report, err := ui.JSONFrame(cfg, snap)
+		if err != nil {
+			// A marshal failure is toktop's own, not the operator's, so it
+			// is a runtime failure (1) rather than a usage error.
+			fmt.Fprintf(os.Stderr, "toktop: render JSON: %v\n", err)
+			return 1
+		}
+		_, err = fmt.Fprintln(out, report)
+		return outputStatus(err)
 	}
 	var frame string
 	if plain {
@@ -558,6 +575,9 @@ func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, n
 		b.WriteString(" once")
 		if f.plain {
 			b.WriteString(" plain")
+		}
+		if f.jsonOut {
+			b.WriteString(" json")
 		}
 	}
 	if f.probeSecs > 0 {

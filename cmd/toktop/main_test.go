@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -152,7 +153,7 @@ func TestRunOnceOutput(t *testing.T) {
 				ch <- snap
 				var code int
 				stderr := captureStderr(t, func() {
-					code = runOnce(context.Background(), w, cfg, ch, 1, plain)
+					code = runOnce(context.Background(), w, cfg, ch, 1, plain, false)
 				})
 				if w == &out {
 					want := ui.StaticFrame(cfg, snap, 120, 38)
@@ -167,6 +168,52 @@ func TestRunOnceOutput(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// --json replaces the frame with the snapshot itself, and what lands on
+// stdout has to parse: the mode exists for a script reading it, so a valid
+// object (and nothing else) is the contract.
+func TestRunOnceJSON(t *testing.T) {
+	cfg := ui.Config{Version: "test", PollEvery: time.Second}
+	snap := core.Snapshot{
+		Uptime: 7 * time.Second,
+		Providers: []core.ProviderSnapshot{
+			{Label: "engine-a", Addr: "127.0.0.1:8000", OK: true, OutTokPS: 12.5},
+			{Label: "engine-b", Addr: "127.0.0.1:8001"},
+		},
+	}
+	ch := make(chan core.Snapshot, 1)
+	ch <- snap
+	var out bytes.Buffer
+	var code int
+	stderr := captureStderr(t, func() {
+		code = runOnce(context.Background(), &out, cfg, ch, 1, false, true)
+	})
+	if code != 0 || stderr != "" {
+		t.Fatalf("code = %d, stderr = %q; want 0 and silence", code, stderr)
+	}
+	var got struct {
+		Version   string `json:"version"`
+		EnginesUp int    `json:"engines_up"`
+		Engines   []struct {
+			Label    string  `json:"label"`
+			OK       bool    `json:"ok"`
+			OutTokPS float64 `json:"out_tok_per_s"`
+		} `json:"engines"`
+		Agents []any `json:"agents"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, out.String())
+	}
+	if got.Version != "test" || got.EnginesUp != 1 || len(got.Engines) != 2 {
+		t.Fatalf("decoded %+v, want version test, 1 engine up and 2 engines", got)
+	}
+	if got.Engines[0].Label != "engine-a" || !got.Engines[0].OK || got.Engines[0].OutTokPS != 12.5 {
+		t.Fatalf("decoded engine[0] = %+v, want engine-a up at 12.5 tok/s", got.Engines[0])
+	}
+	if got.Agents == nil {
+		t.Error("agents key missing, want an empty list so jq '.agents[]' does not fail")
 	}
 }
 
@@ -573,7 +620,7 @@ func TestUsageDocumentsFlagsInLongForm(t *testing.T) {
 
 	for _, want := range []string{
 		"--add URL", "--bearer TOKEN", "--frames N", "--ingest ADDR",
-		"--interval D", "--probe N", "--seed N", "--ssh-key PATH",
+		"--interval D", "--json", "--probe N", "--seed N", "--ssh-key PATH",
 		"--help, -h",
 	} {
 		if !strings.Contains(got, "\n  "+want+"\n") {
@@ -654,7 +701,9 @@ func TestUpdateUsageDocumentsFlagsInLongForm(t *testing.T) {
 	if code := runUpdate(context.Background(), &out, []string{"--help"}); code != 0 {
 		t.Fatalf("runUpdate(--help) = %d, want 0", code)
 	}
-	for _, want := range []string{"--check", "--repo string", "--help, -h"} {
+	// The argument word matches the "Usage:" line above it (owner/name), not
+	// the type name the flag package would print ("string").
+	for _, want := range []string{"--check", "--repo owner/name", "--help, -h"} {
 		if !strings.Contains(out.String(), "\n  "+want+"\n") {
 			t.Errorf("update usage flag list missing entry %q", want)
 		}
@@ -790,6 +839,7 @@ func TestWarnIgnoredFlags(t *testing.T) {
 		plain    bool
 		agents   bool
 		noIngest bool
+		jsonOut  bool
 		nAdd     int
 		nRemote  int
 		wantSub  string // empty means silence expected
@@ -827,11 +877,19 @@ func TestWarnIgnoredFlags(t *testing.T) {
 			wantSub: "--ingest"},
 		{name: "ingest without no-ingest silent", set: map[string]bool{"ingest": true}},
 		{name: "no-ingest without ingest silent", noIngest: true},
+		{name: "json outside once warns", set: map[string]bool{"json": true}, wantSub: "--json"},
+		{name: "json inside once silent", set: map[string]bool{"json": true}, once: true},
+		{name: "json with plain is explained", set: map[string]bool{"json": true}, once: true, plain: true, jsonOut: true,
+			wantSub: "--plain has no effect with --json"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := captureStderr(t, func() {
-				warnIgnoredFlags(tt.set, tt.demo, tt.once, tt.plain, tt.agents, tt.noIngest, tt.nAdd, tt.nRemote)
+				f := &cliFlags{
+					demo: tt.demo, once: tt.once, plain: tt.plain,
+					agents: tt.agents, noIngest: tt.noIngest, jsonOut: tt.jsonOut,
+				}
+				warnIgnoredFlags(tt.set, f, tt.nAdd, tt.nRemote)
 			})
 			if tt.wantSub == "" {
 				if got != "" {
@@ -898,6 +956,7 @@ func TestWarnIgnoredFrameEnv(t *testing.T) {
 		name    string
 		once    bool
 		plain   bool
+		jsonOut bool
 		columns string
 		lines   string
 		wantSub string // empty means silence expected
@@ -910,12 +969,16 @@ func TestWarnIgnoredFrameEnv(t *testing.T) {
 		{name: "inside once silent", once: true, columns: "120", lines: "38"},
 		{name: "with plain warns about the report", once: true, plain: true, columns: "120",
 			wantSub: "$TOKTOP_COLUMNS has no effect with --plain"},
+		{name: "with json warns about the report", once: true, jsonOut: true, columns: "120",
+			wantSub: "$TOKTOP_COLUMNS has no effect with --json"},
+		{name: "with json and plain names the text report", once: true, plain: true, jsonOut: true, lines: "38",
+			wantSub: "$TOKTOP_LINES has no effect with --plain"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("TOKTOP_COLUMNS", tt.columns)
 			t.Setenv("TOKTOP_LINES", tt.lines)
-			got := captureStderr(t, func() { warnIgnoredFrameEnv(tt.once, tt.plain) })
+			got := captureStderr(t, func() { warnIgnoredFrameEnv(tt.once, tt.plain, tt.jsonOut) })
 			if tt.wantSub == "" {
 				if got != "" {
 					t.Fatalf("warnIgnoredFrameEnv() printed %q, want silence", got)

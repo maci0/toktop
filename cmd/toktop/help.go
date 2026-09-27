@@ -30,6 +30,7 @@ var flagPlaceholders = map[string]string{
 	"ingest":   "ADDR",
 	"interval": "D",
 	"probe":    "N",
+	"repo":     "owner/name",
 	"seed":     "N",
 	"ssh-key":  "PATH",
 }
@@ -128,6 +129,7 @@ Examples:
   toktop --agents --opencode-db=false   ...without opencode's session database
   toktop --once >frame.txt     render one static frame and exit
   toktop --once --plain        one frame as a linear text report (screen readers)
+  toktop --once --json         one snapshot as JSON, for scripts
 
 Flags:
 `)
@@ -169,9 +171,9 @@ Exit codes:
   130  interrupted with Ctrl+C (--once and toktop update; the live dashboard
        quits on q or Ctrl+C instead, which is a clean 0)
 
-Results go to stdout (the rendered frame, the version, the release URL);
-progress, warnings and errors go to stderr, so a script can read stdout
-without filtering status lines out of it.
+Results go to stdout (the rendered frame, the JSON report, the version, the
+release URL); progress, warnings and errors go to stderr, so a script can
+read stdout without filtering status lines out of it.
 `)
 	_, err := io.WriteString(w, buf.String())
 	return err
