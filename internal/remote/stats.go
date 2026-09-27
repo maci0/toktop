@@ -233,14 +233,20 @@ func (s *Stats) Merge(into *core.SysSample) {
 		// Copy: s.last is rewritten on the next poll, and the merged
 		// sample is published to the UI goroutine.
 		into.GPUs = slices.Clone(s.last.GPUs)
+		// Drivers follow the devices they were read from. parseVitals
+		// rebuilds the map every poll so a vendor that went away does not
+		// linger, and merging it as a union would keep the local host's
+		// driver chips beside the remote's devices, or beside none at all
+		// when the remote's vendors publish no driver string. A target with
+		// no GPUs leaves both fields alone, so the pair stays coherent.
+		into.Drivers = maps.Clone(s.last.Drivers)
 	}
-	if len(s.last.Drivers) > 0 {
-		if into.Drivers == nil {
-			into.Drivers = maps.Clone(s.last.Drivers)
-		} else {
-			maps.Copy(into.Drivers, s.last.Drivers)
-		}
-	}
+	// The dump carries no temperatures and no NPUs, so what the local
+	// sampler left there is this machine's, not the remote's. It is
+	// dropped rather than shown: the strip labels the whole row with the
+	// host, and an operator reading a remote's CPU model beside their own
+	// box's package temperature has been told a lie.
+	into.Temps, into.NPUs = nil, nil
 	// RemoteHost labels RemoteErr, so the two have to name one target.
 	// --target is repeatable and each target's Merge overlays the same
 	// sample, so the pair is a slot with an owner, not a field every target

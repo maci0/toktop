@@ -917,3 +917,92 @@ func TestEngineErrorRepeatsAfterRecovery(t *testing.T) {
 		t.Errorf("reported %q, want %q", got, want)
 	}
 }
+
+// A store is followed once, and the process that loses the race is tracked
+// without a watcher. When the follower's process exits, the survivor takes
+// the store over instead of sitting on the dashboard reporting nothing.
+func TestStoreHandoverFollowsTheSurvivor(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	dir := t.TempDir()
+	leader := agentusage.Process{PID: 9101, Tool: "claude", Dir: dir, Started: time.Unix(10, 0)}
+	follower := agentusage.Process{PID: 9102, Tool: "claude", Dir: dir, Started: time.Unix(11, 0)}
+	var mu sync.Mutex
+	live := []agentusage.Process{leader, follower}
+
+	w := New(&recorder{}, nil)
+	w.readEvery = time.Hour
+	w.listAgents = func() []agentusage.Process {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(live)
+	}
+	ctx := t.Context()
+	defer w.stopAll()
+
+	w.discover(ctx)
+	w.mu.Lock()
+	gotLeader, gotFollower := w.tracked[leader.PID], w.tracked[follower.PID]
+	w.mu.Unlock()
+	if gotLeader == nil || gotLeader.watch == nil {
+		t.Fatal("the first process for a store must follow it")
+	}
+	if gotFollower == nil || gotFollower.watch != nil {
+		t.Fatal("a second process on the same store must be tracked without a watcher")
+	}
+
+	mu.Lock()
+	live = []agentusage.Process{follower}
+	mu.Unlock()
+	w.discover(ctx)
+
+	w.mu.Lock()
+	promoted := w.tracked[follower.PID]
+	w.mu.Unlock()
+	if promoted != gotFollower || promoted.watch == nil {
+		t.Fatalf("the survivor did not take the store over: %+v", promoted)
+	}
+	if w.following(leader.PID) {
+		t.Error("the exited follower is still tracked")
+	}
+	// The promoted watcher's goroutine is live: its done channel is open
+	// while it runs and closes when it is stopped.
+	select {
+	case <-promoted.done:
+		t.Fatal("the promoted watcher is not running")
+	default:
+	}
+	stopped := make(chan struct{})
+	go func() { w.stopOne(promoted); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the promoted watcher did not stop")
+	}
+}
+
+// A transcript rewritten under the watcher republishes its counters at zero.
+// That sample is a reading: the next growth is measured from it, not from
+// figures the transcripts no longer hold.
+func TestReportRebaselinesOnARewrittenTranscript(t *testing.T) {
+	rec := &recorder{}
+	w := New(rec, nil)
+	tr := &tracked{proc: agentusage.Process{PID: 5, Tool: "claude", Dir: "/tmp"}}
+
+	w.report(tr, agentusage.Sample{Output: 100, At: time.Unix(10, 0)})
+	if got := rec.all(); len(got) != 1 || got[0].OutputTokens != 100 {
+		t.Fatalf("first reading not reported: %+v", got)
+	}
+	// The rewrite: same watcher, counters republished at zero.
+	w.report(tr, agentusage.Sample{At: time.Unix(20, 0)})
+	// The agent writes again. This growth is below the pre-rewrite baseline,
+	// so it is only reported if the empty sample replaced it.
+	w.report(tr, agentusage.Sample{Output: 50, At: time.Unix(30, 0)})
+
+	got := rec.all()
+	if len(got) != 2 {
+		t.Fatalf("events = %d, want 2: %+v", len(got), got)
+	}
+	if got[1].OutputTokens != 50 {
+		t.Fatalf("post-rewrite growth lost: %+v", got[1])
+	}
+}

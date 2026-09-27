@@ -143,7 +143,7 @@ func enrichLemonade(ctx context.Context, base string, m *Metrics) bool {
 		return false
 	}
 	if h.Version != "" {
-		m.Version = h.Version
+		m.Version = capVersion(h.Version)
 	}
 	switch {
 	case len(h.AllLoaded) > 0:

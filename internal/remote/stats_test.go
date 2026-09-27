@@ -315,6 +315,59 @@ func TestMergeCopiesGPUs(t *testing.T) {
 	}
 }
 
+// A remote sample is labelled with the host it came from, so no field may
+// survive the merge that the local sampler read from this machine.
+func TestMergeDropsLocalOnlyReadings(t *testing.T) {
+	s := &Stats{
+		at:   time.Now(),
+		last: core.SysSample{RemoteHost: "box", CPUModel: "Xeon", OsName: "Debian"},
+	}
+	into := core.SysSample{
+		Temps:   []core.TempReading{{Label: "package", MilliC: 62000}},
+		NPUs:    []string{"acme"},
+		Drivers: map[string]string{"local": "1.0"},
+	}
+	s.Merge(&into)
+	if len(into.Temps) != 0 || len(into.NPUs) != 0 {
+		t.Fatalf("local-only readings survived a remote merge: %+v", into)
+	}
+	if into.CPUModel != "Xeon" || into.OsName != "Debian" {
+		t.Fatalf("present remote fields must still merge: %+v", into)
+	}
+}
+
+// Drivers belong to the devices they were read from, so a remote's map
+// replaces the local one rather than joining it, and leaves it alone when the
+// remote reported no devices at all.
+func TestMergeReplacesDriversWithTheRemoteGPUs(t *testing.T) {
+	into := core.SysSample{Drivers: map[string]string{"local": "1.0"}}
+	s := &Stats{at: time.Now(), last: core.SysSample{GPUs: []core.GPUDevice{{Vendor: "amd"}}}}
+	s.Merge(&into)
+	if len(into.Drivers) != 0 {
+		t.Fatalf("local drivers kept beside remote GPUs: %+v", into.Drivers)
+	}
+
+	withDrivers := &Stats{
+		at: time.Now(),
+		last: core.SysSample{
+			GPUs:    []core.GPUDevice{{Vendor: "nvidia"}},
+			Drivers: map[string]string{"nvidia": "550.1"},
+		},
+	}
+	into = core.SysSample{Drivers: map[string]string{"local": "1.0"}}
+	withDrivers.Merge(&into)
+	if len(into.Drivers) != 1 || into.Drivers["nvidia"] != "550.1" {
+		t.Fatalf("remote drivers not merged: %+v", into.Drivers)
+	}
+
+	noGPU := &Stats{at: time.Now(), last: core.SysSample{}}
+	into = core.SysSample{Drivers: map[string]string{"local": "1.0"}, GPUs: []core.GPUDevice{{Vendor: "local"}}}
+	noGPU.Merge(&into)
+	if into.Drivers["local"] != "1.0" || len(into.GPUs) != 1 {
+		t.Fatalf("a target with no GPUs disturbed the local pair: %+v", into)
+	}
+}
+
 const rocmJSON = `{"card0":{"Temperature (Sensor edge) (C)":"52.0","GPU use (%)":"88","Used Memory (VRAM)":"12271640576","Total Memory (VRAM)":"17163091968"}}`
 
 // vitalsDumpFrom builds a full vitals payload from ordered sections.

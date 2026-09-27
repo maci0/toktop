@@ -295,6 +295,33 @@ func (w *Watcher) discover(ctx context.Context) {
 		w.mu.Unlock()
 	}
 
+	// promoteWatch is attach for a tracker that already exists: the handover
+	// installs a watcher on a follower rather than adding a second tracker for
+	// a PID that is already tracked. It leaves the follower as it found it if
+	// the agent keeps nothing readable, or if the tracker went away or gained
+	// a watcher in between (shutdown, or a reattached store).
+	promoteWatch := func(p agentusage.Process, t *tracked) {
+		watch := p.Watch(time.Now())
+		if watch == nil {
+			return // this agent keeps nothing readable
+		}
+		watch.SetNow(w.instant)
+		tctx, cancel := context.WithCancel(ctx)
+		w.mu.Lock()
+		cur, ok := w.tracked[t.proc.PID]
+		if !ok || cur != t || cur.watch != nil {
+			w.mu.Unlock()
+			cancel()
+			return
+		}
+		cur.watch = watch
+		cur.cancel = cancel
+		cur.done = make(chan struct{})
+		w.mu.Unlock()
+		started = append(started, cur)
+		startCtx = append(startCtx, tctx)
+	}
+
 	// newProcs is PID-ordered, so the lowest PID for a store takes it and the
 	// choice does not depend on map iteration.
 	for _, p := range newProcs {
@@ -313,16 +340,23 @@ func (w *Watcher) discover(ctx context.Context) {
 	// running against it, so a live agent is never left unwatched. Ordered by
 	// PID like every other pass, so the choice is reproducible.
 	w.mu.Lock()
-	var promote []agentusage.Process
+	type promotion struct {
+		proc agentusage.Process
+		tr   *tracked
+	}
+	var promote []promotion
 	for _, t := range w.trackedList() {
 		if t.watch == nil && !claimed[storeKey(t.proc)] {
 			claimed[storeKey(t.proc)] = true
-			promote = append(promote, t.proc)
+			promote = append(promote, promotion{proc: t.proc, tr: t})
 		}
 	}
 	w.mu.Unlock()
-	for _, p := range promote {
-		attach(p)
+	// A follower already holds a tracker, so the watcher is installed into it
+	// rather than attached as a new one: attach would find the PID taken and
+	// drop the watcher, leaving the store followed by nobody.
+	for _, pm := range promote {
+		promoteWatch(pm.proc, pm.tr)
 	}
 
 	for i, t := range started {
@@ -531,9 +565,12 @@ func sortTracked(ts []*tracked) []*tracked {
 }
 
 func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
-	if cur.Empty() {
-		return
-	}
+	// A sample that reads empty is still a reading. A transcript rewritten
+	// under the watcher republishes its counters at zero, and treating that
+	// as "nothing to say" leaves the old baseline in place, so the growth
+	// that follows is measured from figures the transcripts no longer hold
+	// and is never reported. Sample.Delta already handles it: no growth is
+	// reported and the empty sample becomes the baseline.
 	w.mu.Lock()
 	d, ok := cur.Delta(t.last)
 	if !ok {

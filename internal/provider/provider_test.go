@@ -1,6 +1,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -926,5 +927,63 @@ func TestPollBoundsEngineSuppliedModelNames(t *testing.T) {
 	}
 	if len(o.Models) != 1 || o.Models[0].Name != strings.Repeat("z", core.ModelNameMax) {
 		t.Errorf("ollama models = %+v, want one id of %d chars", o.Models, core.ModelNameMax)
+	}
+}
+
+// A version arrives from the engine, so it takes the same cap, sanitizer and
+// one-line collapse as every other version producer. An engine answering a
+// newline would otherwise buy itself a second row in the version readout.
+func TestPollCapsTheLemonadeVersion(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/health":
+			w.Write([]byte(`{"version":"1.0\n2.0` + strings.Repeat("x", 4*versionCap) + `"}`))
+		case "/metrics":
+			w.Write([]byte(""))
+		default:
+			w.Write([]byte(`{"data":[{"id":"m"}]}`))
+		}
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompat(srv.URL, "test", core.KindLemonade)
+	m, err := p.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("Poll: %v", err)
+	}
+	if strings.ContainsAny(m.Version, "\n\r") {
+		t.Fatalf("version kept a line break: %q", m.Version)
+	}
+	if len([]rune(m.Version)) > versionCap {
+		t.Fatalf("version kept %d clusters, cap is %d", len([]rune(m.Version)), versionCap)
+	}
+}
+
+// A metrics body past the cap is refused, not truncated: the partial
+// exposition parses into counters below the last good ones, and the
+// collector reads that fall as a restart, losing the tail for good.
+func TestGetTextRefusesAnOversizedBody(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(bytes.Repeat([]byte("x"), textCap+1))
+	}))
+	defer srv.Close()
+
+	if _, err := getText(context.Background(), httpClient, srv.URL); err == nil {
+		t.Fatal("oversized body accepted as a complete scrape")
+	}
+}
+
+func TestGetTextAcceptsABodyAtTheCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Write(bytes.Repeat([]byte("x"), textCap))
+	}))
+	defer srv.Close()
+
+	b, err := getText(context.Background(), httpClient, srv.URL)
+	if err != nil {
+		t.Fatalf("getText at the cap: %v", err)
+	}
+	if len(b) != textCap {
+		t.Fatalf("read %d bytes, want %d", len(b), textCap)
 	}
 }

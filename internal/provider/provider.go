@@ -119,6 +119,13 @@ func getJSON(ctx context.Context, url string, out any) error {
 	return nil
 }
 
+// textCap bounds a text scrape. A body past it is refused rather than
+// truncated: a partial exposition parses into lower counters, and the
+// collector reads a counter that fell as a restart, so the tokens in the
+// truncated tail are lost for good. A JSON scrape needs no such guard, since
+// a body cut mid-document fails to decode.
+const textCap = 8 << 20
+
 // getText fetches a URL with the given client; the caller's context bounds
 // the request alongside any client timeout.
 func getText(ctx context.Context, c *http.Client, url string) (string, error) {
@@ -127,9 +134,12 @@ func getText(ctx context.Context, c *http.Client, url string) (string, error) {
 		return "", err
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, textBodyMax))
+	b, err := io.ReadAll(io.LimitReader(resp.Body, textCap+1))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
+	}
+	if len(b) > textCap {
+		return "", fmt.Errorf("%s: response over %d bytes", url, textCap)
 	}
 	return string(b), nil
 }
