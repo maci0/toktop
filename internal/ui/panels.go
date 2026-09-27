@@ -114,6 +114,12 @@ func (m Model) probesTitle() string {
 	return t
 }
 
+// probeModelMin is the narrowest model column a probe row keeps. The
+// successful and failed rows reserve different widths for it (the rate and
+// ttft readouts), so the floor is set where neither reservation is negative
+// on the smallest legal dashboard pane.
+const probeModelMin = 8
+
 func (m Model) probesBody(w, h int) string {
 	vals := probeSeries(m.snap, w, m.chartCadence())
 	chartH := min(max(h-3-len(m.snap.Providers), 2), 8)
@@ -122,7 +128,11 @@ func (m Model) probesBody(w, h int) string {
 	shown := 0
 	for i := len(m.snap.Probes) - 1; i >= 0 && shown < 2; i-- {
 		p := m.snap.Probes[i]
-		model := styleDim.Render(shorten(core.SanitizeText(p.Model), w-18))
+		// The floor matters on a legal narrow pane: w-18 goes to zero or
+		// below around 62 columns, and shorten("") there drops the model
+		// entirely, leaving two probe rows that name no model at all. The
+		// line is clipped to w below either way.
+		model := styleDim.Render(shorten(core.SanitizeText(p.Model), max(w-18, probeModelMin)))
 		var line string
 		if !p.OK {
 			// Match the plain frame and ENGINES: name the failure and keep

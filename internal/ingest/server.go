@@ -588,7 +588,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Retry-After", "1")
 		armWrite()
 		reject(http.StatusServiceUnavailable,
-			fmt.Sprintf("at most %d event streams are decoded at once; retry", maxInFlightEvents))
+			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(eventSlots)))
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)

@@ -352,7 +352,12 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 		if r.Thinking > 0 {
 			line += " thinking " + fmtCount(r.Thinking)
 		}
-		line += " " + recency
+		// Only when there is a recency to name: an event the snapshot
+		// cannot date yields "", and the report is a fixed-column text
+		// format, so an unconditional space left a trailing one.
+		if recency != "" {
+			line += " " + recency
+		}
 		b.WriteString(line + "\n")
 		rows++
 	}

@@ -537,13 +537,16 @@ func aggHist(s core.Snapshot, out bool, w int, cadence time.Duration) []float64 
 			// A bucket takes every sample within half a cadence of it, so a
 			// source sampled faster than the grid is summed rather than
 			// overwritten, and one sampled slower lands on the bucket it
-			// belongs to. A sample with no instant is not placed at all.
+			// belongs to. The window is half-open toward the later bucket,
+			// matching nearestCadenceIndex, so a sample exactly half a
+			// cadence from two columns joins one of them rather than both.
+			// A sample with no instant is not placed at all.
 			for k, v := range sr.vals {
 				st := sampleTime(sr.ts, k)
 				if st.IsZero() {
 					continue
 				}
-				if d := st.Sub(ts); d > half || d < -half {
+				if d := st.Sub(ts); d >= half || d < -half {
 					continue
 				}
 				sum += v

@@ -31,15 +31,26 @@ func norm(v, vMax float64) float64 {
 	return clamp01(v / vMax)
 }
 
+// unitRound is the fraction a value must reach in the next unit up for the
+// rounded rendering to cross the boundary: 999.5 to "%.0f" prints 1000, and
+// 999.95 to "%.1f" prints 1000.0. The unit is chosen on the rounded value, so
+// a count reads 1.0M rather than 1000.0k, and the same magnitude does not
+// change spelling across a boundary.
+const (
+	unitRound   = 999.95
+	unitRoundTo = 999.5
+)
+
 func fmtRate(v float64) string {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return "0.0"
 	}
+	k := v / 1000
 	switch {
-	case v >= 10000:
-		return fmt.Sprintf("%.0fk", v/1000)
-	case v >= 1000:
-		return fmt.Sprintf("%.1fk", v/1000)
+	case v >= 10000 || k >= unitRound:
+		return fmt.Sprintf("%.0fk", k)
+	case v >= unitRoundTo:
+		return fmt.Sprintf("%.1fk", k)
 	case v >= 100:
 		return fmt.Sprintf("%.0f", v)
 	default:
@@ -48,11 +59,12 @@ func fmtRate(v float64) string {
 }
 
 func fmtCount(n int64) string {
+	k := float64(n) / 1000
 	switch {
-	case n >= 1000000:
-		return fmt.Sprintf("%.1fM", float64(n)/1e6)
+	case n >= 1000000 || k >= unitRound:
+		return fmt.Sprintf("%.1fM", k/1000)
 	case n >= 1000:
-		return fmt.Sprintf("%.1fk", float64(n)/1000)
+		return fmt.Sprintf("%.1fk", k)
 	default:
 		return fmt.Sprintf("%d", n)
 	}

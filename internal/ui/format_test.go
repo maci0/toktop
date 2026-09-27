@@ -152,3 +152,42 @@ func TestHumanBytesShortSubMebiTier(t *testing.T) {
 		}
 	}
 }
+
+// A count or rate just below a unit boundary rounds up on screen, so the
+// unit has to be picked on the rounded value: 999999 printed "1000.0k"
+// while 1000000 printed "1.0M", and 9999.9 printed "10.0k" while 10000
+// printed "10k". Two spellings of one magnitude read as two measurements.
+func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
+	counts := []struct {
+		n    int64
+		want string
+	}{
+		{999, "999"},
+		{1000, "1.0k"},
+		{999949, "999.9k"},
+		{999999, "1.0M"},
+		{1000000, "1.0M"},
+		{12500000, "12.5M"},
+	}
+	for _, tc := range counts {
+		if got := fmtCount(tc.n); got != tc.want {
+			t.Errorf("fmtCount(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+	rates := []struct {
+		v    float64
+		want string
+	}{
+		{99.94, "99.9"},
+		{999.4, "999"},
+		{999.5, "1.0k"},
+		{9999, "10.0k"},
+		{9999.9, "10.0k"},
+		{10000, "10k"},
+	}
+	for _, tc := range rates {
+		if got := fmtRate(tc.v); got != tc.want {
+			t.Errorf("fmtRate(%v) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+}
