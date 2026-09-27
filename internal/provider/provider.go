@@ -225,9 +225,17 @@ const versionCap = 128
 // capVersion bounds a version string to versionCap grapheme clusters and
 // strips what a terminal would interpret in it. The engine, not the operator,
 // chooses the text. The cap counts clusters, so it never splits a multi-byte
-// rune, a combining mark, or an emoji sequence.
+// rune, a combining mark, or an emoji sequence. Sanitizing comes first:
+// ClampField only normalizes, so the quoted and plain-text branches of
+// extractVersionField would otherwise hand a bare invalid byte (an engine
+// answering 0x8c and nothing else) straight through as the cached version.
+// A version is one field on one line, so whitespace runs collapse to a single
+// space: the quoted branch strips quotes but not what is between them, and an
+// engine answering "\n" would otherwise buy itself a second row in the
+// version readout.
 func capVersion(s string) string {
-	return core.ClampField(s, versionCap)
+	oneLine := strings.Join(strings.Fields(core.SanitizeText(s)), " ")
+	return core.ClampField(oneLine, versionCap)
 }
 
 // extractVersionField pulls a "version" member out of JSON-ish bodies.

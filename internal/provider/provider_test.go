@@ -625,6 +625,10 @@ func TestExtractVersionField(t *testing.T) {
 		"":                       "",
 		`{"a":1} trailing junk`:  "",
 		strings.Repeat("x", 129): "", // over-long text is not a version
+		"\x8c":                   "", // a bare invalid byte is not a version
+		"\"\n\"":                 "", // nor is a line break the engine quoted
+		"\"\x1b[2J\"":            "", // a quoted escape sequence is not a version
+		"b4600  \t b4600":        "b4600 b4600",
 	}
 	for body, want := range cases {
 		if got := extractVersionField(body); got != want {

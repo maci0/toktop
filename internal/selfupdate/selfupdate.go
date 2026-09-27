@@ -243,6 +243,27 @@ func (r *Release) NewerThan(current string) bool {
 	return r.Version() != "" && r.Version() != strings.TrimPrefix(current, "v")
 }
 
+// releaseAssets picks this platform's binary and this version's checksums
+// archive out of the decoded release. Both names come from rel.TagName, which
+// GitHub chose, so a release tagged with a path or a glob names assets nothing
+// will ever match and the install stops before fetching anything.
+//
+// The last asset of a given name wins, so a release carrying two entries
+// named AssetName is decided by the order GitHub listed them in.
+func releaseAssets(rel *Release) (assetURL, sumsURL string) {
+	want := AssetName(rel.Version())
+	sumsFile := checksumsName(rel.Version())
+	for _, a := range rel.Assets {
+		switch a.Name {
+		case want:
+			assetURL = a.URL
+		case sumsFile:
+			sumsURL = a.URL
+		}
+	}
+	return assetURL, sumsURL
+}
+
 // Apply downloads, verifies, and installs the release over the running
 // executable. It returns the path that was replaced.
 //
@@ -267,15 +288,7 @@ func Apply(ctx context.Context, rel *Release) (string, error) {
 func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 	want := AssetName(rel.Version())
 	sumsFile := checksumsName(rel.Version())
-	var assetURL, sumsURL string
-	for _, a := range rel.Assets {
-		switch a.Name {
-		case want:
-			assetURL = a.URL
-		case sumsFile:
-			sumsURL = a.URL
-		}
-	}
+	assetURL, sumsURL := releaseAssets(rel)
 	if assetURL == "" {
 		return "", fmt.Errorf("release %s has no asset %s", rel.TagName, want)
 	}
