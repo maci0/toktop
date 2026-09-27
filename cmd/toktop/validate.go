@@ -65,7 +65,9 @@ func warnIgnoredFlags(set map[string]bool, demo, once, plain, agents, noIngest b
 // but no sized frame is rendered: the overrides only size the --once
 // dashboard frame, and a silently ignored variable looks like a broken knob,
 // same as a flag passed into a mode that never reads it. The --plain report
-// is unsized by construction, so it reads neither.
+// is unsized by construction, so it reads neither. Without --once there is
+// no report at all, so that is the reason named first: --plain is itself
+// already named as having no effect there.
 func warnIgnoredFrameEnv(once, plain bool) {
 	if once && !plain {
 		return
@@ -74,11 +76,11 @@ func warnIgnoredFrameEnv(once, plain bool) {
 		if strings.TrimSpace(os.Getenv(name)) == "" {
 			continue
 		}
-		if plain {
-			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
+		if !once {
+			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", name)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", name)
+		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
 	}
 }
 

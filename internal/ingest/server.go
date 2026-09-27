@@ -601,10 +601,19 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// lets a sender recover without duplicating what was kept.
 	fail := func(status int, msg string, extra ...any) {
 		if n > 0 {
-			if n == 1 {
-				msg += "; 1 earlier event in this stream was recorded"
+			// accepted counts what the wire carried, stored what the feed took.
+			// A replayed stream decodes every line and records none, so naming
+			// the decoded count "recorded" would send a sender looking for
+			// events the feed never had.
+			if stored == n {
+				if n == 1 {
+					msg += "; 1 earlier event in this stream was recorded"
+				} else {
+					msg += fmt.Sprintf("; %d earlier events in this stream were recorded", n)
+				}
 			} else {
-				msg += fmt.Sprintf("; %d earlier events in this stream were recorded", n)
+				msg += fmt.Sprintf("; %d earlier events in this stream were received, %d recorded",
+					n, stored)
 			}
 			// Resuming with the remaining lines is right only when the kept
 			// events carry no derived id. A derived id is the POST key plus

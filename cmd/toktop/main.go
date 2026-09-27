@@ -73,7 +73,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		os.Exit(2)
 	}
-	if f.once {
+	// The plain report renders no sized frame, so a frame override is named
+	// as unused there rather than validated: rejecting TOKTOP_COLUMNS=10 for
+	// a frame that is never composed aborts a run whose output does not read
+	// the variable at all.
+	if f.once && !f.plain {
 		if err := validateOnceEnv(); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 			os.Exit(2)

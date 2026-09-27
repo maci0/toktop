@@ -140,9 +140,17 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 // several gateway builds send microseconds or milliseconds, which reads
 // 1000x or 1e6x slow. Generation dominates a probe, so the honest reading
 // lands in the upper part of the measured exchange: take the finest unit whose
-// scaling lands in that band. When nothing lands there, keep the raw
-// nanosecond value (a fast local engine can legitimately report longer than
-// the HTTP round trip around it).
+// scaling lands in that band.
+//
+// When the reported value is longer than the whole round trip, the raw
+// nanosecond reading is the best one left (a fast local engine can
+// legitimately report longer than the HTTP exchange around it). When every
+// scaling is shorter than the band instead, the value is implausibly small in
+// every unit: a decode that finishes more than four times faster than the
+// request that carried it is a queued or proxied request, not a fast engine,
+// and keeping the raw figure would read a microsecond report as nanoseconds
+// and report throughput thousands of times too high. Refusing it leaves the
+// caller on the wall-clock measurement it would use anyway.
 func fitEvalDuration(reported, total time.Duration) time.Duration {
 	if reported <= 0 || total <= 0 {
 		return reported
@@ -156,7 +164,10 @@ func fitEvalDuration(reported, total time.Duration) time.Duration {
 			return scaled
 		}
 	}
-	return reported
+	if reported > total {
+		return reported
+	}
+	return 0
 }
 
 func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens int, evalDur, ttft time.Duration, err error) {

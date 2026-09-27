@@ -87,6 +87,23 @@ support channel (see SECURITY.md).
 
 ### Fixed
 
+- A probe no longer reports throughput thousands of times too high when an
+  engine's `eval_duration` is plausible only in microseconds or milliseconds
+  and the decode itself is fast. The unit fit kept the raw value whenever
+  nothing scaled into the band, which read a microsecond report as
+  nanoseconds; a decode that finishes more than four times faster than the
+  request carrying it is now measured against the wall clock instead.
+- A stream that fails mid-body says how many earlier events were recorded
+  out of how many arrived, so a replay whose lines are all already in the feed
+  is not told they were recorded.
+- `$TOKTOP_COLUMNS` / `$TOKTOP_LINES` are no longer validated for
+  `--once --plain`, which renders no sized frame. A set-but-invalid value
+  exited 2 before the "has no effect with --plain" line that names the
+  variable, so a value the run never reads could still refuse it.
+- `$TOKTOP_COLUMNS` / `$TOKTOP_LINES` set without `--once` are named as
+  having no effect without `--once`, the reason that applies. `--plain` on
+  its own already says it has no effect there, and no text report is ever
+  produced.
 - A flag written after an `ssh://` target says it has to come before the
   targets. Flag parsing stops at the first positional, so `toktop ssh://box
   --agents` reported only "unexpected argument", with nothing to change.
