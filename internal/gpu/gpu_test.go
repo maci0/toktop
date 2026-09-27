@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sort"
 	"strings"
@@ -342,22 +343,67 @@ func TestSample(t *testing.T) {
 	}
 }
 
+// requireFakeCLIs skips where a fake vendor CLI cannot be started at all: the
+// POSIX spelling is a shell script, so a host without sh cannot run one.
+// Windows has sh on PATH (Git for Windows) but cannot execute a shebang
+// script, so the fake there is a batch file and needs nothing extra.
+func requireFakeCLIs(t *testing.T) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		if _, err := exec.LookPath("sh"); err != nil {
+			t.Skip("sh unavailable")
+		}
+	}
+}
+
+// fakeTool writes a fake vendor CLI returning the path to run. A vendor CLI is
+// a process, so the fake has to be one: a shell script with a shebang where
+// the kernel reads one, and a batch file on Windows, where CreateProcess needs
+// an image and a shebang script is not one. Each test spells its body for both.
+func fakeTool(t *testing.T, dir, name, shBody, cmdBody string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		p := filepath.Join(dir, name+".cmd")
+		if err := os.WriteFile(p, []byte("@echo off\r\n"+cmdBody), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+shBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// shCat is the shell body that prints doc verbatim.
+func shCat(doc string) string {
+	return "cat <<'OUT'\n" + strings.TrimRight(doc, "\n") + "\nOUT\n"
+}
+
+// cmdEcho is the batch body that prints doc verbatim. cmd escapes nothing
+// inside echo, and the fixtures carry no metacharacter it would act on, so one
+// echo per line reproduces the document byte for byte.
+func cmdEcho(doc string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(doc, "\n"), "\n") {
+		b.WriteString("echo " + line + "\r\n")
+	}
+	return b.String()
+}
+
 // A caller that cancels (the UI tearing down, the sysmon budget spent) must
 // not pay runTimeout per vendor, and must not report a device the canceled
 // sample never got to read. The fake CLI is present on PATH, so a Sample that
 // ignored the cancellation would block for the full timeout and leave the
 // marker behind.
 func TestSampleCanceledContextSkipsVendorCLIs(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh unavailable")
-	}
+	requireFakeCLIs(t)
 	dir := t.TempDir()
 	marker := filepath.Join(dir, "cli-ran")
-	fake := filepath.Join(dir, "toktop-fake-smi")
-	script := "#!/bin/sh\ntouch " + marker + "\n" + nvidiaCSV
-	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	fake := fakeTool(t, dir, "toktop-fake-smi",
+		"touch "+marker+"\n"+nvidiaCSV,
+		"type nul > \""+marker+"\"\r\n"+cmdEcho(nvidiaCSV))
 	stubTools(t, func(string) (string, error) { return fake, nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -381,14 +427,9 @@ func TestSampleCanceledContextSkipsVendorCLIs(t *testing.T) {
 // cancellation assertions above cannot pass by the fake CLI simply never
 // being reached.
 func TestSampleReadsVendorCLIOutput(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh unavailable")
-	}
+	requireFakeCLIs(t)
 	dir := t.TempDir()
-	fake := filepath.Join(dir, "toktop-fake-smi")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat <<'CSV'\n"+nvidiaCSV+"CSV\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	fake := fakeTool(t, dir, "toktop-fake-smi", shCat(nvidiaCSV), cmdEcho(nvidiaCSV))
 	stubTools(t, func(string) (string, error) { return fake, nil })
 
 	var nvidia []core.GPUDevice
@@ -410,30 +451,22 @@ func TestSampleReadsVendorCLIOutput(t *testing.T) {
 // which on a build machine is none: this pins the sort against a known
 // three-vendor set so the ordering is checked on every machine.
 func TestSampleOrdersVendorsAndIndices(t *testing.T) {
-	if _, err := exec.LookPath("sh"); err != nil {
-		t.Skip("sh unavailable")
-	}
+	requireFakeCLIs(t)
 	dir := t.TempDir()
 	// xpu-smi is called twice, once per subcommand; the discovery listing and
-	// the per-device metrics are different documents.
-	write := func(name, body string) string {
-		p := filepath.Join(dir, name)
-		if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		return p
-	}
-	// The heredoc terminator must be alone on its line, so the document
-	// needs a trailing newline.
-	cat := func(doc string) string { return "cat <<'OUT'\n" + strings.TrimRight(doc, "\n") + "\nOUT\n" }
+	// the per-device metrics are different documents, and the fake picks one by
+	// the argument it was handed, which is argv on POSIX and %1 in a batch file.
+	nvidiaOrder := "1, Fake NVIDIA B, 65, 1, 2, 98, 350, 550.0\n" +
+		"0, Fake NVIDIA A, 65, 1, 2, 98, 350, 550.0\n"
+	xpuSh := "case \"$1\" in\ndiscovery) " + shCat(xpuFakeDiscovery) + ";;\n*) " + shCat(xpuFakeMetrics) + ";;\nesac\n"
+	xpuCmd := "if \"%~1\"==\"discovery\" goto discovery\r\n" + cmdEcho(xpuFakeMetrics) +
+		"exit /b 0\r\n:discovery\r\n" + cmdEcho(xpuFakeDiscovery)
 	// Intel's indices sort ahead of nvidia's on purpose: only the vendor rank
 	// may decide the order, and a plain index sort would get it wrong.
 	paths := map[string]string{
-		"nvidia-smi": write("nvidia-smi", "#!/bin/sh\n"+cat(
-			"1, Fake NVIDIA B, 65, 1, 2, 98, 350, 550.0\n"+
-				"0, Fake NVIDIA A, 65, 1, 2, 98, 350, 550.0\n")),
-		"rocm-smi": write("rocm-smi", "#!/bin/sh\n"+cat(rocmFakeJSON)),
-		"xpu-smi":  write("xpu-smi", "#!/bin/sh\ncase \"$1\" in\ndiscovery) "+cat(xpuFakeDiscovery)+";;\n*) "+cat(xpuFakeMetrics)+";;\nesac\n"),
+		"nvidia-smi": fakeTool(t, dir, "nvidia-smi", shCat(nvidiaOrder), cmdEcho(nvidiaOrder)),
+		"rocm-smi":   fakeTool(t, dir, "rocm-smi", shCat(rocmFakeJSON), cmdEcho(rocmFakeJSON)),
+		"xpu-smi":    fakeTool(t, dir, "xpu-smi", xpuSh, xpuCmd),
 	}
 	stubTools(t, func(name string) (string, error) {
 		p, ok := paths[name]
