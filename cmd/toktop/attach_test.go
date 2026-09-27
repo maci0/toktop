@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -246,5 +248,33 @@ func TestAttachEnginesAddsWithoutTargets(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("the --add endpoint is missing from %+v", labels(providers))
+	}
+}
+
+// Every other attach line describes something that went wrong, so an engine
+// that answers for the whole run writes none of them. The run's local set is
+// recorded once at attach, or the audit log cannot tell a run measuring one
+// engine from a run measuring none.
+func TestAttachEnginesRecordsLocalEngines(t *testing.T) {
+	srv := attachEngine(t, map[string]string{"/metrics": "sglang:gen_throughput 1\n"})
+	var lines bytes.Buffer
+	prev := attachLog
+	attachLog = func() *slog.Logger {
+		return slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+	t.Cleanup(func() { attachLog = prev })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	captureStderr(t, func() {
+		attachEngines(ctx, &cliFlags{adds: []string{srv}}, nil)
+	})
+
+	got := lines.String()
+	if !strings.Contains(got, "local engines attached") {
+		t.Fatalf("attach wrote no record of the engines it measures:\n%s", got)
+	}
+	if !strings.Contains(got, srv) {
+		t.Errorf("the record does not name the attached endpoint:\n%s", got)
 	}
 }

@@ -452,6 +452,13 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 	}
 	if reloaded.Load() {
 		fmt.Fprintln(os.Stderr, "toktop: binary changed, restarting…")
+		// The exec below replaces this process, so the audit log holds the two
+		// startup lines of the run it ends and the two of the run that follows
+		// with nothing between them. The line names the gap: a log read across
+		// a hot reload would otherwise show one dashboard that stopped and
+		// another that began, with nothing connecting the two.
+		logcfg.Logger().Info("toktop: binary changed, restarting",
+			"path", logcfg.Field(self, 1024))
 		selfreload.Restart(self, os.Args, os.Environ())
 	}
 	return 0

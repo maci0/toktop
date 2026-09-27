@@ -211,6 +211,10 @@ func requestID(r *http.Request) string {
 // and rejection alike. accepted counts events decoded off the wire, stored how
 // many the feed took: a replayed POST after a lost 202 differs from a first
 // send only in stored.
+//
+// A Server built as a literal rather than through newServer carries no logger
+// (newServer substitutes a discarding one for a nil argument), so the nil
+// check is what keeps such a handler from panicking on its first request.
 func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, stored int, d time.Duration, errMsg string, extra ...any) {
 	if s.log == nil {
 		return

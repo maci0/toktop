@@ -101,6 +101,19 @@ func attachEngines(ctx context.Context, f *cliFlags, targets []remote.Target) ([
 	for _, raw := range f.adds {
 		providers = attachLocal(ctx, providers, raw)
 	}
+	// What the run measures on this host, recorded once. Every other attach
+	// line in this file describes something that went wrong, so an engine
+	// that answers for the whole run writes none of them: a log that stops at
+	// the startup line cannot say whether discovery found one engine or none,
+	// and a run measuring nothing looks like a run whose engines are all
+	// idle. The ssh targets count theirs for the same reason.
+	addrs := make([]string, 0, len(providers))
+	for _, p := range providers {
+		addrs = append(addrs, p.Addr)
+	}
+	attachLog().Info("toktop: local engines attached",
+		"engines", len(providers),
+		"endpoints", logcfg.Field(strings.Join(addrs, ", "), 1024))
 
 	var sysFn func() core.SysSample
 	attached, lastErr := 0, error(nil)

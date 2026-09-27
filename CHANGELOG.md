@@ -46,6 +46,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   and hundreds of thousands of files, so it is never walked whole: a directory
   is named for a slug and the SHA-256 of the working directory it belongs to,
   and only the directories naming this run's working directory are read.
+- The local host-vitals sampler audits a `/proc` file it cannot read, once per
+  outage and again when it can. Memory, load and uptime are read from files
+  every Linux host has, and a container without procfs mounted, a hardened
+  kernel or a revoked permission blank the host strip exactly the way an idle
+  machine does, for the rest of the run, with nothing written anywhere. The
+  line names the file and the reason; a recovery line says how long it lasted.
+- The engines a run measures on this host are recorded once, at attach. Every
+  other attach line in the audit log describes something that went wrong, so
+  an engine that answers for the whole run wrote none of them, and a log that
+  stopped at the startup record could not say whether discovery had found one
+  engine or none. The record names the count and the endpoints, matching what
+  each ssh target already records for itself.
+- A hot reload is audited before the process is replaced, so a log read across
+  one shows a run that ended and a run that began with the line naming the
+  gap between them.
 - A `--demo` run names its seed, and the `--origin` it was pinned to, on the
   startup line and in the audit record. The report that carried both was never
   written for a run that ended early, so a demo run that crashed left the log

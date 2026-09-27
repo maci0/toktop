@@ -16,19 +16,97 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 const (
 	procMeminfo = "/proc/meminfo"
 	procLoadavg = "/proc/loadavg"
+	procUptime  = "/proc/uptime"
 	sysHwmon    = "/sys/class/hwmon"
 	sysThermal  = "/sys/class/thermal"
 )
 
+// audit builds the logger for the host-vitals lines. A var so a test can point
+// it at a handler it can read.
+var audit = logcfg.Logger
+
+// procRun tracks whether a required procfs read is failing, so the audit log
+// records the start of an outage once and its end once rather than a line per
+// poll. Sample runs every interval, and a sandbox with no procfs would
+// otherwise write one line per second for the life of the run.
+//
+// An entry is never removed, for the reason gpu's run state is not: the keys
+// are the fixed file set readProc is called with, and dropping one on recovery
+// loses a failure a concurrent poll had just recorded, so the next failure
+// reads as a fresh outage.
+var procRuns sync.Map // path -> *procRun
+
+type procRun struct {
+	mu     sync.Mutex
+	failed bool
+	since  time.Time
+}
+
+func noteProcFailure(path string, err error) {
+	s, _ := procRuns.LoadOrStore(path, &procRun{})
+	p := s.(*procRun)
+	p.mu.Lock()
+	first := !p.failed
+	if first {
+		p.failed, p.since = true, time.Now()
+	}
+	p.mu.Unlock()
+	if !first {
+		return
+	}
+	audit().Warn("toktop: host vitals source unreadable",
+		"source", logcfg.Field(path, 256),
+		"error", logcfg.Field(err.Error(), 256))
+}
+
+func noteProcOK(path string) {
+	s, ok := procRuns.Load(path)
+	if !ok {
+		return
+	}
+	p := s.(*procRun)
+	p.mu.Lock()
+	if !p.failed {
+		p.mu.Unlock()
+		return
+	}
+	p.failed = false
+	downFor := time.Since(p.since)
+	p.mu.Unlock()
+	audit().Info("toktop: host vitals source readable again",
+		"source", logcfg.Field(path, 256),
+		"down_for", downFor.Round(time.Second))
+}
+
+// readProc reads one of the /proc files every Linux host has, and latches a
+// read failure into the audit log.
+//
+// These three are not optional the way the driver and sensor files are: a
+// container without procfs mounted, a hardened kernel, a revoked permission
+// all fail the same way an empty file would, and the host strip then shows
+// zero memory, no load and no uptime for the rest of the run. An idle machine
+// reads the same on screen, so the line naming the file is the only thing that
+// tells the two apart.
+func readProc(path string) ([]byte, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		noteProcFailure(path, err)
+		return nil, false
+	}
+	noteProcOK(path)
+	return b, true
+}
+
 func init() {
 	platformMemory = sampleMemoryLinux
 	platformLoad = func(s *core.SysSample) {
-		if b, err := os.ReadFile(procLoadavg); err == nil {
+		if b, ok := readProc(procLoadavg); ok {
 			s.Load1, s.Load5, s.Load15 = ParseLoadavg(string(b))
 		}
 	}
@@ -66,7 +144,7 @@ func cpuModelCached() string {
 }
 
 func sampleMemoryLinux(s *core.SysSample) {
-	if b, err := os.ReadFile(procMeminfo); err == nil {
+	if b, ok := readProc(procMeminfo); ok {
 		ParseMeminfo(b, s)
 	}
 }
@@ -205,8 +283,8 @@ func prettyOSName() string {
 }
 
 func linuxUptime() time.Duration {
-	b, err := os.ReadFile("/proc/uptime")
-	if err != nil {
+	b, ok := readProc(procUptime)
+	if !ok {
 		return 0
 	}
 	f := strings.Fields(string(b))

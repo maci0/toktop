@@ -3,8 +3,11 @@
 package sysmon
 
 import (
+	"bytes"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -395,5 +398,46 @@ func TestSampleLinux(t *testing.T) {
 	}
 	if s.CPUModel == "" {
 		t.Error("Sample() CPUModel is empty on Linux")
+	}
+}
+
+// A required /proc read that fails is not a fact about this host: the host
+// strip then shows zero memory and no load, which is what an idle machine
+// shows. readProc must record the outage once however often Sample is called,
+// name the file, and say so again when the read works.
+func TestReadProcAuditsOutageOnceAndRecovery(t *testing.T) {
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	defer func() { audit = old }()
+
+	missing := filepath.Join(t.TempDir(), "proc", "meminfo")
+	for range 3 {
+		if _, ok := readProc(missing); ok {
+			t.Fatal("readProc reported success for a file that does not exist")
+		}
+	}
+	if n := strings.Count(lines.String(), "host vitals source unreadable"); n != 1 {
+		t.Fatalf("audited %d outage lines for three failing reads, want 1:\n%s", n, lines.String())
+	}
+	if !strings.Contains(lines.String(), "meminfo") {
+		t.Fatalf("the outage line does not name the file:\n%s", lines.String())
+	}
+
+	lines.Reset()
+	if err := os.MkdirAll(filepath.Dir(missing), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(missing, []byte("1234.56 890.12\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if b, ok := readProc(missing); !ok || len(b) == 0 {
+		t.Fatalf("readProc(%s) = %q, %v; want the file read", missing, b, ok)
+	}
+	// Recovery only speaks for a file that had failed: a first read that works
+	// is the normal case and must stay silent.
+	if n := strings.Count(lines.String(), "host vitals source readable again"); n != 1 {
+		t.Fatalf("audited %d recovery lines, want 1:\n%s", n, lines.String())
 	}
 }
