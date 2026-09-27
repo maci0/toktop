@@ -251,6 +251,47 @@ func nearestCadenceIndex(d, cadence time.Duration) int {
 	return int(q)
 }
 
+// cadenceSpan is the range of cadence-spaced columns a sample at offset d from
+// the series origin reaches: the first and the last column whose centre lies
+// within half a cadence of it. Centres are a full cadence apart and the reach
+// is half one either side, so the range spans at most two columns, and a
+// sample exactly on a boundary is counted by both of them, as a scan of every
+// column would have counted it.
+//
+// An offset no column can reach yields an empty range (first > last).
+func cadenceSpan(d, cadence time.Duration) (first, last int) {
+	if cadence <= 0 {
+		return 0, -1
+	}
+	half := cadence / 2
+	if d > math.MaxInt64-half || d < math.MinInt64+half {
+		return math.MaxInt, math.MinInt
+	}
+	return int(ceilDivDuration(d-half, cadence)), int(floorDivDuration(d+half, cadence))
+}
+
+// ceilDivDuration divides rounding toward positive infinity. Go's integer
+// division rounds toward zero, which is the floor of a positive quotient and
+// the ceiling of a negative one, so only the positive side needs a nudge.
+func ceilDivDuration(a, b time.Duration) time.Duration {
+	q := a / b
+	if a%b > 0 {
+		q++
+	}
+	return q
+}
+
+// floorDivDuration divides rounding toward negative infinity. Go's integer
+// division rounds toward zero, which would land a negative offset on the
+// column above the one it belongs to.
+func floorDivDuration(a, b time.Duration) time.Duration {
+	q := a / b
+	if a%b < 0 {
+		q--
+	}
+	return q
+}
+
 func agentHistEnd(events []core.AgentEvent) time.Time {
 	var end time.Time
 	for _, ev := range events {

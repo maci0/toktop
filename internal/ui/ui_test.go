@@ -510,6 +510,46 @@ func TestAggHistKeepsIrregularSampleSpacing(t *testing.T) {
 	}
 }
 
+// A sample exactly half a cadence from a column centre is within reach of two
+// of them, and both must carry it: the bucket rule is a half-cadence window
+// around every column, and deriving which columns a sample reaches cannot
+// quietly narrow that to one.
+func TestAggHistCountsBoundarySampleInBothColumns(t *testing.T) {
+	t0 := time.Now()
+	s := core.Snapshot{Providers: []core.ProviderSnapshot{
+		{OutStamps: []time.Time{t0.Add(-3 * time.Second), t0.Add(-1500 * time.Millisecond), t0},
+			OutHist: []float64{1, 5, 3}},
+	}}
+	got := aggHist(s, true, 4, time.Second)
+	// end is the newest sample, t0, so the centres are t0-3s .. t0. The
+	// middle sample sits exactly between the centres at t0-2s and t0-1s.
+	want := []float64{1, 5, 5, 3}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+// A sample further than half a cadence from every column contributes to none,
+// rather than being pulled into the nearest one.
+func TestAggHistDropsSamplesOutsideWindow(t *testing.T) {
+	t0 := time.Now()
+	s := core.Snapshot{Providers: []core.ProviderSnapshot{
+		// end is t0, so the centres are t0-3s .. t0 and their reach starts
+		// at t0-3.5s. The first sample is half a second outside it.
+		{OutStamps: []time.Time{t0.Add(-4 * time.Second), t0},
+			OutHist: []float64{7, 8}},
+	}}
+	got := aggHist(s, true, 4, time.Second)
+	want := []float64{0, 0, 0, 8}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
 // An engine that stopped reporting must leave its buckets empty rather than
 // dragging the whole window leftward.
 func TestAggHistIgnoresStaleEngine(t *testing.T) {

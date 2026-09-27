@@ -81,8 +81,13 @@ type tracked struct {
 	// dashboard; ViaEngine on the event is what stops aggregates adding them
 	// on top of the engine's own numbers.
 	viaEngine string
-	cancel    context.CancelFunc
-	done      chan struct{}
+	// dirNote is shortDir(proc.Dir), resolved once at discovery. Every
+	// reported event carries it, and deriving it walks the path's symlinks,
+	// which is one lstat per component on a path that cannot change while the
+	// process lives.
+	dirNote string
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 // New returns a watcher feeding rec. A nil engines function means nothing is
@@ -246,7 +251,7 @@ func (w *Watcher) discover(ctx context.Context) {
 		// event on every replay.
 		watch.SetNow(w.instant)
 		tctx, cancel := context.WithCancel(ctx)
-		t := &tracked{proc: p, watch: watch, done: make(chan struct{}), cancel: cancel}
+		t := &tracked{proc: p, dirNote: shortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()
 		if _, seen := w.tracked[p.PID]; seen {
 			w.mu.Unlock()
@@ -422,6 +427,7 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	}
 	t.last = cur
 	proc := t.proc
+	dir := t.dirNote
 	via := t.viaEngine
 	rec := w.rec
 	w.mu.Unlock()
@@ -444,7 +450,7 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 		OutputTokens:   eventTokens(out),
 		ThinkingTokens: eventTokens(think),
 		ViaEngine:      core.ClampField(core.SanitizeText(via), 128),
-		Note:           core.ClampField(core.SanitizeText(note(proc, think, via)), 512),
+		Note:           core.ClampField(core.SanitizeText(note(dir, think, via)), 512),
 	})
 }
 
@@ -468,11 +474,16 @@ func sampleID(proc agentusage.Process, at time.Time) string {
 		strconv.FormatInt(at.UnixNano(), 10)
 }
 
-// note carries what the event cannot: where the agent is working, how much of
-// the output was reasoning when the agent says so, and which monitored engine
-// already counts this output when one does.
-func note(p agentusage.Process, thinking int, via string) string {
-	s := core.ShortDir(p.Dir)
+// shortDir is core.ShortDir under the name the tracker uses, so the one
+// per-process derivation stays in one place.
+func shortDir(dir string) string { return core.ShortDir(dir) }
+
+// note carries what the event cannot: where the agent is working (already
+// shortened by the tracker, which resolved it once), how much of the output
+// was reasoning when the agent says so, and which monitored engine already
+// counts this output when one does.
+func note(dir string, thinking int, via string) string {
+	s := dir
 	if thinking > 0 {
 		s += " · " + strconv.Itoa(thinking) + " reasoning"
 	}

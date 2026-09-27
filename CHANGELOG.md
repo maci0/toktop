@@ -67,6 +67,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- The throughput charts place each history sample on the time grid instead of
+  testing every sample against every column. A 200-column frame over three
+  engines' retention went from about 7.7ms to 2.8ms to draw, and what is drawn
+  is unchanged: a sample still lands in every column within half a cadence of
+  it, boundaries included.
 - A remote's GPU row and driver versions drop when the remote stops reporting
   a GPU. The retained vitals sample was parsed into in place, so a card that
   went away (driver unloaded, vendor CLI uninstalled, the host turned into a
