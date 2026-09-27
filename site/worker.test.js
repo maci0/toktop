@@ -169,7 +169,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4124);
+    expect(bytes.byteLength).toBe(4125);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -382,7 +382,6 @@ test("hero is the captured dashboard, not an ASCII stand-in", () => {
     ),
   ).toBe(true);
   expect(identityBody.includes('src="/dashboard.png"')).toBe(true);
-  expect(identityBody.includes("https://toktop.ai/dashboard.png")).toBe(true);
   expect(identityBody.includes("decoding=")).toBe(false);
 });
 
@@ -560,8 +559,8 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(11869);
-  expect(gzipped).toBe(4124);
+  expect(identity).toBe(11878);
+  expect(gzipped).toBe(4125);
   expect(brotli).toBe(3444);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
@@ -618,7 +617,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(23_675);
+  expect(visit).toBe(17_007);
   expect(visit).toBeLessThan(25_000);
 });
 
@@ -649,9 +648,9 @@ test("hero AVIF is smaller than WebP at every width, and each width beats the ne
   expect(assetBytes("dashboard-1280.avif")).toBeLessThan(assetBytes("dashboard.avif"));
   expect(assetBytes("dashboard-768.webp")).toBeLessThan(assetBytes("dashboard-1280.webp"));
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(assetBytes("dashboard.webp"));
-  expect(assetBytes("dashboard.avif")).toBeLessThan(80_000);
-  expect(assetBytes("dashboard-1280.avif")).toBeLessThan(50_000);
-  expect(assetBytes("dashboard-768.avif")).toBeLessThan(25_000);
+  expect(assetBytes("dashboard.avif")).toBeLessThan(60_000);
+  expect(assetBytes("dashboard-1280.avif")).toBeLessThan(35_000);
+  expect(assetBytes("dashboard-768.avif")).toBeLessThan(15_000);
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(100_000);
   expect(assetBytes("dashboard-768.webp")).toBeLessThan(45_000);
   expect(assetBytes("dashboard.webp")).toBeLessThan(160_000);
@@ -659,9 +658,9 @@ test("hero AVIF is smaller than WebP at every width, and each width beats the ne
 
 // The slot a phone actually takes: a 2x screen at the 360 CSS px the figure
 // occupies needs 722 device pixels, so the srcset hands it the 768w candidate.
-// Without that entry the browser rounds up to 1280w and downloads 39,708 bytes
+// Without that entry the browser rounds up to 1280w and downloads 30,963 bytes
 // to fill 722 of them. A 768w capture covers 36% of the 1280w area and lands
-// at 51% of its weight; the ceiling is set past that, so a re-capture that
+// at 44% of its weight; the ceiling is set past that, so a re-capture that
 // drops or fattened the phone candidate fails here instead of quietly
 // doubling the weight of the visit that matters most.
 test("the phone slot is served by the 768w capture, not the 1280w one", () => {
@@ -669,14 +668,35 @@ test("the phone slot is served by the 768w capture, not the 1280w one", () => {
   expect(assetBytes("dashboard-768.webp")).toBeLessThan(assetBytes("dashboard-1280.webp") * 0.6);
 });
 
-// The <img src> fallback and the og:image both point at the PNG original, so
-// it is the one download on the page that no srcset narrows: a client with
-// neither AVIF nor WebP pays all of it. Nothing else measures that path, so a
-// re-capture at a higher scale would double the worst-case hero weight with CI
-// green. The ceiling is above today's 303,865 and well under the ~14 KB the
-// rest of the page fits in, so it records the gap instead of hiding it.
+// The <img src> fallback is the one download on the page that no srcset
+// narrows: a client with neither AVIF nor WebP pays all of it. Nothing else
+// measures that path, so a re-capture at a higher scale would double the
+// worst-case hero weight with CI green. The ceiling is above today's 303,865
+// and well under the ~14 KB the rest of the page fits in, so it records the
+// gap instead of hiding it.
 test("the PNG fallback stays bounded", () => {
   expect(assetBytes("dashboard.png")).toBeLessThan(320_000);
+});
+
+// The share card is the same frame at the width a card is laid out at. The
+// og:image crawlers fetch it on every share, so the pixels past 1200 are
+// bytes they download and never draw: the 3240px original is 304 KB of which
+// a 1200px palette PNG shows 69 KB. This pins both halves, so a re-capture
+// that stops producing the card (or stops quantizing it) fails here instead
+// of shipping a share preview four times its size.
+test("the share card is the capture at card width, not the full-size original", () => {
+  const card = readFileSync(join(PUBLIC, "dashboard-card.png"));
+  // IHDR width and height, big-endian at the fixed offset 16: every PNG
+  // starts with an 8-byte signature, a 4-byte length, the "IHDR" type, then
+  // the two fields.
+  const view = new DataView(card.buffer, card.byteOffset, card.byteLength);
+  expect([view.getUint32(16), view.getUint32(20)]).toEqual([1200, 704]);
+  expect(assetBytes("dashboard-card.png")).toBeLessThan(80_000);
+  expect(assetBytes("dashboard-card.png")).toBeLessThan(
+    assetBytes("dashboard.png") * 0.3,
+  );
+  expect(identityBody).toContain(`og:image" content="${ORIGIN}/dashboard-card.png"`);
+  expect(identityBody).toContain(`twitter:image" content="${ORIGIN}/dashboard-card.png"`);
 });
 
 function assetsEnv(bodies) {

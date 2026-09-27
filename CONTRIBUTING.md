@@ -118,23 +118,34 @@ magick docs/images/dashboard.png -strip -resize 1280x -quality 82 \
   site/public/dashboard-1280.webp
 magick docs/images/dashboard.png -strip -resize 768x -quality 82 \
   site/public/dashboard-768.webp
+magick docs/images/dashboard.png -strip -resize 1200x -colors 128 \
+  PNG8:site/public/dashboard-card.png
 magick docs/images/dashboard.png -strip -resize 1920x .scratch/hero-1920.png
 magick docs/images/dashboard.png -strip -resize 1280x .scratch/hero-1280.png
 magick docs/images/dashboard.png -strip -resize 768x .scratch/hero-768.png
-avifenc -q 50 -s 2 -y 444 --ignore-exif --ignore-xmp \
+avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
   .scratch/hero-1920.png site/public/dashboard.avif
-avifenc -q 50 -s 2 -y 444 --ignore-exif --ignore-xmp \
+avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
   .scratch/hero-1280.png site/public/dashboard-1280.avif
-avifenc -q 50 -s 2 -y 444 --ignore-exif --ignore-xmp \
+avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
   .scratch/hero-768.png site/public/dashboard-768.avif
 ```
 
 AVIF is what browsers that speak it download (about half the WebP). The three
 widths match the `srcset` in `site/worker.js`: 768w is the ~720px slot,
-1280w covers phones at 3x and desktops at 1x, 1920w is the 2x desktop. The
-PNG stays at capture resolution for
-share cards. `bun test site/` pins the HTML transfer sizes and the AVIF/WebP
-byte ceilings, so a recapture that blows the budget fails there.
+1280w covers phones at 3x and desktops at 1x, 1920w is the 2x desktop.
+`-q 40` rather than 50: the capture is flat color and hard edges, and at 1:1
+on the densest text the two are indistinguishable, while 40 takes a third off
+the phone capture and a quarter off the desktop one. Compare a crop before
+moving it further; the gain below 40 is visible.
+`dashboard-card.png` is the share card, not a fifth hero candidate: the
+`og:image` crawlers fetch one URL and draw it at card size, so it is the
+capture at 1200px, the width a `summary_large_image` is laid out at. The
+capture is 262 flat colors, so `-colors 128` is not a visible cut and takes
+it from 303,865 bytes to 68,924. The full-size PNG stays as the `<img src>`
+fallback for a client with neither AVIF nor WebP. `bun test site/` pins the
+HTML transfer sizes, the AVIF/WebP byte ceilings and the card's width and
+weight, so a recapture that blows the budget fails there.
 
 ## Make targets
 

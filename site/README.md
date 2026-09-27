@@ -39,7 +39,7 @@ drifts, on a one-off hex in a rule, and on a violet anywhere in the three.
 The Worker answers `/health` with `ok` for uptime checks, serves the
 dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 `/dashboard-1280.avif`, `/dashboard-768.avif`, `/dashboard.webp`,
-`/dashboard-1280.webp` and `/dashboard-768.webp`,
+`/dashboard-1280.webp`, `/dashboard-768.webp` and `/dashboard-card.png`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). Wrong methods are `405` with `Allow: GET, HEAD`. `/health` reports
 `degraded` with a `503` while the asset binding is missing, rather than `ok`:
@@ -72,7 +72,7 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,124 bytes rather than 11,869 bytes in the local Worker response test.
+transfers 4,125 bytes rather than 11,878 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
@@ -124,12 +124,13 @@ answer says so, and neither names a broken deploy.
 ## Performance budget
 
 One request for the page, no JavaScript, no webfonts, inline CSS only. The
-hero is the real dashboard capture: AVIF (72,812 bytes at 1920px, 39,708 at
-1280px, 20,231 at 768px), then WebP (148,050 / 81,540 / 36,130 bytes), then
-the PNG share-card original. A phone lays the figure out at about 360 CSS px,
+hero is the real dashboard capture: AVIF (55,392 bytes at 1920px, 30,963 at
+1280px, 13,563 at 768px), then WebP (148,050 / 81,540 / 36,130 bytes), then
+the full-size PNG for a client that speaks neither. A phone lays the figure
+out at about 360 CSS px,
 so the 768w candidate is the slot a 2x screen takes: without it every phone
-rounded up to 1280w and fetched 39,708 bytes to fill 722 of them, which is the
-49% the 768w AVIF saves. A 3x phone (1083 device pixels) and a 1x desktop
+rounded up to 1280w and fetched 30,963 bytes to fill 722 of them, which is the
+56% the 768w AVIF saves. A 3x phone (1083 device pixels) and a 1x desktop
 (1216) still take 1280w, and 1920w remains the 2x desktop slot.
 For public visitors, including mobile networks, `sizes` follows the body
 gutters, figure borders, and 76rem column cap rather than declaring a desktop
@@ -148,14 +149,23 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 11,869 bytes identity / 4,124 gzip /
+against the current source with Bun 1.4.2: 11,878 bytes identity / 4,125 gzip /
 3,444 brotli for the HTML, still inside the
 ~14 KB initial congestion window. A phone's whole visit is those 3,444 bytes
-plus the 20,231-byte 768w capture, 23,675 bytes in two requests; that pair has
+plus the 13,563-byte 768w capture, 17,007 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no
-srcset narrows, so it carries a ceiling of its own in the same test. The budget
+srcset narrows, so it carries a ceiling of its own in the same test.
+
+The share card is a fourth file, not a fifth srcset candidate: the og
+crawlers fetch the one URL in `og:image` and draw it at card size, so
+`dashboard-card.png` is the capture at 1200px, the width a
+`summary_large_image` is laid out at. The capture is 262 flat colors, so the
+palette PNG shows the same frame in 68,924 bytes where the 3240px original
+takes 303,865: the pixels past 1200 were bytes every share downloaded and
+never drew. Its width and weight are pinned in the same test, so a re-capture
+that stops producing it fails there. The budget
 is pinned by a test, so drift fails `bun test site/`; numbers above are
 re-measurable with it:
 

@@ -13,7 +13,7 @@ function htmlForWire(source) {
 // A phone lays the figure out at about 360 CSS px, so a 2x screen asks for
 // roughly 720 device pixels: 768w is that slot, and 1280w is what a 3x phone
 // and a 1x desktop need. Without the 768w candidate every phone fetched the
-// 1280w capture, 39,708 bytes for 722 pixels of it. 1920w is the 2x desktop
+// 1280w capture, 30,963 bytes for 722 pixels of it. 1920w is the 2x desktop
 // slot.
 // The img omits decoding=async so the browser does not postpone the LCP decode.
 const HERO_SIZES =
@@ -22,6 +22,14 @@ const HERO_AVIF_SRCSET =
   "/dashboard-768.avif 768w, /dashboard-1280.avif 1280w, /dashboard.avif 1920w";
 const HERO_WEBP_SRCSET =
   "/dashboard-768.webp 768w, /dashboard-1280.webp 1280w, /dashboard.webp 1920w";
+
+// The share card is a separate file, not another srcset candidate: a crawler
+// reading og:image gets one URL and renders it at its own size, so the only
+// question the width answers is how many pixels it is worth shipping. 1200px
+// is the width a summary_large_image card is laid out at, and the capture is
+// 262 flat colors, so a downscaled palette PNG shows the same frame in 69 KB
+// where the 3240px original takes 304 KB.
+const SHARE_CARD_PATH = "/dashboard-card.png";
 
 // The palette, named once. toktop is a terminal: the page is a picture of one,
 // and the same hexes are the TUI's (internal/ui/theme.go) and the capture
@@ -69,13 +77,16 @@ const HTML = htmlForWire(`<!doctype html>
 <meta property="og:type" content="website">
 <meta property="og:url" content="https://toktop.ai">
 <!-- the real dashboard, not a generated stand-in: share cards should show
-     the product the page is about -->
-<meta property="og:image" content="https://toktop.ai/dashboard.png">
-<meta property="og:image:width" content="3240">
-<meta property="og:image:height" content="1900">
+     the product the page is about. The card is the capture at 1200px, the
+     width a summary_large_image is laid out at: the og crawlers that fetch
+     this URL would otherwise pull the 3240px original, 304 KB where 69 KB
+     shows exactly the same frame. -->
+<meta property="og:image" content="https://toktop.ai${SHARE_CARD_PATH}">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="704">
 <meta property="og:image:alt" content="toktop running in a terminal: engine rows with throughput and KV-cache pressure beside an agent feed">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:image" content="https://toktop.ai/dashboard.png">
+<meta name="twitter:image" content="https://toktop.ai${SHARE_CARD_PATH}">
 <!-- the icon is the h1 cursor block in the accent and panel colors, not a placeholder emoji -->
 <link rel="icon" href="${FAVICON}">
 <style>
@@ -588,6 +599,7 @@ function srcsetPaths(srcset) {
 
 const IMAGE_PATHS = new Set([
   "/dashboard.png",
+  SHARE_CARD_PATH,
   ...srcsetPaths(HERO_AVIF_SRCSET),
   ...srcsetPaths(HERO_WEBP_SRCSET),
 ]);
