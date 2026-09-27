@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 
@@ -111,6 +112,9 @@ func enrichLMStudio(ctx context.Context, base string, m *Metrics) bool {
 		if d.State != "" && !strings.EqualFold(d.State, "loaded") {
 			continue
 		}
+		if d.ID == "" {
+			continue // a listing entry with no id names no model
+		}
 		mi := core.ModelInfo{Name: d.ID}
 		if d.MaxContextLen > 0 {
 			mi.CtxMax = uint64(d.MaxContextLen)
@@ -140,9 +144,16 @@ func enrichLemonade(ctx context.Context, base string, m *Metrics) bool {
 	case len(h.AllLoaded) > 0:
 		m.Models = m.Models[:0]
 		for _, mm := range h.AllLoaded {
+			if mm.ModelName == "" {
+				continue
+			}
 			mi := core.ModelInfo{Name: mm.ModelName}
 			if mm.CtxSize > 0 {
-				mi.CtxMax = core.SatUint(mm.CtxSize)
+				// CtxMax is rendered as an int64, so a float ctx_size
+				// past that range would read back as a negative context
+				// length. The two listings above decode an int64 and so
+				// cannot reach it; this one arrives as a float.
+				mi.CtxMax = min(core.SatUint(mm.CtxSize), uint64(math.MaxInt64))
 			}
 			m.Models = append(m.Models, mi)
 		}

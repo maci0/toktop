@@ -41,6 +41,9 @@ func (o *Ollama) poll(ctx context.Context) (*Metrics, error) {
 		if name == "" {
 			name = mm.Model
 		}
+		if name == "" {
+			continue
+		}
 		m.Models = append(m.Models, core.ModelInfo{Name: name, SizeVRAM: mm.SizeVRAM})
 	}
 	m.Version = o.version.fetch(ctx, o.base)
