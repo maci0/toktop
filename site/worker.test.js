@@ -19,6 +19,8 @@ const PALETTE_ENTRY_RE = /\d+/g;
 const ANSI16_BLOCK_RE = /^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m;
 const ANSI16_ENTRY_RE = /^\s*(\d+): (\(\d+, \d+, \d+\))/gm;
 const EDGE_DUR_RE = /^edge;dur=(\d+)$/;
+// A border on :hover draws a second line under a link's underline.
+const HOVER_BORDER_RE = /a:hover[^}]*border-/;
 const DUR_SUFFIX_RE = /dur=\d+(?:\.\d+)?$/;
 const IMG_TAG_RE = /<img\b[^>]*>/g;
 const IMG_SIZE_RE = /width="(\d+)" height="(\d+)"/;
@@ -249,7 +251,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4346);
+    expect(bytes.byteLength).toBe(4329);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -530,6 +532,44 @@ test("the type scale is named, ordered, and the one place a size is written", ()
   }
 });
 
+// The order test above reads px and rem as the same 16px root, so a scale that
+// mixed them still passed it. The ratios are the whole point of the scale, and
+// they only hold while every step moves together: a step in pixels keeps its
+// size while the three above it follow the reader's browser text size, which
+// doubles the h1 over an unchanged body step and leaves the eye with a level
+// it cannot place. One unit, all six steps.
+test("every step of the type scale is in the same unit", () => {
+  const steps = [...identityBody.matchAll(/--fs-([\w-]+):\s*([\d.]+)(px|rem)/g)];
+  expect(steps).toHaveLength(6);
+  expect([...new Set(steps.map(([, , , unit]) => unit))]).toEqual(["rem"]);
+});
+
+// A link is underlined at rest so color is not its only cue, and hover
+// thickens that underline. A second device alongside it, a border that filled
+// on hover, drew a rule two pixels under the one already there: every link the
+// pointer crossed read as a rendering fault. The underline is the whole cue, so
+// nothing else may draw under a link.
+test("one underline device carries the link, at rest and on hover", () => {
+  expect(identityBody).not.toMatch(HOVER_BORDER_RE);
+  expect([...identityBody.matchAll(/text-decoration-thickness/g)]).toHaveLength(2);
+  expect([...identityBody.matchAll(/text-decoration:\s*underline/g)]).toHaveLength(1);
+  // The wordmark and the skip link are the two links that opt out of the
+  // underline, so the count above stays the count of the body links.
+  expect([...identityBody.matchAll(/text-decoration:\s*none/g)]).toHaveLength(2);
+});
+
+// The hero's three refusals are its pitch, and the footer repeated the same
+// list two screens lower, where a reader who had scrolled past the hero had
+// already read it. A footer line that says nothing the page has not already
+// said is there to fill the bar, which is what makes a footer read as
+// furniture. The footer names the repository and the license and stops.
+test("the footer says what the page has not already said", () => {
+  const footer = identityBody.slice(identityBody.indexOf("<footer>"));
+  expect(footer.includes("no telemetry, no account, no daemon")).toBe(false);
+  expect(footer.includes("github.com/maci0/toktop")).toBe(true);
+  expect(footer.includes("MIT licensed")).toBe(true);
+});
+
 // The second accent is cYellow in the terminal, where amber is pressure. On
 // the page it marks the pane about pressure and nothing else: a second accent
 // alternated by position is decoration, and decoration is what makes a page
@@ -698,9 +738,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12602);
-  expect(gzipped).toBe(4346);
-  expect(brotli).toBe(3663);
+  expect(identity).toBe(12535);
+  expect(gzipped).toBe(4329);
+  expect(brotli).toBe(3653);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -759,7 +799,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_240);
+  expect(visit).toBe(14_230);
   expect(visit).toBeLessThan(25_000);
 });
 

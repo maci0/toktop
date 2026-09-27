@@ -129,9 +129,13 @@ const HTML = htmlForWire(`<!doctype html>
        section start has to be legible as one. The page is monospaced, so a
        level is read as size alone. The h1 is exactly double the h2, and every
        step below that one is within a few pixels of the next, so no level on
-       the page can be read as the level under it. */
+       the page can be read as the level under it. Every step is in rem, the
+       last three included: a step in pixels holds its size while the three
+       above it follow the reader's browser text size, and the ratio the scale
+       is built on, the one that makes a level findable, is the first thing
+       such a reader loses. */
     --fs-h1: 2.6rem; --fs-h2: 1.3rem; --fs-lead: 1.05rem;
-    --fs-body: 15px; --fs-small: 13.5px; --fs-micro: 12.5px;
+    --fs-body: 0.9375rem; --fs-small: 0.84375rem; --fs-micro: 0.78125rem;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -164,7 +168,7 @@ const HTML = htmlForWire(`<!doctype html>
     align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
     background: var(--bg); border-bottom: 1px solid var(--line); }
   .brand { font-weight: 700; font-size: var(--fs-lead); text-decoration: none; color: var(--fg);
-    border-bottom: 0; white-space: nowrap; }
+    white-space: nowrap; }
   .brand .cursor { color: var(--accent); }
   nav { display: flex; gap: 1.1rem; font-size: var(--fs-small); margin-left: auto; }
   nav a { color: var(--dim); white-space: nowrap; padding: .3rem 0; }
@@ -228,10 +232,13 @@ const HTML = htmlForWire(`<!doctype html>
   kbd { border: 1px solid var(--line); border-radius: 4px;
     padding: 0 .4rem; font-family: inherit; font-size: var(--fs-micro); background: var(--bg); }
   /* Links must not be identified by color alone (WCAG 1.4.1): underline at
-     rest, not just on hover. */
+     rest, not just on hover. One device carries it. A transparent border that
+     filled on hover drew a second rule two pixels under the underline already
+     there, so every link the pointer crossed read as a rendering fault rather
+     than as a link; hover thickens the underline it already has instead. */
   a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px;
-      border-bottom: 1px solid transparent; }
-  a:hover { border-bottom-color: currentColor; }
+      text-decoration-thickness: 1px; }
+  a:hover { text-decoration-thickness: 2px; }
   footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
            color: var(--dim); font-size: var(--fs-small); display: flex; gap: 1.5rem; flex-wrap: wrap; }
   /* A small/1.6 line box is ~21px tall, under the 24px target-size floor
@@ -371,7 +378,6 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
   <footer>
     <a href="https://github.com/maci0/toktop">github.com/maci0/toktop</a>
     <span>MIT licensed</span>
-    <span>no telemetry, no account, no daemon</span>
   </footer>
 </main>
 </body>
@@ -462,8 +468,8 @@ const COMPRESSIBLE = new Map([
   ["gzip", "gzip"],
 ]);
 
-// The same three codings, smallest body of this page first: brotli 3,663,
-// gzip 4,346, zstd 4,586 bytes. The page is a constant, so those sizes are
+// The same three codings, smallest body of this page first: brotli 3,653,
+// gzip 4,329, zstd 4,566 bytes. The page is a constant, so those sizes are
 // constants too, and ranking by them lets a request build only the coding it
 // is about to send instead of all three to compare them. zstd lands behind
 // gzip here because the page is short English words and markup, which is not
