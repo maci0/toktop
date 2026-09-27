@@ -7,6 +7,20 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
+// contrastRatio is the WCAG contrast ratio between two colors; ok is false
+// when either side is not #rrggbb (see relLuminance).
+func contrastRatio(a, b lipgloss.Color) (ratio float64, ok bool) {
+	la, oka := relLuminance(a)
+	lb, okb := relLuminance(b)
+	if !oka || !okb {
+		return 0, false
+	}
+	if la < lb {
+		la, lb = lb, la
+	}
+	return (la + 0.05) / (lb + 0.05), true
+}
+
 // contrastRatioT is contrastRatio with a fatal on non-hex input.
 func contrastRatioT(t testing.TB, a, b lipgloss.Color) float64 {
 	t.Helper()

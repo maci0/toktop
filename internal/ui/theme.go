@@ -195,17 +195,3 @@ func contrastAgainstBaseLum(lc float64) float64 {
 	}
 	return (lc + 0.05) / (baseLum + 0.05)
 }
-
-// contrastRatio returns the WCAG contrast ratio between two colors; ok is
-// false when either side is not #rrggbb (see relLuminance).
-func contrastRatio(a, b lipgloss.Color) (ratio float64, ok bool) {
-	la, oka := relLuminance(a)
-	lb, okb := relLuminance(b)
-	if !oka || !okb {
-		return 0, false
-	}
-	if la < lb {
-		la, lb = lb, la
-	}
-	return (la + 0.05) / (lb + 0.05), true
-}

@@ -1295,7 +1295,7 @@ func (m Model) renderHelp() string {
 		return clipBlock(box, m.w, m.h)
 	}
 	placed := lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
-	return clipFrame(placed, m.w)
+	return clipBlock(placed, m.w, -1)
 }
 
 // helpRows is the in-app key reference. Compact panes already hide p and t
@@ -1419,15 +1419,11 @@ func composeFrame(body, footer string, w, h int) string {
 	if gap := h - lipgloss.Height(body) - lipgloss.Height(footer) - 1; gap > 0 {
 		body += strings.Repeat("\n", gap)
 	}
-	return clipFrame(body+"\n"+footer, w)
-}
-
-func clipFrame(s string, w int) string {
-	return clipBlock(s, w, -1)
+	return clipBlock(body+"\n"+footer, w, -1)
 }
 
 // clipBlock clips s to at most w visible columns and, when h >= 0, at most
-// h rows. h < 0 means no row cap (clipFrame). Extra rows are dropped from
+// h rows. h < 0 means no row cap. Extra rows are dropped from
 // the bottom so a header or title already on screen stays put.
 func clipBlock(s string, w, h int) string {
 	if h == 0 || w < 0 {
