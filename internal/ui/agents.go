@@ -288,7 +288,8 @@ func nearestCadenceIndex(d, cadence time.Duration) int {
 		q--
 	}
 	// q is a Duration, so the guard above already kept it inside the int range
-	// a 64-bit int holds: no second clamp is needed.
+	// a 64-bit int holds. Every release platform is 64-bit (see PLATFORMS in
+	// the Makefile); a 32-bit build would need its own clamp here.
 	return int(q)
 }
 

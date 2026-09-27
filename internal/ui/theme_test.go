@@ -2,6 +2,7 @@ package ui
 
 import (
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
@@ -125,5 +126,37 @@ func TestHeatRampMeetsContrastFloors(t *testing.T) {
 func TestHeatColorNaN(t *testing.T) {
 	if got := heatColor(math.NaN()); got != cDim {
 		t.Errorf("heatColor(NaN) = %v, want cDim (%v)", got, cDim)
+	}
+}
+
+// Both fade helpers convert a blended channel straight into an index of
+// linearChannel, which has 256 entries. A factor past 1 would index past the
+// end of it, and a negative or NaN factor converts to a huge uint64 and does
+// the same, so an unrepresentable factor has to clamp instead of indexing.
+// clamp01 sends everything below zero (NaN included) to 0 and everything
+// above one to 1.
+func TestFadeClampsFactorToUnitRange(t *testing.T) {
+	for _, f := range []float64{1.5, 2, 1e30, math.Inf(1)} {
+		if got := fadeColor(cRed, f); got != string(cRed) {
+			t.Errorf("fadeColor(%v) = %q, want the undimmed %q", f, got, cRed)
+		}
+		if got := fadeClamped(cRed, f, minGraphicContrast); got != cRed {
+			t.Errorf("fadeClamped(%v) = %q, want the undimmed %q", f, got, cRed)
+		}
+	}
+	for _, f := range []float64{-0.5, math.NaN()} {
+		if got := fadeColor(cRed, f); got != "#000000" {
+			t.Errorf("fadeColor(%v) = %q, want #000000", f, got)
+		}
+		// fadeClamped bisects for the shallowest factor still above the
+		// contrast floor, so the result is whichever hex that search
+		// lands on. What matters here is only that it answers at all:
+		// before the clamp it indexed linearChannel out of bounds.
+		if got := fadeClamped(cRed, f, minGraphicContrast); !strings.HasPrefix(string(got), "#") || len(got) != 7 {
+			t.Errorf("fadeClamped(%v) = %q, want a #rrggbb color", f, got)
+		}
+	}
+	if got := fadeColor(cRed, 0); got != "#000000" {
+		t.Errorf("fadeColor(0) = %q, want #000000", got)
 	}
 }

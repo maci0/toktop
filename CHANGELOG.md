@@ -126,6 +126,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- An agent's rate spans its first to its last event in time, not to the last
+  event the walk happened to reach. The feed is not time-ordered: the ingest
+  endpoint accepts any `ts`, and a producer's clock can step. One out-of-order
+  stamp used to shorten the span, or turn it negative and drop the rate
+  entirely, so an agent that reported 80 tok/s a moment ago could read as
+  having no rate at all.
+
 - Failures that reported "nothing happened" now reach the audit log. A crush
   or opencode store that exists and cannot be read, a dsh transcript frame
   that will not decode, a process listing with no last good snapshot, a

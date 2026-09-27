@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 func init() {
@@ -32,8 +34,13 @@ const windowsTicksPerJiffy = 1e4 / clkTck
 // windowsCPUTicks is a process's cumulative kernel plus user time in jiffies.
 // Without it every process reports 0% CPU on windows while linux and darwin
 // report the real figure, which the engine panels print per process.
+//
+// The sum saturates: the two CIM fields are separate 100-ns counters and
+// their sum can pass MaxUint64, and the wrapped value becomes the sampler's
+// new baseline, so the process would read 0% until its real tick count
+// overtook it.
 func windowsCPUTicks(kernel, user uint64) uint64 {
-	return (kernel + user) / windowsTicksPerJiffy
+	return core.SatAddU64(kernel, user) / windowsTicksPerJiffy
 }
 
 // windowsShell is the PowerShell CIM runs under, resolved once. See pickShell

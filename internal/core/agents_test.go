@@ -314,3 +314,40 @@ func BenchmarkSummarize(b *testing.B) {
 		_ = Summarize(events, now)
 	}
 }
+
+// The feed is not time-ordered: the ingest endpoint accepts any ts, and a
+// producer's clock can step. A rate's span runs first to last event, so
+// taking the last event walked instead of the latest in time turns one
+// out-of-order stamp into a span that is short, or negative and dropped.
+func TestSummarizeSpanIsFirstToLastInTimeNotWalkOrder(t *testing.T) {
+	now := time.Unix(1_700_000_100, 0)
+	// Same three events as the ordered fixture, delivered newest first. The
+	// span is 2s either way, so the rate is 80 out / 200 prompt tok/s.
+	events := []AgentEvent{
+		{At: now.Add(-1 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 15},
+		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 10},
+		{At: now.Add(-500 * time.Millisecond), Agent: "claude", OutputTokens: 0, PromptTokens: 0, ViaEngine: "127.0.0.1:11434"},
+	}
+	sum := Summarize(events, now)
+	if len(sum.Rates) != 1 {
+		t.Fatalf("rates = %d entries, want 1", len(sum.Rates))
+	}
+	r := sum.Rates[0]
+	// Every event counts toward the span, so it runs -2s to -0.5s: 1.5s.
+	if math.Abs(r.TokPS-80/1.5) > 1e-9 || math.Abs(r.PromptPS-200/1.5) > 1e-9 {
+		t.Errorf("claude = %v/%v tok/s, want %v/%v", r.TokPS, r.PromptPS, 80/1.5, 200/1.5)
+	}
+	// Last is the latest event in time (the via event at -0.5s), not the
+	// last one walked (-2s).
+	if want := now.Add(-500 * time.Millisecond); !r.Last.Equal(want) {
+		t.Errorf("claude Last = %v, want the latest event at %v", r.Last, want)
+	}
+	// Unattributed only: the via event is excluded from Own, leaving the
+	// same two events and the same 2s span.
+	if len(sum.Own) != 1 {
+		t.Fatalf("own = %d entries, want 1", len(sum.Own))
+	}
+	if o := sum.Own[0]; o.TokPS != 80 || o.PromptPS != 200 {
+		t.Errorf("claude own = %v/%v tok/s, want 80/200", o.TokPS, o.PromptPS)
+	}
+}

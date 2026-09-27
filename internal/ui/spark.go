@@ -55,6 +55,7 @@ func fadeColor(c lipgloss.Color, f float64) string {
 	if !ok {
 		return string(c)
 	}
+	f = clamp01(f)
 	return formatHexRGB(
 		uint64(float64(r)*f),
 		uint64(float64(g)*f),
@@ -92,7 +93,11 @@ func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
 	}
 	rf, gf, bf := float64(r0), float64(g0), float64(b0)
 
+	// The three conversions index linearChannel, so a factor outside 0..1
+	// (or NaN) would index past the array rather than blend. clamp01 also
+	// pins the bisection below to a range lumOf can answer for.
 	lumOf := func(factor float64) (float64, uint64, uint64, uint64) {
+		factor = clamp01(factor)
 		r := uint64(rf * factor)
 		g := uint64(gf * factor)
 		b := uint64(bf * factor)

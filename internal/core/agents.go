@@ -120,16 +120,29 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 		a.tokens = SatAddPos(a.tokens, ev.OutputTokens)
 		a.prompt = SatAddPos(a.prompt, ev.PromptTokens)
 		a.thinking = SatAddPos(a.thinking, ev.ThinkingTokens)
-		a.last = ev.At
+		// The feed is not ordered by time: the remote ingest endpoint
+		// accepts any ts, and a producer's clock can step. Track the
+		// extremes rather than the last event walked, or a single
+		// out-of-order stamp shortens the span below and the rate with it.
+		if ev.At.Before(a.first) {
+			a.first = ev.At
+		}
+		if ev.At.After(a.last) {
+			a.last = ev.At
+		}
 		a.via = ev.ViaEngine
 		a.n++
 		if ev.ViaEngine == "" {
 			if a.ownN == 0 {
 				a.ownFirst = ev.At
+			} else if ev.At.Before(a.ownFirst) {
+				a.ownFirst = ev.At
 			}
 			a.ownTokens = SatAddPos(a.ownTokens, ev.OutputTokens)
 			a.ownPrompt = SatAddPos(a.ownPrompt, ev.PromptTokens)
-			a.ownLast = ev.At
+			if ev.At.After(a.ownLast) {
+				a.ownLast = ev.At
+			}
 			a.ownN++
 		}
 	}
