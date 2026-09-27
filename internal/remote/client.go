@@ -337,6 +337,11 @@ func (c *Client) probe(wait time.Duration) bool {
 
 const stderrBufferBytes = 4096
 
+// stderrDrainGrace bounds how long a cancelled or timed-out Run waits for the
+// command's own Wait to join the stderr copier. Well under runTimeout, so the
+// wait can never turn a bounded command into an unbounded one.
+const stderrDrainGrace = time.Second
+
 // forwardBindAttempts bounds the rebind loop that steers a kernel-chosen
 // ephemeral port away from the forwarded set.
 const forwardBindAttempts = 8
@@ -407,6 +412,15 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 		return r.out, nil
 	case <-ctx.Done():
 		sess.Close()
+		// Wait (inside Output) joins the goroutine that copies the remote
+		// stderr, so the tail below is only complete once Output has
+		// returned. Closing the session is what makes it return; the grace
+		// bounds the wait so a wedged channel cannot hold Run past its own
+		// deadline, and costs nothing when the join is prompt.
+		select {
+		case <-done:
+		case <-time.After(stderrDrainGrace):
+		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", fmt.Errorf("remote command timed out: %w%s", ctx.Err(), stderrTail(stderr.String()))
 		}
