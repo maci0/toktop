@@ -22,6 +22,18 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+// waitCeiling bounds every poll in this file. It is a ceiling on a broken
+// watcher's runtime, not a budget for a working one: conditions are polled
+// every 20ms and return as soon as they hold, so a loaded machine only
+// lengthens the failing path, never a passing one.
+const waitCeiling = 30 * time.Second
+
+// Stub agents sleep this long. Every test that starts one kills it in a
+// defer, so the sleep only has to outlast waitCeiling rather than pace the
+// assertion: a stub that exits on its own can vanish before discovery sees
+// it on a machine that is running the whole suite at once.
+const stubSleep = 120
+
 // recorder collects what the watcher reports.
 type recorder struct {
 	mu     sync.Mutex
@@ -41,13 +53,20 @@ func (r *recorder) all() []core.AgentEvent {
 	return append([]core.AgentEvent(nil), r.events...)
 }
 
-// recOutput sums the output tokens reported so far.
-func recOutput(r *recorder) int64 {
-	var n int64
+// forPID returns the events one discovered process produced. Discovery reads
+// the real /proc, so a developer's own agents, or another checkout's test
+// stubs, are followed and reported alongside; an assertion about one stub
+// must not see them. sampleID leads with the PID, which is what the test
+// holds.
+func (r *recorder) forPID(pid int) []core.AgentEvent {
+	prefix := "aw:" + strconv.Itoa(pid) + ":"
+	var out []core.AgentEvent
 	for _, ev := range r.all() {
-		n += ev.OutputTokens
+		if strings.HasPrefix(ev.ID, prefix) {
+			out = append(out, ev)
+		}
 	}
-	return n
+	return out
 }
 
 func (w *Watcher) following(pid int) bool {
@@ -97,7 +116,7 @@ func TestWatchesARunningAgent(t *testing.T) {
 	// A process named like the agent, working in the directory the transcript
 	// claims. Nothing about it cooperates with toktop.
 	bin := filepath.Join(t.TempDir(), "claude")
-	script := "#!/bin/sh\nsleep 5\n"
+	script := "#!/bin/sh\nsleep " + strconv.Itoa(stubSleep) + "\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -118,16 +137,24 @@ func TestWatchesARunningAgent(t *testing.T) {
 	go w.Run(ctx)
 
 	// Give discovery a chance to find the process, then let the agent "spend".
-	waitFor(t, 3*time.Second, func() bool { return w.following(cmd.Process.Pid) })
+	waitFor(t, waitCeiling, func() bool { return w.following(cmd.Process.Pid) })
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 120))
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 240))
 
+	pid := cmd.Process.Pid
 	// Both lines land in one read or split across two, so the first event can
-	// carry only the 120. Wait for the full spend before summing.
-	waitFor(t, 3*time.Second, func() bool { return recOutput(rec) == 360 })
+	// carry only the 120. Wait for the full spend before summing. Scoped to
+	// this process, because discovery also follows whatever else is running.
+	waitFor(t, waitCeiling, func() bool {
+		var n int64
+		for _, ev := range rec.forPID(pid) {
+			n += ev.OutputTokens
+		}
+		return n == 360
+	})
 
 	var total int64
-	for _, ev := range rec.all() {
+	for _, ev := range rec.forPID(pid) {
 		if ev.Agent != "claude" {
 			t.Fatalf("wrong agent: %+v", ev)
 		}
@@ -271,7 +298,7 @@ func TestForgetsExitedAgents(t *testing.T) {
 	// can be gone from /proc before the tick lands, and the test then fails
 	// on a machine that is merely slow to start a goroutine.
 	bin := filepath.Join(t.TempDir(), "codex")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep "+strconv.Itoa(stubSleep)+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bin)
@@ -289,10 +316,15 @@ func TestForgetsExitedAgents(t *testing.T) {
 	// Scoped to this process: a developer machine usually has real agents
 	// running, so a global count would never reach zero.
 	pid := cmd.Process.Pid
-	waitFor(t, 3*time.Second, func() bool { return w.following(pid) })
-	_ = cmd.Process.Kill()
+	waitFor(t, waitCeiling, func() bool { return w.following(pid) })
+	// Killed, not waited out: the test needs the process gone, and a
+	// wall-clock exit would put a stub lifetime between "followed" and
+	// "exited".
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
 	_, _ = cmd.Process.Wait()
-	waitFor(t, 3*time.Second, func() bool { return !w.following(pid) })
+	waitFor(t, waitCeiling, func() bool { return !w.following(pid) })
 }
 
 // TestSilentAgentProducesNoEvents is the honesty half: an agent that writes no
@@ -304,7 +336,7 @@ func TestSilentAgentProducesNoEvents(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	bin := filepath.Join(t.TempDir(), "claude")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 5\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep "+strconv.Itoa(stubSleep)+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bin)
@@ -323,7 +355,7 @@ func TestSilentAgentProducesNoEvents(t *testing.T) {
 	ctx := t.Context()
 	go w.Run(ctx)
 
-	waitFor(t, 3*time.Second, func() bool { return w.following(cmd.Process.Pid) })
+	waitFor(t, waitCeiling, func() bool { return w.following(cmd.Process.Pid) })
 	// Followed, with nothing written to the transcript. A few read cycles
 	// must stay silent; checking before discovery would pass even if a
 	// silent agent invented events once it was tracked.
@@ -425,7 +457,8 @@ func waitFor(t *testing.T, limit time.Duration, cond func() bool) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("condition not met within %s", limit)
+	_, file, line, _ := runtime.Caller(1)
+	t.Fatalf("condition not met within %s (%s:%d)", limit, filepath.Base(file), line)
 }
 
 // TestEngineTakesPrecedence is the double-counting guard: an agent generating
@@ -458,7 +491,7 @@ func TestEngineTakesPrecedence(t *testing.T) {
 
 	// An agent that holds a connection to that engine while it works.
 	bin := filepath.Join(t.TempDir(), "claude")
-	script := "#!/bin/sh\nexec 3<>/dev/tcp/127.0.0.1/" + port(t, ln) + "\nsleep 5\n"
+	script := "#!/bin/sh\nexec 3<>/dev/tcp/127.0.0.1/" + port(t, ln) + "\nsleep " + strconv.Itoa(stubSleep) + "\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -478,8 +511,8 @@ func TestEngineTakesPrecedence(t *testing.T) {
 	ctx := t.Context()
 	go w.Run(ctx)
 
-	waitFor(t, 3*time.Second, func() bool { return w.following(cmd.Process.Pid) })
-	waitFor(t, 3*time.Second, func() bool {
+	waitFor(t, waitCeiling, func() bool { return w.following(cmd.Process.Pid) })
+	waitFor(t, waitCeiling, func() bool {
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		tr := w.tracked[cmd.Process.Pid]
@@ -487,9 +520,10 @@ func TestEngineTakesPrecedence(t *testing.T) {
 	})
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 500))
 
-	waitFor(t, 3*time.Second, func() bool { return len(rec.all()) > 0 })
+	pid := cmd.Process.Pid
+	waitFor(t, waitCeiling, func() bool { return len(rec.forPID(pid)) > 0 })
 	var out int64
-	for _, ev := range rec.all() {
+	for _, ev := range rec.forPID(pid) {
 		if ev.ViaEngine == "" {
 			t.Fatalf("agent using the engine was not attributed: %+v", ev)
 		}

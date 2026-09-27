@@ -21,6 +21,13 @@
   rather than failing on an unknown flag.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
+- Network access on first run. `make` pins `GOTOOLCHAIN` to the `go.mod`
+  version, so a host with a different compiler downloads that toolchain; the
+  first `make lint` and `make vet-cross` download the `staticcheck` tool the
+  module pins; and `make govulncheck` (part of `make ci` and `make pr`)
+  fetches the vulnerability database from vuln.go.dev. The edit-test loop
+  (`make build`, `make test`, `make test-pkg`) works offline once the
+  modules are in the local cache.
 
 ## Quickstart
 

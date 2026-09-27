@@ -37,9 +37,10 @@ func crushDB(t *testing.T, dir string, sessions map[string][3]int64) {
 		updated_at INTEGER NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	// One transaction for the whole fixture. In autocommit each INSERT is
-	// its own durable commit, so a 2000-session fixture cost 2000 fsyncs and
+	// One transaction for the whole fixture. In autocommit each INSERT is its
+	// own durable commit, so 2000 autocommit inserts are 2000 fsyncs, which
 	// pushed TestCrushSinceQueryCanUseUpdatedAtIndex past the suite timeout.
+	// The table the tests query is the same either way.
 	tx, err := db.Begin()
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func crushDB(t *testing.T, dir string, sessions map[string][3]int64) {
 		if _, err := tx.Exec(
 			`INSERT INTO sessions (id, completion_tokens, prompt_tokens, updated_at) VALUES (?, ?, ?, ?)`,
 			id, v[0], v[1], v[2]); err != nil {
+			_ = tx.Rollback()
 			t.Fatal(err)
 		}
 	}
