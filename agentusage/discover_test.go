@@ -53,6 +53,18 @@ func TestAgentNameNormalization(t *testing.T) {
 	}
 }
 
+func TestAgentNameKimiCode(t *testing.T) {
+	if got := agentName("kimi-code", []string{"kimi-code"}, knownNames()); got != "kimi" {
+		t.Fatalf("agentName(kimi-code) = %q, want kimi", got)
+	}
+	if got := agentName("", []string{"/usr/local/bin/kimi-code"}, knownNames()); got != "kimi" {
+		t.Fatalf("agentName(argv0 kimi-code) = %q, want kimi", got)
+	}
+	if Supported("kimi-code") {
+		t.Fatal("kimi-code must not be its own tool")
+	}
+}
+
 func TestKnownNamesUsesCanonicalForm(t *testing.T) {
 	known := knownNames()
 	for _, name := range Agents() {

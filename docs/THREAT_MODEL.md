@@ -104,8 +104,8 @@ What is worth stealing, corrupting, or denying:
   the SHA-256 of its path rather than walked, agentusage/kimi.go), gemini
   (`~/.gemini/tmp`, the project named by `.project_root`), grok
   (`~/.grok/sessions/<encoded cwd>/<id>/usage.json`), agy
-  (`~/.gemini/antigravity-cli` `transcript.jsonl`, only steps that carry
-  token counts), clanker
+  (`~/.gemini/antigravity-cli/brain/<id>/.../transcript.jsonl`, workspace
+  from `history.jsonl`, only steps that carry token counts), clanker
   (its token log inside the repository it runs in, registry.go, 126-133), and
   the built-in pi, prime-agent, and feynman definitions
   (agentusage/definitions.go, 115-121), and kimi

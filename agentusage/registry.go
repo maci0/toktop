@@ -146,15 +146,16 @@ var adapters = map[string]adapter{
 		parse:          parseGemini,
 		sessionCwdFile: geminiSessionCwd,
 	},
-	// agy (Antigravity CLI) logs steps to transcript.jsonl under
-	// ~/.gemini/antigravity-cli. A step that carries no usage counts as
-	// nothing; the ones that do name the working directory on the record.
+	// agy (Antigravity CLI) logs steps to
+	// brain/<id>/.system_generated/logs/transcript.jsonl. A step that carries
+	// no usage counts as nothing. The workspace is the one history.jsonl
+	// records for that conversation id, not a field on the step.
 	"agy": {
-		roots:      func(string) []string { return []string{home(".gemini", "antigravity-cli")} },
-		suffix:     "transcript.jsonl",
-		kind:       perMessage,
-		parse:      parseAgy,
-		sessionCwd: agySessionCwd,
+		roots:          func(string) []string { return []string{home(".gemini", "antigravity-cli")} },
+		suffix:         "transcript.jsonl",
+		kind:           perMessage,
+		parse:          parseAgy,
+		sessionCwdFile: agySessionCwd,
 	},
 	// Grok writes one usage.json per session, rewritten in place with the
 	// session's own totals, under ~/.grok/sessions/<encoded cwd>/<id>/.

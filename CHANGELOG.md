@@ -24,9 +24,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `~/.grok/sessions/<project>/<id>`. The file is that session's own totals,
   rewritten in place, and the project directory is the one the CLI named for
   the working directory.
-- Antigravity CLI (`agy`) transcripts under `~/.gemini/antigravity-cli` are
-  read when a step carries token counts. A step that names none contributes
-  nothing. The working directory is the one the transcript records.
+- Antigravity CLI (`agy`) transcripts under
+  `~/.gemini/antigravity-cli/brain/<id>` are read when a step carries token
+  counts. A step that names none contributes nothing. The workspace is the
+  one `history.jsonl` records for that conversation, which the step itself
+  does not name.
 
 ### Fixed
 

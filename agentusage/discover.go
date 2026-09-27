@@ -90,16 +90,29 @@ func splitASCIISpace(s string) []string {
 // the running agent never shows up. The canonical spelling is returned, since
 // that is the key definedSpec and sourceFor look up.
 func agentName(comm string, argv []string, known map[string]bool) string {
-	if t := canonicalTool(comm); known[t] {
+	if t := resolveAgent(canonicalTool(comm), known); t != "" {
 		return t
 	}
 	for i, a := range argv {
 		if i > 1 || a == "" {
 			break
 		}
-		if t := canonicalTool(filepath.Base(a)); known[t] {
+		if t := resolveAgent(canonicalTool(filepath.Base(a)), known); t != "" {
 			return t
 		}
+	}
+	return ""
+}
+
+// resolveAgent maps a process title onto the agent whose transcripts we read.
+// Kimi Code's binary and argv0 are kimi-code; the adapter and the store are
+// registered as kimi. kimi-code is not its own tool.
+func resolveAgent(name string, known map[string]bool) string {
+	if name == "kimi-code" {
+		name = "kimi"
+	}
+	if known[name] {
+		return name
 	}
 	return ""
 }

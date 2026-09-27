@@ -81,26 +81,18 @@ func TestGeminiUsageMetadataIsCounted(t *testing.T) {
 	}
 }
 
-func TestAgyCountsUsageAndIgnoresAStepWithoutIt(t *testing.T) {
+func TestAgyCountsALateUsageStepForTheRecordedWorkspace(t *testing.T) {
 	store := withStore(t, "agy")
 	work, other := t.TempDir(), t.TempDir()
 	w := Watch("agy", work, time.Now())
 	if w == nil {
 		t.Fatal("agy watcher")
 	}
-	if err := os.MkdirAll(filepath.Join(store, "mine"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(filepath.Join(store, "other"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	append_(t, filepath.Join(store, "mine", "transcript.jsonl"),
-		`{"workspace":`+jsonPath(work)+`}`,
-		`{"type":"PLANNER_RESPONSE","content":"looking"}`,
-		`{"usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":6,"thoughtsTokenCount":2,"cachedContentTokenCount":5,"totalTokenCount":28}}`)
-	append_(t, filepath.Join(store, "other", "transcript.jsonl"),
-		`{"workspace":`+jsonPath(other)+`}`,
-		`{"usageMetadata":{"promptTokenCount":4000,"candidatesTokenCount":400,"totalTokenCount":4400}}`)
+	// The transcript lines are the shape the CLI writes: step_index, source,
+	// type, content. They do not name a workspace. More than ownerScanLines
+	// of them precede the usage step, which is what a header scan would refuse.
+	writeAgyTranscript(t, store, "mine-id", work, true)
+	writeAgyTranscript(t, store, "other-id", other, true)
 	s := w.Poll()
 	if s.Input != 20 || s.Output != 8 || s.Thinking != 2 {
 		t.Fatalf("sample = %+v, want input 20 output 8 thinking 2", s)
@@ -111,11 +103,30 @@ func TestAgyFileWithoutUsageContributesNothing(t *testing.T) {
 	store := withStore(t, "agy")
 	work := t.TempDir()
 	w := Watch("agy", work, time.Now())
-	append_(t, filepath.Join(store, "transcript.jsonl"),
-		`{"workspace":`+jsonPath(work)+`,"type":"PLANNER_RESPONSE","content":"no tokens here"}`)
+	writeAgyTranscript(t, store, "plain-id", work, false)
 	if s := w.Poll(); !s.Empty() {
 		t.Fatalf("a step with no usage counted %+v", s)
 	}
+}
+
+// writeAgyTranscript lays out brain/<id>/.system_generated/logs/transcript.jsonl
+// and the history.jsonl line that records that conversation's workspace.
+func writeAgyTranscript(t *testing.T, store, id, workspace string, withUsage bool) {
+	t.Helper()
+	dir := filepath.Join(store, "brain", id, ".system_generated", "logs")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var lines []string
+	for i := range ownerScanLines + 1 {
+		lines = append(lines, `{"step_index":`+itoa(i)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:33:17Z","content":"reading the tree"}`)
+	}
+	if withUsage {
+		lines = append(lines, `{"step_index":`+itoa(ownerScanLines+1)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:34:00Z","usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":6,"thoughtsTokenCount":2,"cachedContentTokenCount":5,"totalTokenCount":28}}`)
+	}
+	append_(t, filepath.Join(dir, "transcript.jsonl"), lines...)
+	append_(t, filepath.Join(store, "history.jsonl"),
+		`{"timestamp":1780204120907,"workspace":`+jsonPath(workspace)+`,"conversationId":`+jsonPath(id)+`}`)
 }
 
 func TestGrokUsageIsThisProject(t *testing.T) {
