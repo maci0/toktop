@@ -92,9 +92,10 @@ func procStatCPUAndRSS(stat string) (ticks uint64, rssBytes uint64) {
 
 // satAddTicks adds two jiffy counters saturating at MaxUint64, the rule
 // every other counter sum in the tree follows (core.SatAddPos, sysmon.satAdd,
-// ui.satAddU64, agentusage.satAdd). A wrapped sum reads as a process that
-// used no CPU at all, and the next sample's delta then covers two intervals
-// while the elapsed time covers one, halving the reported percentage.
+// ui.satAddU64; agentusage.satAdd saturates too, at its own token ceiling). A
+// wrapped sum reads as a process that used no CPU at all, and the next
+// sample's delta then covers two intervals while the elapsed time covers one,
+// halving the reported percentage.
 func satAddTicks(a, b uint64) uint64 {
 	if b > ^uint64(0)-a {
 		return ^uint64(0)

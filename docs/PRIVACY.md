@@ -10,13 +10,13 @@ data flows, so the claim is checkable rather than a slogan.
 | Source | What is taken |
 | --- | --- |
 | Engine HTTP APIs (`--add`, or engines found on local ports) | model names, version, token counts, load, KV-cache and slot state |
-| `/proc`, `ps`, Win32 CIM, `nvidia-smi`, `rocm-smi` | CPU, memory, GPU, power, temperature, process name, port flags |
+| `/proc`, `ps`, Win32 CIM, `nvidia-smi`, `rocm-smi`, `xpu-smi`, `system_profiler`, `ioreg` | CPU, memory, GPU, power, temperature, process name, port flags |
 | Agent transcripts, only with `--agents` | the token counters each agent records about itself, plus the working directory it ran in |
 | `ssh://` target, only when you name one | the same vitals, the listening ports `/proc/net/tcp(+6)` reports (or an active probe of the well-known list), and the leading 4096 bytes of each process's command line (see below) |
 
 `--agents` is off by default: it means reading session files nobody pointed
-toktop at. The adapters in
-[agentusage/transcript.go](../agentusage/transcript.go) parse token counters only.
+toktop at. The adapters in the
+[agentusage](../agentusage/) package parse token counters only.
 Prompt text, tool output and file contents in a transcript are not decoded,
 copied into events, or displayed. A working directory becomes a note in the
 feed with the last two path components and `~` in place of your home

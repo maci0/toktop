@@ -108,7 +108,7 @@ const maxDepth = 8
 // inlineKids is the per-level scratch for the members a level still has to
 // descend into. Records are small and most envelopes hold fewer than this many
 // non-scalar members, so the array covers them without touching the heap: this
-// runs for every key of every record, four times a second, per transcript.
+// runs for every key of every record, on every poll, per transcript.
 const inlineKids = 8
 
 // walk descends one decoded line collecting usage counters and the recorded

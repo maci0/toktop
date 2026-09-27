@@ -64,7 +64,7 @@ func parseAdd(v string, target *[]string) error {
 	}
 	// One poll per endpoint. Each --add builds its own provider, and the
 	// dashboard sums them, so the same URL named twice reads as double the
-	// tokens. Compared the way main.go polls it (trailing slashes trimmed),
+	// tokens. Compared the way attach.go polls it (trailing slashes trimmed),
 	// since that is the form under which the two collide.
 	endpoint := strings.TrimRight(v, "/")
 	for _, seen := range *target {

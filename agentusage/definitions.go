@@ -111,9 +111,10 @@ var (
 	// rather than adapters. They ship here so both this tool and gauntlet read
 	// them without a definitions file.
 	defs = builtinDefs()
-	// defsGen counts the loads of defs. A watcher derives its adapter from a
-	// spec four times a second; the spec it reads cannot have changed unless
-	// this moved, so an unchanged counter turns that rebuild into a load.
+	// defsGen counts changes to defs: a load that registered an entry, or
+	// ResetDefinitions. A watcher re-derives its adapter from a spec on every
+	// poll; the spec it reads cannot have changed unless this moved, so an
+	// unchanged counter turns that rebuild into a load.
 	defsGen atomic.Uint64
 )
 
@@ -217,11 +218,12 @@ var ErrCollidingDefinitions = errors.New("agent names collide after NFC normaliz
 // A definition may replace another definition, including one compiled into
 // this build: the pi family is defined rather than adapted, so a file naming
 // feynman with different roots redirects it. What it cannot displace is a
-// compiled-in adapter, so a usage entry for an agent this build reads that way
-// (claude, codex, dsh, ...) is skipped rather than registered, the same as one
-// naming no roots. Registering it would leave SpecFor reporting roots no
-// watcher reads. Use [RegisterSpec] to read such an agent elsewhere; it
-// displaces the built-in for as long as it is held.
+// registered adapter, built-in or installed by RegisterSpec, so a usage entry
+// for an agent already read that way (claude, codex, dsh, ...) is skipped
+// rather than registered, the same as one naming no roots. Registering it
+// would leave SpecFor reporting roots no watcher reads. Use [RegisterSpec] to
+// read such an agent elsewhere; it displaces the built-in for as long as it
+// is held.
 //
 // Names are canonicalized before registration, so two spellings that NFC
 // reduces to one key (NFD "café" beside precomposed "café") would silently
@@ -265,12 +267,13 @@ func LoadDefinitions(path string) error {
 		if canonical == "" || def.Usage == nil {
 			continue // a launch-only definition says nothing about tokens
 		}
-		if _, builtin := registeredAdapter(canonical); builtin {
-			// A compiled-in adapter outranks every definition, so registering
-			// this entry would leave SpecFor reporting transcript roots that
-			// Watch never reads. Skipping keeps the registry the answer to
-			// "what did this file register", which is how a program finds the
-			// entries a file failed to apply.
+		if _, registered := registeredAdapter(canonical); registered {
+			// A registered adapter, built-in or installed by RegisterSpec,
+			// outranks every definition, so registering this entry would leave
+			// SpecFor reporting transcript roots that Watch never reads.
+			// Skipping keeps the registry the answer to "what did this file
+			// register", which is how a program finds the entries a file
+			// failed to apply.
 			continue
 		}
 		if prev, dup := seen[canonical]; dup {

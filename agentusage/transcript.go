@@ -14,9 +14,10 @@ import (
 
 // readNew consumes the bytes appended to one transcript since the last poll.
 //
-// Polling runs four times a second over every recent transcript, and most of
-// them are idle, so the mtime check happens on a plain stat: an untouched file
-// costs one syscall instead of open+stat+close.
+// Polling revisits every recent transcript on the caller's interval (never
+// faster than pollEvery), and most of them are idle, so the mtime check
+// happens on a plain stat: an untouched file costs one syscall instead of
+// open+stat+close.
 //
 // Newline-terminated lines are always counted; a trailing fragment without
 // its final newline is counted too, but only once it parses in full, and

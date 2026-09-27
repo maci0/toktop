@@ -314,9 +314,10 @@ func (m Model) probesBody(w, h int) string {
 	}
 	if len(m.snap.Probes) == 0 {
 		// Short enough for the narrowest legal pane's PROBES column, which is
-		// 31% of 62 cells wide: the longer spellings ended in an ellipsis on
-		// every narrow dashboard, so the one instruction the empty panel has
-		// was the one thing that could not be read.
+		// the 31% the engine state column does not take: 62 - 38 - 31 = 20
+		// cells, 16 of them body width. The longer spellings ended in an
+		// ellipsis on every narrow dashboard, so the one instruction the empty
+		// panel has was the one thing that could not be read.
 		out.WriteString(dim("press ") + styleInfo.Render("p") + dim(" to probe") + "\n")
 		out.WriteString(dim("quit, --probe N"))
 	}

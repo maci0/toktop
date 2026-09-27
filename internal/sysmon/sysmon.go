@@ -28,7 +28,7 @@ var (
 )
 
 // Sample collects a best-effort snapshot of host vitals; missing sources are
-// simply absent from the result. Never returns nil.
+// simply absent from the result.
 func Sample() core.SysSample {
 	var s core.SysSample
 	if platformMemory != nil {

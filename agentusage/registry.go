@@ -338,7 +338,7 @@ func adapterFor(tool string) (adapter, bool) {
 // adapter (a built-in, or an explicit RegisterSpec) is fixed for the process
 // and is left alone, which also keeps a test's patched adapter in place.
 //
-// A watcher derives from definitions four times a second, and the derivation
+// A watcher re-derives from definitions on every poll, and the derivation
 // clones the spec's roots, expands ~ and substitutes {dir} in each: all of it
 // discarded work unless a definitions file was reloaded in between. The
 // generation counter says whether that happened, and the steady state is one

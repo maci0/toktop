@@ -26,13 +26,14 @@ const pollEvery = 250 * time.Millisecond
 const rescanEvery = time.Second
 
 // recencyWindow is how long after a transcript's last write it stays in the
-// walk. Attach still sees files that went idle just before we started (Watch
-// runs this at since≈now); after that the window slides with the watcher's
-// clock so a long-lived dashboard does not accumulate every session file ever
-// written while it ran, and so a run driven by an injected clock ages the
-// window in steps it controls rather than in whatever wall time the test
-// happened to take. The mtimes it is compared against are still wall time:
-// that is the clock the filesystem records in.
+// walk. Attach deliberately ignores it and seeds every file the store holds
+// (Watch runs this at since≈now), so an idle session's history is skipped
+// rather than unread; from the first poll on, the window slides with the
+// watcher's clock so a long-lived dashboard does not accumulate every session
+// file ever written while it ran, and so a run driven by an injected clock
+// ages the window in steps it controls rather than in whatever wall time the
+// test happened to take. The mtimes it is compared against are still wall
+// time: that is the clock the filesystem records in.
 const recencyWindow = 2 * time.Minute
 
 // walkWait bounds how long a caller waits on another goroutine's walk of the

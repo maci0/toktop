@@ -8,9 +8,11 @@
 // was never meant for it. Set once at startup, before discovery spawns
 // goroutines.
 //
-// The package also owns the redirect policy every engine request runs under
-// (CheckRedirect), which confines a chain to the origin it started on for the
-// same reason.
+// The package also owns the redirect policy the polling and discovery
+// clients run under (CheckRedirect), which confines a chain to the origin it
+// started on for the same reason. The probe client replaces it with
+// http.ErrUseLastResponse: a redirect there is a real answer, and following it
+// would time a request the engine never served.
 package bearer
 
 import (

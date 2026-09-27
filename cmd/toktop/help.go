@@ -153,7 +153,8 @@ Environment (a flag always wins over the variable it mirrors):
   TOKTOP_SSH_PASSWORD     ssh password for ssh:// targets, for headless runs
   TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal)
   TOKTOP_LINES            --once frame height, 21-512 (default: the terminal)
-  TOKTOP_LOG_LEVEL        ingest audit log floor: debug, info, warn, error
+  TOKTOP_LOG_LEVEL        audit log floor for every subsystem that writes one
+                          (engine, ssh, ingest): debug, info, warn, error
   GAUNTLET_HOME           directory holding agents.json (--agents), default
                           ~/.gauntlet; a relative value is ignored
   XDG_DATA_HOME           where opencode's session database is read

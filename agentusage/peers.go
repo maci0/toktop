@@ -40,9 +40,10 @@ func parseLsofPeers(out string) []netip.AddrPort {
 var peersByPID func([]int) map[int][]netip.AddrPort
 
 // MatchingEndpoints maps each pid to the first endpoint it holds a connection
-// to. One pass over the kernel tables covers every process, so a dashboard
-// watching N agents does not reread /proc/net/tcp N times (or N×M times when
-// matching M engines one by one).
+// to. On Linux one pass over the kernel tables covers every process, so a
+// dashboard watching N agents does not reread /proc/net/tcp N times (or N×M
+// times when matching M engines one by one); where the platform has no
+// shared-table reader, this falls back to one Peers call per pid.
 //
 // Endpoints are matched on port plus address, with loopback spellings treated
 // as equal: an engine advertised as 127.0.0.1:11434 and a connection to
