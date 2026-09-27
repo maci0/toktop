@@ -572,7 +572,6 @@ const IMAGE_PATHS = new Set([
 // put a week-old screenshot of the dashboard on the page. An hour bounds how
 // long a re-capture takes to reach a returning browser, at the cost of one
 // cheap conditional request on a visit that is already past max-age.
-// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
 const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=3600";
 
 export default {

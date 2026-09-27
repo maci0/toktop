@@ -283,8 +283,6 @@ test("every page answer carries the security headers, not only revalidations", a
   }
 });
 
-// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
-// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
 const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=3600";
 
 function staticAssets(body = new Uint8Array([1, 2, 3, 4])) {

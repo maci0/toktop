@@ -21,6 +21,12 @@
   rather than failing on an unknown flag.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
+- Only to regenerate the README screenshot (below), and never for the
+  edit-test loop or any merge gate: `tmux` to capture the live frame,
+  `magick` (ImageMagick 7) to resize the PNG into the WebP variants, and
+  `avifenc` (libavif) to encode the AVIF ones. Nothing in `make pr` runs
+  them, so a machine without them passes every gate and only fails when it
+  tries to recapture.
 - Network access on first run. `make` pins `GOTOOLCHAIN` to the `go.mod`
   version, so a host with a different compiler downloads that toolchain; the
   first `make lint` and `make vet-cross` download the `staticcheck` tool the
@@ -69,7 +75,8 @@ exec over a running image, so the dashboard exits instead.
 ## Regenerating the README screenshot
 
 `docs/images/dashboard.png` is captured from a live demo frame under tmux
-and rendered by `scripts/screenshot.py`:
+and rendered by `scripts/screenshot.py`. This is the only workflow that
+needs `tmux`, `magick` and `avifenc`; see Prerequisites.
 
 ```
 make build VERSION=0.10.0
