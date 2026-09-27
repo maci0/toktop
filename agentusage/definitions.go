@@ -57,6 +57,10 @@ type Spec struct {
 	Roots []string `json:"roots"`
 	// Suffix filters transcript files (default ".jsonl").
 	Suffix string `json:"suffix,omitempty"`
+	// Suffixes matches several extensions, for an agent that writes more than
+	// one (compressed by default, plain when compression is off). It replaces
+	// Suffix when set.
+	Suffixes []string `json:"suffixes,omitempty"`
 	// Cumulative says the counters already include everything before them, so
 	// the first value seen becomes a baseline. Default is per message.
 	Cumulative bool `json:"cumulative,omitempty"`
@@ -110,6 +114,7 @@ func definedSpec(tool string) (Spec, bool) {
 	s, ok := defs[tool]
 	if ok {
 		s.Roots = slices.Clone(s.Roots)
+		s.Suffixes = slices.Clone(s.Suffixes)
 	}
 	return s, ok
 }
@@ -122,6 +127,7 @@ type definitionFile map[string]*struct {
 	Usage *struct {
 		Roots      []string `json:"roots"`
 		Suffix     string   `json:"suffix,omitempty"`
+		Suffixes   []string `json:"suffixes,omitempty"`
 		Cumulative bool     `json:"cumulative,omitempty"`
 		HeaderCwd  bool     `json:"header_cwd,omitempty"`
 	} `json:"usage,omitempty"`
@@ -192,6 +198,7 @@ func LoadDefinitions(path string) error {
 		spec := Spec{
 			Roots:      slices.Clone(def.Usage.Roots),
 			Suffix:     def.Usage.Suffix,
+			Suffixes:   slices.Clone(def.Usage.Suffixes),
 			Cumulative: def.Usage.Cumulative,
 			HeaderCwd:  def.Usage.HeaderCwd,
 		}

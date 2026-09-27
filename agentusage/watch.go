@@ -60,7 +60,10 @@ type Sample struct {
 	Total int
 	// Input is billed prompt tokens, accrued per request the same way Output is.
 	Input int
-	// At is when the reading was taken, so successive samples make a rate.
+	// At is when the counters last changed, which is when the reading was
+	// taken. A poll that observed nothing does not move it, so a stalled
+	// agent's rate is averaged over the whole pause rather than over the
+	// poll interval.
 	At time.Time
 }
 
@@ -275,8 +278,18 @@ func specAdapter(spec Spec) (adapter, bool) {
 		}
 		return out
 	}
+	// Blank suffixes are not patterns: one would match every file under the
+	// root, and the parser would then be pointed at the agent's config.
+	suffixes := make([]string, 0, len(spec.Suffixes))
+	for _, s := range spec.Suffixes {
+		if strings.TrimSpace(s) != "" {
+			suffixes = append(suffixes, s)
+		}
+	}
 	suffix := spec.Suffix
-	if suffix == "" {
+	if len(suffixes) > 0 {
+		suffix = ""
+	} else if suffix == "" {
 		suffix = ".jsonl"
 	}
 	kind := perMessage
@@ -284,10 +297,11 @@ func specAdapter(spec Spec) (adapter, bool) {
 		kind = cumulative
 	}
 	ad := adapter{
-		roots:  rootsFor,
-		suffix: suffix,
-		kind:   kind,
-		parse:  parseGeneric,
+		roots:    rootsFor,
+		suffix:   suffix,
+		suffixes: suffixes,
+		kind:     kind,
+		parse:    parseGeneric,
 	}
 	if spec.HeaderCwd {
 		ad.sessionCwd = genericSessionCwd
@@ -647,7 +661,9 @@ func (w *Watcher) seedBaseline(path string) {
 }
 
 // Run polls until the context is canceled, calling onChange whenever the
-// observed usage grows. It is meant to run in its own goroutine.
+// observed usage changes, growth or the drop a rewritten transcript causes.
+// A caller that reports deltas should re-baseline on a sample smaller than
+// the one it last reported. It is meant to run in its own goroutine.
 func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sample)) {
 	if w == nil {
 		return
@@ -764,16 +780,17 @@ func (w *Watcher) Sample() Sample {
 }
 
 func (w *Watcher) poll(onChange func(Sample)) {
-	s, grew := w.read()
+	s, changed := w.read()
 	// Callback after read has released pollMu: onChange may Poll (final read,
 	// tests), and holding the lock across it deadlocks that path.
-	if grew && onChange != nil {
+	if changed && onChange != nil {
 		onChange(s)
 	}
 }
 
 // read takes one reading and publishes it, reporting the new sample only when
-// the observed usage grew. Both mutexes are released by defer, so a panic
+// the observed counts differ from the published ones. Both mutexes are
+// released by defer, so a panic
 // raised while parsing an agent's transcript cannot leave a watcher holding
 // pollMu for the rest of the dashboard's life with no goroutine left to
 // unlock it.
@@ -814,11 +831,17 @@ func (w *Watcher) read() (Sample, bool) {
 	}
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	grew := out > w.sample.Output || total > w.sample.Total || thinking > w.sample.Thinking || input > w.sample.Input
-	if grew {
+	// Counts are what the transcripts say right now, not a running total that
+	// only ever rises: a transcript rewritten to a shorter length is re-read
+	// from its start, and the figures it replaces are ones it no longer
+	// records. Publishing the drop is what keeps a rewrite from being billed
+	// twice; callers that differencing see a smaller sample and re-baseline.
+	changed := out != w.sample.Output || total != w.sample.Total ||
+		thinking != w.sample.Thinking || input != w.sample.Input
+	if changed {
 		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: time.Now()}
 	}
-	return w.sample, grew
+	return w.sample, changed
 }
 
 // pollEvery is how often a transcript is re-read. It bounds how stale a live
@@ -1026,15 +1049,25 @@ func (w *Watcher) forgetIdle(live []string) {
 	}
 }
 
+// forgetCounts drops what a transcript contributed to this attach without
+// forgetting the file: the read position and its stamp are reset separately,
+// by the caller that decided the bytes on disk are no longer the bytes it
+// read. Cumulative baselines go too, so the next record after a rewrite
+// re-baselines instead of being measured against a session that is gone.
+func (w *Watcher) forgetCounts(path string) {
+	delete(w.seen, path)
+	delete(w.total, path)
+	delete(w.base, path)
+	delete(w.baseThink, path)
+	delete(w.baseInput, path)
+}
+
 func (w *Watcher) dropFile(path string) {
 	delete(w.stamps, path)
 	delete(w.offsets, path)
 	delete(w.owner, path)
 	delete(w.preexisting, path)
-	delete(w.base, path)
-	delete(w.baseThink, path)
-	delete(w.baseInput, path)
-	delete(w.total, path)
+	w.forgetCounts(path)
 }
 
 // readNew consumes the bytes appended to one transcript since the last poll.
@@ -1060,7 +1093,11 @@ func (w *Watcher) readNew(path string) {
 	}
 	// A shrink is a rotation or rewrite: the header (and so the owner
 	// verdict) may belong to a different session than the one we cached.
+	// The counts cached for those bytes go with it. Rewinding the offset
+	// alone would re-read the same records and add them on top of what was
+	// already counted, billing a transcript's tokens twice.
 	if fi.Size() < w.offsets[path] {
+		w.forgetCounts(path)
 		w.offsets[path] = 0
 		delete(w.owner, path)
 	}
@@ -1334,11 +1371,14 @@ func (w *Watcher) sameDir(cwd string) bool {
 }
 
 // satAdd sums two non-negative counters, saturating instead of wrapping: a
-// transcript with absurd counts must read as enormous, never as negative.
+// transcript with absurd counts must read as enormous, never as negative. It
+// saturates at maxSaneTokens, the same ceiling counter enforces on a single
+// record, so a total never reaches a magnitude this package would refuse to
+// parse back.
 func satAdd(a, b int) int {
 	s := a + b
-	if s < 0 {
-		return math.MaxInt
+	if s < 0 || s > maxSaneTokens {
+		return maxSaneTokens
 	}
 	return s
 }

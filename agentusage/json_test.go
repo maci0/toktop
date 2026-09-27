@@ -140,8 +140,13 @@ func TestSatAddSaturates(t *testing.T) {
 	if got := satAdd(3, 4); got != 7 {
 		t.Fatalf("satAdd(3, 4) = %d", got)
 	}
-	if got := satAdd(math.MaxInt-1, 2); got != math.MaxInt {
-		t.Fatalf("satAdd overflow = %d, want MaxInt", got)
+	// The ceiling is the same one counter enforces on a single record, so a
+	// running total never reports a magnitude this package would reject.
+	if got := satAdd(maxSaneTokens, 4); got != maxSaneTokens {
+		t.Fatalf("satAdd past maxSaneTokens = %d, want %d", got, maxSaneTokens)
+	}
+	if got := satAdd(math.MaxInt-1, 2); got != maxSaneTokens {
+		t.Fatalf("satAdd overflow = %d, want %d", got, maxSaneTokens)
 	}
 }
 

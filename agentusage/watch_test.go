@@ -586,6 +586,36 @@ func TestDefinedAgentIgnoresOtherDirectories(t *testing.T) {
 	}
 }
 
+// A defined agent that writes more than one extension (compressed by
+// default, plain when compression is off) is read from both, and a blank
+// entry matches nothing rather than every file under the root.
+func TestSpecSuffixesMatchEveryExtension(t *testing.T) {
+	store := t.TempDir()
+	work := t.TempDir()
+	if err := RegisterSpec("multisuffix", Spec{
+		Roots:    []string{store},
+		Suffixes: []string{".jsonl.zst", "  ", ".jsonl"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		adaptersMu.Lock()
+		delete(adapters, "multisuffix")
+		adaptersMu.Unlock()
+	})
+	w := Watch("multisuffix", work, time.Now())
+	append_(t, filepath.Join(store, "a.jsonl"),
+		`{"role":"assistant","cwd":`+jsonPath(work)+`,"usage":{"output_tokens":140}}`)
+	append_(t, filepath.Join(store, "b.jsonl.zst"),
+		`{"role":"assistant","cwd":`+jsonPath(work)+`,"usage":{"output_tokens":60}}`)
+	append_(t, filepath.Join(store, "config.json"),
+		`{"role":"assistant","cwd":`+jsonPath(work)+`,"usage":{"output_tokens":5000}}`)
+	w.poll(nil)
+	if got := w.Sample().Output; got != 200 {
+		t.Fatalf("output %d, want 200: every listed suffix should match, and nothing else", got)
+	}
+}
+
 func TestRegisterSpecValidates(t *testing.T) {
 	if err := RegisterSpec("", Spec{Roots: []string{"/tmp"}}); !errors.Is(err, ErrEmptyTool) {
 		t.Errorf("nameless spec = %v, want ErrEmptyTool", err)
@@ -964,6 +994,28 @@ func appendRaw(t *testing.T, path, s string) {
 	defer f.Close()
 	if _, err := f.WriteString(s); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A transcript rewritten to a shorter length is re-read from its start, and
+// the records already counted from those bytes must not be counted again.
+func TestRewrittenTranscriptIsNotCountedTwice(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl")
+
+	w := Watch("claude", work, time.Now())
+	append_(t, path, claudeLine(work, 100), claudeLine(work, 200))
+	w.poll(nil)
+	if got := w.Sample().Output; got != 300 {
+		t.Fatalf("output tokens %d, want 300", got)
+	}
+	if err := os.WriteFile(path, []byte(claudeLine(work, 100)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.poll(nil)
+	if got := w.Sample().Output; got != 100 {
+		t.Fatalf("output tokens %d, want 100: a rewritten transcript was billed twice", got)
 	}
 }
 

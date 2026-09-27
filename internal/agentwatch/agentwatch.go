@@ -355,8 +355,12 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	think := cur.Thinking - t.last.Thinking
 	prompt := cur.Input - t.last.Input
 	if out <= 0 && think <= 0 && prompt <= 0 {
+		// Nothing new, or a transcript rewritten under us replaced the
+		// records already reported. Either way the next growth is measured
+		// from this sample, not from figures the transcripts no longer hold.
+		t.last = cur
 		w.mu.Unlock()
-		return // nothing new: silence is not an event
+		return // silence is not an event
 	}
 	t.last = cur
 	proc := t.proc

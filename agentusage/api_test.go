@@ -19,7 +19,7 @@ import (
 var publicTypes = map[string][]string{
 	"Process": {"PID", "Tool", "Dir", "Started"},
 	"Sample":  {"Output", "Thinking", "Total", "Input", "At"},
-	"Spec":    {"Roots", "Suffix", "Cumulative", "HeaderCwd"},
+	"Spec":    {"Roots", "Suffix", "Suffixes", "Cumulative", "HeaderCwd"},
 	"Watcher": nil,
 }
 

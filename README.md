@@ -107,6 +107,12 @@ block matters here (launch fields are ignored):
 }
 ```
 
+`roots` are searched, `suffix` filters the files under them (default
+`.jsonl`), `suffixes` does the same for an agent that writes more than one
+extension, `cumulative` marks counters that already include everything
+before them, and `header_cwd` says the working directory appears once in a
+session header rather than on every record.
+
 ### Using the Go package
 
 Import `github.com/maci0/toktop/agentusage` to discover agent processes and

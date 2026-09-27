@@ -15,6 +15,9 @@ support channel (see SECURITY.md).
 - A `--add` endpoint on plain `http://` whose host is not this machine is
   named at startup, because the bearer token crosses the network in
   cleartext there.
+- An agent definition (`usage.suffixes`) can name more than one transcript
+  extension, for an agent that writes a compressed file by default and a plain
+  one when compression is off.
 - A key that has nothing to act on (`p` with no engines, `t` before any
   throughput, `a` with no engines to swap to) says so on the footer for a few
   seconds instead of being swallowed.
@@ -46,6 +49,16 @@ support channel (see SECURITY.md).
   not leave a partial file in the install directory or the config directory
   for good. A staging file young enough to be a download in flight is left
   alone.
+
+### Fixed
+
+- A transcript rewritten to a shorter length is counted once, not twice. The
+  watcher re-read such a file from its start, and the records it had already
+  billed were added a second time.
+- A transcript rotated under a running watcher can lower an agent's reported
+  totals, the same way the file itself now says. The dashboard records no
+  negative growth, so the next reading is measured from what the transcripts
+  actually hold.
 
 ### Changed
 
