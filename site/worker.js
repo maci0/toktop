@@ -432,23 +432,31 @@ function pageRepresentations(request) {
 // The request rides along only so a dropped coding names the edge request
 // that hit it: the build is shared, so the first caller's ray is the one on
 // the line, not a claim about every request it served.
+//
+// The three run concurrently. A cold isolate pays this build inside the first
+// request, before the page it is answering, and awaiting them in sequence
+// makes that request wait for the sum of the three rather than the slowest
+// one. The bytes are the same either way and the CPU is the same either way;
+// only the time to the first byte of that request changes.
 async function buildRepresentations(request) {
-  const out = [{ coding: null, bytes: IDENTITY }];
-  for (const [coding, format] of COMPRESSIBLE) {
-    try {
-      out.push({ coding, bytes: await compressFormat(format) });
-    } catch (err) {
-      // A runtime without the format is the ordinary case. Anything else
-      // (out of memory, a stream that dies mid-pipeline) would ship the
-      // page at its uncompressed size forever without a word, so name it.
-      logFailure(request, "coding-dropped", {
-        coding,
-        // A throw carries any value, null included, so err may have no message.
-        error: String(err?.message ?? err),
-      });
-    }
-  }
-  return out;
+  const compressed = await Promise.all(
+    COMPRESSIBLE.map(async ([coding, format]) => {
+      try {
+        return { coding, bytes: await compressFormat(format) };
+      } catch (err) {
+        // A runtime without the format is the ordinary case. Anything else
+        // (out of memory, a stream that dies mid-pipeline) would ship the
+        // page at its uncompressed size forever without a word, so name it.
+        logFailure(request, "coding-dropped", {
+          coding,
+          // A throw carries any value, null included, so err may have no message.
+          error: String(err?.message ?? err),
+        });
+        return null;
+      }
+    }),
+  );
+  return [{ coding: null, bytes: IDENTITY }, ...compressed.filter((rep) => rep !== null)];
 }
 
 // Highest q the client offered, then the smallest body at that q. A Chrome
@@ -505,6 +513,16 @@ function errorResponse(status, body, extraHeaders = {}) {
   });
 }
 
+// What the edge spent on the answer, in Server-Timing (RFC 8941), so the
+// number a visitor or a RUM script reads is the time to first byte from this
+// Worker rather than an unbreakable share of a round trip. The page is the
+// only surface that has no client-side timing to fall back on, and a
+// regression here is invisible in a byte-count test: it is a change in how
+// long the edge takes, not in how much it sends.
+function serverTiming(started) {
+  return `edge;dur=${Math.max(0, Date.now() - started)}`;
+}
+
 // One JSON object per line, so Workers Logs can filter on a field rather than
 // parse prose, and the edge's cf-ray rides along so a failure a visitor
 // reports pivots from the line to that edge request. Only failures log: a
@@ -547,8 +565,15 @@ const IMAGE_PATHS = new Set([
   ...srcsetPaths(HERO_AVIF_SRCSET),
   ...srcsetPaths(HERO_WEBP_SRCSET),
 ]);
+// The captures are served under stable names, not content-hashed ones, so
+// nothing but a revalidation can retire the copy a browser is holding when a
+// deploy re-captures. max-age covers the repeat visit, which is nearly all of
+// them; stale-while-revalidate is what runs after it, and a day of that would
+// put a week-old screenshot of the dashboard on the page. An hour bounds how
+// long a re-capture takes to reach a returning browser, at the cost of one
+// cheap conditional request on a visit that is already past max-age.
 // biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
-const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
+const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=3600";
 
 export default {
   // Every throw below would otherwise reach the client as the edge's opaque
@@ -558,7 +583,7 @@ export default {
   async fetch(request, env) {
     const started = Date.now();
     try {
-      return await handle(request, env);
+      return await handle(request, env, started);
     } catch (err) {
       logFailure(request, "unhandled", {
         method: request.method,
@@ -571,7 +596,7 @@ export default {
   },
 };
 
-async function handle(request, env) {
+async function handle(request, env, started) {
   const url = new URL(request.url);
   if (IMAGE_PATHS.has(url.pathname)) {
     if (request.method !== "GET" && request.method !== "HEAD") {
@@ -619,6 +644,7 @@ async function handle(request, env) {
     for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
       headers.set(name, value);
     }
+    headers.set("server-timing", serverTiming(started));
     // Success and revalidation can be stored; a missing or failed asset
     // must not inherit the day-long image policy or a 404 sticks.
     if (asset.status === 200 || asset.status === 304) {
@@ -669,6 +695,7 @@ async function handle(request, env) {
         etag: ETAG,
         "cache-control": PAGE_CACHE_CONTROL,
         vary: VARY,
+        "server-timing": serverTiming(started),
         ...SECURITY_HEADERS,
       },
     });
@@ -676,6 +703,7 @@ async function handle(request, env) {
   const headers = {
     ...PAGE_HEADERS,
     "content-length": String(chosen.bytes.byteLength),
+    "server-timing": serverTiming(started),
   };
   if (chosen.coding) headers["content-encoding"] = chosen.coding;
   if (request.method === "HEAD") {

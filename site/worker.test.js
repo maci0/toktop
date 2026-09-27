@@ -284,7 +284,8 @@ test("every page answer carries the security headers, not only revalidations", a
 });
 
 // biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
-const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
+// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
+const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=3600";
 
 function staticAssets(body = new Uint8Array([1, 2, 3, 4])) {
   return {
@@ -550,6 +551,63 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
 const PUBLIC = join(import.meta.dir, "public");
 const assetBytes = (name) => statSync(join(PUBLIC, name)).size;
 
+// The byte counts above say how much the page sends; they cannot see the edge
+// taking longer to send it, which is the other half of time to first byte and
+// the half a cold isolate controls. Every page and image answer therefore
+// carries the edge's own cost in Server-Timing, where a RUM script or a
+// visitor's own devtools can read it.
+test("pages and images report the edge cost in Server-Timing", async () => {
+  const dur = (value) => /^edge;dur=(\d+)$/.exec(value ?? "")?.[1];
+  for (const headers of [{}, { "accept-encoding": "br" }]) {
+    const res = await call(headers);
+    expect(dur(res.headers.get("server-timing"))).toBeDefined();
+  }
+  const etag = (await call()).headers.get("etag");
+  const revalidated = await call({ "if-none-match": etag });
+  expect(dur(revalidated.headers.get("server-timing"))).toBeDefined();
+  const image = await imageCall("/dashboard.png", {}, { env: staticAssets() });
+  expect(dur(image.headers.get("server-timing"))).toBeDefined();
+});
+
+// Two requests, both from this origin: the document and the one hero image
+// its srcset picks. Nothing else is fetched, because the page has no script,
+// no webfont and no external stylesheet, and the favicon is a data URI rather
+// than a file. The per-asset ceilings below bound each half; this bounds the
+// pair, which is what a phone on a mobile network actually waits for.
+test("a phone's visit is the document and the 768w capture, and fits in 25 KB", async () => {
+  expect(identityBody.includes("<script")).toBe(false);
+  expect(identityBody.includes('rel="stylesheet"')).toBe(false);
+  // The one <link> is the data-URI favicon: a link to a file would be a
+  // fourth thing on the critical path.
+  const links = [...identityBody.matchAll(/<link\b[^>]*>/g)];
+  expect(links).toHaveLength(1);
+  expect(links[0][0]).toContain('rel="icon"');
+  expect(links[0][0]).toContain("data:image/svg+xml,");
+
+  const brotli = new Uint8Array(
+    await (await call({ "accept-encoding": "br" })).arrayBuffer(),
+  ).byteLength;
+  const visit = brotli + assetBytes("dashboard-768.avif");
+  expect(visit).toBe(23_685);
+  expect(visit).toBeLessThan(25_000);
+});
+
+// The captures keep stable names, so a re-capture deploy cannot reach a
+// browser that still holds the old one: revalidation is the whole invalidation
+// story, and stale-while-revalidate is when it runs. A week of that window is
+// a week-old screenshot of the dashboard on a public page, so the ceiling here
+// is a day and the hour-long window is deliberate.
+test("a re-capture reaches a returning browser within a day, not a week", () => {
+  const directives = new Map(
+    IMAGE_CACHE.split(",").map((part) => {
+      const [name, value] = part.trim().split("=");
+      return [name, Number(value)];
+    }),
+  );
+  expect(directives.get("max-age")).toBe(86_400);
+  expect(directives.get("stale-while-revalidate")).toBeLessThanOrEqual(86_400);
+});
+
 test("hero AVIF is smaller than WebP at every width, and each width beats the next", () => {
   for (const width of ["768", "1280", ""]) {
     const suffix = width ? `-${width}` : "";
@@ -711,10 +769,7 @@ test("image paths are served from ASSETS with cache and security headers", async
   const res = await imageCall("/dashboard.avif", { "accept-encoding": "gzip, br" }, { env });
   expect(res.status).toBe(200);
   expect(await res.text()).toBe("avif-bytes");
-  expect(res.headers.get("cache-control")).toBe(
-    // biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
-    "public, max-age=86400, stale-while-revalidate=604800",
-  );
+  expect(res.headers.get("cache-control")).toBe(IMAGE_CACHE);
   expect(res.headers.get("etag")).toBe('"/dashboard.avif"');
   for (const name of SECURITY_HEADER_NAMES) {
     expect(res.headers.get(name)).not.toBeNull();

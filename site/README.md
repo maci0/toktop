@@ -66,7 +66,7 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,081 bytes rather than 11,741 bytes in the local Worker response test.
+transfers 4,126 bytes rather than 11,869 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
@@ -74,6 +74,19 @@ Source comments
 in the HTML and CSS stay in `worker.js` and are stripped before the page is
 hashed, compressed, or sent. Every response carries `Vary: Accept-Encoding`,
 so caches never hand a compressed body to a client that cannot decode it.
+
+The three codings are built concurrently. A cold isolate pays that build
+inside the first request it is answering, so awaiting them in sequence makes
+that one request wait for the sum of the three rather than the slowest one.
+
+## Timing
+
+Page and image answers carry `Server-Timing: edge;dur=<ms>`, the time the
+Worker spent before writing the response. A byte-count test cannot see a
+regression here: the page can send the same 3,454 bytes slowly. With the
+header, a RUM script or a visitor's own devtools reads the edge's share of
+time to first byte on the connection they actually had, and no third party
+has to be added to the page to collect it.
 
 ## Logs
 
@@ -113,10 +126,24 @@ width on tablets. Each format retains its 768w, 1280w and 1920w candidates.
 Served from
 this Worker so a deploy updates share cards and the page together.
 `wrangler.jsonc` sets `run_worker_first` so those image paths hit the Worker
-(cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline. Measured
-against the current source with Bun 1.4.2: 11,741 bytes identity / 4,081 gzip /
-3,414 brotli for the HTML, still inside the
-~14 KB initial congestion window. The PNG original is the one download no
+(cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline, and
+`public/` carries no `_headers` of its own: two files setting the same policy
+is one of them drifting.
+
+Captures are cached `max-age=86400, stale-while-revalidate=3600`. They are
+served under stable names rather than content-hashed ones, so revalidation is
+the only thing that can retire the copy a browser holds when a deploy
+re-captures; the hour bounds how long a returning browser keeps showing the
+previous screenshot, and costs one conditional request on a visit that is
+already past `max-age`.
+Measured
+against the current source with Bun 1.4.2: 11,869 bytes identity / 4,126 gzip /
+3,454 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,454 bytes
+plus the 20,231-byte 768w capture, 23,685 bytes in two requests; that pair has
+a ceiling of its own in the same test, next to the per-asset ones, because
+each half can pass its own limit while the visit still gets heavy. The PNG
+original is the one download no
 srcset narrows, so it carries a ceiling of its own in the same test. The budget
 is pinned by a test, so drift fails `bun test site/`; numbers above are
 re-measurable with it:
