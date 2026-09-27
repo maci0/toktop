@@ -524,7 +524,10 @@ func TestPlainAgentsNameEngineOnce(t *testing.T) {
 }
 
 func TestAgentCountLabel(t *testing.T) {
-	for _, tc := range []struct{ n int; want string }{
+	for _, tc := range []struct {
+		n    int
+		want string
+	}{
 		{0, "0 agents"}, {1, "1 agent"}, {2, "2 agents"}, {12, "12 agents"},
 	} {
 		if got := agentCountLabel(tc.n); got != tc.want {

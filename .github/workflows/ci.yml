@@ -66,6 +66,12 @@ jobs:
       - name: the go lines in this job carry the Makefile's tags
         if: runner.os == 'Linux'
         run: make check-ci-tags
+      # The build matrix below is a copy of the Makefile's PLATFORMS, so the
+      # two can drift: the release job builds and publishes PLATFORMS while
+      # this workflow vets and compiles whatever the matrix lists.
+      - name: the build matrix below is the Makefile's PLATFORMS
+        if: runner.os == 'Linux'
+        run: make check-ci-platforms
       # staticcheck resolves build tags per GOOS, so every runner analyzes its
       # own platform-specific files; the linux pass plus the matrix below
       # together cover all of them. The module pins the analyzer via a tool
@@ -109,6 +115,10 @@ jobs:
           bun-version-file: ".bun-version"
       - run: make site-lint
       - run: make site-check
+      # The wrangler pin and the deploy command the docs name have to move
+      # together. check-wrangler-doc runs at deploy time today, so a doc that
+      # stops naming the pin merges and then fails the next `make site-deploy`.
+      - run: make check-wrangler-doc
 
   scripts:
     runs-on: ubuntu-24.04

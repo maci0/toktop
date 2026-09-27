@@ -81,11 +81,11 @@ jobs:
         run: make test
 
       # The Makefile promises byte-identical artifacts from identical source.
-        # The pull-request `repro` job guards main, but a tag push runs here
-        # only, so the bytes about to be published have to be compared in the
-        # job that publishes them. repro-check-pair is the target the PR gate
-        # runs over the Makefile's REPRO_PLATFORMS, so this job and that one
-        # cannot drift onto different platforms; the full sweep is local.
+      # The pull-request `repro` job guards main, but a tag push runs here
+      # only, so the bytes about to be published have to be compared in the
+      # job that publishes them. repro-check-pair is the target the PR gate
+      # runs over the Makefile's REPRO_PLATFORMS, so this job and that one
+      # cannot drift onto different platforms; the full sweep is local.
       - name: reproducibility gate (REPRO_PLATFORMS)
         run: make repro-check-pair
 

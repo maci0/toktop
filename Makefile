@@ -201,10 +201,10 @@ RELEASE_REPO ?= $(shell $(GO) list -m)
 .DEFAULT_GOAL := help
 
 # Width of the target column in `make help`, one past the longest target
-# (repro-check-pair). A narrower column pushes the longest names' descriptions
+# (check-ci-platforms). A narrower column pushes the longest names' descriptions
 # out of alignment, and alignment is the one thing a help listing has to get
 # right.
-HELP_WIDTH := 17
+HELP_WIDTH := 21
 
 .PHONY: help
 help: ## show available targets
@@ -559,6 +559,27 @@ check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not car
 		exit 1; \
 	fi
 
+# The build job in ci.yml carries its own copy of PLATFORMS so each platform
+# gets its own runner. A copy is a second place to forget: adding a platform
+# here leaves the CI matrix vetting and compiling the old set while the release
+# job builds and publishes the new one, and nothing fails. Same shape as
+# check-ci-tags: a workflow that has drifted fails here, locally, first.
+# The matrix entries only, so the `matrix.goos` uses in the step bodies and the
+# uppercase GOOS/GOARCH in their env blocks do not read as platforms.
+CI_WORKFLOW := .github/workflows/ci.yml
+.PHONY: check-ci-platforms
+check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
+	@in_workflow=$$(sed -n 's/.*goos:[[:space:]]*\([a-z0-9]\{1,\}\)[^a-z0-9]*goarch:[[:space:]]*\([a-z0-9]\{1,\}\).*/\1\/\2/p' $(CI_WORKFLOW) | sort); \
+	in_make=$$(printf '%s\n' $(PLATFORMS) | sort); \
+	if [ "$$in_workflow" != "$$in_make" ]; then \
+		echo "make check-ci-platforms: the build matrix in $(CI_WORKFLOW) and PLATFORMS here are different platform sets, so CI vets and compiles a different set than the release builds and publishes:" >&2; \
+		printf '  only in %s:\n' "$(CI_WORKFLOW)" >&2; \
+		comm -23 <(printf '%s\n' "$$in_workflow") <(printf '%s\n' "$$in_make") | sed 's/^/    /' >&2; \
+		printf '  only in PLATFORMS:\n' >&2; \
+		comm -13 <(printf '%s\n' "$$in_workflow") <(printf '%s\n' "$$in_make") | sed 's/^/    /' >&2; \
+		exit 1; \
+	fi
+
 .PHONY: check-wrangler-doc
 check-wrangler-doc:
 	@grep -Fq 'wrangler@$(WRANGLER) login' CONTRIBUTING.md || { \
@@ -657,6 +678,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 .PHONY: check
 check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)
 	@$(MAKE) --no-print-directory check-ci-tags
+	@$(MAKE) --no-print-directory check-ci-platforms
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
 			echo "needs gofmt (run 'make fmt'):" >&2; echo "$$unformatted" >&2; exit 1; \
