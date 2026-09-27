@@ -58,9 +58,6 @@ jobs:
             prerelease=true
           fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
-          # The publish step below globs dist/ through ${{ env.VERSION }},
-          # which reads this file, not the shell scope of this step.
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           # Platform list, checksum generation and deterministic archive
           # metadata live in the Makefile so local and CI releases cannot
           # drift apart.
@@ -84,6 +81,16 @@ jobs:
             echo "smoke run of $bin failed" >&2
             exit 1
           fi
+          # The publish step uploads exactly what dist/ holds, read back from
+          # the filesystem after the build rather than spelled out a second
+          # time here. A second copy of the platform list would let a platform
+          # build, checksum, and then never be published, and
+          # fail_on_unmatched_files is silent about a missing entry.
+          {
+            echo 'artifacts<<GITHUB_OUTPUT_EOF'
+            find dist -maxdepth 1 -type f -printf '%p\n' | sort
+            echo GITHUB_OUTPUT_EOF
+          } >> "$GITHUB_OUTPUT"
 
       - name: publish github release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
@@ -91,18 +98,4 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ steps.build.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
-          # Every artifact `make release` puts in dist/ and nothing else: the
-          # PLATFORMS binaries, the checksums tarball, the SBOM. Naming them
-          # here would duplicate the Makefile's platform list, and a platform
-          # added there would build, checksum and then never be published,
-          # with fail_on_unmatched_files silent about it.
-          files: |
-            dist/toktop_${{ env.VERSION }}_linux_amd64
-            dist/toktop_${{ env.VERSION }}_linux_arm64
-            dist/toktop_${{ env.VERSION }}_darwin_amd64
-            dist/toktop_${{ env.VERSION }}_darwin_arm64
-            dist/toktop_${{ env.VERSION }}_windows_amd64.exe
-            dist/toktop_${{ env.VERSION }}_windows_arm64.exe
-            dist/toktop_${{ env.VERSION }}_checksums.tar.gz
-            dist/toktop_${{ env.VERSION }}_buildinfo.txt
-            dist/toktop-sbom-${{ env.VERSION }}.cdx.json
+          files: ${{ steps.build.outputs.artifacts }}

@@ -53,6 +53,9 @@ WRANGLER    := 4.126.0
 SITE_HEALTH_URL   := https://toktop.ai/health
 SITE_HEALTH_TRIES := 6
 SITE_HEALTH_WAIT  := 10
+# Serializes site-deploy against site-deploy and site-rollback. Under dist/,
+# which .gitignore already covers, so a released lock is never committed.
+SITE_LOCK         := $(DIST)/site.lock
 LDFLAGS     := -s -w -buildid= -X main.version=$(VERSION)
 # gofmt from the selected toolchain, not a different major on PATH.
 GOFMT = $$($(GO) env GOROOT)/bin/gofmt
@@ -248,13 +251,26 @@ site-check: require-bun ## bun test the Cloudflare Worker in site/ (CI parity)
 site-lint: require-bun ## biome-lint site/ at the BIOME pin (CI parity)
 	bunx $(BIOME) lint site/
 
-# The site's only deployment step, and its undo. The /health poll is the
-# post-release verification, so an upload that never went live fails here
-# instead of being discovered by a visitor.
+# The site's only deployment step, and its undo. The /health poll proves the
+# site is answering, not that this tree is the version answering, so it is an
+# availability check: a deploy that uploaded cleanly but never took effect
+# still passes here and is found by a visitor.
+#
+# Both targets take $(SITE_LOCK) for the whole recipe, deploy and rollback
+# alike: two of these running at once would leave whichever upload reached the
+# platform last, and a rollback racing a deploy restores whichever version
+# the platform happened to serve. mkdir is the portable lock (flock is not on
+# macOS); it lives under dist/, so `make clean` releases a stale one.
 .PHONY: site-deploy
 site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wait for /health
-	cd site && bunx wrangler@$(WRANGLER) deploy
-	@for i in $$(seq 1 $(SITE_HEALTH_TRIES)); do \
+	@mkdir -p $(DIST); \
+	if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
+		echo "another site deploy or rollback holds $(SITE_LOCK); wait for it, or remove the directory if that process is gone" >&2; \
+		exit 1; \
+	fi; \
+	trap 'rmdir $(SITE_LOCK) 2>/dev/null || true' EXIT; \
+	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
+	for i in $$(seq 1 $(SITE_HEALTH_TRIES)); do \
 		if [ "$$(curl -fsS --max-time 10 $(SITE_HEALTH_URL))" = "ok" ]; then \
 			echo "$(SITE_HEALTH_URL) answered ok after $${i} attempt(s)"; \
 			exit 0; \
@@ -267,7 +283,13 @@ site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wai
 
 .PHONY: site-rollback
 site-rollback: require-bun ## roll the site Worker back to the version before the last deploy
-	cd site && bunx wrangler@$(WRANGLER) rollback
+	@mkdir -p $(DIST); \
+	if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
+		echo "another site deploy or rollback holds $(SITE_LOCK); wait for it, or remove the directory if that process is gone" >&2; \
+		exit 1; \
+	fi; \
+	trap 'rmdir $(SITE_LOCK) 2>/dev/null || true' EXIT; \
+	(cd site && bunx wrangler@$(WRANGLER) rollback)
 
 .PHONY: fmt
 fmt: ## rewrite all Go files with gofmt (including simplifications)
