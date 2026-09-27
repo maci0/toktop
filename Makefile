@@ -111,7 +111,12 @@ SCRIPTS_BIN := $(SCRIPTS_ENV)/bin
 # True when $1 is a uv version below UV_MIN. Defined once so `make
 # scripts-check` and `make prereqs` cannot accept different uv. One line, so
 # it drops into a recipe that is a single continued command.
-UV_TOO_OLD = uv_too_old() { [ "$$(printf '%s\n%s\n' "$(UV_MIN)" "$$1" | sort -V | head -1)" != "$(UV_MIN)" ]; }
+#
+# Compared field by field in awk, not with `sort -V`: version sort is a GNU
+# extension, and where BSD sort (macOS) rejects it the pipeline printed
+# nothing, which read as "uv is too old" and failed every macOS run of
+# prereqs and scripts-check. awk is POSIX and already used by these recipes.
+UV_TOO_OLD = uv_too_old() { awk -v min='$(UV_MIN)' -v have="$$1" 'BEGIN { n = split(min, a, "."); m = split(have, b, "."); for (i = 1; i <= (n > m ? n : m); i++) { x = a[i] + 0; y = b[i] + 0; if (y < x) exit 0; if (y > x) exit 1 } exit 1 }'; }
 # bun's exact pin, from the file CI installs (bun-version-file), so
 # require-bun and prereqs compare against the same string.
 BUN_PIN := $(shell tr -d ' \t\r\n' < .bun-version 2>/dev/null)
