@@ -34,12 +34,20 @@ func Example() {
 	var wg sync.WaitGroup
 	for _, p := range agentusage.Discover() {
 		w := p.Watch(time.Now())
-		if w == nil {
-			continue
+		if w.Err() != nil {
+			continue // the agent keeps nothing this package can read
 		}
 		wg.Go(func() {
-			w.Run(ctx, 250*time.Millisecond, func(s agentusage.Sample) {
-				fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, s.Output, s.Input)
+			// Run hands over a running total, so a caller that emits events
+			// reports the growth from its previous sample. A delta reporting no
+			// growth is the sample to measure from next time, whether the agent
+			// was quiet or its transcript was rewritten under the watcher.
+			var prev agentusage.Sample
+			w.Run(ctx, 250*time.Millisecond, func(cur agentusage.Sample) {
+				if d, ok := cur.Delta(prev); ok {
+					fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, d.Output, d.Input)
+				}
+				prev = cur
 			})
 		})
 	}
@@ -77,7 +85,7 @@ func ExampleThinkingRate() {
 
 func ExampleProcess_Watch() {
 	for _, p := range agentusage.Discover() {
-		if w := p.Watch(time.Now()); w != nil {
+		if w := p.Watch(time.Now()); w.Err() == nil {
 			fmt.Println(w.Tool(), w.Dir())
 		}
 	}

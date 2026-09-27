@@ -174,12 +174,16 @@ func main() {
 	var wg sync.WaitGroup
 	for _, p := range agentusage.Discover() {
 		w := p.Watch(time.Now())
-		if w == nil {
+		if w.Err() != nil {
 			continue
 		}
 		wg.Go(func() {
-			w.Run(ctx, 250*time.Millisecond, func(s agentusage.Sample) {
-				fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, s.Output, s.Input)
+			var prev agentusage.Sample
+			w.Run(ctx, 250*time.Millisecond, func(cur agentusage.Sample) {
+				if d, ok := cur.Delta(prev); ok {
+					fmt.Printf("%s pid %d: %d output, %d prompt\n", p.Tool, p.PID, d.Output, d.Input)
+				}
+				prev = cur
 			})
 		})
 	}
@@ -190,6 +194,17 @@ func main() {
 The example watches the discovered processes concurrently for ten seconds.
 Only usage written after attachment is reported; existing transcript counts
 are skipped. Keep an agent generating during that window to see output.
+
+Two rules the example follows, because both are easy to get wrong and neither
+is enforced by the types. `Watch` returns a nil `*Watcher` for an agent that
+keeps nothing readable, and every method on that nil is safe to call, so the
+test is `w.Err()` rather than the pointer: `Err` names the case, `Tool` and
+`Dir` return empty strings, and the error is `ErrUnsupportedTool` under
+`errors.Is`. And `Run` hands over a running total, not the interval's usage, so
+each callback reports `cur.Delta(prev)` and keeps `cur` as the next baseline.
+Printing the totals instead bills the same tokens once per poll. A delta that
+reports no growth is still the baseline to carry forward: the agent was quiet,
+or its transcript was rewritten under the watcher.
 
 `RegisterSpec` teaches the package about an agent it was not compiled to know,
 and `UnregisterSpec` takes it back, restoring the adapter it displaced. The
