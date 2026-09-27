@@ -22,6 +22,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `GET /healthz` ends its body with the newline every other answer on the
+  ingest endpoint already carried (`http.Error` appends one, the `202` ack
+  writes one, and the site's own `/health` answers `ok\n`). A probe reading a
+  whole line no longer has to special-case the healthy one.
 - `TOKTOP_LOG_LEVEL` is no longer reported as unused under `--no-ingest`. The
   variable sets the floor for every audit log the process writes, and the
   engine collector, the ssh client and the `--add` attach path all write one;

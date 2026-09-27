@@ -785,8 +785,8 @@ func TestHealthz(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resp.StatusCode != http.StatusOK || string(body) != "ok" {
-		t.Fatalf("healthz = %d %q, want 200 ok", resp.StatusCode, body)
+	if resp.StatusCode != http.StatusOK || string(body) != "ok\n" {
+		t.Fatalf("healthz = %d %q, want 200 %q", resp.StatusCode, body, "ok\n")
 	}
 	if got := resp.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
 		t.Errorf("healthz content-type = %q, want text/plain; charset=utf-8", got)

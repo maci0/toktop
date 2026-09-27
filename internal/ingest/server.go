@@ -481,7 +481,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusOK)
-	fmt.Fprint(w, "ok")
+	// The newline the degraded line and every other body here already end
+	// with: http.Error appends one, the 202 ack writes one, and the site's
+	// own /health answers "ok\n". A probe that reads a whole line rather than
+	// trimming should not have to special-case this one.
+	fmt.Fprint(w, "ok\n")
 }
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {

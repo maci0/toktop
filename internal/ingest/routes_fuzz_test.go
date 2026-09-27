@@ -142,7 +142,7 @@ func FuzzRoute(f *testing.F) {
 			if path != healthPath {
 				t.Fatalf("200 for %q", path)
 			}
-			if respBody != "ok" {
+			if respBody != "ok\n" {
 				t.Errorf("health body = %q", respBody)
 			}
 		case http.StatusAccepted:

@@ -280,13 +280,13 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 | endpoint | purpose |
 |---|---|
 | `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
-| `GET /healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held |
+| `GET`, `HEAD` `/healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held |
 
 Event fields are all optional; anything omitted gets the default:
 
 | field | type | default | notes |
 |---|---|---|---|
-| `id` | string | - | caller-chosen key, capped at 128 characters; a repeat of a key recorded within the last 15 minutes is ignored. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key without truncation or whitespace collapsing; hash collisions remain possible |
+| `id` | string | - | caller-chosen key, capped at 128 characters; a repeat of a key recorded within the last 15 minutes is ignored. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
 | `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); stamps more than two minutes ahead of arrival are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |

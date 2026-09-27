@@ -1307,6 +1307,13 @@ func TestEmitSurvivesFirstPollError(t *testing.T) {
 	fp := fakeProvider{label: "dead", err: errors.New("connection refused")}
 	ch := make(chan core.Snapshot, 1)
 	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
+	// A cold cache makes emit sample the host itself, and sysmon.Sample walks
+	// the vendor GPU CLIs, which the collector's own comment calls out as able
+	// to take seconds. That has nothing to do with the history ring this test
+	// is about, and on a loaded machine it eats the deadline below and fails a
+	// run that was correct.
+	c.SetSysFn(func() core.SysSample { return core.SysSample{} })
+	c.procFn = func() []procs.Info { return nil }
 	done := make(chan struct{})
 	go func() { defer close(done); c.emit(context.Background(), ch) }()
 	select {
