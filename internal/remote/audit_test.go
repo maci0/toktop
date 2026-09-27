@@ -4,24 +4,54 @@ import (
 	"bytes"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 )
+
+// syncBuffer is the bytes.Buffer the audit logger writes through, with the
+// lock a plain one lacks. The client's own goroutines keep logging after a
+// drop (watchClose records the loss, keepalive the misses) while the test is
+// already reading the lines, so an unsynchronized buffer is a data race the
+// detector rightly reports. Nothing here runs in parallel, so one mutex is
+// enough.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func (s *syncBuffer) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.b.Reset()
+}
 
 // captureAudit points the package logger at a buffer and restores it after,
 // so the lines an operator would find in a journal can be asserted. Same
 // package-var convention as withKnownHosts; nothing here runs in parallel.
-func captureAudit(t *testing.T) *bytes.Buffer {
+func captureAudit(t *testing.T) *syncBuffer {
 	t.Helper()
-	var buf bytes.Buffer
+	buf := &syncBuffer{}
 	old := audit
 	audit = func() *slog.Logger {
-		return slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	}
 	t.Cleanup(func() { audit = old })
-	return &buf
+	return buf
 }
 
-func linesWith(buf *bytes.Buffer, sub string) []string {
+func linesWith(buf *syncBuffer, sub string) []string {
 	var out []string
 	for _, l := range strings.Split(buf.String(), "\n") {
 		if strings.Contains(l, sub) {

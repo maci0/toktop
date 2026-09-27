@@ -979,15 +979,22 @@ func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("the store must be written into a directory that did not exist: %v", err)
 	}
-	if got := storeInfo.Mode().Perm(); got != 0o600 {
-		t.Errorf("store mode = %#o, want %#o", got, 0o600)
-	}
 	dirInfo, err := os.Stat(privateDir)
 	if err != nil {
 		t.Fatalf("the store directory must be created: %v", err)
 	}
-	if got := dirInfo.Mode().Perm(); got != 0o700 {
-		t.Errorf("store directory mode = %#o, want %#o", got, 0o700)
+	// Permission bits are a POSIX notion. Windows reports 0666 for any file
+	// and 0777 for any directory whose read-only attribute is clear, whatever
+	// the create call asked for: a private store there is the ACL inherited
+	// from the directory, which no mode asserts. The write into a directory
+	// that did not exist is checked above on every platform.
+	if runtime.GOOS != "windows" {
+		if got := storeInfo.Mode().Perm(); got != 0o600 {
+			t.Errorf("store mode = %#o, want %#o", got, 0o600)
+		}
+		if got := dirInfo.Mode().Perm(); got != 0o700 {
+			t.Errorf("store directory mode = %#o, want %#o", got, 0o700)
+		}
 	}
 }
 
