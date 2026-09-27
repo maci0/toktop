@@ -38,6 +38,11 @@ support channel (see SECURITY.md).
   agent, roots as written, so a program can see which entries a definitions
   file registered and which it skipped. A `{dir}` root placeholder is
   documented on `agentusage.Spec`.
+- `agentusage.Watcher.SetNow` overrides the clock that stamps published
+  samples, so a caller running on an injected timeline gets samples stamped
+  on it and derives the same event ids from the same readings. Transcript
+  mtimes, `since` and the recency window stay wall time, because that is the
+  clock the filesystem and the session stores record in.
 
 ### Changed
 

@@ -89,6 +89,11 @@ type Watcher struct {
 	// synchronous Poll both walk the same offsets and counters.
 	pollMu sync.Mutex
 
+	// now stamps the published sample. The transcript mtimes it is compared
+	// against stay wall time in every mode; only the stamp a caller turns into
+	// an event id and a feed timestamp comes from here.
+	now func() time.Time
+
 	mu     sync.Mutex
 	sample Sample
 }
@@ -155,7 +160,7 @@ func (w *Watcher) Err() error {
 func Watch(tool, dir string, since time.Time) *Watcher {
 	tool = canonicalTool(tool)
 	if source, ok := sourceFor(tool); ok {
-		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since}
+		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since, now: time.Now}
 		if source.session != nil {
 			// A failed snapshot must not become an empty baseline: that
 			// would credit every pre-attach token the first time the store
@@ -172,7 +177,7 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 		return nil
 	}
 	w := &Watcher{
-		ad: ad, tool: tool, dir: resolveDir(dir), since: since,
+		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now,
 		offsets: map[string]int64{}, preexisting: map[string]bool{}, stamps: map[string]fileStamp{},
 		owner: map[string]bool{}, base: map[string]int{}, baseThink: map[string]int{},
 		baseInput: map[string]int{},
@@ -210,6 +215,34 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 	// same rescanEvery freshness window.
 	w.scanned = time.Time{}
 	return w
+}
+
+// SetNow overrides the clock that stamps published samples, and with them the
+// event ids a caller derives from them. Call before Run: a simulated or frozen
+// clock replays the same readings onto the same timeline, so a replayed run
+// produces the same ids and the dashboard's id window drops the duplicates
+// instead of counting them twice.
+//
+// It does not move the transcript comparisons: since, the recency window and
+// every file mtime stay wall time, because that is the clock the filesystem
+// and the session stores record in.
+func (w *Watcher) SetNow(fn func() time.Time) {
+	if w == nil {
+		return
+	}
+	if fn == nil {
+		fn = time.Now
+	}
+	w.now = fn
+}
+
+// instant reads the injected stamp clock, falling back to the wall clock for a
+// Watcher built without one.
+func (w *Watcher) instant() time.Time {
+	if w.now == nil {
+		return time.Now()
+	}
+	return w.now()
 }
 
 // resolveDir is the form a working directory is compared in: absolute, with
@@ -511,7 +544,7 @@ func (w *Watcher) read() (Sample, bool) {
 	changed := out != w.sample.Output || total != w.sample.Total ||
 		thinking != w.sample.Thinking || input != w.sample.Input
 	if changed {
-		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: time.Now()}
+		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: w.instant()}
 	}
 	return w.sample, changed
 }

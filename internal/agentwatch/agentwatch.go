@@ -211,6 +211,11 @@ func (w *Watcher) discover(ctx context.Context) {
 		if watch == nil {
 			continue // this agent keeps nothing readable
 		}
+		// The sample stamp is not a filesystem comparison, so it follows the
+		// injected clock: report derives the event id from it, and an id
+		// carrying a wall-clock instant makes the same reading look like a new
+		// event on every replay.
+		watch.SetNow(w.instant)
 		tctx, cancel := context.WithCancel(ctx)
 		t := &tracked{proc: p, watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()

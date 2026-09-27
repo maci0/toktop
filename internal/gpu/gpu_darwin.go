@@ -84,30 +84,39 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	}
 	var devs []core.GPUDevice
 	for _, d := range doc.Displays {
-		dev := core.GPUDevice{Vendor: "apple"}
-		if name, ok := d["_name"].(string); ok {
-			dev.Name = name
-		}
-		for k, v := range d {
-			lk := strings.ToLower(k)
-			if strings.Contains(lk, "vram") {
-				if s, ok := v.(string); ok {
-					dev.MemTotal = parseSizeString(s)
-				}
-			}
-			if dev.Name == "" && k == "sppci_model" {
-				if s, ok := v.(string); ok {
-					dev.Name = s
-				}
-			}
-		}
-		if dev.Name == "" {
-			continue // skip anonymous entries
+		dev, ok := appleGPUFromDisplay(d)
+		if !ok {
+			continue
 		}
 		dev.Index = len(devs)
 		devs = append(devs, dev)
 	}
 	return devs
+}
+
+// appleGPUFromDisplay decodes one SPDisplaysDataType entry. The fields are
+// picked without depending on map order: a bare vram key wins over the
+// substring match, and the first parseable candidate fills the rest, so the
+// same Mac reports the same total on every run.
+func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
+	dev := core.GPUDevice{Vendor: "apple"}
+	if name, ok := d["_name"].(string); ok {
+		dev.Name = name
+	}
+	for k, v := range d {
+		lk := strings.ToLower(k)
+		if lk == "vram" || (dev.MemTotal == 0 && strings.Contains(lk, "vram")) {
+			if s, ok := v.(string); ok {
+				dev.MemTotal = parseSizeString(s)
+			}
+		}
+		if dev.Name == "" && k == "sppci_model" {
+			if s, ok := v.(string); ok {
+				dev.Name = s
+			}
+		}
+	}
+	return dev, dev.Name != ""
 }
 
 var (

@@ -1430,3 +1430,26 @@ func TestPanickingParserDoesNotWedgeWatcher(t *testing.T) {
 		t.Fatal("watcher wedged after a parser panic: pollMu never released")
 	}
 }
+
+// A published sample is stamped from the injected clock, so a frozen or
+// simulated run replays the same readings at the same instants. Callers build
+// event ids from that stamp (see agentwatch.sampleID): a wall-clock one makes
+// every replay look like fresh activity.
+func TestSampleStampFollowsInjectedClock(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	frozen := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	w := Watch("claude", work, time.Now())
+	w.SetNow(func() time.Time { return frozen })
+
+	append_(t, filepath.Join(store, "session.jsonl"), claudeLine(work, 21))
+	if s := w.Poll(); s.At != frozen {
+		t.Fatalf("sample At = %v, want injected %v", s.At, frozen)
+	}
+
+	// A nil clock restores the wall clock rather than panicking on every read.
+	w.SetNow(nil)
+	if s := w.Poll(); s.At.Before(frozen) {
+		t.Fatalf("sample At = %v after SetNow(nil), want wall time at or after %v", s.At, frozen)
+	}
+}

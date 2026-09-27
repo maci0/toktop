@@ -100,3 +100,34 @@ func TestNoteIOAccelKeepsLastGoodOnFailure(t *testing.T) {
 		t.Fatalf("failure overwrote last good: mem=%d util=%v", ioAccelMemUsed, ioAccelUtil)
 	}
 }
+
+// The display map is ranged, so which vram field lands last is Go's choice.
+// A bare vram key has to win over a compound one whichever way the map
+// iterates, or the same Mac reports two different totals across runs.
+func TestAppleDisplayPicksVramIndependentlyOfMapOrder(t *testing.T) {
+	bare := map[string]any{"_name": "Apple M3 Max", "vram": "8 GB", "spdisplays_vram_shared": "4 GB"}
+	want := parseSizeString("8 GB")
+	for range 200 {
+		dev, ok := appleGPUFromDisplay(bare)
+		if !ok {
+			t.Fatal("named display rejected")
+		}
+		if dev.MemTotal != want {
+			t.Fatalf("MemTotal = %d, want the bare vram key %d", dev.MemTotal, want)
+		}
+		if dev.Name != "Apple M3 Max" {
+			t.Fatalf("Name = %q", dev.Name)
+		}
+	}
+
+	// spdisplays_vram is the only vram field some Macs report.
+	compound := map[string]any{"_name": "Apple M3 Pro", "spdisplays_vram": "18 GB"}
+	if dev, ok := appleGPUFromDisplay(compound); !ok || dev.MemTotal != parseSizeString("18 GB") {
+		t.Fatalf("compound vram key: dev = %+v ok = %v", dev, ok)
+	}
+
+	// An unnamed entry is not a device.
+	if _, ok := appleGPUFromDisplay(map[string]any{"vram": "8 GB"}); ok {
+		t.Fatal("anonymous display accepted")
+	}
+}

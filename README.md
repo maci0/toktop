@@ -186,7 +186,9 @@ definitions file or colliding agent names after normalization. `Watch` returns
 a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
 and matches `ErrUnsupportedTool`. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
-prompt tokens.
+prompt tokens. `Watcher.SetNow` replaces the clock that stamps published
+samples, so a program driving a simulated timeline gets samples stamped on
+it; transcript mtimes, `since` and the recency window stay wall time.
 
 ## What it shows
 

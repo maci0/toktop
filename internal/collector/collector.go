@@ -85,6 +85,10 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 	if interval <= 0 {
 		interval = time.Second
 	}
+	// One clock read for both the default and the start stamp: a second read
+	// would leave started a hair later than the clock it is compared against,
+	// so uptime and the rate baselines would sit on two origins.
+	now := time.Now()
 	c := &Collector{
 		providers:     providers,
 		interval:      interval,
@@ -98,7 +102,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
 		now:           time.Now,
-		started:       time.Now(),
+		started:       now,
 	}
 	// CPU tick deltas use this clock, not a second wall-clock read inside
 	// the sampler: a frozen or stepped now must move dt the same way emit's
