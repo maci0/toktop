@@ -5,6 +5,7 @@ import (
 	"math"
 	"os"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 	"unicode/utf8"
@@ -404,5 +405,88 @@ func TestPickShell(t *testing.T) {
 				t.Errorf("pickShell = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// A listing slow enough to outlast the refresh window must not be joined by a
+// second one. The window is a rate limit, not a lock: on Windows the CIM
+// enumeration costs more than refreshMin, so every caller arriving while it
+// ran used to start its own sweep of the same process table, and whichever
+// finished last published the older listing over the newer one. The stub
+// blocks the first call so the overlap is certain rather than timed.
+func TestSnapshotDoesNotSweepTwiceAtOnce(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+
+	var calls atomic.Int32
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	platformList = func() ([]raw, error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		list := []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}}}
+		for i := range list {
+			annotate(&list[i])
+		}
+		return list, nil
+	}
+
+	s := NewSampler()
+	base := time.Unix(1700000000, 0)
+	done := make(chan []Info, 1)
+	go func() { done <- s.SnapshotAt(base) }()
+	<-entered
+
+	// An hour later, so the refresh window cannot be what holds this caller
+	// off: the in-flight claim is the only thing standing between one sweep
+	// and two.
+	if got := s.SnapshotAt(base.Add(time.Hour)); len(got) != 0 {
+		t.Errorf("mid-sweep caller got %d entries, want the previous (empty) snapshot", len(got))
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("platformList called %d times, want 1 while a sweep is in flight", n)
+	}
+
+	close(release)
+	list := <-done
+	if len(list) != 1 || list[0].Engine != "ollama" {
+		t.Fatalf("snapshot = %+v, want the one ollama process", list)
+	}
+	// The claim is released on both the success and the error path, so the
+	// sampler keeps listing after a sweep that ran long.
+	if after := s.SnapshotAt(base.Add(2 * time.Hour)); len(after) != 1 {
+		t.Errorf("snapshot after the sweep = %+v, want the sweep released", after)
+	}
+	if n := calls.Load(); n != 2 {
+		t.Errorf("platformList called %d times, want 2", n)
+	}
+}
+
+// A failed listing releases the in-flight claim too, or every later caller
+// reads the last good snapshot forever.
+func TestSnapshotFailedSweepReleasesClaim(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+
+	var calls atomic.Int32
+	platformList = func() ([]raw, error) {
+		if calls.Add(1) == 1 {
+			return nil, errors.New("listing failed")
+		}
+		list := []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}}}
+		for i := range list {
+			annotate(&list[i])
+		}
+		return list, nil
+	}
+
+	s := NewSampler()
+	if got := s.Snapshot(); len(got) != 0 {
+		t.Errorf("failed sweep returned %+v, want no processes", got)
+	}
+	if got := s.Snapshot(); len(got) != 1 {
+		t.Errorf("snapshot after a failed sweep = %+v, want the listing retried", got)
 	}
 }

@@ -63,6 +63,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -348,6 +349,17 @@ func (w *Watcher) refreshAdapter() {
 	}
 	w.ad = ad
 	w.roots = nil // the old adapter's expanded roots belong to the old one
+	// The listing belongs to the old adapter too: it names the roots and
+	// suffixes that adapter walked, so reusing it for a rescan window after
+	// a reload that redirected either keeps this poll reading the tree the
+	// spec just disowned. Re-listing is what the generation change already
+	// costs, and one walk is the price.
+	//
+	// The per-file bookkeeping stays. Offsets and counts are read positions
+	// in files, not answers about the agent: dropping them would re-read
+	// records already counted (billing a transcript twice) and reset totals
+	// for a watcher whose definition was reloaded for an unrelated reason.
+	w.cached, w.scanned = nil, time.Time{}
 	w.defsGen = gen
 	w.fromDefs = true
 }

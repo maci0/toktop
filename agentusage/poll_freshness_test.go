@@ -4,6 +4,7 @@
 package agentusage
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -235,5 +236,72 @@ func TestRecencyWindowFollowsInjectedClock(t *testing.T) {
 	now = origin.Add(recencyWindow + time.Second)
 	if got := w.candidates(); len(got) != 0 {
 		t.Fatalf("candidates after stepping the clock past the window = %v, want none", got)
+	}
+}
+
+// A definition reloaded under a running watcher replaces the adapter, and the
+// cached listing is the old one's answer: which roots and suffixes to walk. A
+// reload that redirects the roots must be walked in the poll that read it, not
+// a rescan window later, or the new spec's transcripts are read by nobody and
+// the old tree's are still being read as if the spec had not changed.
+func TestReloadWalksTheNewRootsInTheSamePoll(t *testing.T) {
+	oldRoot, newRoot, work := t.TempDir(), t.TempDir(), t.TempDir()
+	spec := func(root string) string {
+		return `{"myagent": {"usage": {"roots": [` + jsonPath(root) + `], "suffix": ".jsonl"}}}`
+	}
+	path := writeDefs(t, spec(oldRoot))
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	dropDefs(t, "myagent")
+
+	w := Watch("myagent", work, time.Now())
+	if w == nil {
+		t.Fatal("myagent is defined with a root, so Watch must return a watcher")
+	}
+	oldTranscript := filepath.Join(oldRoot, "s.jsonl")
+	if err := os.WriteFile(oldTranscript, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appendLine(t, oldTranscript, 7)
+	// read, not Poll: a final Poll forces a fresh walk, which is the point
+	// of Poll and would hide the listing this is about.
+	if got, _ := w.read(false); got.Output != 7 {
+		t.Fatalf("poll = %d output tokens, want the 7 under the root the spec named", got.Output)
+	}
+
+	// Redirect the definition, then write into the new root. The poll that
+	// observes the reload is the one that has to list it.
+	if err := os.WriteFile(path, []byte(spec(newRoot)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	newTranscript := filepath.Join(newRoot, "s.jsonl")
+	if err := os.WriteFile(newTranscript, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	appendLine(t, newTranscript, 5)
+
+	// 7 is still this attach's own spend and stays counted; 5 is the new
+	// root's, and is what a stale listing would have missed for a rescan
+	// window.
+	if got, _ := w.read(false); got.Output != 12 {
+		t.Errorf("poll after reload = %d output tokens, want 12: 7 already counted and 5 from the new root", got.Output)
+	}
+}
+
+// appendLine adds one per-message record naming no working directory.
+func appendLine(t *testing.T, path string, out int) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	line := `{"type":"assistant","message":{"usage":{"output_tokens":` + fmt.Sprint(out) + `}}}` + "\n"
+	if _, err := f.WriteString(line); err != nil {
+		t.Fatal(err)
 	}
 }

@@ -138,6 +138,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `export GITHUB_TOKEN=$(cat token)` leaves behind) and refuses one that
   appears anywhere in the value, instead of letting the request fail on an
   invalid header that named the transport rather than the variable.
+- A process listing that runs longer than the sampler's refresh window no
+  longer admits a second one behind it. On Windows the CIM enumeration costs
+  more than the window, so every caller arriving while it ran swept the same
+  process table, and whichever finished last published the older listing and
+  a CPU tick baseline stamped before a newer one.
+- A reloaded agent definition is followed by the poll that read it. The
+  transcript listing a watcher reused for up to a second named the roots and
+  suffixes the previous definition had, so a redirect was not walked until
+  that window expired, and the tree the spec had just disowned kept being
+  read in the meantime.
 
 ### Breaking
 

@@ -82,6 +82,12 @@ type Sampler struct {
 	prev       map[int]uint64
 	last       time.Time // last poll attempt (for refreshMin throttling)
 	lastSample time.Time // last successful poll (for CPU tick delta dt)
+	// sweeping is set for the duration of the unlocked listing. The refresh
+	// window alone cannot hold a second sweep off: a Windows CIM enumeration
+	// outlasts refreshMin, so every caller arriving past the window started
+	// its own sweep of one process table, and whichever finished last
+	// published the older listing and a lastSample stamped before a newer one.
+	sweeping bool
 
 	// refreshMin throttles expensive OS tooling (PowerShell CIM on Windows
 	// takes seconds); within the window the previous snapshot is returned.
@@ -126,27 +132,27 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	// on Windows CIM enumeration takes seconds, so holding s.mu across it
 	// pinned every other caller of this sampler for the whole sweep, the
 	// cached fast path included. The throttle is claimed under the lock
-	// instead, so a caller arriving mid-sweep gets the previous snapshot
-	// rather than a second sweep, and the tick math below still runs as one
-	// critical section.
+	// instead, together with the in-flight flag, so a caller arriving
+	// mid-sweep gets the previous snapshot rather than a second sweep, and
+	// the tick math below still runs as one critical section.
 	s.mu.Lock()
-	if s.refreshMin > 0 && !s.last.IsZero() && now.Sub(s.last) < s.refreshMin {
+	if s.sweeping || (s.refreshMin > 0 && !s.last.IsZero() && now.Sub(s.last) < s.refreshMin) {
 		out := slices.Clone(s.cached)
 		s.mu.Unlock()
 		return out
 	}
 	s.last = now
+	s.sweeping = true
 	s.mu.Unlock()
 
 	list, err := platformList()
+	s.mu.Lock()
+	s.sweeping = false
+	defer s.mu.Unlock()
 	if err != nil {
-		s.mu.Lock()
-		defer s.mu.Unlock()
 		return slices.Clone(s.cached) // last good snapshot; a transient listing error is not "no processes"
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	var dt float64
 	if !s.lastSample.IsZero() {
 		dt = now.Sub(s.lastSample).Seconds()
