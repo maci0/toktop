@@ -41,6 +41,15 @@ support channel (see SECURITY.md).
 
 ### Changed
 
+- `toktop --help` ends with the exit codes (`0`, `1`, `2`, `130`) and the
+  split between results on stdout and status on stderr.
+  `toktop update --help` gained the examples block the top-level screen
+  already had, and says `--check` is pipeable.
+- `toktop version --version` prints the version, as `toktop update
+  --version` already did; only a real extra argument is a usage error now.
+- A knob that `--once --plain` never reads is named, like every other flag
+  passed into a mode that ignores it. `$TOKTOP_COLUMNS`, `$TOKTOP_LINES`
+  and `--frames` set alongside `--plain` were silently dropped.
 - `--ingest` bound to a host *name* other than `localhost` now warns about
   the unauthenticated endpoint, as a literal non-loopback address always
   has; a loopback address or `localhost` stays quiet.
@@ -68,6 +77,9 @@ support channel (see SECURITY.md).
 
 ### Fixed
 
+- A flag written after an `ssh://` target says it has to come before the
+  targets. Flag parsing stops at the first positional, so `toktop ssh://box
+  --agents` reported only "unexpected argument", with nothing to change.
 - An ssh failure no longer reports the home directory. A refused key, an
   unreadable host key store or a changed host key named the absolute path it
   worked on, and `$HOME` names the account; those paths now read `~/...`, as

@@ -114,8 +114,8 @@ func main() {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
 	}
 	warnUnknownEnv()
-	warnIgnoredFlags(explicit, f.demo, f.once, f.agents, f.noIngest, len(f.adds), len(remoteTargets))
-	warnIgnoredFrameEnv(f.once)
+	warnIgnoredFlags(explicit, f.demo, f.once, f.plain, f.agents, f.noIngest, len(f.adds), len(remoteTargets))
+	warnIgnoredFrameEnv(f.once, f.plain)
 	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, len(f.adds), len(remoteTargets))
 	if !f.noIngest {
 		if err := validateIngestAddr(f.ingest); err != nil {

@@ -400,6 +400,9 @@ func TestUsage(t *testing.T) {
 		"host:port",             // --ingest listen address shape
 		"piping",                // --once is the non-TTY path
 		"needs a terminal",      // live dashboard vs --once
+		"Exit codes:",           // the scripting contract
+		"130",                   // Ctrl+C
+		"stderr",                // status never lands on stdout
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() missing %q", want)
@@ -426,7 +429,7 @@ func TestRunUpdateHelp(t *testing.T) {
 			if got != "" {
 				t.Fatalf("runUpdate(%q) leaked %q to stderr", arg, got)
 			}
-			for _, want := range []string{"Usage:", "--check", "--repo", "owner/name", "--version", "GITHUB_TOKEN"} {
+			for _, want := range []string{"Usage:", "--check", "--repo", "owner/name", "--version", "GITHUB_TOKEN", "Examples:", "pipeable"} {
 				if !strings.Contains(out.String(), want) {
 					t.Errorf("update help missing %q", want)
 				}
@@ -470,6 +473,7 @@ func TestWarnIgnoredFlags(t *testing.T) {
 		set      map[string]bool
 		demo     bool
 		once     bool
+		plain    bool
 		agents   bool
 		noIngest bool
 		nAdd     int
@@ -482,6 +486,8 @@ func TestWarnIgnoredFlags(t *testing.T) {
 		{name: "seed default silent", set: map[string]bool{}, demo: false},
 		{name: "frames outside once warns", set: map[string]bool{"frames": true}, wantSub: "--frames"},
 		{name: "frames inside once silent", set: map[string]bool{"frames": true}, once: true},
+		{name: "frames with plain is explained", set: map[string]bool{"frames": true}, once: true, plain: true,
+			wantSub: "--frames only sets how long --once waits with --plain"},
 		{name: "both no-ops warn twice", set: map[string]bool{"seed": true, "frames": true},
 			wantSub: "--seed", wantAlso: "--frames"},
 		{name: "opencode-db without agents warns", set: map[string]bool{"opencode-db": true},
@@ -511,7 +517,7 @@ func TestWarnIgnoredFlags(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := captureStderr(t, func() {
-				warnIgnoredFlags(tt.set, tt.demo, tt.once, tt.agents, tt.noIngest, tt.nAdd, tt.nRemote)
+				warnIgnoredFlags(tt.set, tt.demo, tt.once, tt.plain, tt.agents, tt.noIngest, tt.nAdd, tt.nRemote)
 			})
 			if tt.wantSub == "" {
 				if got != "" {
@@ -577,6 +583,7 @@ func TestWarnIgnoredFrameEnv(t *testing.T) {
 	tests := []struct {
 		name    string
 		once    bool
+		plain   bool
 		columns string
 		lines   string
 		wantSub string // empty means silence expected
@@ -587,12 +594,14 @@ func TestWarnIgnoredFrameEnv(t *testing.T) {
 		{name: "lines outside once warns", lines: "38", wantSub: "TOKTOP_LINES"},
 		{name: "both set warn twice", columns: "120", lines: "38", wantSub: "TOKTOP_COLUMNS"},
 		{name: "inside once silent", once: true, columns: "120", lines: "38"},
+		{name: "with plain warns about the report", once: true, plain: true, columns: "120",
+			wantSub: "$TOKTOP_COLUMNS has no effect with --plain"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("TOKTOP_COLUMNS", tt.columns)
 			t.Setenv("TOKTOP_LINES", tt.lines)
-			got := captureStderr(t, func() { warnIgnoredFrameEnv(tt.once) })
+			got := captureStderr(t, func() { warnIgnoredFrameEnv(tt.once, tt.plain) })
 			if tt.wantSub == "" {
 				if got != "" {
 					t.Fatalf("warnIgnoredFrameEnv() printed %q, want silence", got)
@@ -893,6 +902,20 @@ func TestRunVersion(t *testing.T) {
 			t.Fatalf("stderr = %q, want mention of extra", got)
 		}
 	})
+	t.Run("--version prints the version", func(t *testing.T) {
+		var out bytes.Buffer
+		var code int
+		got := captureStderr(t, func() { code = runVersion(&out, []string{"--version"}) })
+		if code != 0 {
+			t.Fatalf("runVersion(--version) = %d, want 0", code)
+		}
+		if got != "" {
+			t.Fatalf("runVersion(--version) leaked %q to stderr", got)
+		}
+		if !strings.Contains(out.String(), "toktop "+version) {
+			t.Fatalf("stdout = %q, want toktop %s", out.String(), version)
+		}
+	})
 	t.Run("--help prints top-level help", func(t *testing.T) {
 		var out bytes.Buffer
 		var code int
@@ -944,6 +967,8 @@ func TestInterpretArgs(t *testing.T) {
 		{name: "help not first", args: []string{"ssh://a", "help"}, wantErr: "toktop help"},
 		{name: "version not first", args: []string{"ssh://a", "version"}, wantErr: "toktop version"},
 		{name: "ssh then junk", args: []string{"ssh://a", "nope"}, wantErr: "toktop --help"},
+		{name: "flag after ssh", args: []string{"ssh://a", "--add", "http://x"}, wantErr: `"--add" must come before the ssh:// targets`},
+		{name: "help flag after ssh", args: []string{"ssh://a", "--help"}, wantErr: `"--help" must come before the ssh:// targets`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

@@ -16,7 +16,7 @@ import (
 // Mode and environment validation, and the warnings for flags and env vars
 // that were set but cannot take effect.
 
-func warnIgnoredFlags(set map[string]bool, demo, once, agents, noIngest bool, nAdd, nRemote int) {
+func warnIgnoredFlags(set map[string]bool, demo, once, plain, agents, noIngest bool, nAdd, nRemote int) {
 	if set["opencode-db"] && !agents {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db has no effect without --agents")
 	}
@@ -28,6 +28,12 @@ func warnIgnoredFlags(set map[string]bool, demo, once, agents, noIngest bool, nA
 	}
 	if set["frames"] && !once {
 		fmt.Fprintln(os.Stderr, "toktop: --frames has no effect without --once")
+	}
+	if set["frames"] && plain {
+		// The plain report renders the last snapshot as a linear list; there
+		// is no chart for the earlier frames to fill, so the count only buys
+		// the wait before it.
+		fmt.Fprintln(os.Stderr, "toktop: --frames only sets how long --once waits with --plain; the text report renders the last snapshot")
 	}
 	if set["plain"] && !once {
 		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect without --once")
@@ -56,17 +62,23 @@ func warnIgnoredFlags(set map[string]bool, demo, once, agents, noIngest bool, nA
 }
 
 // warnIgnoredFrameEnv names TOKTOP_COLUMNS / TOKTOP_LINES when they are set
-// but --once is not running: the overrides only size static frames, and a
-// silently ignored variable looks like a broken knob, same as a flag passed
-// into a mode that never reads it.
-func warnIgnoredFrameEnv(once bool) {
-	if once {
+// but no sized frame is rendered: the overrides only size the --once
+// dashboard frame, and a silently ignored variable looks like a broken knob,
+// same as a flag passed into a mode that never reads it. The --plain report
+// is unsized by construction, so it reads neither.
+func warnIgnoredFrameEnv(once, plain bool) {
+	if once && !plain {
 		return
 	}
 	for _, name := range [...]string{"TOKTOP_COLUMNS", "TOKTOP_LINES"} {
-		if strings.TrimSpace(os.Getenv(name)) != "" {
-			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", name)
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			continue
 		}
+		if plain {
+			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", name)
 	}
 }
 

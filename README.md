@@ -441,7 +441,8 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 --plain           with --once: linear text report instead of the dashboard
                   frame (screen-reader friendly)
 --frames N        with --once: snapshots to accumulate before rendering
-                  (max 180, the chart history length)
+                  (max 180, the chart history length; with --plain only the
+                  wait before rendering changes)
 --seed N          demo RNG seed; the demo frame shows the seed it ran
                   with, and the same seed replays the run
 --no-hot-reload   disable restart-on-rebuild while running
@@ -451,6 +452,12 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 
 Password auth for ssh targets: interactive prompt, or `TOKTOP_SSH_PASSWORD`.
 
+Flags come before the positional `ssh://` targets; a flag written after one is
+a usage error that says so. Results (the rendered frame, the version, the
+release URL) go to stdout and progress, warnings and errors to stderr, so
+`toktop --once >frame.txt` and `toktop version` stay pipeable. Exit codes: `0`
+success, `1` runtime failure, `2` usage error, `130` interrupted.
+
 ## Environment variables
 
 | variable | what it does |
@@ -458,7 +465,7 @@ Password auth for ssh targets: interactive prompt, or `TOKTOP_SSH_PASSWORD`.
 | `OMNIROUTE_API_KEY` | bearer token fallback for `--bearer` (checked first unless `--bearer` is passed) |
 | `TOKTOP_BEARER` | bearer token fallback for `--bearer` (checked after `OMNIROUTE_API_KEY`) |
 | `TOKTOP_SSH_PASSWORD` | ssh password for headless runs; otherwise an interactive prompt. A trailing newline (from `$(cat file)`) is stripped, everything else is sent as typed |
-| `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2 |
+| `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. `--once --plain` renders no sized frame, so both are named as unused |
 | `TOKTOP_LOG_LEVEL` | ingest audit log floor: `debug`, `info` (default), `warn`, or `error`; a set-but-invalid value aborts with exit code 2 |
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit |

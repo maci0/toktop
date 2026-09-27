@@ -51,6 +51,16 @@ Bearer tokens fall back to $OMNIROUTE_API_KEY then $TOKTOP_BEARER (an
 explicit --bearer, even empty, wins) and are sent only to --add endpoints.
 The live dashboard needs a terminal; use --once when piping or redirecting.
 See README.md for all environment variables.
+
+Exit codes:
+  0    success, including a reader such as head closing stdout early
+  1    runtime failure (no telemetry arrived, a write or the update failed)
+  2    usage error (unknown flag, command or ssh:// target, bad value)
+  130  interrupted with Ctrl+C
+
+Results go to stdout (the rendered frame, the version, the release URL);
+progress, warnings and errors go to stderr, so a script can read stdout
+without filtering status lines out of it.
 `)
 	_, err := io.WriteString(w, buf.String())
 	return err
@@ -99,10 +109,18 @@ func rejectExtra(cmd, arg string) int {
 	return 2
 }
 
-// runVersion implements `toktop version`. --help prints top-level usage;
-// any other extra argument is a usage error.
+// runVersion implements `toktop version`. --help prints top-level usage and
+// --version prints the version, matching what `toktop update` accepts; any
+// other extra argument is a usage error.
 func runVersion(out io.Writer, args []string) int {
 	if len(args) > 0 {
+		if args[0] == "--version" {
+			if len(args) > 1 {
+				return rejectExtra("toktop version", args[1])
+			}
+			_, err := fmt.Fprintln(out, "toktop", version)
+			return outputStatus(err)
+		}
 		if isHelpArg(args[0]) {
 			if len(args) > 1 {
 				return rejectExtra("toktop version", args[1])
@@ -131,10 +149,16 @@ func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 		}
 		return "version", nil, nil
 	}
-	for _, arg := range args {
+	for i, arg := range args {
 		if strings.HasPrefix(arg, "ssh://") {
 			remotes = append(remotes, arg)
 			continue
+		}
+		if i > 0 && strings.HasPrefix(arg, "-") {
+			// flag parsing stopped at the first positional, so a flag written
+			// after an ssh:// target comes back as a leftover. Naming only the
+			// argument would leave the reader with nothing to change.
+			return "", nil, fmt.Errorf("toktop: %q must come before the ssh:// targets (see 'toktop --help')", arg)
 		}
 		return "", nil, unexpectedArg(arg)
 	}

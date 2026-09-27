@@ -34,11 +34,18 @@ Usage:
 The download is verified against the release's checksums before anything is
 replaced; a mismatch leaves the running binary untouched.
 
+Examples:
+  toktop update --check        print the latest release URL, install nothing
+  toktop update                install the latest release
+  toktop update --repo you/toktop   track a fork instead
+
 Flags:
 `)
 	fs.PrintDefaults()
 	fmt.Fprint(&buf, `
 $GITHUB_TOKEN authenticates GitHub API calls past the anonymous rate limit.
+The release URL goes to stdout and progress to stderr, so --check is
+pipeable; a failed check or install exits 1, a usage error exits 2.
 `)
 	_, err := io.WriteString(w, buf.String())
 	return err
