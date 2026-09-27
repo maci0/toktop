@@ -8,16 +8,15 @@ they live and what already stands in their way.
 - **Last reviewed:** 2026-09-27 (every claim below re-read against code at
   this commit: ingest, bearer, provider, probe, remote, selfupdate, selfreload,
   gpu, logcfg, agentusage, workflows, Makefile, site/worker.js). The current
-  pass covers nine commits since the last one. One entry point was missing
-  (`--once --json`, a third rendering of the same snapshot) and three
-  controls that post-date this file were recorded (M34-M36): the shared
-  engine model-name bound, the process-wide log redaction in `internal/logcfg`,
-  and the authenticated, fail-closed release guard. Line anchors into
-  `site/worker.js` (829 lines now) and `internal/ingest/server.go` had moved
-  again and are re-anchored, each naming its symbol. No risk changed rank.
-  The correction diary that used to sit under the documentation-claims
-  section is gone rather than appended: what a past pass got wrong is not a
-  claim about the code.
+  pass found one scope error, in the response-readiness section: the audit
+  trail was written as the ingest endpoint's alone, while four subsystems
+  build their logger from the same `logcfg.Logger` and one floor,
+  `TOKTOP_LOG_LEVEL`, governs all of them. The ssh, engine-poll and `--add`
+  attach audit lines, and the engine addresses and ssh targets they carry, are
+  now recorded there, under M35 and under the ingest claims that reach for the
+  same variable. No risk changed rank. The correction diary that used to sit
+  under the documentation-claims section is gone rather than appended: what a
+  past pass got wrong is not a claim about the code.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -133,7 +132,13 @@ What is worth stealing, corrupting, or denying:
   disclosure. The process logger folds the home directory out of every
   message and string attribute, and the ingest audit line names a peer only
   as `loopback:<port>` (M35); the fields left are the ones a useful report
-  needs.
+  needs. Since the ssh, engine-state and attach audit lines joined this
+  stream, the same paste carries the destinations rather than the operator's
+  own account: an engine `addr` (a `--add` URL, a scanned port, `host:port`
+  for a remote engine, internal/collector/collector.go, 461) and an ssh
+  `target` (`user@host`, internal/remote/client.go, 216 and 222). Those are
+  infrastructure names, not a home path, so the fold above does not touch
+  them and no control in the table removes them.
 
 ## Entry points
 
@@ -196,9 +201,17 @@ Every externally reachable input, with its code location:
    `TOKTOP_BEARER`, `TOKTOP_SSH_PASSWORD`, `GITHUB_TOKEN`; plus
    `SSH_AUTH_SOCK`, `TOKTOP_COLUMNS`/`TOKTOP_LINES`, `TOKTOP_LOG_LEVEL`
    (cmd/toktop/main.go; internal/remote/auth.go; internal/selfupdate;
-   internal/ingest), `GAUNTLET_HOME` (agentusage/definitions.go; honored
+   internal/logcfg: one floor for the ingest, ssh, engine-poll and `--add`
+   attach loggers alike, and named as having no effect only in a
+   `--demo --no-ingest` run, which builds no logger at all,
+   cmd/toktop/validate.go, `warnUnusedEnv`, 184-195),
+   `GAUNTLET_HOME` (agentusage/definitions.go; honored
    only when absolute, so a relative value cannot pull definitions from the
-   working directory, and it is named as ignored at startup under `--agents`),
+   working directory, and it is named as ignored at startup under `--agents`;
+   an absolute value with no `agents.json` under it is named in the same
+   place, since a missing file is a no-op for the loader and the dashboard
+   cannot tell the two apart, cmd/toktop/validate.go,
+   `warnIgnoredGauntletHome`, 103-133),
    `XDG_CONFIG_HOME` (internal/remote/knownhosts.go, 19-28; honored only
    when absolute, and a relative value is named as ignored at startup when
    an `ssh://` target would have read it),
@@ -729,7 +742,7 @@ Controls verified in code, with the threats they cover:
 | M32: `currentUser` validates `USER` and `USERNAME` through `validTargetField` before handing either to the transport and falls through to the passwd database when either is empty or would fail validation; the passwd name is passed through `basenameLogin` so a Windows `DOMAIN\user` yields `user`. `TOKTOP_SSH_PASSWORD` moved behind the exported `remote.PasswordEnv` constant so the startup warning that names an unusable variable spells it the way the code reads it | a hostile environment redirecting the ssh connection to a different account, or naming an invalid string the transport would reject later as a password failure (B6) | internal/remote/client.go, 81-104; internal/remote/target.go, 258; internal/remote/auth.go, 93-107; cmd/toktop/validate.go, 137-147 |
 | M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick (B5 DoS) | cmd/toktop/main.go, 548-575; internal/remote/client.go, 532-570; internal/gpu/gpu.go, 90-121 |
 | M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 62-67, `ModelName` 76-78; call sites internal/provider/openai.go, 66, 119, 152, 167; internal/provider/ollama.go, 40-42; internal/probe/probe.go, `ModelNameMax` 73-77 |
-| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them | the operator pasting a diagnostic line into an issue and publishing the account name inside it; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68-75, `HomeHandler` 81-137, `Field` 149-151; internal/core/redact.go, `RedactHome` 23-52 |
+| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All four audit loggers build theirs from that one function (internal/ingest/server.go, 53; internal/remote/client.go, 30; internal/collector/collector.go, 31; cmd/toktop/attach.go, 29), so the redaction reaches the ssh, engine-state and attach lines too, and the ssh client's own `logField` (client.go, 34) additionally runs `RedactAddrs` over the text. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; and a destination the operator typed (an engine `addr`, an ssh `target`) is not a peer address, so nothing short of the home fold removes it | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68-75, `HomeHandler` 81-137, `Field` 149-151; internal/core/redact.go, `RedactHome` 23-52 |
 | M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, 38-65 |
 
 Documentation claims checked against code on 2026-09-27. What this pass
@@ -1002,24 +1015,51 @@ Recorded as threats with locations; fixes do not happen in this document:
 
 ## Response readiness (notes only)
 
-- **Audit trail:** POST /v1/events, 404/405, and recovered handler panics
-  emit structured stderr metadata, subject to `TOKTOP_LOG_LEVEL`
-  (internal/ingest/server.go).
-  Default info includes successful POSTs; warn/error suppress them, and
-  error also suppresses 4xx rejections. Successful health checks are not
-  logged (server.go). Request ids can be supplied by callers
-  (server.go), so they provide correlation, not sender identity.
-  A body that trips a deadline now names which bound it broke, in the 408
-  body rather than a log line (M30, `stallReason` server.go, 451-464, used at
-  :608), so an operator can tell a peer that stopped sending from one whose
-  stream outlived the
-  10-minute bound without reading the source for which branch fired.
+- **Audit trail:** four subsystems write to stderr through the same logger
+  and the same floor, `TOKTOP_LOG_LEVEL` (internal/logcfg), so the floor
+  moves for all of them at once and none of them is silent because its own
+  endpoint is off:
+  - the ingest server (`logcfg.Logger()` at internal/ingest/server.go, 53):
+    POST /v1/events, 404/405, and recovered handler panics. Default info
+    includes successful POSTs; warn/error suppress them, and error also
+    suppresses 4xx rejections. Successful health checks are not logged
+    (server.go). Request ids can be supplied by callers (server.go), so they
+    provide correlation, not sender identity. A body that trips a deadline
+    names which bound it broke, in the 408 body rather than a log line
+    (M30, `stallReason` server.go, 451-464, used at :608), so an operator can
+    tell a peer that stopped sending from one whose stream outlived the
+    10-minute bound without reading the source for which branch fired.
+  - the ssh client (`var audit = logcfg.Logger`, internal/remote/client.go,
+    30): connect failure and success (:215 warn, :221 info), a peer that
+    stopped answering keepalives (:344), an unanswered channel open (:517),
+    and a lost connection (:745 error).
+  - the engine collector (`internal/collector/collector.go`, 31, one line per
+    engine whose state changed: `logHealth` at :453, called warn for not
+    answering and info for answering again at :431-432, carrying label, addr,
+    reason and down-for).
+  - the `--add` attach path (`var attachLog = logcfg.Logger`,
+    cmd/toktop/attach.go, 29): a refused bearer and an unrecognized endpoint
+    (:49, :55), an ssh target that was not attached and one that was (:80,
+    :87), a remote port that could not be forwarded (:164), and a remote port
+    skipped for speaking no recognized engine API (:207).
   Event bodies, notes, and token counts are not audit attributes; the
   attributes that are written go through `logcfg.Field`
   (sanitize, collapse whitespace, cap) and the whole record through the
   home-folding handler (M35), so a line is postable into an issue, but there
   is no credential-redaction guarantee for arbitrary caller-supplied log
-  fields (server.go). The feed is bounded in-memory state
+  fields (server.go). The three subsystems outside ingest carry
+  operator-named infrastructure into the same stream: engine `addr` values
+  (a `--add` URL, a discovered port, `host:port` for a remote engine,
+  collector.go, 461) and ssh `target` labels, built as `user@host` by
+  `targetLabel` (cmd/toktop/attach.go, 33) over `userHost`
+  (internal/remote/target.go, 108). Those are destinations the operator typed
+  or the run discovered, not peer addresses, so `logcfg.Remote` does not
+  apply to them and M27 does not cover them; what redacts them is
+  `logcfg.Field` plus the home fold. An operator pasting a report therefore
+  publishes the names of the hosts and gateways that run, which the frame's
+  own redaction-into-`~` work (asset: diagnostic log lines) does not reach.
+  The
+  feed is bounded in-memory state
   (internal/collector/collector.go). After exit, only captured stderr
   remains, without enough payload data to reconstruct poisoning.
 - **Reported-vulnerability-to-fix path:** undocumented. SECURITY.md exists
