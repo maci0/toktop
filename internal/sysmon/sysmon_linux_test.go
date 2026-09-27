@@ -160,6 +160,7 @@ func reset() {
 	hostStaticMu.Lock()
 	hostStaticVal = hostStatic{}
 	hostStaticAt = time.Time{}
+	hostStaticFill = 0
 	hostStaticMu.Unlock()
 }
 
@@ -201,6 +202,36 @@ func TestHostStaticInfoRetriesEmptyDrivers(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("probe ran %d times, want 2", n)
+	}
+}
+
+// A host with no NPU and no AMD module has optional fields that stay empty
+// forever. The memo must not treat that as "the cache never became valid":
+// past the retry budget an empty optional field is answered, not chased, so
+// the probe stops running for the life of the process.
+func TestHostStaticInfoStopsRetrying(t *testing.T) {
+	reset()
+	orig := loadHostStatic
+	t.Cleanup(func() {
+		loadHostStatic = orig
+		reset()
+	})
+
+	var n int
+	loadHostStatic = func() hostStatic {
+		n++
+		return hostStatic{osName: "Debian", kernel: "6.1"}
+	}
+
+	hostStaticInfo() // the first probe
+	for range hostStaticTries + 2 {
+		hostStaticMu.Lock()
+		hostStaticAt = time.Now().Add(-hostStaticRetry - time.Second)
+		hostStaticMu.Unlock()
+		hostStaticInfo()
+	}
+	if n != hostStaticTries {
+		t.Fatalf("probe ran %d times, want the %d-probe budget", n, hostStaticTries)
 	}
 }
 

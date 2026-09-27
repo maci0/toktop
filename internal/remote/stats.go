@@ -169,7 +169,8 @@ func (s *Stats) poll(ctx context.Context) {
 // is not merged, but a recorded poll failure names the target and its reason,
 // so the frame says which host is missing rather than passing local readings
 // off as the whole picture. A target that has not failed and has no sample
-// yet leaves the sample alone.
+// yet leaves the sample alone. Where several targets overlay one sample, only
+// the one holding the failure names the sample (see the switch below).
 func (s *Stats) Merge(into *core.SysSample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -210,8 +211,24 @@ func (s *Stats) Merge(into *core.SysSample) {
 			maps.Copy(into.Drivers, s.last.Drivers)
 		}
 	}
-	into.RemoteHost = s.last.RemoteHost
-	into.RemoteErr = s.err
+	// RemoteHost labels RemoteErr, so the two have to name one target.
+	// --target is repeatable and each target's Merge overlays the same
+	// sample, so the pair is a slot with an owner, not a field every target
+	// writes: a healthy target that cleared it would take the banner off a
+	// different target that is still down and leave a dead host with no
+	// symptom at all. A target claims the slot while it is failing and
+	// releases it on its own recovery; a healthy target that owns nothing
+	// names itself, and one that does not own the slot says nothing.
+	switch {
+	case s.err != "":
+		into.RemoteHost, into.RemoteErr = s.host(), s.err
+	case into.RemoteHost == s.host():
+		into.RemoteErr = ""
+	default:
+		if into.RemoteErr == "" {
+			into.RemoteHost = s.last.RemoteHost
+		}
+	}
 }
 
 // host is the target label for a sample that has gone stale: the host is

@@ -74,8 +74,9 @@ func sampleMemoryLinux(s *core.SysSample) {
 // hostStatic is identity that is usually fixed for the process lifetime:
 // distro name, kernel release, driver versions and the NPU inventory.
 // Filled fields are kept; empty optional ones (driver not loaded yet, NPU
-// sysfs not mounted at start) are retried on hostStaticRetry so the first
-// sample cannot blank them for the whole session.
+// sysfs not mounted at start) are retried on hostStaticRetry, hostStaticTries
+// times over, so the first sample cannot blank them for the whole session and
+// a host with no optional accelerator to find does not rescan forever.
 type hostStatic struct {
 	osName    string
 	kernel    string
@@ -85,28 +86,40 @@ type hostStatic struct {
 	npus      []string
 }
 
-const hostStaticRetry = 30 * time.Second
+const (
+	hostStaticRetry = 30 * time.Second
+	// hostStaticTries bounds how many times the probe runs, the first read
+	// included. The retry exists so a field that is not there yet (a driver
+	// loaded after
+	// toktop started, NPU sysfs mounted later) is still picked up, and
+	// mergeHostStatic only ever fills an empty field, so a retry can still
+	// add something. It is bounded because the alternative is asking whether
+	// the host has every optional accelerator, which no host without an NPU
+	// and without AMD satisfies: that predicate never holds, so the memo
+	// re-read /etc/os-release, uname and the driver files every
+	// hostStaticRetry for the life of the process. A driver still absent
+	// after the window is not one this dashboard keeps waiting on.
+	hostStaticTries = 4
+)
 
 var (
-	hostStaticMu  sync.Mutex
-	hostStaticVal hostStatic
-	hostStaticAt  time.Time
+	hostStaticMu   sync.Mutex
+	hostStaticVal  hostStatic
+	hostStaticAt   time.Time
+	hostStaticFill int
 )
 
 func hostStaticInfo() hostStatic {
 	hostStaticMu.Lock()
 	defer hostStaticMu.Unlock()
-	if hostStaticAt.IsZero() || (!hostStaticFilled(hostStaticVal) && time.Since(hostStaticAt) >= hostStaticRetry) {
+	if hostStaticAt.IsZero() || (hostStaticFill < hostStaticTries && time.Since(hostStaticAt) >= hostStaticRetry) {
 		hostStaticVal = mergeHostStatic(hostStaticVal, loadHostStatic())
 		hostStaticAt = time.Now()
+		hostStaticFill++
 	}
 	res := hostStaticVal
 	res.npus = slices.Clone(hostStaticVal.npus)
 	return res
-}
-
-func hostStaticFilled(h hostStatic) bool {
-	return h.osName != "" && h.kernel != "" && h.nvidiaDrv != "" && h.cuda != "" && h.amdgpu != "" && len(h.npus) > 0
 }
 
 func mergeHostStatic(prev, fresh hostStatic) hostStatic {

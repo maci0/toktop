@@ -258,6 +258,48 @@ func TestMergeFreshnessFollowsInjectedClock(t *testing.T) {
 	}
 }
 
+// --target is repeatable and every target's Merge overlays the same sample,
+// so a healthy target merging after a failing one used to clear that
+// failure: a dead host then had no symptom at all, and the header named a
+// host that was answering. The failing target keeps the slot until it
+// recovers on its own.
+func TestMergeOneTargetDoesNotClearAnothersFailure(t *testing.T) {
+	down := &Stats{at: time.Now(), err: "connection refused", last: core.SysSample{RemoteHost: "box"}}
+	up := &Stats{at: time.Now(), last: core.SysSample{RemoteHost: "rack", CPUModel: "Xeon"}}
+
+	var into core.SysSample
+	into.MemTotal = 1 << 30 // local readings the remotes overlay
+	down.Merge(&into)
+	up.Merge(&into)
+	if into.RemoteHost != "box" || into.RemoteErr == "" {
+		t.Errorf("a healthy target cleared a failing one's error: host=%q err=%q",
+			into.RemoteHost, into.RemoteErr)
+	}
+	// The healthy target's own vitals still land: only the error slot is
+	// owned, not the whole sample.
+	if into.CPUModel != "Xeon" {
+		t.Errorf("healthy target's vitals were dropped: %+v", into)
+	}
+
+	// box comes back: its own banner lifts, without touching rack's.
+	down.err = ""
+	down.Merge(&into)
+	if into.RemoteErr != "" {
+		t.Errorf("recovered target still reporting: host=%q err=%q", into.RemoteHost, into.RemoteErr)
+	}
+}
+
+// A sample no failing target owns names the host that answered it, so the
+// header's "via ssh:" line keeps naming a host that is reachable.
+func TestMergeNamesTheHostThatAnswered(t *testing.T) {
+	up := &Stats{at: time.Now(), last: core.SysSample{RemoteHost: "rack"}}
+	var into core.SysSample
+	up.Merge(&into)
+	if into.RemoteHost != "rack" || into.RemoteErr != "" {
+		t.Errorf("healthy target did not name itself: host=%q err=%q", into.RemoteHost, into.RemoteErr)
+	}
+}
+
 // The merged sample is published to the UI while the next poll rewrites
 // s.last.GPUs; aliasing that slice would data-race with a render.
 func TestMergeCopiesGPUs(t *testing.T) {
