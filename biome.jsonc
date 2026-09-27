@@ -50,11 +50,15 @@
         "useMaxParams": "off"
       },
       // One style rule on its own, not the group. The rest of style stays off
-      // because the tree does not pass it (noContinue in the encoding parser,
-      // useBlockStatements on the one-line early returns, noMagicNumbers in
-      // the ANSI palette and the FNV hash, noTernary, noIncrementDecrement,
-      // useNumericSeparators, noExcessiveLinesPerFile), and those are rewrites
-      // of code that is already shaped the way the author wants it. Nursery
+      // because the tree does not pass it, measured with the group forced on:
+      // 180 violations across the twelve rules below, and those are rewrites of
+      // code that is already shaped the way the author wants it. noMagicNumbers
+      // (107) is the ANSI palette and the FNV hash; useBlockStatements (22) is
+      // the one-line early returns; useNamingConvention (18) is the worker's
+      // own naming; noTernary (16) and noNestedTernary are the encoding
+      // dispatch; useExportsLast, noDefaultExport, useNumberNamespace,
+      // noContinue (3), noIncrementDecrement (4), useNumericSeparators (3)
+      // and noExcessiveLinesPerFile (2) are the rest. Nursery
       // stays off for the same reason plus one of its own: its rules change
       // without a major bump, so a gate on them is a gate on a moving target.
       // A template literal with no interpolation is a string that reads as

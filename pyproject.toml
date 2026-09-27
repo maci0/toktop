@@ -26,9 +26,9 @@ required-version = ">=0.16.4"
 #
 # The two groups left out are the two the tree cannot pass, both because this
 # is a command-line renderer whose output is the product: T20 and PI flag every
-# print, which is how a CLI talks. D and COM are the docstring and trailing
-# comma sets, TCH keeps annotation-only imports out of runtime, CPY keeps the
-# SPDX header every file in this repo already carries.
+# print, which is how a CLI talks. The docstring (D), trailing comma (COM),
+# annotation-only import (TCH) and copyright (CPY) sets are all selected; the
+# convention note below is what lets D run without a mutual-exclusion warning.
 select = [
     "A", "AIR", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "COM", "C90", "CPY", "D",
     "DTZ", "E", "EM", "ERA", "EXE", "F", "FA", "FAST", "FBT", "FIX", "FLY",
@@ -37,6 +37,13 @@ select = [
     "RUF", "S", "SIM", "SLF", "SLOT", "T10", "TC", "TCH", "TD", "TID", "TRY",
     "UP", "W", "YTT",
 ]
+# COM812 wants a trailing comma on the last element of a multi-line call, and
+# black decides that instead. Selected together, ruff prints a conflict
+# warning on every run of `make scripts-check` and in CI, over a rule the
+# formatter already settles. The rest of COM is formatter-independent
+# (COM818 flags a trailing comma that adds nothing, COM819 a prohibited one)
+# and stays on.
+ignore = ["COM812"]
 
 [tool.ruff.lint.pydocstyle]
 # The docstrings here use Google sections (Args:, Returns:, Raises:), which is
