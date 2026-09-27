@@ -30,6 +30,25 @@
 // LoadDefinitions and ResetDefinitions do the same for a definitions file, so
 // a program that teaches this package an agent can take it back out.
 //
+// The registry calls and Watch are safe to call from several goroutines at
+// once, and a Watcher is safe to use while its Run is going: Poll takes the
+// read lock a running Run also takes, so a final read after the agent exits
+// is a call like any other rather than a race. A definitions file reloaded
+// after a watcher started reaches it on the next poll, and a source
+// withdrawn by EnableOpenCodeDB(false) stops being read the same way; an
+// adapter installed by RegisterSpec is fixed for the life of the process, and
+// a watcher keeps the one it attached with.
+//
+// Every method on a nil *Watcher is safe to call on the result of Watch:
+// Tool and Dir report the empty string, Err matches ErrUnsupportedTool, Poll
+// and Sample report the zero Sample, Run returns at once, and SetNow does
+// nothing. A caller skipping the agents it cannot read therefore asks Err,
+// which is what names that case, rather than testing the pointer:
+//
+//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
+//		// no readable usage for this agent
+//	}
+//
 // The crush and opencode sources need a SQLite driver, so they exist only
 // under the sqlite build tag. Without it the package still compiles, and
 // Supported reports those agents unreadable.

@@ -39,6 +39,7 @@ var publicFuncs = []string{
 	"ResetDefinitions",
 	"SpecFor",
 	"Supported",
+	"ThinkingRate",
 	"UnregisterSpec",
 	"Watch",
 }

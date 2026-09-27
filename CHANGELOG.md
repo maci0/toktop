@@ -13,6 +13,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- `agentusage.ThinkingRate` reports reasoning tokens per second between two
+  samples, under the same rules as `Rate` and `InputRate`. `Sample.Thinking`
+  and `Delta.Thinking` were already public, so a consumer showing a thinking
+  rate had to write the division itself.
+
 ### Fixed
 
 - `TOKTOP_LOG_LEVEL` is no longer reported as unused under `--no-ingest`. The

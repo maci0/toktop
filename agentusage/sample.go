@@ -92,6 +92,14 @@ func InputRate(prev, cur Sample) (float64, bool) {
 	return deltaRate(prev.At, cur.At, prev.Input, cur.Input)
 }
 
+// ThinkingRate returns reasoning tokens per second between two samples, and
+// whether it could be computed. Same rules as [Rate], over the reasoning
+// share of Output rather than all of it. An agent that does not report
+// reasoning separately never grows it, so this reports no rate for one.
+func ThinkingRate(prev, cur Sample) (float64, bool) {
+	return deltaRate(prev.At, cur.At, prev.Thinking, cur.Thinking)
+}
+
 func deltaRate(prevAt, curAt time.Time, prevN, curN int) (float64, bool) {
 	if prevAt.IsZero() || curAt.IsZero() {
 		return 0, false

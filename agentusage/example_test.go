@@ -64,6 +64,17 @@ func ExampleInputRate() {
 	// Output: 120 true
 }
 
+// Reasoning is the share of Output an agent reports separately, and it rates
+// the same way, so a caller showing a thinking rate has one call to make.
+func ExampleThinkingRate() {
+	t0 := time.Unix(1_000_000, 0)
+	prev := agentusage.Sample{Thinking: 20, At: t0}
+	cur := agentusage.Sample{Thinking: 70, At: t0.Add(time.Second)}
+	r, ok := agentusage.ThinkingRate(prev, cur)
+	fmt.Println(int(r), ok)
+	// Output: 50 true
+}
+
 func ExampleProcess_Watch() {
 	for _, p := range agentusage.Discover() {
 		if w := p.Watch(time.Now()); w != nil {
@@ -108,6 +119,40 @@ func ExampleRegisterSpec() {
 	err := agentusage.RegisterSpec("", agentusage.Spec{})
 	fmt.Println(err)
 	// Output: usage spec needs an agent name
+}
+
+// The pattern a consumer's own tests need: register an agent this package
+// does not ship, point it at a transcript the test writes, and take the
+// registration back out so the next test in the binary does not inherit it.
+func ExampleRegisterSpec_fakeAgent() {
+	dir, err := os.MkdirTemp("", "agentusage-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	if err := agentusage.RegisterSpec("fakeagent", agentusage.Spec{Roots: []string{dir}}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer agentusage.UnregisterSpec("fakeagent")
+
+	w := agentusage.Watch("fakeagent", "/home/me/project", time.Now())
+	if w.Err() != nil {
+		fmt.Println(w.Err())
+		return
+	}
+	// A transcript already on disk when the watcher attached belongs to an
+	// earlier run, so the record has to be written after it. The generic
+	// reader takes counters under any of the names the supported agents use.
+	record := []byte(`{"usage":{"input_tokens":30,"output_tokens":12}}` + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), record, 0o644); err != nil {
+		fmt.Println(err)
+		return
+	}
+	s := w.Poll()
+	fmt.Println(s.Input, s.Output, s.Total)
+	// Output: 30 12 42
 }
 
 func ExampleUnregisterSpec() {

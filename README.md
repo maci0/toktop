@@ -131,8 +131,15 @@ that keeps its transcripts inside the project it works in:
 
 ### Using the Go package
 
-Import `github.com/maci0/toktop/agentusage` to discover agent processes and
-read the token counts they already write:
+```
+go get github.com/maci0/toktop/agentusage
+```
+
+It needs Go 1.27, the version `go.mod` pins, and the `sqlite` build tag if you
+want crush and opencode (`go build -tags sqlite`); without it the package still
+compiles and `Supported` reports those two unreadable. Import
+`github.com/maci0/toktop/agentusage` to discover agent processes and read the
+token counts they already write:
 
 ```go
 package main
@@ -183,9 +190,12 @@ same goes for a definitions file: `LoadDefinitions` adds to the process-wide
 registry and `ResetDefinitions` drops everything it added, leaving the
 compiled-in ones. A test that loads a definitions file (or registers a fake
 agent) needs that undo, since every later test in the same binary inherits it
-otherwise. `errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on a rejected
-spec, `ErrInvalidDefinitions` on a malformed definitions file, and
-`ErrCollidingDefinitions` on two agent names in one file that reduce to the
+otherwise; the package's own `ExampleRegisterSpec_fakeAgent` is that pattern
+end to end, writing the transcript after the watcher attaches because records
+already on disk belong to an earlier run. `errors.Is` matches `ErrEmptyTool`
+and `ErrNoRoots` on a rejected spec, `ErrInvalidDefinitions` on a malformed
+definitions file, and `ErrCollidingDefinitions` on two agent names in one file
+that reduce to the
 same key. `SpecFor` is the read side: it reports the transcript
 location registered for an agent, roots as written, which is how a program
 finds out which entries a definitions file registered and which it skipped
@@ -195,12 +205,16 @@ read such an agent elsewhere. A definition does replace a compiled-in
 *definition*, pi, prime-agent and feynman. `Supported` covers every agent.
 `Watch` returns
 a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
-and matches `ErrUnsupportedTool`. A sample is the total since the watcher
-attached, so a program reporting events takes the growth between two of them
-from `Sample.Delta`, which reports nothing when a transcript was rewritten
-under the watcher rather than a negative count. `Rate` is output
+and matches `ErrUnsupportedTool`. Every method on it is safe to call, so a
+caller tests `w.Err() != nil` rather than the pointer. A sample is the total
+since the watcher attached, so a program reporting events takes the growth
+between two of them from `Sample.Delta`, which reports nothing when a
+transcript was rewritten under the watcher rather than a negative count.
+`Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
-prompt tokens. `Watcher.SetNow` replaces the clock that stamps published
+prompt tokens, and `ThinkingRate` for the reasoning share. All three report
+whether a rate could be computed at all, and none of them extrapolates from
+one reading. `Watcher.SetNow` replaces the clock that stamps published
 samples, so a program driving a simulated timeline gets samples stamped on
 it, and the recency and rescan windows age on that clock rather than on wall
 time. Transcript mtimes and `since` stay wall time, because that is the clock
