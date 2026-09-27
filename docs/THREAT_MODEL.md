@@ -102,20 +102,20 @@ Every externally reachable input, with its code location:
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
    NDJSON stream), `GET /healthz`
    (internal/ingest/server.go). Binds `127.0.0.1:8420` unless `--ingest`
-   says otherwise (cmd/toktop/main.go); any address is accepted, including
+   says otherwise (cmd/toktop/flags.go); any address is accepted, including
    routable interfaces. An empty `--ingest` is rejected (validateIngestAddr,
-   main.go) because `net.Listen` would treat it as `:0` (every
+   validate.go) because `net.Listen` would treat it as `:0` (every
    interface, ephemeral port). A routable bind prints a startup warning naming
-   the unauthenticated exposure (main.go, routableBind :413-423). Runs
+   the unauthenticated exposure (endpoints.go, routableBind). Runs
    in demo mode too. `--no-ingest` turns it off (main.go).
 2. **CLI arguments**: top-level flags including `--bearer` (secret),
    `--ssh-key`, `--add URL` (repeatable), `--ingest ADDR`, `--agents`,
-   `--opencode-db` (cmd/toktop/main.go); positional
+   `--opencode-db` (cmd/toktop/flags.go); positional
    `ssh://[user@]host[:port]` targets (interpretArgs / ParseTarget); and the
    `update` subcommand with `--check` and `--repo owner/name`
    (cmd/toktop/update.go). `--repo` is checked with `ValidateRepo`
    (owner/name only). `--add` rejects non-http(s), missing host, and userinfo
-   (validateAddURL, main.go). An `ssh://` URL that embeds a password,
+   (validateAddURL, endpoints.go). An `ssh://` URL that embeds a password,
    path, query, or fragment is rejected at startup (internal/remote/target.go).
    The live dashboard refuses to start when stdout is not a terminal
    (main.go); `--once` is the non-TTY path.
@@ -404,7 +404,7 @@ ports that are then exposed on local loopback (client.go).
 **B4 (secrets):**
 - *Information disclosure*: token passed via `--bearer` is visible in process
   listings. README documents the env fallback for exactly this reason, and
-  warnBearerFlag names it at startup (main.go).
+  warnBearerFlag names it at startup (validate.go).
   `TOKTOP_SSH_PASSWORD` in the environment is readable by same-user processes
   and inherited by children (auth.go); `GITHUB_TOKEN` reaches api.github.com
   on every `toktop update` check when set (selfupdate.go).
@@ -481,11 +481,11 @@ Controls verified in code, with the threats they cover:
 | M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, serialized writes, temp-file plus rename | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect | knownhosts.go |
 | M13: Banner deadline lifted only on complete version line; 15s command timeout; keepalive with bounded probe waits; SupportedAlgorithms (no ssh-rsa SHA-1 / DSA); forwardDialTimeout 8s | trickle/silent-peer hangs (B3 DoS); weak host-key algorithms; hung tunnel dial (B3b) | client.go |
 | M14: Local-only defaults: forward listeners on 127.0.0.1, ingest on 127.0.0.1:8420 | accidental network exposure (B1 widening; B3b stays local) | client.go; main.go |
-| M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | main.go |
+| M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | endpoints.go |
 | M16: Remote shell scripts: static bodies, only locally generated integers interpolated; no secret material sent to remote scripts | command injection into remote shell (B3 elevation) | discover.go; stats.go |
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance | credential handling in headless runs (B4) | auth.go |
 | M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution (B5) | selfupdate.go |
-| M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | main.go validateFlags, validateOnceEnv, logActiveConfig, validateAddURL, validateIngestAddr, 220-225; agentusage/definitions.go, 143-164 |
+| M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | validate.go validateFlags, validateOnceEnv, validateIngestAddr; endpoints.go validateAddURL; main.go logActiveConfig, 220-225; agentusage/definitions.go, 143-164 |
 | M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check | vulnerable-dependency drift (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, Makefile |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
