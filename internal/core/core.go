@@ -246,6 +246,11 @@ type SysSample struct {
 	Drivers    map[string]string // vendor -> version
 	NPUs       []string          // detected accelerator drivers
 	RemoteHost string            // set when stats come via ssh
+	// RemoteErr is why the last remote vitals poll failed, empty while the
+	// ssh target is answering. It rides along with RemoteHost past the
+	// staleness window so a target that went dark names itself and its
+	// reason instead of the header quietly reverting to local readings.
+	RemoteErr string
 
 	Temps []TempReading
 	GPUs  []GPUDevice

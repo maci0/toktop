@@ -2209,6 +2209,74 @@ func TestAddrRedactHandler(t *testing.T) {
 // the idle deadline. Past the in-flight cap a POST is refused immediately, so
 // a peer opening connections and withholding bodies costs the process no
 // descriptors it has to wait out.
+// healthz returns the status of a GET /healthz probe.
+func healthz(t *testing.T, s *Server) int {
+	t.Helper()
+	resp, err := http.Get("http://" + s.Addr() + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// A health probe that says ok while every event POST is being refused
+// describes a service that accepts nothing. The cap reached, the answer
+// names the reason and the status stops being 200.
+func TestHealthzReportsSaturation(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
+
+	pr, pw := io.Pipe()
+	stalled := make(chan error, 1)
+	go func() {
+		defer pw.Close()
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
+		if err != nil {
+			stalled <- err
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		stalled <- err
+	}()
+	t.Cleanup(func() { pw.Close() })
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(eventSlots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(eventSlots) == 0 {
+		t.Fatal("stalled POST never reached the decode loop")
+	}
+
+	resp, err := http.Get("http://" + s.Addr() + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("healthz = %d %q, want 503 while every POST is refused", resp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "event streams in flight") {
+		t.Errorf("healthz body names no reason: %q", body)
+	}
+
+	pw.Close()
+	<-stalled
+	if code := healthz(t, s); code != http.StatusOK {
+		t.Errorf("healthz after the slot freed = %d, want 200", code)
+	}
+}
+
 func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 	s := startIngest(t, &memRecorder{})
 	// One slot, as the default cap would have many: the test is about the

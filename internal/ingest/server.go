@@ -528,8 +528,17 @@ func (b *progressBody) Read(p []byte) (int, error) {
 // handleHealth answers the liveness probe. Plain text like every other
 // non-event answer here, and never audited: a probe runs continuously and
 // would drown the event log.
+//
+// It reports degraded rather than ok while every decode slot is held. At that
+// point the endpoint answers 503 to every POST, so a probe that keeps saying
+// ok describes a service that accepts nothing.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	if in := len(eventSlots); in >= cap(eventSlots) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		fmt.Fprintf(w, "degraded: %d/%d event streams in flight; events are being refused\n", in, cap(eventSlots))
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	fmt.Fprint(w, "ok")
 }

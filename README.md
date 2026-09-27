@@ -254,7 +254,7 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 | endpoint | purpose |
 |---|---|
 | `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
-| `GET /healthz` | liveness probe, answers `ok` |
+| `GET /healthz` | liveness probe, answers `ok`; `503` naming the in-flight count while every event slot is held |
 
 Event fields are all optional; anything omitted gets the default:
 
@@ -294,7 +294,10 @@ Every POST is logged to stderr as one structured line (`req`, `method`,
 `path`, `status`, `accepted`, `stored`, `duration`, `remote`; failures add
 `error`).
 Wrong-method and unknown-path requests log the same way, so a harness
-posting to `/events` is not silent. `GET /healthz` is not logged. Event
+posting to `/events` is not silent. `GET /healthz` is not logged. It answers
+`503` with a one-line reason while all 64 event slots are held, because the
+endpoint is refusing every POST then and `ok` would describe a service that
+accepts nothing. Event
 bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. Responses carry `X-Request-Id`,
 echoed from the request when the sender set one.

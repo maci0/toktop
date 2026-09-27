@@ -363,3 +363,44 @@ func TestRunPollsAndMergesRemoteVitals(t *testing.T) {
 		t.Errorf("linux remote must yield memory vitals: %+v", into)
 	}
 }
+
+// A remote that stops answering must name itself and the reason. Dropping
+// the ssh readings without a word leaves the local host's numbers on screen
+// passing for the watched one's.
+func TestPollFailureNamesTheTarget(t *testing.T) {
+	withKnownHosts(t)
+	srv := newTestSSHServer(t, "", 0)
+	defer srv.Close()
+
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	s := &Stats{Client: cli}
+	s.poll(t.Context())
+	s.Merge(&s.last) // warm the sample so the failure has a host to drop away from
+	if s.err != "" {
+		t.Fatalf("successful poll recorded a failure: %q", s.err)
+	}
+
+	cli.Close()
+	s.poll(t.Context())
+	if s.err == "" {
+		t.Fatal("failed poll recorded no reason")
+	}
+
+	// Past the staleness window the vitals are gone, so the reason is the
+	// only thing left that says a remote was ever configured.
+	s.at = s.instant().Add(-stalenessWindow - time.Second)
+	var into core.SysSample
+	s.Merge(&into)
+	if into.RemoteHost != "127.0.0.1" {
+		t.Errorf("failing target not named: %+v", into)
+	}
+	if into.RemoteErr == "" {
+		t.Errorf("failing target reported no reason: %+v", into)
+	}
+	if into.CPUModel != "" {
+		t.Errorf("stale vitals merged anyway: %+v", into)
+	}
+}

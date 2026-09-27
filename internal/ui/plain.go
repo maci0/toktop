@@ -23,8 +23,18 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 		fmt.Fprintf(&b, "[demo seed %d] ", cfg.DemoSeed)
 	}
 	b.WriteString("toktop v" + cfg.Version)
-	if s.Sys != nil && s.Sys.RemoteHost != "" {
-		b.WriteString(" via ssh:" + core.SanitizeText(s.Sys.RemoteHost))
+	if s.Sys != nil {
+		switch {
+		case s.Sys.RemoteErr != "":
+			target := s.Sys.RemoteHost
+			if target == "" {
+				target = "remote"
+			}
+			b.WriteString(" via ssh:" + core.SanitizeText(target) +
+				" (not answering: " + core.SanitizeText(s.Sys.RemoteErr) + ")")
+		case s.Sys.RemoteHost != "":
+			b.WriteString(" via ssh:" + core.SanitizeText(s.Sys.RemoteHost))
+		}
 	}
 	b.WriteString("\n\n")
 

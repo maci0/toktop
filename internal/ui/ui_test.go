@@ -1758,6 +1758,32 @@ func TestHeaderSessionMatchesPlain(t *testing.T) {
 	}
 }
 
+// A remote whose vitals poll is failing must stay on screen with its reason:
+// a silent drop leaves the local host's numbers passing for the watched one.
+func TestHeaderNamesFailingRemote(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.w, m.h, m.ready = 160, 36, true
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Sys: &core.SysSample{
+			RemoteHost: "box",
+			RemoteErr:  "ssh session: connection lost",
+		},
+	}
+	out := strip(m.renderHeader())
+	if !strings.Contains(out, "ssh box: ssh session: connection lost") {
+		t.Errorf("header hides the failing remote:\n%s", out)
+	}
+	if strings.Contains(out, "via ssh:box") {
+		t.Errorf("header still reports the remote as healthy:\n%s", out)
+	}
+
+	plain := PlainTextFrame(Config{Version: "t"}, m.snap)
+	if !strings.Contains(plain, "not answering: ssh session: connection lost") {
+		t.Errorf("plain report hides the failing remote:\n%s", plain)
+	}
+}
+
 func TestProbeKeyNoopsWithoutEngines(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		var probes atomic.Int32

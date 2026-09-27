@@ -63,8 +63,21 @@ func (m Model) renderHeader() string {
 		// reads as engine uptime.
 		segs = append(segs, headerSeg{text: dim("session " + fmtDur(m.snap.Uptime)), shed: 50})
 	}
-	if m.snap.Sys != nil && m.snap.Sys.RemoteHost != "" {
-		segs = append(segs, headerSeg{text: styleInfo.Render("via ssh:" + core.SanitizeText(m.snap.Sys.RemoteHost))})
+	if m.snap.Sys != nil {
+		switch {
+		case m.snap.Sys.RemoteErr != "":
+			// The target is not answering. Name it and the reason: without
+			// this the ssh readings drop out of the frame and the local
+			// host's numbers pass for the watched one's.
+			target := m.snap.Sys.RemoteHost
+			if target == "" {
+				target = "remote"
+			}
+			segs = append(segs, headerSeg{text: styleBad.Render(
+				strip(dotBad) + " ssh " + core.SanitizeText(target) + ": " + core.SanitizeText(m.snap.Sys.RemoteErr))})
+		case m.snap.Sys.RemoteHost != "":
+			segs = append(segs, headerSeg{text: styleInfo.Render("via ssh:" + core.SanitizeText(m.snap.Sys.RemoteHost))})
+		}
 	}
 
 	right := ""

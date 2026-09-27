@@ -33,6 +33,10 @@ type Stats struct {
 	// instead of the wall clock's, so a replayed run merges exactly what a
 	// live one would.
 	now func() time.Time
+	// err is the last poll failure, kept while it stays the reason the remote
+	// is not answering. A dropped connection would otherwise look like a host
+	// with no load, no memory and no GPU.
+	err string
 }
 
 // SetNow overrides the clock used to stamp and age remote samples. Call
@@ -142,22 +146,33 @@ func (s *Stats) poll(ctx context.Context) {
 		return
 	}
 	out, err := s.Client.Run(ctx, vitalsScript())
-	if err != nil {
-		return // keep last good sample; UI shows staleness via age
-	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err != nil {
+		// Keep the last good sample; the reason rides along so the UI can
+		// name the target that stopped answering instead of dropping the
+		// ssh readings and leaving local numbers to pass for the remote's.
+		s.err = core.Snippet([]byte(err.Error()))
+		return
+	}
+	s.err = ""
 	s.loadsValid = parseVitals(out, &s.last)
 	s.last.RemoteHost = s.Client.Target.Host
 	s.at = s.instant()
 }
 
 // Merge overlays fresh remote stats onto a local sample. Stale data (>20s)
-// is ignored entirely.
+// is not merged, but a recorded poll failure names the target and its reason,
+// so the frame says which host is missing rather than passing local readings
+// off as the whole picture. A target that has not failed and has no sample
+// yet leaves the sample alone.
 func (s *Stats) Merge(into *core.SysSample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.at.IsZero() || s.instant().Sub(s.at) > stalenessWindow {
+		if s.err != "" {
+			into.RemoteHost, into.RemoteErr = s.host(), s.err
+		}
 		return
 	}
 	if s.loadsValid {
@@ -192,6 +207,20 @@ func (s *Stats) Merge(into *core.SysSample) {
 		}
 	}
 	into.RemoteHost = s.last.RemoteHost
+	into.RemoteErr = s.err
+}
+
+// host is the target label for a sample that has gone stale: the host is
+// stamped on a successful poll, so a target that never answered once has none
+// to show and its connection error stands alone.
+func (s *Stats) host() string {
+	if s.last.RemoteHost != "" {
+		return s.last.RemoteHost
+	}
+	if s.Client != nil {
+		return s.Client.Target.Host
+	}
+	return ""
 }
 
 // parseVitals reads the vitalsScript dump: loadavg, meminfo, uptime seconds,
