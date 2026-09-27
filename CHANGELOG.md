@@ -46,6 +46,9 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - The startup configuration line named `--plain` in a `--once --plain --json`
   run, which renders the JSON object and ignores the text report. Only the
   report that is actually printed is named now.
+- `cmd/toktop/main_test.go` carried a table literal that `gofmt -s` rewrites,
+  so `make check` and the CI formatting gate failed on a clean tree. The file
+  is formatted as the formatter wants it.
 - `toktop --opencode-db` stated its default twice in `--help`, once as
   "default on" inside the description and once as the "(default true)" every
   non-zero default carries.

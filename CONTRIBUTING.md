@@ -230,6 +230,12 @@ Keep platform-specific code behind build tags or runtime checks; the
 cross-compile job catches code that only builds, or only vets and lints
 cleanly, on the author's OS.
 
+A new dependency needs an entry in [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md)
+with its license and the reason it beats writing the code here;
+`cmd/toktop/deps_test.go` fails when a module in go.mod's direct require block
+is imported nowhere or has no entry in that file. Check the stdlib and the
+platform before adding one.
+
 A `repro` job builds two shipped platforms twice and fails if the bytes
 differ. The second pass builds a copy of the working tree staged under
 `dist/repro/src-b`, so the two passes read the same source from different

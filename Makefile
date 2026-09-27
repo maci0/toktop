@@ -524,7 +524,8 @@ wait_for_site() { \
 endef
 
 # CONTRIBUTING.md spells the wrangler version out in the login command an
-# operator copies, so the pin lives in two files. This is that guard, the same
+# operator copies, and docs/THREAT_MODEL.md names it in the deployment paths it
+# documents, so the pin lives in three files. This is that guard, the same
 # shape as the biome schema check in site-lint: a bump of WRANGLER that does
 # not move the documented command leaves an operator logging in with, and then
 # deploying, a version the tree does not test against. Deploy-only, so a
@@ -533,6 +534,10 @@ endef
 check-wrangler-doc:
 	@grep -Fq 'wrangler@$(WRANGLER) login' CONTRIBUTING.md || { \
 		echo "make: CONTRIBUTING.md does not name wrangler $(WRANGLER) in its login command; the pin and the documented command must move together" >&2; \
+		exit 1; \
+	}
+	@grep -Fq 'wrangler@$(WRANGLER) deploy' docs/THREAT_MODEL.md || { \
+		echo "make: docs/THREAT_MODEL.md does not name wrangler $(WRANGLER) in the deploy path it documents; the pin and the documented command must move together" >&2; \
 		exit 1; \
 	}
 

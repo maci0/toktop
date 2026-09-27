@@ -1627,7 +1627,10 @@ func TestLogActiveConfig(t *testing.T) {
 	// The line records the knobs that will actually apply, so a --plain that
 	// --json replaced is not named: "once plain json" reads as two reports.
 	t.Run("only the report that renders is named", func(t *testing.T) {
-		for _, tc := range []struct{ plain, jsonOut bool; want string }{
+		for _, tc := range []struct {
+			plain, jsonOut bool
+			want           string
+		}{
 			{plain: true, want: "once plain"},
 			{jsonOut: true, want: "once json"},
 			{plain: true, jsonOut: true, want: "once json"},
