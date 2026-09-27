@@ -1,5 +1,7 @@
 // Package demo simulates a small inference fleet so toktop has something to
-// show without any real backends. Deterministic per seed.
+// show without any real backends. Deterministic per seed: the seed decides
+// every value, and SetOrigin pins the instant the timeline starts at, so a
+// run is reproduced frame for frame.
 package demo
 
 import (
@@ -154,13 +156,28 @@ func (s *Source) stepAt(now time.Time) core.Snapshot {
 }
 
 // Now is the current simulated instant. The first caller pins the origin
-// (one wall-clock read); later calls and Run share that origin so probes,
-// ingest stamps, and frames stay on one timeline. Tests drive time through
-// stepAt instead.
+// (one wall-clock read, or SetOrigin when the caller pins it); later calls
+// and Run share that origin so probes, ingest stamps, and frames stay on one
+// timeline. Tests drive time through stepAt instead.
 func (s *Source) Now() time.Time {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.stamp()
+}
+
+// SetOrigin pins the instant the simulated timeline starts at, for a caller
+// that has to reproduce a run against a fixed axis: without it two runs of
+// one seed report the same values stamped with their own launch times, so
+// their frames cannot be diffed against each other. Call it before Run, or
+// any other caller of Now; a source that has already produced a frame panics
+// rather than moving a timeline its stamped history sits on.
+func (s *Source) SetOrigin(at time.Time) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.start.IsZero() {
+		panic("demo: SetOrigin after the first frame")
+	}
+	s.now = at
 }
 
 // stamp is the current simulated instant. The first call pins the origin

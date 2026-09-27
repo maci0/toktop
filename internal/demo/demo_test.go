@@ -96,6 +96,56 @@ func TestDeterministicFrames(t *testing.T) {
 	}
 }
 
+// Run is the path `toktop --demo` takes, and it places the timeline on the
+// wall clock unless the origin is pinned. Two runs of one seed would then
+// report equal values on two different axes, so a replay could not be
+// diffed against the run it reproduces. Pinned, every frame must match.
+func TestRunReplaysIdenticallyFromOneSeed(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		t0 := time.Unix(1_700_000_000, 0).UTC()
+		frames := func() []core.Snapshot {
+			s := NewSource(10*time.Millisecond, 7)
+			s.SetOrigin(t0)
+			ch := make(chan core.Snapshot, 64)
+			ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+			defer cancel()
+			go s.Run(ctx, ch)
+			var out []core.Snapshot
+			for len(out) < 20 {
+				select {
+				case snap := <-ch:
+					out = append(out, snap)
+				case <-ctx.Done():
+					t.Fatalf("source produced %d frames, want 20", len(out))
+				}
+			}
+			return out
+		}
+		a, b := frames(), frames()
+		for i := range a {
+			if !reflect.DeepEqual(a[i], b[i]) {
+				t.Fatalf("replays diverged at frame %d:\n%+v\n%+v", i, a[i], b[i])
+			}
+		}
+		if !a[0].At.Equal(t0) {
+			t.Fatalf("first frame at %v, want the pinned origin %v", a[0].At, t0)
+		}
+	})
+}
+
+// A timeline that already has stamped history cannot be moved under it, so
+// SetOrigin refuses rather than leaving the caller believing it took.
+func TestSetOriginAfterFirstFramePanics(t *testing.T) {
+	s := NewSource(time.Second, 7)
+	s.stepAt(time.Unix(1_700_000_000, 0))
+	defer func() {
+		if recover() == nil {
+			t.Fatal("SetOrigin after the first frame did not panic")
+		}
+	}()
+	s.SetOrigin(time.Unix(0, 0))
+}
+
 // ProbeAll that wins the race with the first frame must pin the origin Run
 // then uses, so probes and the first snapshot share one instant.
 func TestProbeAllPinsOriginForRun(t *testing.T) {

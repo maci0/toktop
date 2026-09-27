@@ -642,6 +642,7 @@ func TestVersionCacheRetriesUntilResolved(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	now := fakeClock(t)
 	var vc versionCache
 	ctx := context.Background()
 	failing.Store(1)
@@ -656,9 +657,7 @@ func TestVersionCacheRetriesUntilResolved(t *testing.T) {
 		t.Fatalf("server hit %d times before expiry, want 3", n)
 	}
 
-	vc.mu.Lock()
-	vc.at = time.Now().Add(-versionRetry - time.Second)
-	vc.mu.Unlock()
+	now(versionRetry + time.Second) // the injected clock, not real elapsed time, expires the window
 	if got := vc.fetch(ctx, srv.URL); got != "2.7.1" {
 		t.Fatalf("fetch after recovery = %q, want 2.7.1", got)
 	}
@@ -692,6 +691,7 @@ func TestVersionCacheRefreshesResolvedHit(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	now := fakeClock(t)
 	var vc versionCache
 	ctx := context.Background()
 	if got := vc.fetch(ctx, srv.URL); got != "0.6.0" {
@@ -702,24 +702,102 @@ func TestVersionCacheRefreshesResolvedHit(t *testing.T) {
 		t.Fatalf("fetch inside the refresh window = %q, want the cached 0.6.0", got)
 	}
 
-	vc.mu.Lock()
-	vc.at = time.Now().Add(-versionRefresh - time.Second)
-	vc.mu.Unlock()
+	now(versionRefresh + time.Second)
 	if got := vc.fetch(ctx, srv.URL); got != "0.7.0" {
 		t.Fatalf("fetch after the refresh window = %q, want 0.7.0", got)
 	}
 
 	// A dark refresh must not blank a version the engine already reported.
 	version.Store("")
-	vc.mu.Lock()
-	vc.at = time.Now().Add(-versionRefresh - time.Second)
-	vc.mu.Unlock()
+	now(2 * (versionRefresh + time.Second))
 	if got := vc.fetch(ctx, srv.URL); got != "0.7.0" {
 		t.Fatalf("fetch while the engine is down = %q, want the last good 0.7.0", got)
 	}
 	if reqs.Load() < 5 {
 		t.Errorf("server hit %d times, want the expired windows re-probed", reqs.Load())
 	}
+}
+
+// A frozen clock is the degenerate case a replay runs under: nothing may
+// expire on its own, so the cache has to answer from memory for as long as
+// the run lasts. Time elapsing on the wall clock must not expire a window the
+// replay's clock has not reached.
+func TestVersionCacheFrozenClockNeverExpires(t *testing.T) {
+	var reqs atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		reqs.Add(1)
+		fmt.Fprint(w, `{"version":"3.1.4"}`)
+	}))
+	defer srv.Close()
+
+	fakeClock(t) // frozen: never advanced
+	var vc versionCache
+	ctx := context.Background()
+	if got := vc.fetch(ctx, srv.URL); got != "3.1.4" {
+		t.Fatalf("first fetch = %q, want 3.1.4", got)
+	}
+	time.Sleep(time.Millisecond) // real time passes; the injected clock does not
+	for range 3 {
+		if got := vc.fetch(ctx, srv.URL); got != "3.1.4" {
+			t.Fatalf("fetch under a frozen clock = %q, want the cached 3.1.4", got)
+		}
+	}
+	if n := reqs.Load(); n != 1 {
+		t.Errorf("server hit %d times, want 1: a frozen clock must not re-probe", n)
+	}
+}
+
+// The seam has to reach a real poll, not just the cache struct: the version
+// endpoint is hit once per window, and the window is the injected clock's.
+// Without SetNow the same two polls a replay steps through reach the network
+// or not according to how long the process happened to be up.
+func TestPollVersionTrafficFollowsInjectedClock(t *testing.T) {
+	var versionReqs atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			w.Write([]byte(`{"models":[{"name":"llama3:latest"}]}`))
+		case "/api/version":
+			versionReqs.Add(1)
+			w.Write([]byte(`{"version":"0.5.4"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	now := fakeClock(t)
+	p := NewOllama(srv.URL)
+	ctx := context.Background()
+	for range 3 { // one resolving request, then silence for the window
+		if _, err := p.Poll(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := versionReqs.Load(); n != 1 {
+		t.Fatalf("version endpoint hit %d times inside the window, want 1", n)
+	}
+	now(versionRefresh + time.Second)
+	if _, err := p.Poll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := versionReqs.Load(); n != 2 {
+		t.Fatalf("version endpoint hit %d times after the window, want 2", n)
+	}
+}
+
+// fakeClock installs a stepped clock for the version caches and returns the
+// function that advances it. The window a fetch sees is the only thing that
+// decides its network traffic, so a test that ages the cache by sleeping is a
+// test that can flake; this one moves time explicitly and restores the wall
+// clock afterwards.
+func fakeClock(t *testing.T) func(time.Duration) {
+	t.Helper()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	cur := base
+	SetNow(func() time.Time { return cur })
+	t.Cleanup(func() { SetNow(nil) })
+	return func(d time.Duration) { cur = cur.Add(d) }
 }
 
 // Engines explain rejections in the error body (OOM, bad api key, model

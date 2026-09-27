@@ -217,6 +217,10 @@ func (w *Watcher) discover(ctx context.Context) {
 	}
 	w.mu.Unlock()
 	sortTracked(exited)
+	// The replaced set is collected from the tracked map, so its order is the
+	// map's. Stopping by PID keeps the sequence of stops, and the events they
+	// emit, the same on every pass.
+	sortTracked(replaced)
 	slices.SortFunc(newProcs, func(a, b agentusage.Process) int {
 		return cmp.Compare(a.PID, b.PID)
 	})

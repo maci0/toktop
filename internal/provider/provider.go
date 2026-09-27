@@ -133,6 +133,41 @@ type versionCache struct {
 	at       time.Time // last probe; a miss retries after versionRetry, a hit after versionRefresh
 }
 
+// versionNow is the clock every version cache ages its probe windows against.
+// The retry and refresh spacing decides which polls reach the network at all,
+// so on the wall clock a run's version traffic is a function of how long the
+// process happened to be up: the same polls replayed from the same seed hit
+// different endpoints, and a cache that expires mid-replay blanks the version
+// readout for that frame. SetNow replaces it, so a replayed or simulated run
+// expires the windows on its own timeline. Call it before Discover or Attach,
+// the way the other SetNow seams are called before their Run. Guarded, because
+// a poll running on another goroutine reads it on every fetch.
+var (
+	versionNowMu sync.RWMutex
+	versionNow   = time.Now
+)
+
+// SetNow overrides the clock the version caches time their retry and refresh
+// windows against, restoring the wall clock for nil. It does not move request
+// deadlines: those are real HTTP timeouts and belong to the wall clock.
+func SetNow(fn func() time.Time) {
+	if fn == nil {
+		fn = time.Now
+	}
+	versionNowMu.Lock()
+	versionNow = fn
+	versionNowMu.Unlock()
+}
+
+// versionInstant reads the injected clock, calling it outside the lock: it is
+// caller-supplied and may re-enter the package.
+func versionInstant() time.Time {
+	versionNowMu.RLock()
+	fn := versionNow
+	versionNowMu.RUnlock()
+	return fn()
+}
+
 // versionRetry spaces out probes of an unresolved version. Retrying a miss
 // every poll would add three HTTP round trips to every scrape of engines
 // with no version endpoint.
@@ -163,7 +198,8 @@ func versionWindow(resolved bool) time.Duration {
 func (c *versionCache) fetch(ctx context.Context, base string) string {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.at.IsZero() && time.Since(c.at) < versionWindow(c.resolved) {
+	now := versionInstant()
+	if !c.at.IsZero() && now.Sub(c.at) < versionWindow(c.resolved) {
 		return c.val
 	}
 	for _, path := range []string{"/api/version", "/version", "/get_server_info"} {
@@ -172,11 +208,11 @@ func (c *versionCache) fetch(ctx context.Context, base string) string {
 			continue
 		}
 		if val := extractVersionField(text); val != "" {
-			c.val, c.resolved, c.at = val, true, time.Now()
+			c.val, c.resolved, c.at = val, true, now
 			return c.val
 		}
 	}
-	c.at = time.Now()
+	c.at = now
 	return c.val
 }
 
