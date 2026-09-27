@@ -75,27 +75,40 @@ func openCodeDBPath() string {
 // usageQuery sums what this directory's sessions spent after a point in time.
 // Cached reads are deliberately absent: they are cache hits, not billed
 // prompt. tokens.input, when present, is billed prompt and is summed.
-// Only assistant messages carry tokens; other roles are prompts. The directory
-// list is spliced in by usageQueryFor, since SQL has no placeholder for a set.
-// MAX(CAST(…), 0) floors a negative stored counter at zero so one malformed
-// row cannot subtract from sessions that read fine.
+// Only assistant messages carry tokens; other roles are prompts. The JSON
+// paths and the directory list are spliced in by usageQueryFor, since SQL has
+// no placeholder for either. MAX(CAST(…), 0) floors a negative stored counter
+// at zero so one malformed row cannot subtract from sessions that read fine.
 //
 // Sessions are the outer loop, then messages via message_session_idx
 // (session_id). CROSS JOIN stops SQLite from reversing that into a scan of
 // message: opencode indexes session_id, not (session_id, time_created) and
 // not directory. CAST keeps MAX numeric: json_extract of a JSON string is
 // TEXT, and SQLite ranks TEXT above INTEGER, so MAX('9', 100) would be '9'.
-const usageQuery = `
+const usageQueryFormat = `
 	SELECT
-		COALESCE(SUM(MAX(CAST(json_extract(m.data, '$.tokens.output') AS INTEGER), 0)), 0),
-		COALESCE(SUM(MAX(CAST(json_extract(m.data, '$.tokens.reasoning') AS INTEGER), 0)), 0),
-		COALESCE(MAX(CAST(json_extract(m.data, '$.tokens.total') AS INTEGER)), 0),
-		COALESCE(SUM(MAX(CAST(json_extract(m.data, '$.tokens.input') AS INTEGER), 0)), 0)
+		COALESCE(SUM(MAX(CAST(%[1]s AS INTEGER), 0)), 0),
+		COALESCE(SUM(MAX(CAST(%[2]s AS INTEGER), 0)), 0),
+		COALESCE(MAX(CAST(%[3]s AS INTEGER)), 0),
+		COALESCE(SUM(MAX(CAST(%[4]s AS INTEGER), 0)), 0)
 	FROM session
 	CROSS JOIN message m
 	WHERE m.session_id = session.id
-	  AND %s AND m.time_created > ?
-	  AND json_extract(m.data, '$.role') = 'assistant'`
+	  AND %[5]s AND m.time_created > ?
+	  AND %[6]s = 'assistant'`
+
+// jsonToken builds the extraction of one JSON path from a message payload,
+// guarded so a row that is not well-formed JSON reads as absent instead of
+// raising. json_extract raises on malformed input, and one such row fails the
+// whole statement: this is another program's store, which toktop opens
+// read-only and cannot constrain, so a single truncated or non-JSON payload
+// would blind every reading of this agent for as long as the row survived.
+// The CASE guards the extract rather than adding a json_valid term beside it,
+// because the aggregate is a SELECT list where no predicate orders the
+// evaluation. A NULL payload keeps reading as NULL, as json_extract(NULL) did.
+func jsonToken(path string) string {
+	return fmt.Sprintf("CASE WHEN json_valid(m.data) THEN json_extract(m.data, '%s') END", path)
+}
 
 // foldSessionDirectory compares session.directory case-insensitively and with
 // either path separator. NTFS and the default APFS configuration look names
@@ -113,7 +126,13 @@ func init() {
 // usageQueryFor builds the query for n directory spellings. Only the number of
 // placeholders varies: every value still travels as a bound parameter.
 func usageQueryFor(n int) string {
-	return fmt.Sprintf(usageQuery, directoryPred(n))
+	return fmt.Sprintf(usageQueryFormat,
+		jsonToken("$.tokens.output"),
+		jsonToken("$.tokens.reasoning"),
+		jsonToken("$.tokens.total"),
+		jsonToken("$.tokens.input"),
+		directoryPred(n),
+		jsonToken("$.role"))
 }
 
 func directoryPred(n int) string {

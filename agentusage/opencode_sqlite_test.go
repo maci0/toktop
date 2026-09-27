@@ -169,8 +169,31 @@ func TestOpenCodeDBDropsAbsurdCounts(t *testing.T) {
 	}
 }
 
-// A missing database is an ordinary state (no opencode on this machine), not
-// an error, and must never invent a number.
+// A payload that is not well-formed JSON reads as absent. json_extract raises
+// on one, and the store belongs to another program that toktop only reads, so
+// an unguarded extraction would fail the whole statement and report nothing
+// for this agent for as long as the row is there.
+func TestOpenCodeDBSkipsMalformedPayloads(t *testing.T) {
+	path := opencodeDB(t)
+	work := t.TempDir()
+	addSession(t, path, "s1", work)
+	start := time.Now()
+	addMessage(t, path, "m1", "s1", start.Add(time.Second),
+		`{"role":"assistant","tokens":{"output":324}}`)
+	addMessage(t, path, "m2", "s1", start.Add(2*time.Second), `{"role":"assist`)
+	withOpenCodeDB(t, path)
+	w := Watch("opencode", work, start)
+	if w == nil {
+		t.Fatal("opencode should be readable once the database is enabled")
+	}
+	w.poll(nil)
+	if got := w.Sample().Output; got != 324 {
+		t.Fatalf("output %d, want the 324 from the readable row next to a malformed one", got)
+	}
+}
+
+// Every directory value still travels as a bound parameter, so a path is never
+// spliced into the statement.
 func TestUsageQueryForPlaceholderCount(t *testing.T) {
 	orig := foldSessionDirectory.Load()
 	t.Cleanup(func() { foldSessionDirectory.Store(orig) })
