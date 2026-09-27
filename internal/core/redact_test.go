@@ -10,7 +10,7 @@ import (
 )
 
 func TestRedactHomeFoldsEveryOccurrence(t *testing.T) {
-	home := filepath.Join(string(filepath.Separator)+"home", "private-user")
+	home := absPath("home", "private-user")
 	setHome(t, home)
 	msg := "open " + filepath.Join(home, "bin", ".toktop") + ": permission denied; retry " +
 		filepath.Join(home, "bin", "toktop")
@@ -24,7 +24,7 @@ func TestRedactHomeFoldsEveryOccurrence(t *testing.T) {
 }
 
 func TestRedactHomeLeavesOtherPathsAlone(t *testing.T) {
-	home := filepath.Join(string(filepath.Separator)+"home", "private-user")
+	home := absPath("home", "private-user")
 	setHome(t, home)
 	for _, msg := range []string{
 		"checksum mismatch",
@@ -41,7 +41,7 @@ func TestRedactHomeLeavesOtherPathsAlone(t *testing.T) {
 // tail is left exactly as written rather than normalized to a real directory
 // the redaction never proved anything about.
 func TestRedactHomeFoldsUnnormalizedPrefixWithoutCleaningIt(t *testing.T) {
-	home := filepath.Join(string(filepath.Separator)+"home", "private-user")
+	home := absPath("home", "private-user")
 	setHome(t, home)
 	sep := string(filepath.Separator)
 	msg := home + sep + ".." + sep + "etc" + sep + "hosts"
@@ -56,7 +56,7 @@ func TestRedactHomeFoldsUnnormalizedPrefixWithoutCleaningIt(t *testing.T) {
 // sibling whose name merely starts with the home's is a different directory
 // and must survive verbatim.
 func TestRedactHomeFoldsBareHomeAndNotASibling(t *testing.T) {
-	home := filepath.Join(string(filepath.Separator)+"home", "private-user")
+	home := absPath("home", "private-user")
 	setHome(t, home)
 	if got := RedactHome(home); got != "~" {
 		t.Errorf("RedactHome(%q) = %q, want %q", home, got, "~")
@@ -72,9 +72,9 @@ func TestRedactHomeFoldsCaseOnCaseInsensitivePlatforms(t *testing.T) {
 	if runtime.GOOS != "windows" && runtime.GOOS != "darwin" {
 		t.Skip("only Windows and macOS look names up without regard to case")
 	}
-	home := filepath.Join(string(filepath.Separator), "Users", "Me")
+	home := absPath("Users", "Me")
 	setHome(t, home)
-	other := filepath.Join(string(filepath.Separator), "users", "me", "bin")
+	other := absPath("users", "me", "bin")
 	if got := RedactHome("cannot write " + other); strings.Contains(got, "me"+string(filepath.Separator)) {
 		t.Errorf("RedactHome(%q) = %q, want the cased spelling folded too", other, got)
 	}
@@ -149,14 +149,23 @@ func TestReplaceFold(t *testing.T) {
 	}
 }
 
+// absPath builds an absolute path under a fake root, spelled the way this
+// platform spells one. Windows paths need a volume, so "\home\private-user" is
+// drive-relative there and RedactHome rightly leaves it alone; a test that
+// wants a folded path has to name one the platform calls absolute.
+func absPath(parts ...string) string {
+	root := string(filepath.Separator)
+	if vol := filepath.VolumeName(os.TempDir()); vol != "" {
+		root = vol + string(filepath.Separator)
+	}
+	return filepath.Join(append([]string{root}, parts...)...)
+}
+
 // setHome points UserHomeDir at a path under the test's own temp dir, which
 // must not itself live under the real home: the platform resolves the home
 // from different variables.
 func setHome(t *testing.T, home string) {
 	t.Helper()
-	if runtime.GOOS == "windows" {
-		home = `C:\` + filepath.ToSlash(home)
-	}
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
 	t.Setenv("home", home)

@@ -1014,13 +1014,18 @@ func TestIngestFoldsHomeOutOfNote(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
+	// %q, not a raw path: a Windows home carries backslashes, and pasted into
+	// a JSON string unescaped they read as the start of an escape (\users is
+	// not one) and the request is rejected before the fold is ever reached.
+	note := "in " + filepath.Join(home, "projects", "app")
 	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		fmt.Sprintf(`{"agent":"coder","note":"in %s/projects/app"}`, home))
+		fmt.Sprintf(`{"agent":"coder","note":%q}`, note))
 	if resp != http.StatusAccepted {
 		t.Fatalf("status = %d", resp)
 	}
 	awaitEvents(t, rec, 1)
-	if got, want := rec.evs[0].Note, "in ~/projects/app"; got != want {
+	sep := string(filepath.Separator)
+	if got, want := rec.evs[0].Note, "in ~"+sep+"projects"+sep+"app"; got != want {
 		t.Errorf("note = %q, want %q", got, want)
 	}
 }
@@ -1078,17 +1083,19 @@ func TestIngestLeavesFreeTextNoteAlone(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
-	// Prose the sender wrote, carrying the feed's own separator: a working
+	// Prose the sender wrote, carrying the feed's separator: a working
 	// directory inside it is the sender's to spell, and cutting the note at a
-	// separator would cut a sentence in half.
-	note := "in " + home + "/projects/app · 1200 reasoning"
+	// separator would cut a sentence in half. The home prefix still folds, so
+	// the path has to be written with this platform's separator.
+	sep := string(filepath.Separator)
+	note := "in " + filepath.Join(home, "projects", "app") + " · 1200 reasoning"
 	resp := post(t, "http://"+s.Addr()+"/v1/events",
 		fmt.Sprintf(`{"agent":"coder","note":%q}`, note))
 	if resp != http.StatusAccepted {
 		t.Fatalf("status = %d", resp)
 	}
 	awaitEvents(t, rec, 1)
-	if got, want := rec.evs[0].Note, "in ~/projects/app · 1200 reasoning"; got != want {
+	if got, want := rec.evs[0].Note, "in ~"+sep+"projects"+sep+"app · 1200 reasoning"; got != want {
 		t.Errorf("note = %q, want %q", got, want)
 	}
 }

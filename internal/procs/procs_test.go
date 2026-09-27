@@ -483,10 +483,16 @@ func TestSnapshotFailedSweepReleasesClaim(t *testing.T) {
 	}
 
 	s := NewSampler()
-	if got := s.Snapshot(); len(got) != 0 {
+	// An explicit clock, an hour apart: the refresh window is a rate limit on
+	// the listing, and on Windows it is wide enough that two Snapshot calls
+	// back to back would answer from the cache and never reach the retry this
+	// pins. Stepping past the window leaves the in-flight claim as the only
+	// thing that could hold the second call off.
+	base := time.Unix(1700000000, 0)
+	if got := s.SnapshotAt(base); len(got) != 0 {
 		t.Errorf("failed sweep returned %+v, want no processes", got)
 	}
-	if got := s.Snapshot(); len(got) != 1 {
+	if got := s.SnapshotAt(base.Add(time.Hour)); len(got) != 1 {
 		t.Errorf("snapshot after a failed sweep = %+v, want the listing retried", got)
 	}
 }

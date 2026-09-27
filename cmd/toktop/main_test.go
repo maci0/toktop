@@ -422,6 +422,8 @@ func TestValidateOnceEnv(t *testing.T) {
 // A GAUNTLET_HOME that cannot be used is named at startup under --agents:
 // nothing else would report it, and the agents.json it names is never read.
 func TestWarnIgnoredGauntletHome(t *testing.T) {
+	// t.TempDir is absolute on every platform; a hand-built "/srv/gauntlet"
+	// is drive-relative on Windows, where the warning is then correct.
 	tests := []struct {
 		name       string
 		agents     bool
@@ -429,7 +431,7 @@ func TestWarnIgnoredGauntletHome(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "unset passes", agents: true},
-		{name: "absolute passes", agents: true, gauntlet: filepath.Join(string(filepath.Separator), "srv", "gauntlet")},
+		{name: "absolute passes", agents: true, gauntlet: t.TempDir()},
 		{name: "relative is named", agents: true, gauntlet: "gauntlet", wantStderr: "$GAUNTLET_HOME"},
 		{name: "not read without agents", gauntlet: "gauntlet"},
 	}
@@ -454,7 +456,9 @@ func TestWarnIgnoredGauntletHome(t *testing.T) {
 // would have been read: the same rule GAUNTLET_HOME follows, applied to the
 // two variables that otherwise fall back to a default directory in silence.
 func TestWarnIgnoredXDGHome(t *testing.T) {
-	abs := filepath.Join(string(filepath.Separator), "srv", "xdg")
+	// t.TempDir is absolute on every platform; a hand-built "/srv/xdg" is
+	// drive-relative on Windows, where the warning is then correct.
+	abs := t.TempDir()
 	tests := []struct {
 		name       string
 		opencodeDB bool

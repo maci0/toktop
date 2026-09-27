@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -281,9 +282,16 @@ func TestHomeHandlerFoldsHomeInMessageAndAttrs(t *testing.T) {
 	if strings.Contains(got, home) {
 		t.Fatalf("line kept the home directory: %s", got)
 	}
+	// The fold keeps the separator it matched, so the expectation has to be
+	// spelled with this platform's one. slog renders a message carrying a
+	// space quoted and escaped, which is exactly what strconv.Quote produces:
+	// on Windows the line holds "~\\toktop\\agents.json" where POSIX holds
+	// "~/toktop/agents.json".
+	sep := string(filepath.Separator)
+	folded := "cannot read ~" + sep + "toktop" + sep + "agents.json"
 	for _, want := range []string{
-		`path=~/toktop`,
-		"cannot read ~/toktop/agents.json",
+		"path=~" + sep + "toktop",
+		strconv.Quote(folded),
 		`status=404`,
 		`remote=loopback:1234`,
 	} {
