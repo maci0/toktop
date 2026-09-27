@@ -44,8 +44,11 @@ Flags:
 	fs.PrintDefaults()
 	fmt.Fprint(&buf, `
 $GITHUB_TOKEN authenticates GitHub API calls past the anonymous rate limit.
-The release URL goes to stdout and progress to stderr, so --check is
-pipeable; a failed check or install exits 1, a usage error exits 2.
+With --check, stdout is the release URL and nothing else, so
+'url=$(toktop update --check)' is a URL whether or not this build is
+already current; the comparison and the install progress go to stderr.
+Without --check, stdout is the result and progress still goes to stderr.
+A failed check or install exits 1, a usage error exits 2, Ctrl+C exits 130.
 `)
 	_, err := io.WriteString(w, buf.String())
 	return err
@@ -94,16 +97,9 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	if err != nil {
 		return updateErr("cannot check for updates", err)
 	}
-	if !rel.NewerThan(version) {
-		_, err := fmt.Fprintf(out, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
-		return outputStatus(err)
-	}
-	if _, err := fmt.Fprintf(out, "New release: %s (running %s)\n", rel.TagName, version); err != nil {
-		return outputStatus(err)
-	}
-	if *check {
-		_, err := fmt.Fprintln(out, rel.HTMLURL)
-		return outputStatus(err)
+	code, newer := reportRelease(out, os.Stderr, rel, *check)
+	if code != 0 || !newer {
+		return code
 	}
 	fmt.Fprintf(os.Stderr, "toktop: installing %s...\n", rel.TagName)
 	path, err := selfupdate.Apply(ctx, rel)
@@ -112,6 +108,34 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	}
 	_, err = fmt.Fprintf(out, "Installed %s to %s\n", rel.TagName, path)
 	return outputStatus(err)
+}
+
+// reportRelease prints what the check found and reports whether an install
+// should follow. With --check, stdout carries the release URL and nothing
+// else, so `url=$(toktop update --check)` is a URL whether or not the running
+// binary is already current; the "New release" and "is current" lines are
+// status and go to stderr.
+func reportRelease(out, status io.Writer, rel *selfupdate.Release, check bool) (code int, newer bool) {
+	found := !rel.NewerThan(version)
+	if check {
+		var err error
+		if found {
+			_, err = fmt.Fprintf(status, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
+		} else {
+			_, err = fmt.Fprintf(status, "New release: %s (running %s)\n", rel.TagName, version)
+		}
+		if err != nil {
+			return outputStatus(err), false
+		}
+		_, err = fmt.Fprintln(out, rel.HTMLURL)
+		return outputStatus(err), false
+	}
+	if found {
+		_, err := fmt.Fprintf(out, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
+		return outputStatus(err), false
+	}
+	_, err := fmt.Fprintf(out, "New release: %s (running %s)\n", rel.TagName, version)
+	return outputStatus(err), true
 }
 
 // updateErr maps a canceled context to the same 130 the --once path uses

@@ -424,7 +424,8 @@ technology:
 
 ```
 toktop update     subcommand: install the latest release (--check to only
-                  report it, --repo owner/name for a fork)
+                  report it, --repo owner/name for a fork). With --check,
+                  stdout is the release URL and nothing else
 toktop help       same as --help; `toktop help update` / `toktop help version`
 toktop version    same as --version
 --demo            simulated fleet, zero setup
@@ -466,7 +467,9 @@ Flags come before the positional `ssh://` targets; a flag written after one is
 a usage error that says so. Results (the rendered frame, the version, the
 release URL) go to stdout and progress, warnings and errors to stderr, so
 `toktop --once >frame.txt` and `toktop version` stay pipeable. Exit codes: `0`
-success, `1` runtime failure, `2` usage error, `130` interrupted.
+success, `1` runtime failure, `2` usage error, `130` interrupted (`--once` and
+`toktop update`; the live dashboard quits on `q` or Ctrl+C, which is a clean
+`0`).
 
 ## Environment variables
 

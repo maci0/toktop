@@ -19,6 +19,7 @@ import (
 	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/ingest"
+	"github.com/maci0/toktop/internal/selfupdate"
 	"github.com/maci0/toktop/internal/ui"
 )
 
@@ -403,6 +404,10 @@ func TestUsage(t *testing.T) {
 		"Exit codes:",           // the scripting contract
 		"130",                   // Ctrl+C
 		"stderr",                // status never lands on stdout
+		"Environment",           // env table lives in --help, not only the README
+		"TOKTOP_LOG_LEVEL",      // the env vars a run actually reads
+		"TOKTOP_COLUMNS",        // --once frame overrides
+		"a flag always wins",    // flag beats the variable it mirrors
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() missing %q", want)
@@ -429,9 +434,72 @@ func TestRunUpdateHelp(t *testing.T) {
 			if got != "" {
 				t.Fatalf("runUpdate(%q) leaked %q to stderr", arg, got)
 			}
-			for _, want := range []string{"Usage:", "--check", "--repo", "owner/name", "--version", "GITHUB_TOKEN", "Examples:", "pipeable"} {
+			for _, want := range []string{"Usage:", "--check", "--repo", "owner/name", "--version", "GITHUB_TOKEN", "Examples:", "url=$(toktop update --check)"} {
 				if !strings.Contains(out.String(), want) {
 					t.Errorf("update help missing %q", want)
+				}
+			}
+		})
+	}
+}
+
+// `toktop update --check` is pipeable: stdout is the release URL and nothing
+// else, whether or not the running binary is already current. The status lines
+// that describe the comparison are stderr, and only a newer release asks for
+// an install to follow.
+func TestReportRelease(t *testing.T) {
+	const url = "https://github.com/maci0/toktop/releases/tag/v9.9.9"
+	newer := &selfupdate.Release{TagName: "v9.9.9", HTMLURL: url}
+	current := &selfupdate.Release{TagName: "v" + version, HTMLURL: url}
+	for _, tt := range []struct {
+		name       string
+		rel        *selfupdate.Release
+		check      bool
+		wantStdout string
+		wantStderr []string
+		wantNewer  bool
+	}{
+		{
+			name:       "check newer",
+			rel:        newer,
+			check:      true,
+			wantStdout: url + "\n",
+			wantStderr: []string{"New release: v9.9.9", version},
+		},
+		{
+			name:       "check current",
+			rel:        current,
+			check:      true,
+			wantStdout: url + "\n",
+			wantStderr: []string{"is current", version},
+		},
+		{
+			name:       "install newer",
+			rel:        newer,
+			wantStdout: "New release: v9.9.9 (running " + version + ")\n",
+			wantNewer:  true,
+		},
+		{
+			name:       "install current",
+			rel:        current,
+			wantStdout: "toktop " + version + " is current (latest release: v" + version + ")\n",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var out, status bytes.Buffer
+			code, newer := reportRelease(&out, &status, tt.rel, tt.check)
+			if code != 0 {
+				t.Fatalf("reportRelease = %d, want 0", code)
+			}
+			if newer != tt.wantNewer {
+				t.Errorf("newer = %v, want %v", newer, tt.wantNewer)
+			}
+			if got := out.String(); got != tt.wantStdout {
+				t.Errorf("stdout = %q, want %q", got, tt.wantStdout)
+			}
+			for _, want := range tt.wantStderr {
+				if !strings.Contains(status.String(), want) {
+					t.Errorf("stderr = %q, want mention of %q", status.String(), want)
 				}
 			}
 		})

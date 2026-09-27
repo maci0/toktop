@@ -47,16 +47,27 @@ are also accepted as commands. http(s) URLs are rejected with an --add hint;
 anything else points at --help. --add URLs must be http(s) with a host and
 must not embed userinfo. ssh:// targets must be ssh://[user@]host[:port]
 and must not embed a password (use $TOKTOP_SSH_PASSWORD or --ssh-key).
-Bearer tokens fall back to $OMNIROUTE_API_KEY then $TOKTOP_BEARER (an
-explicit --bearer, even empty, wins) and are sent only to --add endpoints.
 The live dashboard needs a terminal; use --once when piping or redirecting.
-See README.md for all environment variables.
+
+Environment (a flag always wins over the variable it mirrors):
+  TOKTOP_BEARER           bearer token for --add endpoints; OMNIROUTE_API_KEY
+                          is consulted first, and an explicit --bearer (even
+                          empty) suppresses both
+  TOKTOP_SSH_PASSWORD     ssh password for ssh:// targets, for headless runs
+  TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal)
+  TOKTOP_LINES            --once frame height, 21-512 (default: the terminal)
+  TOKTOP_LOG_LEVEL        ingest audit log floor: debug, info, warn, error
+  NO_COLOR                recognized by the terminal renderer, as usual
+An unrecognized TOKTOP_* name is reported as a typo at startup, and one that
+cannot take effect in the chosen mode is named rather than silently ignored.
+See README.md for the full environment reference.
 
 Exit codes:
   0    success, including a reader such as head closing stdout early
   1    runtime failure (no telemetry arrived, a write or the update failed)
   2    usage error (unknown flag, command or ssh:// target, bad value)
-  130  interrupted with Ctrl+C
+  130  interrupted with Ctrl+C (--once and toktop update; the live dashboard
+       quits on q or Ctrl+C instead, which is a clean 0)
 
 Results go to stdout (the rendered frame, the version, the release URL);
 progress, warnings and errors go to stderr, so a script can read stdout

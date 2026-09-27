@@ -50,6 +50,10 @@ support channel (see SECURITY.md).
   split between results on stdout and status on stderr.
   `toktop update --help` gained the examples block the top-level screen
   already had, and says `--check` is pipeable.
+- `toktop --help` lists the `TOKTOP_*` variables a run reads, their ranges,
+  and that a flag beats the variable it mirrors, instead of only pointing at
+  the README. Its exit-code line now says that `130` covers `--once` and
+  `toktop update`, while the live dashboard quits on `q` or Ctrl+C with `0`.
 - `toktop version --version` prints the version, as `toktop update
   --version` already did; only a real extra argument is a usage error now.
 - A knob that `--once --plain` never reads is named, like every other flag
@@ -91,6 +95,10 @@ support channel (see SECURITY.md).
   `make site-deploy` already did. A rollback that restored a Worker which
   never came up exited 0, so the only signal that the site was down was a
   visitor.
+- `toktop update --check` writes the release URL and nothing else to stdout,
+  so `url=$(toktop update --check)` is a URL whether or not this build is
+  already current. The "New release" and "is current" lines moved to stderr,
+  where the update help already said progress belonged.
 - A probe no longer reports throughput thousands of times too high when an
   engine's `eval_duration` is plausible only in microseconds or milliseconds
   and the decode itself is fast. The unit fit kept the raw value whenever
