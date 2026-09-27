@@ -233,6 +233,11 @@ produce byte-identical archives. Binaries are built with `-trimpath
 -buildvcs=false -mod=readonly -buildmode=pie`. This needs GNU tar; where the
 system tar is bsdtar (macOS), install GNU tar as `gtar`.
 
+A tag is a version, not a branch: cut it once and leave it. Moving one re-runs
+the release job, and the job refuses to run when a release of that tag already
+exists, because replacing the binaries under a version people have installed
+and verified breaks the checksum they recorded. Cut a new version instead.
+
 The publish step uploads every top-level file `dist/` holds, so `make release`
 first runs `dist-clean`, which deletes the regular files an earlier `make cover`
 or a previous local run left behind. Directories such as the site deploy lock

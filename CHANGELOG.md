@@ -8,6 +8,9 @@ The project is 0.x: those surfaces may change without a major bump. `toktop
 update` always fetches the latest GitHub release; older tags are not a
 support channel (see SECURITY.md).
 
+This file starts at 0.5.0. Releases before that have no notes here; see
+[0.1.0 to 0.4.5](#010-to-045) for what to read instead.
+
 ## [Unreleased]
 
 ### Added
@@ -49,6 +52,18 @@ support channel (see SECURITY.md).
   on it and derives the same event ids from the same readings. Transcript
   mtimes, `since` and the recency window stay wall time, because that is the
   clock the filesystem and the session stores record in.
+- A first `ssh://` contact says the key was pinned, naming the host and the
+  fingerprint. Trust on first use is silent, so a fresh config directory, a
+  different account, or a container with no store accepted whatever key was
+  presented, with nothing in the output to notice.
+- toktop.ai writes one JSON object per line to Workers Logs when a request
+  fails, each carrying the `cf-ray` of the request behind it, so a failure a
+  visitor reports pivots to the edge request that caused it. Only failures log:
+  a served page is the steady state, and a line per visit would bury the few
+  that name a broken deploy. `site/README.md` lists the events.
+- toktop.ai answers with a `Server-Timing: edge;dur=<ms>` header, so the
+  number a visitor or a RUM script reads is the time to first byte from the
+  Worker rather than an unbreakable share of a round trip.
 
 ### Changed
 
@@ -124,6 +139,22 @@ support channel (see SECURITY.md).
   was shorter than the time it claimed to cover; the axis now follows the
   recorded stamps, so a slow engine shows its real spacing and a stall shows
   as a gap.
+- An engine request that answers with a redirect is no longer followed off the
+  origin it started on: the hop is refused and the engine reports the
+  redirect. Every engine request starts at an address nobody authenticated as
+  a toktop peer (a scanned loopback port, or a port forwarded over `ssh://`),
+  so a redirect turned that read into a request to any URL the host can reach,
+  including instance metadata, and the answer reached the dashboard. A hop
+  within the origin still follows, which also means an `https` to `http`
+  downgrade is no longer followed with the engine token attached. An engine
+  that answers a poll with a cross-origin redirect now fails that poll where
+  it used to follow.
+- toktop.ai revalidates a dashboard capture within an hour of its cache
+  expiring instead of within a week. The captures are served under stable
+  names, so nothing but a revalidation retires the copy a browser is holding
+  when a deploy re-captures, and a week of that put a week-old screenshot on
+  the page. The cost is one cheap conditional request on a visit that is
+  already past `max-age`.
 
 ### Fixed
 
@@ -295,6 +326,24 @@ support channel (see SECURITY.md).
   locks instead of leaving one held with no goroutine left to unlock it, and
   holding `p` dispatches the probe as a program-owned command rather than
   spawning an untracked goroutine per key press.
+- A `zstd` transcript window no longer decompresses without bound across its
+  frames. The per-decode cap reset on each frame, so a window of small RLE
+  frames (about 10 compressed bytes yielding 128 KiB each) grew the
+  accumulator to tens of gigabytes with every individual frame inside the
+  cap. The walk stops at the cap and the rest is read on the next poll.
+- A `hwmon` name or thermal-zone type is stripped of escape sequences before
+  it reaches the terminal. Those are file contents on a host toktop may not
+  own, and they were stored as read.
+- The `ssh://` host-key store's lock is real on a first connect. The lock file
+  lives beside the store and the store's directory is created by the write
+  inside the lock, so the exclusive create failed with `ENOENT` instead of
+  `EEXIST` and the unlocked fallback ran: two first contacts racing on a
+  fresh install, the loser renaming away the winner's pin, and the next
+  connect re-trusting that host.
+- An `ssh://` handshake that stalls stops when the run is cancelled. The
+  transport observes no context of its own and the connection deadline is
+  lifted once the version banner arrives, so a peer that sends the banner and
+  then waits held the dashboard unkillable by Ctrl+C.
 
 ## [0.14.1] - 2026-09-26
 
@@ -821,6 +870,18 @@ Binaries, checksums, and a CycloneDX SBOM are on
 
 Binaries, checksums, and a CycloneDX SBOM are on
 [GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.5.0).
+
+## 0.1.0 to 0.4.5
+
+These releases predate this file, so nothing here describes what changed for
+you across them, and no migration notes exist for that range. Each release
+page, from
+[v0.1.0](https://github.com/maci0/toktop/releases/tag/v0.1.0) through
+[v0.4.5](https://github.com/maci0/toktop/releases/tag/v0.4.5), carries notes
+auto-generated from its commits, and the diff between the tag you run and the
+tag you want is the record of what moved. The README and `--help` of the tag
+you upgrade to are the CLI contract for that version; this file covers 0.5.0
+and later only.
 
 [Unreleased]: https://github.com/maci0/toktop/compare/v0.14.1...HEAD
 [0.14.1]: https://github.com/maci0/toktop/compare/v0.14.0...v0.14.1

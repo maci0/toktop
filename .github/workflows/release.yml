@@ -35,6 +35,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: refuse a version that is already published
+        # A moved tag re-runs this job and would otherwise replace the binaries,
+        # checksums and SBOM under a version people have already installed and
+        # verified, so a download and its recorded checksum stop agreeing. The
+        # tag is a version, not a branch: it is cut once and left alone. This
+        # runs before the gates so a duplicate fails without building.
+        # A publish that failed before the release existed leaves nothing here,
+        # so a retry is still allowed.
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            echo "$GITHUB_REF_NAME is already published; cut a new version instead" >&2
+            exit 1
+          fi
+
       - name: vet and staticcheck before shipping (every release platform)
         # Per-platform gate lives in the Makefile; PLATFORMS there is the
         # single source of truth so CI and local checks cannot drift apart.
