@@ -107,10 +107,6 @@ type Sampler struct {
 // call costs nothing.
 var audit = logcfg.Logger
 
-// logField prepares a value for an audit attribute the way the remote and
-// ingest packages do: one line, home folded, capped.
-func logField(s string, n int) string { return logcfg.Field(logcfg.RedactAddrs(s), n) }
-
 // NewSampler returns a Sampler with the platform's default refresh window.
 // A caller that lists processes more than once in a run should share one
 // sampler: the underlying listing is throttled, and the CPU tick deltas it
@@ -176,7 +172,7 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		// line the same way the sweep itself is bounded.
 		if len(s.cached) == 0 {
 			audit().Warn("toktop: process listing failed, no snapshot to fall back on",
-				"error", logField(err.Error(), 256))
+				"error", logcfg.RedactedField(err.Error(), 256))
 		}
 		return slices.Clone(s.cached)
 	}

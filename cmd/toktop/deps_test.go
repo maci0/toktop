@@ -169,7 +169,8 @@ func TestDependencyTableMatchesManifest(t *testing.T) {
 //	5  cmd/toktop        the only package allowed to wire the rest together
 var tiers = [][]string{
 	{"internal/core"},
-	{"internal/logcfg", "internal/bearer", "internal/procs", "internal/selfreload", "agentusage"},
+	{"internal/logcfg"},
+	{"internal/bearer", "internal/procs", "internal/selfreload", "agentusage"},
 	{"internal/gpu", "internal/probe", "internal/provider", "internal/demo", "internal/selfupdate", "internal/ui"},
 	{"internal/sysmon", "internal/ingest", "internal/agentwatch"},
 	{"internal/remote", "internal/collector"},

@@ -730,10 +730,10 @@ func (c *Client) auditForwardFailure(rport int, err error) {
 	c.forwardWarnAt[rport] = now
 	c.forwardWarnMu.Unlock()
 	audit().Warn("toktop: ssh forward failed",
-		"target", logField(c.Target.userHost(), 256),
+		"target", logcfg.RedactedField(c.Target.UserHost(), 256),
 		"port", c.Target.Port,
 		"forwarded_port", rport,
-		"error", logField(err.Error(), 256))
+		"error", logcfg.RedactedField(err.Error(), 256))
 }
 
 // closeListeners reclaims every local forward listener (and thereby its relay

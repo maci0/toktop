@@ -16,6 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // knownHostsFile is the trust-on-first-use store. Overridable in tests.
@@ -421,8 +422,8 @@ func replaceFile(tmpName, path string) error {
 		// the store itself is missing, so a leftover nobody could delete
 		// would be handed back as the operator's pins on some later run.
 		audit().Warn("toktop: known_hosts backup left behind",
-			"path", logField(displaced, 256),
-			"error", logField(rerr.Error(), 256))
+			"path", logcfg.RedactedField(displaced, 256),
+			"error", logcfg.RedactedField(rerr.Error(), 256))
 	}
 	core.SyncDir(filepath.Dir(path))
 	return nil
