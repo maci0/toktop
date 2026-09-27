@@ -30,6 +30,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- Kimi Code CLI sessions are read. One `usage.record` per model call, summed
+  across the session's agents, each session attributed to the working
+  directory its `state.json` records, since the store is machine-wide and the
+  wire log names no directory itself.
 - The run's active configuration is audited as one record at startup, beside
   the line stderr already carried. The dashboard hides stderr under the alt
   screen, so the startup line was the one piece of a run's configuration that
@@ -126,6 +130,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A defined agent whose transcript carries only the cached prompt shares is
+  read for its tokens. `cache_read_input_tokens` and
+  `cache_creation_input_tokens` (and Kimi Code CLI's own spellings) were
+  missing from the keys the generic walker recognizes, so a log that reported
+  the uncached share and no other counter was read as a session producing
+  nothing, and one reporting all three was read as the largest share alone
+  rather than the sum. The cached shares are one billable prompt, so they now
+  add to the uncached share, the same fold the claude and dsh parsers apply.
+- Kimi Code CLI sessions are attributed to the working directory their
+  `state.json` records. The state file sits beside the session's `agents/`
+  directory, three levels above a `wire.jsonl`; the lookup stopped one level
+  short, so no session was ever owned and the adapter reported no tokens at
+  all rather than another project's.
 - An agent's rate spans its first to its last event in time, not to the last
   event the walk happened to reach. The feed is not time-ordered: the ingest
   endpoint accepts any `ts`, and a producer's clock can step. One out-of-order

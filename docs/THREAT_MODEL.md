@@ -843,9 +843,9 @@ Other claims checked against code on this pass, all of which hold as written:
   .github/workflows/ci.yml, 66-74) are what keeps a shipped platform and a
   vetted one the same set.
 - The agent-store asset names dsh, crush, and opencode, and the default
-  `--agents` path also tails claude, codex, qwen, copilot, clanker, and the
+  `--agents` path also tails claude, codex, qwen, copilot, kimi, clanker, and the
   built-in pi, prime-agent, and feynman definitions
-  (agentusage/registry.go, 93-121; agentusage/claude.go, 15; codex.go, 31).
+  (agentusage/registry.go, 93-135; agentusage/claude.go, 15; codex.go, 31).
 - The ingest route registers GET and HEAD on `/healthz`
   (internal/ingest/server.go, `ingestEndpoints`, 260-263, and the 405 `Allow`
   header written by the shared method guard); the `help` and `version` subcommands take arbitrary

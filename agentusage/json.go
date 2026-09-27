@@ -32,10 +32,16 @@ type jsonUsage struct {
 	Thinking int
 	Total    int
 	Input    int
+	// Cache is the cached share of the prompt, kept apart from Input because
+	// it adds to it rather than competing with it. An agent reporting the
+	// uncached, cache-read and cache-write shares bills all three, so folding
+	// them by maximum (as the other counters are folded) would report the
+	// largest share alone and lose the rest.
+	Cache int
 }
 
 func (u jsonUsage) Has() bool {
-	return values{output: u.Output, thinking: u.Thinking, total: u.Total, input: u.Input}.present()
+	return values{output: u.Output, thinking: u.Thinking, total: u.Total, input: satAdd(u.Input, u.Cache)}.present()
 }
 
 // Keys recognized as token counters, mapped onto the fields above. These are
@@ -58,9 +64,19 @@ var (
 	inputKeys = map[string]bool{
 		"input_tokens": true, "inputtokens": true, "prompt_tokens": true,
 		"prompttokens": true, "prompttokencount": true, "input": true,
-		// Kimi Code CLI's own spelling of the three prompt shares, so a
+		// Kimi Code CLI's spelling of the uncached prompt share, so a
 		// definition pointed at one of its logs reads what the agent read.
-		"inputother": true, "inputcacheread": true, "inputcachecreation": true,
+		"inputother": true,
+	}
+	// The cached shares of a prompt, in the spellings the supported agents
+	// use. These add to inputKeys rather than joining it: a log carrying only
+	// cache fields carries a billable prompt, and reading it through
+	// inputKeys alone (before this set existed) reported no prompt at all.
+	cacheKeys = map[string]bool{
+		"cache_read_input_tokens": true, "cache_creation_input_tokens": true,
+		"cache_read_tokens": true, "cache_creation_tokens": true,
+		// Kimi Code CLI's own spelling of the same two shares.
+		"inputcacheread": true, "inputcachecreation": true,
 	}
 	// Fields naming the working directory a record belongs to.
 	cwdKeys = map[string]bool{
@@ -198,7 +214,7 @@ func walk(node any, ev *jsonEvent, depth int) {
 }
 
 func isNumberKey(lower string) bool {
-	return outputKeys[lower] || thinkingKeys[lower] || totalKeys[lower] || inputKeys[lower]
+	return outputKeys[lower] || thinkingKeys[lower] || totalKeys[lower] || inputKeys[lower] || cacheKeys[lower]
 }
 
 // utf8BOM is the byte-order mark a transcript may open a record with. A
@@ -221,6 +237,8 @@ func assign(ev *jsonEvent, lower string, val any) {
 		ev.Usage.Total = max(ev.Usage.Total, n)
 	case inputKeys[lower]:
 		ev.Usage.Input = max(ev.Usage.Input, n)
+	case cacheKeys[lower]:
+		ev.Usage.Cache = satAdd(ev.Usage.Cache, n)
 	}
 }
 
@@ -256,7 +274,9 @@ func parseGeneric(line []byte) (values, string, bool) {
 		return values{}, "", false
 	}
 	out := counter(ev.Usage.Output)
-	in := counter(ev.Usage.Input)
+	// Cached prompt tokens were billed too, so they add to the uncached share
+	// the same fold parseClaude and parseDsh apply.
+	in := satAdd(counter(ev.Usage.Input), counter(ev.Usage.Cache))
 	tot := counter(ev.Usage.Total)
 	if tot == 0 && in > 0 {
 		tot = satAdd(in, out)

@@ -72,8 +72,8 @@ still appears in the list, labelled `via <engine>`, but those tokens are not
 added on top of the engine's own numbers.
 
 Once asked for, nothing else has to be configured and the agent does not have
-to cooperate: claude, codex, qwen, copilot, pi, prime-agent, feynman, clanker,
-crush, opencode, and dsh all keep records carrying the provider's own counts
+to cooperate: claude, codex, qwen, copilot, kimi, pi, prime-agent, feynman,
+clanker, crush, opencode, and dsh all keep records carrying the provider's own counts
 (JSONL transcripts, except opencode and crush which keep SQLite stores).
 dsh's
 default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
