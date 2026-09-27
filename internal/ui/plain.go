@@ -86,7 +86,7 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 		state, fmtRate(outAgg), fmtRate(inAgg))
 	rates := sum.Rates
 	if n := len(rates); n > 0 {
-		b.WriteString(fmt.Sprintf(" · %d agents", n))
+		b.WriteString(" · " + agentCountLabel(n))
 	}
 	if s.Uptime > 0 {
 		b.WriteString(" · session " + fmtDur(s.Uptime))
@@ -332,18 +332,13 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 		case recencyIdle:
 			recency = "idle " + fmtDur(d)
 		}
-		if r.ViaEngine != "" {
-			via := "via " + core.SanitizeText(r.ViaEngine)
-			if recency == "" {
-				recency = via
-			} else {
-				recency = via + " " + recency
-			}
-		}
+		// The engine is named once, where the rate it replaces would go, so
+		// the recency word keeps its own job. This mirrors the AGENT FEED
+		// summary line above, which prints the same attribution.
 		line := name
 		switch {
 		case r.ViaEngine != "":
-			line += " via engine"
+			line += " via " + core.SanitizeText(r.ViaEngine)
 		case r.TokPS > 0:
 			line += " " + fmtRate(r.TokPS) + " tok/s"
 		default:

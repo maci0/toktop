@@ -481,3 +481,54 @@ func TestAgentRowFitsTheNarrowestFeed(t *testing.T) {
 		t.Errorf("agent row lost its recency cell:\n%s", strip(row))
 	}
 }
+
+// An engine-routed agent is named once. The row used to print a vague
+// "via engine" in the rate cell and the address again beside the recency
+// cell, so a reader saw the same attribution twice with different detail.
+func TestAgentRowsNameEngineOnce(t *testing.T) {
+	now := time.Now()
+	rows := agentRows([]core.AgentRate{{
+		Agent: "claude", Last: now, ViaEngine: "ollama",
+	}}, now)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	got := strip(rows[0])
+	if n := strings.Count(got, "via "); n != 1 {
+		t.Errorf("engine named %d times, want once:\n%s", n, got)
+	}
+	if !strings.Contains(got, "live") {
+		t.Errorf("recency cell lost to the attribution:\n%s", got)
+	}
+}
+
+// The same rule in the linear report's AGENTS block, which the TUI and the
+// plain frame must agree about.
+func TestPlainAgentsNameEngineOnce(t *testing.T) {
+	now := time.Now()
+	out := PlainTextFrame(Config{Version: "t", Agents: true}, core.Snapshot{
+		At: now,
+		Agents: []core.AgentEvent{{
+			At: now.Add(-time.Second), Agent: "claude", Kind: core.AgentKindTurn,
+			OutputTokens: 900, PromptTokens: 4000, ViaEngine: "ollama",
+		}},
+	})
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "via engine") {
+			t.Errorf("line kept the vague duplicate attribution:\n%s", line)
+		}
+	}
+	if !strings.Contains(out, "claude via ollama") {
+		t.Errorf("AGENTS block lost the engine attribution:\n%s", out)
+	}
+}
+
+func TestAgentCountLabel(t *testing.T) {
+	for _, tc := range []struct{ n int; want string }{
+		{0, "0 agents"}, {1, "1 agent"}, {2, "2 agents"}, {12, "12 agents"},
+	} {
+		if got := agentCountLabel(tc.n); got != tc.want {
+			t.Errorf("agentCountLabel(%d) = %q, want %q", tc.n, got, tc.want)
+		}
+	}
+}

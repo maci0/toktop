@@ -277,12 +277,12 @@ const HTML = htmlForWire(`<!doctype html>
 
   <section id="install" aria-labelledby="install-heading">
   <h2 id="install-heading">Install</h2>
-<pre tabindex="0" role="region" aria-label="Install commands"><code>go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
-<span class="dim"># or a binary: linux / macos / windows, amd64 + arm64</span></code></pre>
+<pre tabindex="0" role="region" aria-label="Install commands"><code>go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest</code></pre>
   <p class="dim">The <code>sqlite</code> tag matches the release binaries: without it
-  crush and opencode stores are unreadable.
-  <a href="https://github.com/maci0/toktop/releases">Releases</a> ·
-  <code>toktop update</code> self-updates.</p>
+  crush and opencode stores are unreadable. No Go toolchain?
+  <a href="https://github.com/maci0/toktop/releases">Releases</a> has a binary for
+  linux, macos or windows (amd64 and arm64), and <code>toktop update</code> keeps it
+  current.</p>
   </section>
 
   <section id="run" aria-labelledby="run-heading">
@@ -437,8 +437,8 @@ const COMPRESSIBLE = new Map([
   ["gzip", "gzip"],
 ]);
 
-// The same three codings, smallest body of this page first: brotli 3,602,
-// gzip 4,291, zstd 4,526 bytes. The page is a constant, so those sizes are
+// The same three codings, smallest body of this page first: brotli 3,632,
+// gzip 4,302, zstd 4,541 bytes. The page is a constant, so those sizes are
 // constants too, and ranking by them lets a request build only the coding it
 // is about to send instead of all three to compare them. zstd lands behind
 // gzip here because the page is short English words and markup, which is not

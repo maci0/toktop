@@ -23,10 +23,7 @@ func (m Model) renderHeader() string {
 		if n == 0 {
 			n = uniqueAgents(m.snap.Agents)
 		}
-		label := fmt.Sprintf("%d agents", n)
-		if n == 1 {
-			label = "1 agent"
-		}
+		label := agentCountLabel(n)
 		st := styleOK
 		if n == 0 {
 			st = styleWarn
@@ -43,11 +40,7 @@ func (m Model) renderHeader() string {
 		}
 		segs = append(segs, headerSeg{text: st.Render(fmt.Sprintf("%s %d/%d engines", strip(dot), up, tot))})
 		if n := len(rates); n > 0 {
-			label := fmt.Sprintf("%d agents", n)
-			if n == 1 {
-				label = "1 agent"
-			}
-			segs = append(segs, headerSeg{text: dim(label), shed: 45})
+			segs = append(segs, headerSeg{text: dim(agentCountLabel(n)), shed: 45})
 		}
 	}
 

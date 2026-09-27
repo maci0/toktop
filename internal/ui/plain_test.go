@@ -223,7 +223,9 @@ func TestPlainFrameUsesSnapshotTime(t *testing.T) {
 		},
 	}
 	out := PlainTextFrame(Config{Version: "t"}, snap)
-	if !strings.Contains(out, "1 agents") {
+	// The count is spelled by agentCountLabel, so one in-window agent reads
+	// "1 agent" here exactly as it does in the header and the agents view.
+	if !strings.Contains(out, "1 agent") {
 		t.Fatalf("hour-old snapshot dropped in-window agents:\n%s", out)
 	}
 }

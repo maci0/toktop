@@ -53,6 +53,15 @@ const (
 	recencyIdle
 )
 
+// agentCountLabel spells an agent count, so the header, the compact strip and
+// the linear report cannot disagree about "1 agent" against "1 agents".
+func agentCountLabel(n int) string {
+	if n == 1 {
+		return "1 agent"
+	}
+	return fmt.Sprintf("%d agents", n)
+}
+
 // agentSummary renders the rates as one line, for a panel title.
 func agentSummary(rates []core.AgentRate) string {
 	if len(rates) == 0 {
@@ -105,12 +114,18 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 	nameW, rateW, tokW := agentNameMin, agentRateMin, agentTokensMin
 	for i, r := range rates {
 		names[i] = core.SanitizeText(r.Agent)
+		// Engine-routed tokens are already counted by the engine, so the row
+		// names the engine where the rate would go and does not also print it
+		// again beside the recency cell. agentSummary, agentMiniLine, feedLine
+		// and the plain report all name it once; this row used to print a vague
+		// "via engine" here and the address over there.
 		rate := dim("no rate yet")
-		if r.TokPS > 0 {
+		switch {
+		case r.ViaEngine != "":
+			rate = dim("via " + shorten(core.SingleLine(r.ViaEngine), 18))
+		case r.TokPS > 0:
 			rate = styleValue.Foreground(heatColor(clamp01(r.TokPS / 60))).
 				Render("▲ " + fmtRate(r.TokPS) + " tok/s")
-		} else if r.ViaEngine != "" {
-			rate = dim("via engine")
 		}
 		tok := dim("▲" + fmtCount(r.Tokens))
 		if r.Prompt > 0 {
@@ -125,14 +140,6 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 			since = styleOK.Render("● live")
 		case recencyIdle:
 			since = dim("idle " + fmtDur(d))
-		}
-		if r.ViaEngine != "" {
-			via := dim("via " + shorten(core.SingleLine(r.ViaEngine), 18))
-			if since == "" {
-				since = via
-			} else {
-				since = via + "  " + since
-			}
 		}
 		rateCells[i], tokCells[i], sinceCells[i] = rate, tok, since
 		nameW = max(nameW, lipgloss.Width(names[i]))
