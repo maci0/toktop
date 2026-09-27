@@ -122,7 +122,7 @@ func usage(w io.Writer) error {
 Usage:
   toktop [flags] [ssh://user@host ...]
   toktop update [--check] [--repo owner/name]   install the latest release
-  toktop help [update|version]                  show help for toktop or a subcommand
+  toktop help [update|version]                  this screen; update has its own
   toktop version                                print version and exit
 
 Examples:
@@ -144,7 +144,10 @@ Flags:
 	buf.WriteString(flagDocs(topFS))
 	fmt.Fprint(&buf, `
 Positional arguments are ssh:// targets and may repeat; help and version
-are also accepted as commands. http(s) URLs are rejected with an --add hint;
+are also accepted as commands. 'toktop help update' and 'toktop update
+--help' print the update screen; 'toktop help version' and 'toktop version
+--help' both print this one, since version takes no flags of its own.
+http(s) URLs are rejected with an --add hint;
 anything else points at --help. --add URLs must be http(s) with a host and
 must not embed userinfo. ssh:// targets must be ssh://[user@]host[:port]
 and must not embed a password (use $TOKTOP_SSH_PASSWORD or --ssh-key); a

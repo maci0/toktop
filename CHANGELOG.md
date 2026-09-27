@@ -126,6 +126,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `--frames` is named as a wait-only knob under `--once --json`, the way it
+  already was under `--once --plain`. Both reports render the last snapshot
+  alone, so the count buys the wait before the render and nothing else, and a
+  flag that warns in one of the two and stays silent in the other read as a
+  difference the reports do not have.
+- A GitHub rate limit refused by `toktop update` says so. The API answers a
+  spent anonymous quota with 403 or 429 and an otherwise bare
+  `github returned 403 Forbidden for ...`, which names a URL and nothing the
+  reader can change; the message now names the rate limit and
+  `$GITHUB_TOKEN`, the variable the update help screen already documents for
+  exactly this.
+- `toktop help version` and `toktop version --help` are documented as printing
+  the top-level screen. `toktop help update` has its own screen and version
+  takes no flags, so the usage block claiming a subcommand screen for both
+  sent readers looking for one that does not exist.
 - An agent's rate spans its first to its last event in time, not to the last
   event the walk happened to reach. The feed is not time-ordered: the ingest
   endpoint accepts any `ts`, and a producer's clock can step. One out-of-order

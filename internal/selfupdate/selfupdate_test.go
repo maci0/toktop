@@ -234,6 +234,8 @@ func TestCheck(t *testing.T) {
 		{"http error", http.StatusNotFound, `{"message":"Not Found"}`, "404"},
 		{"missing tag", http.StatusOK, `{"tag_name":""}`, "no tag"},
 		{"invalid json", http.StatusOK, `{invalid json`, "cannot parse"},
+		{"rate limited", http.StatusForbidden, `{"message":"API rate limit exceeded"}`, "$GITHUB_TOKEN"},
+		{"throttled", http.StatusTooManyRequests, `{"message":"slow down"}`, "$GITHUB_TOKEN"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			client.Transport = roundTripFunc(func(*http.Request) (*http.Response, error) {

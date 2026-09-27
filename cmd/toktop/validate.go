@@ -34,12 +34,19 @@ func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	}
 	if set["frames"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --frames has no effect without --once")
-	} else if set["frames"] && f.plain {
-		// The plain report renders the last snapshot as a linear list; there
-		// is no chart for the earlier frames to fill, so the count only buys
-		// the wait before it. Gated on once so a --frames --plain run with no
-		// --once is not also told how --once would use it.
-		fmt.Fprintln(os.Stderr, "toktop: --frames only sets how long --once waits with --plain; the text report renders the last snapshot")
+	} else if set["frames"] && (f.plain || f.jsonOut) {
+		// --plain and --json both render the last snapshot alone: a linear
+		// list and a one-object report have no chart for the earlier frames
+		// to fill, so the count only buys the wait before it. Gated on once so
+		// a --frames --plain run with no --once is not also told how --once
+		// would use it. --json gets the same line as --plain because it is
+		// the same situation, and a flag that warns in one report and stays
+		// silent in the other reads as a difference the reports do not have.
+		report, what := "--plain", "the text report"
+		if f.jsonOut {
+			report, what = "--json", "the JSON report"
+		}
+		fmt.Fprintf(os.Stderr, "toktop: --frames only sets how long --once waits with %s; %s renders the last snapshot\n", report, what)
 	}
 	if set["plain"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect without --once")

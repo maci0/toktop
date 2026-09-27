@@ -242,6 +242,13 @@ func Check(ctx context.Context, repo string) (*Release, error) {
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		// 403 and 429 are how the API reports a spent anonymous quota. The
+		// bare status leaves the reader with a GitHub URL and nothing to
+		// change, and the fix is the one variable the update help screen
+		// already documents for it.
+		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+			return nil, fmt.Errorf("github returned %s for %s (anonymous rate limit; set $GITHUB_TOKEN to authenticate)", resp.Status, latest)
+		}
 		return nil, fmt.Errorf("github returned %s for %s", resp.Status, latest)
 	}
 	var rel Release
