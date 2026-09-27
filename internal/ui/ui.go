@@ -352,7 +352,7 @@ func (m Model) View() string {
 	if m.focusAgents {
 		return m.renderAgentsOnly()
 	}
-	body := lipgloss.JoinVertical(lipgloss.Left,
+	body := joinBlocks(
 		m.renderHeader(),
 		"",
 		m.renderCharts(),

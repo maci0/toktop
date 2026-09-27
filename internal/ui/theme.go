@@ -67,10 +67,17 @@ var (
 		core.KindOmniRoute: lipgloss.NewStyle().Foreground(cBlue),
 	}
 
+	// panelStyle draws the rounded frame. panel() assembles its own border
+	// instead (see borderStyle): this stays for system.go's host strip, which
+	// frames two padBlock rows as one block.
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(cBorder).
 			Padding(0, 1)
+
+	// borderStyle is the frame color alone, without lipgloss's border and
+	// padding pass. panel() composes the frame from it directly.
+	borderStyle = lipgloss.NewStyle().Foreground(cBorder)
 
 	helpStyle = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
@@ -83,21 +90,59 @@ var (
 // innerW x innerH with plain spaces; the padding is ours rather than
 // lipgloss's, whose wrapping mishandles densely styled chart cells.
 func panel(title, content string, innerW, innerH int) string {
-	body := panelStyle.Render(padBlock(content, innerW, innerH))
-	return styleTitle.Render(title) + "\n" + body
+	return styleTitle.Render(title) + "\n" + frame(padBlock(content, innerW, innerH), innerW, innerH)
+}
+
+// frame draws the rounded border around a block padBlock has already cut to
+// exactly innerW columns and innerH rows.
+//
+// The border is composed rather than handed to panelStyle.Render, which spent
+// a third of a frame's CPU re-measuring every row with lipgloss's width. That
+// width is known here: the rows are innerW cells, the edge is innerW+2 box
+// runes, and a box rune is one cell (see singleCellRunes), so a grapheme-cluster
+// walk over the block answers nothing the caller has not already decided.
+//
+// A block carrying a tab is the exception lipgloss handles differently: it
+// expands tabs into spaces before measuring. A tab should not reach a frame
+// (clip and shorten fold them away), and deferring keeps that a rendering
+// question rather than a silent one.
+func frame(block string, innerW, innerH int) string {
+	if strings.ContainsRune(block, '\t') {
+		return panelStyle.Render(block)
+	}
+	lines := strings.Split(block, "\n")
+	out := make([]string, 0, len(lines)+2)
+	// One style render per frame. The escape run around the text is the same
+	// for every string the style wraps, so it is rendered once and the text
+	// substituted into it.
+	sides := styleSides(borderStyle)
+	edge := strings.Repeat("─", max(innerW+2, 0))
+	vert := wrap(sides, "│")
+	out = append(out, wrap(sides, "╭"+edge+"╮"))
+	for _, ln := range lines {
+		out = append(out, vert+" "+ln+" "+vert)
+	}
+	out = append(out, wrap(sides, "╰"+edge+"╯"))
+	return strings.Join(out, "\n")
 }
 
 // padBlock forces content to exactly innerW columns and innerH rows.
+//
+// Every line reaches innerW: a line that overflows is clipped first and then
+// padded, because clip returns the ellipsis short of the cut it was given (a
+// wide glyph that will not fit half a cell), and a block whose rows are not
+// all the same width is a block whose right border does not line up.
 func padBlock(content string, innerW, innerH int) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) > innerH {
 		lines = lines[:innerH]
 	}
 	for i, ln := range lines {
+		if widthOf(ln) > innerW {
+			ln = clip(ln, innerW)
+		}
 		if gap := innerW - widthOf(ln); gap > 0 {
 			ln += strings.Repeat(" ", gap)
-		} else {
-			ln = clip(ln, innerW)
 		}
 		lines[i] = ln
 	}

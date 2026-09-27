@@ -138,17 +138,30 @@ func humanBytesShort(b uint64) string {
 // else -1. The Width fast path: every frame calls Width on dozens of short
 // labels ("TOKTOP", "engine-0", "v0.12.0") and on whole chart and border
 // lines, and Width splits on "\n" (genSplit alloc) then walks graphemes.
-// Printable ASCII is one cell per byte; box drawing (U+2500..U+257F) and
-// braille dots (U+2800..U+28FF) are one cell per rune, never wide, never
-// combining, so a rune count is exact for those too. Everything else falls
-// back to Width, which knows about wide runes and combining marks.
+// Printable ASCII is one cell per byte, and a rune in singleCellRunes is one
+// cell per rune, so a byte scan answers for both. Everything else falls back to
+// Width, which knows about wide runes and combining marks.
+//
+// SGR and OSC escape sequences are skipped rather than treated as a bail: the
+// styled strings are most of what a frame measures (every chart row, every
+// panel body, every clipped frame line), and each one otherwise sent Width
+// through a grapheme-cluster walk to arrive at the same count. An escape shape
+// this does not recognize is a bail, not a guess.
 func plainWidth(s string) int {
 	w := 0
 	for i := 0; i < len(s); {
 		c := s[i]
+		if c == 0x1b {
+			next, ok := skipEscape(s, i+1)
+			if !ok {
+				return -1
+			}
+			i = next
+			continue
+		}
 		if c < 0x20 || c >= 0x7f {
 			r, size := utf8.DecodeRuneInString(s[i:])
-			if !((r >= 0x2500 && r <= 0x257f) || (r >= 0x2800 && r <= 0x28ff)) {
+			if !singleCellRune(r) {
 				return -1
 			}
 			i += size
@@ -159,6 +172,86 @@ func plainWidth(s string) int {
 		w++
 	}
 	return w
+}
+
+// singleCellRunes are the ranges plainWidth counts one cell per rune in. Each
+// is a run of code points lipgloss.Width reports as one cell, and each holds
+// no Extend, SpacingMark, regional indicator or emoji code point, so no two
+// neighbours in them join into one grapheme cluster: a per-rune count is
+// therefore the same answer a cluster walk arrives at.
+//
+// Box drawing and braille dots carry the charts and the panel frames, and the
+// typographic marks (dashes, quotes, arrows, daggers, ellipsis) and Latin-1
+// punctuation carry the labels. Wide and zero-width code points (CJK, Hangul,
+// combining accents, emoji) are outside every range, so they still defer.
+var singleCellRunes = [...][2]rune{
+	{0x00A0, 0x00AC},
+	{0x00AE, 0x00FF},
+	{0x2000, 0x200A},
+	{0x2010, 0x2027},
+	{0x202F, 0x205F},
+	{0x2070, 0x20CF},
+	{0x20F1, 0x22FF},
+	{0x2500, 0x25FC},
+	{0x25FF, 0x25FF},
+	{0x2700, 0x2704},
+	{0x2706, 0x2709},
+	{0x270C, 0x2727},
+	{0x2729, 0x274B},
+	{0x274D, 0x274D},
+	{0x274F, 0x2752},
+	{0x2756, 0x2756},
+	{0x2758, 0x2794},
+	{0x2798, 0x27AF},
+	{0x27B1, 0x27BE},
+	{0x2800, 0x28FF},
+}
+
+func singleCellRune(r rune) bool {
+	for _, rg := range singleCellRunes {
+		if r >= rg[0] && r <= rg[1] {
+			return true
+		}
+	}
+	return false
+}
+
+// skipEscape returns the index just past one escape sequence whose ESC is at
+// i-1, for the shapes that carry no cells: CSI, OSC and the two-byte form.
+// ok is false for anything else, so a string with a sequence this does not
+// model is measured by lipgloss instead of by a rule that might be wrong.
+//
+// An unterminated sequence is a bail: swallowing the rest of the string would
+// report a width for a payload whose cells were never counted.
+func skipEscape(s string, i int) (int, bool) {
+	if i >= len(s) {
+		return 0, false
+	}
+	switch s[i] {
+	case '[': // CSI: parameter bytes 0x30-0x3F, intermediates 0x20-0x2F, final 0x40-0x7E
+		i++
+		for i < len(s) && s[i] >= 0x20 && s[i] <= 0x3f {
+			i++
+		}
+		if i < len(s) && s[i] >= 0x40 && s[i] <= 0x7e {
+			return i + 1, true
+		}
+		return 0, false
+	case ']': // OSC: terminated by BEL or ST (ESC backslash)
+		i++
+		for i < len(s) {
+			if s[i] == 0x07 {
+				return i + 1, true
+			}
+			if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
+				return i + 2, true
+			}
+			i++
+		}
+		return 0, false
+	default: // two-byte escape: ESC plus one byte
+		return i + 1, true
+	}
 }
 
 func widthOf(s string) int {
@@ -263,3 +356,92 @@ func joinSpreadLeft(segs []string, w int) string {
 }
 
 func dim(s string) string { return styleDim.Render(s) }
+
+// joinBlocks concatenates blocks vertically, padding every row of the result
+// to the widest row across all of them. It is lipgloss.JoinVertical measured
+// with widthOf: that call was a fifth of a frame's CPU, spent splitting each
+// block and re-measuring rows this package had already cut to a known width.
+//
+// The widest row is found in the same pass that copies, so a block list is
+// walked once rather than once per block plus once to concatenate.
+func joinBlocks(blocks ...string) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0] // a lone block is already the join, trailing rows and all
+	}
+	rows := make([][]string, len(blocks))
+	widest := 0
+	total := 0
+	for i, b := range blocks {
+		rows[i] = strings.Split(b, "\n")
+		total += len(rows[i])
+		for _, ln := range rows[i] {
+			if w := widthOf(ln); w > widest {
+				widest = w
+			}
+		}
+	}
+	var out strings.Builder
+	out.Grow(total * (widest + 1))
+	for _, lines := range rows {
+		for _, ln := range lines {
+			out.WriteString(ln)
+			if gap := widest - widthOf(ln); gap > 0 {
+				out.WriteString(strings.Repeat(" ", gap))
+			}
+			out.WriteByte('\n')
+		}
+	}
+	// The trailing newline JoinVertical does not leave behind.
+	s := out.String()
+	return strings.TrimSuffix(s, "\n")
+}
+
+// joinAcross is joinBlocks' sibling for side-by-side blocks: every block is
+// padded to its own width and the rows of all of them are zipped, with the
+// shorter blocks blank-filled at the bottom (lipgloss.Top). The width each
+// block is padded to is recorded while it is walked for the row count, so a
+// block list is measured once and copied once.
+//
+// The blocks here are panels of a known inner width, so this is the same
+// result lipgloss.JoinHorizontal produces without its per-row width walk.
+func joinAcross(blocks ...string) string {
+	if len(blocks) == 0 {
+		return ""
+	}
+	if len(blocks) == 1 {
+		return blocks[0]
+	}
+	rows := make([][]string, len(blocks))
+	widths := make([]int, len(blocks))
+	height := 0
+	for i, b := range blocks {
+		rows[i] = strings.Split(b, "\n")
+		for _, ln := range rows[i] {
+			if w := widthOf(ln); w > widths[i] {
+				widths[i] = w
+			}
+		}
+		height = max(height, len(rows[i]))
+	}
+	var out strings.Builder
+	out.Grow(height * (len(blocks) + 1))
+	for row := range height {
+		if row > 0 {
+			out.WriteByte('\n')
+		}
+		for i, lines := range rows {
+			if row >= len(lines) {
+				out.WriteString(strings.Repeat(" ", widths[i]))
+				continue
+			}
+			out.WriteString(lines[row])
+			if gap := widths[i] - widthOf(lines[row]); gap > 0 {
+				out.WriteString(strings.Repeat(" ", gap))
+			}
+		}
+	}
+	return out.String()
+}

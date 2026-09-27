@@ -75,13 +75,13 @@ func perfSnap() core.Snapshot {
 var perfFrameSizes = [][2]int{{120, 40}, {200, 50}}
 
 // allocBudget is the garbage one full frame at perfSnap's scale may create.
-// Measured at 6267 (120x40) and 8315 (200x50) after the chart fade stopped
-// parsing a hex color per bisection step; the budget leaves ~8% headroom so a
+// Measured at 2601 (120x40) and 3072 (200x50) once the frame stopped handing
+// measurement back to lipgloss (see below); the budget leaves ~8% headroom so a
 // benign allocation shift does not fail the gate but a regression that
 // reinstates per-cell parse/format churn does.
 var allocBudget = map[[2]int]float64{
-	{120, 40}: 6800,
-	{200, 50}: 9000,
+	{120, 40}: 2850,
+	{200, 50}: 3350,
 }
 
 // TestStaticFrameAllocBudget is the deterministic gate for the render path.
@@ -99,6 +99,17 @@ var allocBudget = map[[2]int]float64{
 // make per call.
 //
 //	now     29.3M instructions,  5.9M branches, 6.1k allocs
+//
+// The next step took the measurement away from lipgloss. widthOf, frame,
+// joinBlocks and joinAcross now answer from a byte scan; a style's escape run
+// is rendered once and its text substituted into it, so the braille cells cost
+// one render per column instead of one per cell and a panel border costs one
+// instead of two per row. Most of what the frame measures is its own output,
+// which had been counted three times over: once to size it, once inside
+// lipgloss's border and padding pass, and once more by the joins on the way to
+// the terminal. Per frame at 200x50:
+//
+//	after   11.3M instructions,  2.2M branches, 3.1k allocs (~2.9ms)
 func TestStaticFrameAllocBudget(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.Ascii)

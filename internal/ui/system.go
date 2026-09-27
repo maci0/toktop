@@ -72,12 +72,16 @@ func (m Model) renderSystem() string {
 		ident = append(ident, dim(fmt.Sprintf("+%d more", len(cpuTemps)-shownTemps)))
 	}
 
-	row1 := padBlock(joinSpreadLeft(vitals, w), w, 1)
-	row2 := ""
+	// The strip is a panel with no title row: frame(padBlock) draws it the same
+	// way panel does, without lipgloss's border and padding pass over a block
+	// this function had already cut to one known width.
+	rows := 1
+	content := padBlock(joinSpreadLeft(vitals, w), w, 1)
 	if len(ident) > 0 && m.stripTwoRows() { // must match systemStripRows' budget
-		row2 = "\n" + padBlock(joinSpreadLeft(ident, w), w, 1)
+		content += "\n" + padBlock(joinSpreadLeft(ident, w), w, 1)
+		rows = 2
 	}
-	return panelStyle.Render(row1 + row2)
+	return frame(content, w, rows)
 }
 
 // hostSegmentLimits caps each identity segment's cells. The SYS strip packs

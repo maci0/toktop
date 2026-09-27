@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/muesli/termenv"
 )
 
 // contrastRatio is the WCAG contrast ratio between two colors; ok is false
@@ -191,6 +192,42 @@ func TestKindBadgeIsFixedWidthInCells(t *testing.T) {
 	}
 }
 
+// panel composes its own frame instead of handing the block to
+// panelStyle.Render, which re-measured every row with lipgloss's width after
+// padBlock had already cut it. The two must print the same bytes on every
+// color profile, or the panels change shape the moment the terminal's
+// capabilities are detected differently.
+func TestPanelFrameMatchesLipglossBorder(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	contents := []string{
+		"", "a", "ab\ncd", "世界", "▲ 1.2k ▼ 900",
+		styleOK.Render("ok") + "\nxyzzy long",
+		"\x1b[31mred\x1b[0m",
+		"\x1b]0;title\x07x",
+		"éあ\nx",
+	}
+	for _, prof := range []termenv.Profile{
+		termenv.Ascii, termenv.ANSI, termenv.ANSI256, termenv.TrueColor,
+	} {
+		lipgloss.SetColorProfile(prof)
+		for _, content := range contents {
+			for innerW := 1; innerW <= 12; innerW++ {
+				for innerH := 1; innerH <= 4; innerH++ {
+					block := padBlock(content, innerW, innerH)
+					want := styleTitle.Render("T") + "\n" + panelStyle.Render(block)
+					got := panel("T", content, innerW, innerH)
+					if got != want {
+						t.Fatalf("profile %v, %dx%d, content %q:\n got %q\nwant %q",
+							prof, innerW, innerH, content, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
 // Cutting the badge must not split a character: a kind that does not fit
 // loses whole grapheme clusters, so the result is always valid UTF-8 and
 // never ends between a base letter and its combining mark.
@@ -202,6 +239,67 @@ func TestKindBadgeCutsBetweenClusters(t *testing.T) {
 		}
 		if strings.ContainsRune(got, '�') {
 			t.Errorf("kindBadge(%q) = %q, holds a replacement rune", kind, got)
+		}
+	}
+}
+
+// A block carrying a tab is the one input lipgloss sizes differently (it
+// expands tabs into spaces before measuring), so panel defers to it there.
+func TestPanelDefersToLipglossOnTab(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	content := "a\tb"
+	want := styleTitle.Render("T") + "\n" + panelStyle.Render(padBlock(content, 8, 2))
+	if got := panel("T", content, 8, 2); got != want {
+		t.Errorf("tabbed panel:\n got %q\nwant %q", got, want)
+	}
+}
+
+// frame draws the border every panel and the SYS strip share. It is compared
+// against panelStyle.Render directly, so both call sites are pinned by one
+// check rather than by whatever the frame happens to look like.
+func TestFrameMatchesLipglossBorder(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	defer lipgloss.SetColorProfile(prev)
+
+	for _, prof := range []termenv.Profile{
+		termenv.Ascii, termenv.ANSI, termenv.ANSI256, termenv.TrueColor,
+	} {
+		lipgloss.SetColorProfile(prof)
+		for innerW := 1; innerW <= 12; innerW++ {
+			for innerH := 1; innerH <= 4; innerH++ {
+				for _, content := range []string{
+					"", "a", "ab\ncd", "世界", "▲ 1.2k ▼ 900", "⠁⠂⠄",
+					styleOK.Render("ok") + "\nxyzzy long",
+					"\x1b[31mred\x1b[0m", "\x1b]0;title\x07x", "éあ\nx",
+				} {
+					block := padBlock(content, innerW, innerH)
+					want := panelStyle.Render(block)
+					if got := frame(block, innerW, innerH); got != want {
+						t.Fatalf("profile %v, %dx%d, content %q:\n got %q\nwant %q",
+							prof, innerW, innerH, content, got, want)
+					}
+				}
+			}
+		}
+	}
+}
+
+// Every row of a panel is the same visible width, wide glyphs included: a
+// short row puts the right border a cell or two left of the others.
+func TestPadBlockFillsEveryRow(t *testing.T) {
+	for _, content := range []string{"世界", "ab\n世界\nc", "", "x"} {
+		for innerW := 1; innerW <= 10; innerW++ {
+			for innerH := 1; innerH <= 3; innerH++ {
+				for i, ln := range strings.Split(padBlock(content, innerW, innerH), "\n") {
+					if w := widthOf(ln); w != innerW {
+						t.Errorf("padBlock(%q, %d, %d) row %d is %d cells, want %d",
+							content, innerW, innerH, i, w, innerW)
+					}
+				}
+			}
 		}
 	}
 }

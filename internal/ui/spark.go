@@ -139,12 +139,6 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 	cols, peak := tailCols(vals, w)
 
 	dotH := h * 4
-	type cacheKey struct {
-		color   string
-		pattern int
-	}
-	cache := map[cacheKey]string{}
-
 	levels := make([]float64, w)
 	colColors := make([]lipgloss.Color, w)
 	denom := float64(max(w-1, 1))
@@ -157,6 +151,19 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 			col = fadeClamped(col, f, minGraphicContrast)
 		}
 		colColors[cx] = col
+	}
+
+	// One style render per column, not per cell: a cell's bytes are its color's
+	// escape prefix, the dot rune and the reset suffix, and only the middle one
+	// changes as the pattern fills in. Style.Render measured the widest part of
+	// this loop (word wrap, getLines, width on every call), so the escape run
+	// is taken once per color and the cells concatenate.
+	sides := make(map[string][2]string, w)
+	for cx := range w {
+		col := colColors[cx]
+		if _, ok := sides[string(col)]; !ok {
+			sides[string(col)] = fgSides(col)
+		}
 	}
 
 	rows := make([]strings.Builder, h)
@@ -179,14 +186,10 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 				rows[cy].WriteByte(' ')
 				continue
 			}
-			col := colColors[cx]
-			k := cacheKey{color: string(col), pattern: pattern}
-			s, ok := cache[k]
-			if !ok {
-				s = lipgloss.NewStyle().Foreground(col).Render(string(rune(0x2800 + pattern)))
-				cache[k] = s
-			}
-			rows[cy].WriteString(s)
+			sd := sides[string(colColors[cx])]
+			rows[cy].WriteString(sd[0])
+			rows[cy].WriteRune(0x2800 + rune(pattern))
+			rows[cy].WriteString(sd[1])
 		}
 	}
 	out := make([]string, h)
@@ -207,6 +210,43 @@ func GaugeBar(pct float64, w int, heat func(float64) lipgloss.Color) string {
 	st := lipgloss.NewStyle().Foreground(heat(pct))
 	bar := st.Render(strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", w-filled))
 	return bar + " " + fmt.Sprintf("%.0f%%", pct)
+}
+
+// fgSides splits a foreground style's rendering of one rune into the escape
+// prefix and reset suffix around it, so a caller that draws many cells in the
+// same color renders the style once instead of once per cell.
+//
+// The split reads the style's own output for a sentinel rune rather than
+// composing the escape itself, so it tracks the active color profile: a
+// terminal that gets truecolor, 256-color or no color at all gets exactly what
+// Style.Render would have written for that profile, prefix and suffix included.
+//
+// A style writes the same prefix and the same suffix whatever it wraps, so
+// prefix+suffix is the run's frame: the caller substitutes its own text
+// between them and gets the bytes Style.Render would have produced.
+func fgSides(c lipgloss.Color) [2]string {
+	return styleSides(lipgloss.NewStyle().Foreground(c))
+}
+
+func styleSides(st lipgloss.Style) [2]string {
+	const sentinel = 'X'
+	out := st.Render(string(rune(sentinel)))
+	at := strings.IndexByte(out, sentinel)
+	if at < 0 { // a profile that rewrote the rune: no prefix to recover
+		return [2]string{out, ""}
+	}
+	return [2]string{out[:at], out[at+1:]}
+}
+
+// wrap applies a style's escape run around s. It is Style.Render for text this
+// package has already measured and knows to be a single line of cells: the
+// render measured it with a grapheme-cluster walk to learn a length the caller
+// already had.
+func wrap(s [2]string, text string) string {
+	if s[0] == "" && s[1] == "" {
+		return text
+	}
+	return s[0] + text + s[1]
 }
 
 func clamp01(v float64) float64 {

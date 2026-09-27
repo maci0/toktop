@@ -20,7 +20,7 @@ func (m Model) renderMidRow() string {
 	gaug := panel(m.engineStateTitle(gw-4, gaugShown), gaugBody, gw-4, midIn)
 	prb := panel(clip(m.probesTitle(), rw), m.probesBody(rw-4, midIn), rw-4, midIn)
 
-	return lipgloss.JoinHorizontal(lipgloss.Top, prov, gaug, prb)
+	return joinAcross(prov, gaug, prb)
 }
 
 // enginesTitle names what the ENGINES body could not fit. shown is the count
