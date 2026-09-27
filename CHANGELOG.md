@@ -69,6 +69,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   path, a rejected `X-Request-Id` or an error text carrying a path under
   `$HOME` names the account in a log that gets pasted into issues, and each of
   those was written by code that never thought about it.
+- `make test-pkg RUN=<name>` no longer reports success for a name that
+  matches no test. `go test -run` exits 0 with `[no tests to run]`, so a
+  renamed or mistyped test read as a passing run; the target now lists the
+  package's test names with the same regexp first and fails on an empty
+  list, naming any near miss. A `RUN` containing a `/` selects subtests,
+  which that listing cannot see, and passes through unchecked.
+- The site's rejected-method test calls the worker's request helper instead
+  of an `imageCall` that does not exist, which failed the `site` CI job and
+  every `make pr` with a `ReferenceError` before any assertion ran.
 - `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
   windows, instead of leaving them on the wall clock. A program driving a
   simulated timeline stepped time forward and still read the file set a

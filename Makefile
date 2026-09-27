@@ -272,6 +272,12 @@ test: ## run all tests shuffled (both sqlite tag halves); RACE=0 skips -race
 # TESTTAGS are optional. Unset TESTTAGS on ./agentusage runs both halves of the
 # sqlite tag gate (matching `make test`); TESTTAGS=sqlite (or another tag) runs one.
 # RACE=0 drops -race for a faster edit loop; default matches CI.
+#
+# RUN_TO_CHECK is RUN/TEST only when it can be checked against the test binary's
+# name list: a pattern with a `/` selects subtests, and -list reports top-level
+# names only. The run gets RUN_PATTERN either way.
+RUN_PATTERN  := $(or $(RUN),$(TEST))
+RUN_TO_CHECK := $(if $(findstring /,$(RUN_PATTERN)),,$(RUN_PATTERN))
 .PHONY: test-pkg
 test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite] [RACE=0]
 	@if [ -z "$(PKG)" ]; then \
@@ -280,15 +286,44 @@ test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite
 		exit 1; \
 	fi
 	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
-	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS) )$(race_flag)-shuffle=on $(if $(or $(RUN),$(TEST)),-run "$(or $(RUN),$(TEST))" )"$(PKG)"
-	@if [ -z "$(TESTTAGS)" ]; then \
-		case "$(PKG)" in \
-		./agentusage|./agentusage/|./agentusage/...|agentusage|github.com/maci0/toktop/agentusage|github.com/maci0/toktop/agentusage/|github.com/maci0/toktop/agentusage/...) \
-			echo "make test-pkg: also running -tags sqlite (set TESTTAGS to run one half)"; \
-			CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on $(if $(or $(RUN),$(TEST)),-run "$(or $(RUN),$(TEST))" )"$(PKG)" || exit 1; \
-			;; \
-		esac; \
+	@if [ -n "$(RUN_TO_CHECK)" ]; then $(CHECK_RUN_MATCHES); fi
+	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS) )$(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)"
+	@if [ -n "$(BOTH_HALVES)" ]; then \
+		echo "make test-pkg: also running -tags sqlite (set TESTTAGS to run one half)"; \
+		CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)" || exit 1; \
 	fi
+
+# The package names under which an unset TESTTAGS means "run both halves of the
+# sqlite tag gate". Named once, read by test-pkg and CHECK_RUN_MATCHES, so the
+# second half cannot be dropped from one and kept in the other.
+BOTH_HALVES = $(if $(TESTTAGS),,$(filter \
+	./agentusage ./agentusage/ ./agentusage/... agentusage \
+	github.com/maci0/toktop/agentusage github.com/maci0/toktop/agentusage/ \
+	github.com/maci0/toktop/agentusage/...,$(PKG)))
+
+# `go test -run` exits 0 and prints "[no tests to run]" when the pattern
+# matches nothing, so a mistyped or renamed RUN reads as a passing run. Ask
+# the test binary for its names first, with the same regexp the run gets, and
+# fail with the near misses. Skipped for a pattern carrying a `/`: that selects
+# subtests, and -list only reports top-level names, so the check would reject a
+# run that does select something.
+#
+# TEST_HALF is the tags of the half under test, set by the caller; the second
+# line is the sqlite half, which only runs when TESTTAGS is unset.
+define CHECK_RUN_MATCHES
+matched() { tags=""; [ -n "$$1" ] && tags="-tags $$1"; $(GO) test -mod=readonly $$tags -list "$(RUN_PATTERN)" "$(PKG)" 2>/dev/null | grep -E '^(Test|Example|Benchmark|Fuzz)' || true; }; \
+	names=$$(matched "$(TESTTAGS)"); \
+	if [ -z "$$names" ] && [ -n "$(BOTH_HALVES)" ]; then names=$$(matched sqlite); fi; \
+	if [ -z "$$names" ]; then \
+		echo "make test-pkg: no test in $(PKG) matches RUN=$(RUN_PATTERN); the run would report success without testing anything" >&2; \
+		all=$$($(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS)) -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); \
+		if [ -n "$(BOTH_HALVES)" ]; then all=$${all}$$'\n'$$($(GO) test -mod=readonly -tags sqlite -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); fi; \
+		near=$$(printf '%s\n' "$$all" | grep -F "$(RUN_PATTERN)" || true); \
+		if [ -n "$$near" ]; then echo "  close: $$near" >&2; fi; \
+		echo "  list the names with: $(GO) test -list '.*' $(PKG)" >&2; \
+		exit 1; \
+	fi
+endef
 
 .PHONY: cover
 cover: ## test coverage summary per package into dist/

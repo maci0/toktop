@@ -68,6 +68,13 @@ make test-pkg PKG=./internal/ui RACE=0
 make test RACE=0
 ```
 
+`RUN` is a regexp, and a name that matches nothing would otherwise exit 0
+with `[no tests to run]`, so a renamed or mistyped test reads as a pass.
+`test-pkg` lists the package's test names with the same regexp first and
+fails on an empty list, naming any near miss and the command to list the
+real names. A `RUN` containing a `/` selects subtests, which that check
+cannot see, so it is passed through unchecked.
+
 To see the dashboard render without an interactive terminal:
 
 ```
