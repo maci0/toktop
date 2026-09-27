@@ -490,8 +490,21 @@ wait_for_site() { \
 };
 endef
 
+# CONTRIBUTING.md spells the wrangler version out in the login command an
+# operator copies, so the pin lives in two files. This is that guard, the same
+# shape as the biome schema check in site-lint: a bump of WRANGLER that does
+# not move the documented command leaves an operator logging in with, and then
+# deploying, a version the tree does not test against. Deploy-only, so a
+# rollback keeps working on a tree whose docs have moved.
+.PHONY: check-wrangler-doc
+check-wrangler-doc:
+	@grep -Fq 'wrangler@$(WRANGLER) login' CONTRIBUTING.md || { \
+		echo "make: CONTRIBUTING.md does not name wrangler $(WRANGLER) in its login command; the pin and the documented command must move together" >&2; \
+		exit 1; \
+	}
+
 .PHONY: site-deploy
-site-deploy: require-bun site-lint site-check ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
+site-deploy: require-bun site-lint site-check check-wrangler-doc ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
 	@$(SITE_GUARD) \
 	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
 	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
@@ -562,7 +575,7 @@ $(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt
 scripts-check: ## black and ruff over scripts/ (same pins as CI)
 	@pin=$$(awk -F'"' '/^\[tool\.uv\]$$/ { u = 1; next } /^\[/ { u = 0 } u && /^required-version/ { print $$2 }' pyproject.toml | tr -d ' \t'); \
 		if [ "$$pin" != ">=$(UV_MIN)" ]; then \
-			echo "make scripts-check: pyproject.toml required-version '$$pin' disagrees with .uv-version '$(UV_MIN)'" >&2; \
+			echo "make scripts-check: pyproject.toml required-version '$$pin' disagrees with the uv line of .tool-versions '$(UV_MIN)'" >&2; \
 			exit 1; \
 		fi
 	@$(MAKE) --no-print-directory scripts-env

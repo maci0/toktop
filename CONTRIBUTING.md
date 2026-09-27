@@ -166,6 +166,7 @@ weight, so a recapture that blows the budget fails there.
 | `make site-check` | `bun test site/` |
 | `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick` and `avifenc`) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
+| `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command names the Makefile's `WRANGLER` pin (`site-deploy` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |

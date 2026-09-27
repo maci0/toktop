@@ -4,8 +4,12 @@ on:
   push:
     tags: ["v*"]
 
+# Read for the whole job: the already-published guard below calls
+# `gh release view`, and the build gates (test, vet-cross, the two-pass
+# reproducibility build) have no business holding a write token. The publish
+# step asks for write itself.
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -136,6 +140,10 @@ jobs:
 
       - name: publish github release
         uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        # The only step that writes. Scoped here so a build gate, or a test
+        # binary reaching the network, holds a read-only token.
+        permissions:
+          contents: write
         with:
           generate_release_notes: true
           prerelease: ${{ steps.build.outputs.prerelease == 'true' }}
