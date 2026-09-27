@@ -7,7 +7,11 @@ require block is neither imported nor listed below.
 
 Pins live in one place per ecosystem: go.mod plus go.sum for Go, the
 requirements files under scripts/ for Python, the Makefile for the tools that
-run from a `go run` or `bunx` pin. No floating ranges anywhere.
+run from a `go run` or `bunx` pin. No floating ranges anywhere. There is no
+`uv.lock`: pyproject.toml declares no project, nothing in the tree runs
+`uv sync`, and a lock file beside a project-less pyproject records a
+`requires-python` no recipe here honors. `uv` installs the two requirements
+files and nothing else.
 
 ## Go, linked into the binary
 
@@ -45,7 +49,10 @@ what is installed and what it is installed into. The pins are exact, with
 sha256 hashes on the pure-Python
 packages (a registry swap of those files fails the install). pillow and pytokens
 ship per-platform or per-interpreter wheels, so they stay version pins: hashing
-one wheel would refuse every other OS/arch/CPython.
+one wheel would refuse every other OS/arch/CPython. The install runs with
+`--no-deps`, so the two files are the entire closure: nothing is resolved out
+of the index to satisfy a dependency the files do not name, and a tool that
+grows one fails its first run rather than pulling an unpinned package.
 
 - runtime: pyte (LGPL-3.0), wcwidth (MIT), pillow (MIT)
 - tools: black, ruff, and their transitive closure (click, packaging,

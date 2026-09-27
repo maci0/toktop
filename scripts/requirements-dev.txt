@@ -2,6 +2,13 @@
 # file so those versions cannot float to whatever PyPI returns today.
 # sha256 is on the py3-none-any wheels only. Binary wheels stay version
 # pins so other OS/arch/CPython combinations still install.
+#
+# This file is the whole closure, not the top of one: the Makefile installs it
+# with --no-deps, so nothing below is resolved out of the index at install
+# time. black's five requirements and ruff's none are all listed here, and a
+# tool that grows a dependency fails the first `make scripts-check` run
+# instead of quietly installing an unpinned package. Add its pin and hash
+# with the tool that needed it.
 -r requirements.txt
 black==26.5.1
 ruff==0.16.8

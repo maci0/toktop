@@ -138,6 +138,12 @@ endif
 # but discards the `--hash` lines in the requirements files, so a swapped file
 # on the index installed silently. `uv pip install` verifies each hash it is
 # given, which is what scripts/requirements-dev.txt documents.
+# --no-deps because the requirements files already spell out black's and
+# ruff's closure. Without it a tool that grows a dependency has it resolved
+# and installed at whatever the index serves that minute, unhashed and
+# unreviewed, which is the one install the exact pins do not govern. With it
+# the list is the whole closure, and a tool whose requirements outgrow the
+# file fails at the first run instead of pulling a package nobody pinned.
 SCRIPTS_ENV := $(CURDIR)/$(DIST)/scripts-env
 SCRIPTS_BIN := $(SCRIPTS_ENV)/bin
 # True when $1 is a uv version below UV_MIN. Defined once so `make
@@ -701,7 +707,7 @@ $(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt .py
 	@$(MAKE) --no-print-directory require-uv
 	@mkdir -p $(DIST)
 	@uv venv --quiet --clear --python $(PY_PIN) $(SCRIPTS_ENV)
-	@VIRTUAL_ENV=$(SCRIPTS_ENV) uv pip install --quiet -r scripts/requirements-dev.txt
+	@VIRTUAL_ENV=$(SCRIPTS_ENV) uv pip install --quiet --no-deps -r scripts/requirements-dev.txt
 	@touch $@
 
 .PHONY: scripts-check
