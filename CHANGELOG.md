@@ -67,6 +67,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- Diagnostics on Windows left the account name in any home path spelled with
+  `/`. Redaction matched the home against the platform separator only, and
+  Windows names one directory with either separator, so a path reaching a
+  message from a user-supplied argument, an ssh target, or a tool built for
+  another platform was copied into a log line, an issue, or a bug report whole.
+  The other spelling is folded now, and a message that is exactly the home
+  directory collapses to `~` whichever way it is written.
 - The ingest examples in the README and on the site taught the two shapes a
   harness must not copy: a key built from the clock
   (`Idempotency-Key: coder-$(date +%s)-1`), which the shell re-evaluates on

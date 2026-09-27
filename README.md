@@ -20,6 +20,13 @@ toktop ssh://user@box    # watch engines on another host
 CGO_ENABLED=0 go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
 ```
 
+On Windows the leading assignment is POSIX shell syntax and does not run in
+`cmd.exe`; PowerShell spells the same command:
+
+```
+$env:CGO_ENABLED=0; go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
+```
+
 Building from source needs Go 1.27, the version `go.mod` pins. A
 downloaded release binary needs nothing but the platform it was built for.
 

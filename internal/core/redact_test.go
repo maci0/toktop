@@ -85,6 +85,25 @@ func TestRedactHomeFoldsCaseOnCaseInsensitivePlatforms(t *testing.T) {
 	}
 }
 
+// One Windows directory has two spellings, and a path in a message can carry
+// either: a user-supplied argument, an ssh target, or a tool built for another
+// platform all spell it with '/'. The platform separator alone would leave the
+// account name in the message.
+func TestRedactHomeFoldsBothWindowsSeparators(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("only Windows names one directory with either separator")
+	}
+	home := absPath("Users", "Me")
+	setHome(t, home)
+	msg := "cannot write " + filepath.ToSlash(filepath.Join(home, "bin", "toktop"))
+	if got := RedactHome(msg); strings.Contains(got, "Me") {
+		t.Errorf("RedactHome(%q) = %q, want the forward-slash spelling folded too", msg, got)
+	}
+	if got := RedactHome(filepath.ToSlash(home)); got != "~" {
+		t.Errorf("RedactHome(%q) = %q, want %q", filepath.ToSlash(home), got, "~")
+	}
+}
+
 func TestRedactHomeRootHomeIsNotFolded(t *testing.T) {
 	root := string(filepath.Separator)
 	setHome(t, root)

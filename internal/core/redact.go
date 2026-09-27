@@ -30,28 +30,47 @@ func RedactHome(msg string) string {
 	if filepath.Dir(home) == home {
 		return msg // a filesystem root would swallow every absolute path
 	}
-	sep := string(filepath.Separator)
-	from, to := home+sep, "~"+sep
 	folded := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
-	spell := home
-	if folded {
-		// The file systems behind the folding platforms also look names up
-		// normalization-insensitively, so the comparison has to be made there
-		// too: a home directory macOS stored decomposed ("rène" as "e" plus
-		// U+0301) is the same account as the composed spelling a process
-		// carries, and comparing bytes leaves the account name in the message.
-		msg, from, spell = normalizeSpelling(msg), normalizeSpelling(from), normalizeSpelling(home)
-		msg = replaceFold(msg, from, to)
-	} else {
-		msg = strings.ReplaceAll(msg, from, to)
+	// Windows names one directory with either separator, and a path reaching
+	// a message can carry either: a user-supplied argument, an ssh target, or
+	// a tool built for another platform all spell it with '/'. Matching only
+	// the platform separator leaves the account name in the message, so the
+	// other spelling is folded with its own separator. On the platforms that
+	// have one separator this is the home itself.
+	spellings := []string{home}
+	if slash := filepath.ToSlash(home); slash != home {
+		spellings = append(spellings, slash)
+	}
+	bare := make([]string, 0, len(spellings))
+	for i, spelling := range spellings {
+		sep := string(filepath.Separator)
+		if i > 0 {
+			sep = "/"
+		}
+		from, to := spelling+sep, "~"+sep
+		if folded {
+			// The file systems behind the folding platforms also look names
+			// up normalization-insensitively, so the comparison has to be made
+			// there too: a home directory macOS stored decomposed ("rène" as
+			// "e" plus U+0301) is the same account as the composed spelling a
+			// process carries, and comparing bytes leaves the account name in
+			// the message.
+			msg, from = normalizeSpelling(msg), normalizeSpelling(from)
+			msg = replaceFold(msg, from, to)
+		} else {
+			msg = strings.ReplaceAll(msg, from, to)
+		}
+		bare = append(bare, normalizeSpelling(spelling))
 	}
 	// A message that is exactly the home directory carries the same account
 	// name as a path under it, and the separator-terminated match above leaves
 	// it untouched. A longer message ending in the home path is not rewritten.
 	// The comparison folds too: the path above does, so on those platforms
 	// the same directory spelled in another case is still the home directory.
-	if msg == spell || (folded && strings.EqualFold(msg, spell)) {
-		return "~"
+	for _, spell := range bare {
+		if msg == spell || (folded && strings.EqualFold(msg, spell)) {
+			return "~"
+		}
 	}
 	return msg
 }
