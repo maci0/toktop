@@ -349,7 +349,13 @@ Deployment surface:
   refused unless they are a safe identifier (release.yml). The
   already-published guard reads `gh release view` with `GH_TOKEN` set from
   the job token and admits only a 404, so an auth failure, a rate limit or an
-  outage can no longer read as a free version (release.yml, 38-65; M36).
+  outage can no longer read as a free version (release.yml, 39-66; M36).
+  The job's last step is the restore drill: `make release-verify` reads the
+  published asset list, compares it against what `PLATFORMS` says a version
+  holds, and re-verifies every downloaded asset against the release's own
+  `checksums.txt`, so an upload that arrived short or altered fails the
+  release instead of reaching an installer (release.yml, 154-166; Makefile
+  `release-verify`).
   The site deploy credential is documented rather than invented here: the
   operator exports `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, or
   logs in through wrangler's own OAuth store, and no CI job deploys the site
@@ -419,14 +425,14 @@ Deployment surface:
   Cloudflare credentials, records `dist/site.deployed`, polls
   `https://toktop.ai/health` 6 times at 10s,
   and points at `make site-rollback` on failure. It depends on `site-lint`
-  and `site-check` (Makefile, 397, 347-352), so the same biome lint and
+  and `site-check` (Makefile, 525; 450-463), so the same biome lint and
   `bun test` the CI workflow runs gate a local deploy too; `site-rollback`
   has no such dependency, deliberately, so a broken worker can still be
   undone. The lock, the poll and
   the failure exit are shared with `make site-rollback`, so a rollback
   cannot race a deploy and cannot report success over a site that is not
   answering, and the recorded marker makes the rollback itself run once
-  (Makefile, 375-415).
+  (Makefile, 490-509, 525-543).
 
 ## Trust boundaries and data flow
 
@@ -743,7 +749,7 @@ Controls verified in code, with the threats they cover:
 | M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick (B5 DoS) | cmd/toktop/main.go, 548-575; internal/remote/client.go, 532-570; internal/gpu/gpu.go, 90-121 |
 | M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 62-67, `ModelName` 76-78; call sites internal/provider/openai.go, 66, 119, 152, 167; internal/provider/ollama.go, 40-42; internal/probe/probe.go, `ModelNameMax` 73-77 |
 | M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All four audit loggers build theirs from that one function (internal/ingest/server.go, 53; internal/remote/client.go, 30; internal/collector/collector.go, 31; cmd/toktop/attach.go, 29), so the redaction reaches the ssh, engine-state and attach lines too, and the ssh client's own `logField` (client.go, 34) additionally runs `RedactAddrs` over the text. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; and a destination the operator typed (an engine `addr`, an ssh `target`) is not a peer address, so nothing short of the home fold removes it | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68-75, `HomeHandler` 81-137, `Field` 149-151; internal/core/redact.go, `RedactHome` 23-52 |
-| M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, 38-65 |
+| M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, 39-66 |
 
 Documentation claims checked against code on 2026-09-27. What this pass
 found is in the header; the list below is what holds as written, so the next
@@ -950,7 +956,7 @@ Recorded as threats with locations; fixes do not happen in this document:
    for the re-exec half.
 8. **Site deploy runs from a developer shell** (Low): `make site-deploy`
    fetches wrangler from the npm registry at run time and uses ambient
-   Cloudflare credentials (Makefile, 397-415). The credential's blast radius
+   Cloudflare credentials (Makefile, 525-543). The credential's blast radius
    is a Cloudflare account, and the deploy tool is not lockfile-pinned; a
    registry compromise or a hijacked developer machine reaches the published
    site. The `/health` poll and `site-rollback` are the only recovery

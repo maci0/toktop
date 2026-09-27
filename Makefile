@@ -191,6 +191,13 @@ PLATFORMS := \
 # different platforms.
 REPRO_PLATFORMS ?= linux/amd64 windows/amd64
 
+# The repository `release-verify` reads a published release from. One string so
+# the fork that publishes elsewhere changes it in one place, the way WRANGLER
+# and BIOME_VERSION are changed in one place. The release job uses the
+# workflow's own repository, so a fork's tag push verifies its own releases
+# without this needing to be right there.
+RELEASE_REPO ?= $(shell $(GO) list -m)
+
 .DEFAULT_GOAL := help
 
 # Width of the target column in `make help`, one past the longest target
@@ -742,6 +749,74 @@ buildinfo: test-dist ## record the toolchain, commit, and flags behind dist/ int
 		echo "goamd64: $(GOAMD64)"; \
 		echo "goarm64: $(GOARM64)"; \
 	} > $(DIST)/$(BINARY)_$(VERSION)_buildinfo.txt
+
+# A published release is only a backup once something has fetched from it and
+# the bytes came back whole. The publish step's exit status is not that
+# evidence: fail_on_unmatched_files catches a glob that matched nothing, not an
+# asset that never arrived, and a job killed after the release exists leaves
+# the already-published guard refusing every retry. So this is the restore
+# drill, and it runs the way a client does: read the published asset list,
+# compare it against what PLATFORMS says a VERSION holds, pull every asset
+# back down, and re-verify each digest against the release's own
+# checksums.txt. Everything it downloads lands under $(DIST), which
+# .gitignore covers and `make clean` takes.
+#
+# gh reads the release with GH_TOKEN from the environment, the same way
+# release.yml's guard does, and `--jq` keeps a JSON parser off PATH: gh carries
+# one. Both calls refuse to read an empty answer as success, because a list
+# that failed to parse is the same shape as a release with nothing on it.
+.PHONY: release-verify
+release-verify: ## fetch every published asset for VERSION and re-verify its checksum (needs gh)
+	@$(CHECK_VERSION)
+	@command -v gh >/dev/null 2>&1 || { \
+		echo "make release-verify: gh is not on PATH; it is what reads the published asset list" >&2; \
+		exit 1; \
+	}
+	@tag=v$(VERSION); \
+	dir=$(CURDIR)/$(DIST)/release-verify/$(VERSION); \
+	rm -rf "$$dir" && mkdir -p "$$dir/sums"; \
+	if ! assets=$$(gh release view "$$tag" --repo $(RELEASE_REPO) --json assets --jq '.assets[] | "\(.size) \(.name)"' 2>&1); then \
+		echo "make release-verify: cannot read release $$tag on $(RELEASE_REPO):" >&2; printf '%s\n' "$$assets" >&2; \
+		echo "  an unpublished version has nothing to restore; this runs after the tag push" >&2; exit 1; \
+	fi; \
+	if [ -z "$$assets" ]; then \
+		echo "make release-verify: $$tag publishes no assets on $(RELEASE_REPO), or the list could not be read" >&2; exit 1; \
+	fi; \
+	printf '%s\n' "$$assets" | sort -k2 > "$$dir/published.txt"; \
+	{ for target in $(PLATFORMS); do \
+		goos=$${target%/*}; goarch=$${target##*/}; ext=""; \
+		if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
+		printf '%s_%s_%s_%s%s\n' "$(BINARY)" "$(VERSION)" "$$goos" "$$goarch" "$$ext"; \
+	done; \
+	printf '%s-sbom-%s.cdx.json\n' "$(BINARY)" "$(VERSION)"; \
+	printf '%s_%s_buildinfo.txt\n' "$(BINARY)" "$(VERSION)"; \
+	printf '%s_%s_checksums.tar.gz\n' "$(BINARY)" "$(VERSION)"; } | sort > "$$dir/expected.txt"; \
+	awk '{ print $$2 }' "$$dir/published.txt" > "$$dir/names.txt"; \
+	missing=$$(grep -vxF -f "$$dir/names.txt" "$$dir/expected.txt" || true); \
+	extra=$$(grep -vxF -f "$$dir/expected.txt" "$$dir/names.txt" || true); \
+	if [ -n "$$missing" ]; then \
+		echo "make release-verify: $$tag does not publish:" >&2; sed 's/^/  MISSING     /' <<< "$$missing" >&2; \
+		echo "  a published release is not re-runnable (release.yml refuses an already-published tag)," >&2; \
+		echo "  so a missing asset is repaired by uploading it from a local 'make release VERSION=$(VERSION)'," >&2; \
+		echo "  which builds the same bytes, or by cutting a new version." >&2; exit 1; \
+	fi; \
+	if [ -n "$$extra" ]; then \
+		echo "make release-verify: $$tag publishes assets a VERSION=$(VERSION) release does not produce:" >&2; \
+		sed 's/^/  UNEXPECTED  /' <<< "$$extra" >&2; exit 1; \
+	fi; \
+	awk '{ if ($$1 <= 0) { printf "  EMPTY      %s\n", $$2; exit 1 } }' "$$dir/published.txt" >&2 || exit 1; \
+	gh release download "$$tag" --repo $(RELEASE_REPO) --dir "$$dir" --pattern '$(BINARY)*$(VERSION)*' || exit 1; \
+	tar -xzf "$$dir/$(BINARY)_$(VERSION)_checksums.tar.gz" -C "$$dir/sums" || exit 1; \
+	listed=$$(cut -c67- "$$dir/sums/checksums.txt" 2>/dev/null | tr -d '*' | sort || true); \
+	unlisted=$$(grep -vxF -e "$$listed" -e "$(BINARY)_$(VERSION)_checksums.tar.gz" "$$dir/expected.txt" || true); \
+	if [ -z "$$listed" ] || [ -n "$$unlisted" ]; then \
+		echo "make release-verify: $$tag's checksums.txt does not cover every artifact it should:" >&2; \
+		if [ -n "$$unlisted" ]; then sed 's/^/  UNLISTED   /' <<< "$$unlisted" >&2; fi; \
+		echo "  an artifact missing from checksums.txt is one a client cannot verify, so it is not installed." >&2; exit 1; \
+	fi; \
+	cd "$$dir" && \
+		if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "$$dir/sums/checksums.txt"; \
+		else shasum -a 256 -c "$$dir/sums/checksums.txt"; fi
 
 # The flags above promise byte-identical output; nothing tested that promise.
 # Build each platform twice and diff. The one input still free to leak is the

@@ -18,10 +18,11 @@ jobs:
   release:
     runs-on: ubuntu-24.04
     # vet-cross analyzes six platforms, the race tests run both sqlite halves,
-    # and the reproducibility gate builds two platforms twice from cold build
-    # caches. 45 minutes covers the three together with the build of every
-    # release platform.
-    timeout-minutes: 45
+    # the reproducibility gate builds two platforms twice from cold build
+    # caches, and the restore step fetches every published asset back. 50
+    # minutes covers the four together with the build of every release
+    # platform.
+    timeout-minutes: 50
     env:
       LC_ALL: C
       TZ: UTC
@@ -149,3 +150,20 @@ jobs:
           prerelease: ${{ steps.build.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
           files: ${{ steps.build.outputs.artifacts }}
+
+      - name: restore what was published
+        # The upload exiting zero is not proof the assets are there:
+        # fail_on_unmatched_files reports a glob that matched nothing, not an
+        # asset that never arrived, and a step killed after the release exists
+        # leaves the guard above refusing every retry of that tag. So the
+        # version that just shipped is fetched back the way a client fetches
+        # it, asset list against PLATFORMS and every digest against the
+        # release's own checksums.txt. A partial publish fails here, loudly,
+        # while the version is one nobody has installed yet.
+        run: make release-verify VERSION="${GITHUB_REF_NAME#v}"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # The repository this run belongs to, not the module path in go.mod:
+          # a fork that kept the upstream module path would otherwise verify
+          # the upstream's release instead of its own.
+          RELEASE_REPO: ${{ github.repository }}

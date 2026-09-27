@@ -15,6 +15,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- `make release-verify VERSION=x.y.z` fetches every asset a published version
+  holds back from GitHub and re-verifies each digest against that release's
+  own `checksums.txt`, so a short, empty, or unlisted asset fails here rather
+  than on an operator's machine. The release job runs it as its last step:
+  the publish step's exit status says the upload was accepted, not that
+  every artifact arrived, and a job killed after the release exists leaves
+  the already-published guard refusing every retry of that tag.
+
 - `agentusage.ThinkingRate` reports reasoning tokens per second between two
   samples, under the same rules as `Rate` and `InputRate`. `Sample.Thinking`
   and `Delta.Thinking` were already public, so a consumer showing a thinking

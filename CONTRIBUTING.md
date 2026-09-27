@@ -171,6 +171,7 @@ weight, so a recapture that blows the budget fails there.
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
+| `make release-verify` | fetch every asset a published `VERSION` holds back from GitHub and re-verify each digest against that release's own `checksums.txt` (the restore drill the release job runs) |
 | `make repro-check` | build every release platform twice, from two different source paths and two different build caches, then diff |
 | `make repro-check-pair` | the same gate over `REPRO_PLATFORMS`, the pair the PR gate and the release job both build twice |
 
@@ -310,3 +311,45 @@ or a previous local run left behind. Directories such as the site deploy lock
 and the nested `dist/bin` and `dist/repro` output are not touched, and
 anything named `toktop_*` or `toktop-*` is kept, so a `make -j release` cannot
 drop the SBOM another prerequisite just wrote.
+
+## Recovering a release
+
+A release is the only place the shipped binaries exist, and the tag's tree in
+the repository is what they are rebuilt from. The upload step exiting zero is
+not evidence of that: `fail_on_unmatched_files` reports a glob that matched
+nothing, not an asset that never arrived. So the release job ends with
+`make release-verify`, which is the restore drill. It reads the published
+asset list, compares it against what `PLATFORMS` says a `VERSION` holds,
+downloads every asset, and re-verifies each digest against the release's own
+`checksums.txt`. It needs `gh` and `GH_TOKEN`; the downloads land under
+`dist/`, which `make clean` takes.
+
+```
+make release-verify VERSION=0.15.0
+```
+
+Run it against a published version, not only right after a release: a version
+whose assets are short, empty, or unlisted is one `toktop update` cannot
+install from, because it refuses a binary it has no checksum for.
+
+A published release cannot be re-run, so a partial one is not repaired by
+pushing the tag again. Rebuild the same bytes and upload what is missing:
+
+```
+git checkout v0.15.0
+make release VERSION=0.15.0
+gh release upload v0.15.0 dist/toktop_0.15.0_* --clobber
+make release-verify VERSION=0.15.0
+```
+
+The rebuild is byte-identical to what was published, which is what makes this
+safe under the rule that forbids replacing a published version: the checksums
+already recorded by everyone who installed it stay true. Built from any other
+commit the artifacts carry different bytes, and the version has to be cut
+again instead.
+
+The RPO and RTO for a release are those two commands. There is no
+point-in-time to select: a version has one set of assets, and the tag names
+the source they are built from. What protects a version from deletion is
+GitHub's own retention on the tag and the release, which this repository does
+not configure and cannot verify from here.
