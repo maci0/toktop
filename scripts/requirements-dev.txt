@@ -27,3 +27,13 @@ mypy-extensions==1.1.0 \
 # pytokens ships per-interpreter compiled wheels alongside the universal one,
 # so it is a version pin for the reason pillow is.
 pytokens==0.4.1
+# mypy and its two compiled runtime deps (librt, ast-serialize) ship per-
+# interpreter wheels only, so they are version pins for the reason pytokens is.
+# mypy-extensions, pathspec, packaging and pytokens above are mypy's remaining
+# dependencies; .python-version pins 3.12, which is past the point where mypy
+# wants tomli, so that marker is not in the set.
+mypy==2.3.1
+librt==0.15.0
+ast-serialize==0.11.2
+typing-extensions==4.16.0 \
+    --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8

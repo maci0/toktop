@@ -51,3 +51,21 @@ ignore = ["COM812"]
 # are mutually exclusive on every run, and a warning nobody acts on is noise
 # that trains people to skip the output.
 convention = "google"
+
+# The type checker. ruff's ANN set only proves an annotation is spelled; nothing
+# in the tree checked that the annotation was true, so a renamed pyte or pillow
+# attribute passed every other gate. strict is the whole set: untyped defs,
+# implicit Optional, Any returns and unchecked dict access all off. The tree
+# passes it today with no per-module overrides, so nothing is ratcheted.
+#
+# `scripts` is the only package that has stubs or inline annotations to check,
+# and it is what src above already scopes ruff to, so the two agree on which
+# files are analyzed.
+[tool.mypy]
+python_version = "3.12"
+files = ["scripts"]
+strict = true
+# A silent pass is the failure this gate exists to prevent: a bad path, a
+# missing config section or an unresolved import must be a non-zero exit, not a
+# run that simply found nothing to say.
+warn_unreachable = true

@@ -49,14 +49,17 @@ what is installed and what it is installed into. The pins are exact, with
 sha256 hashes on the pure-Python
 packages (a registry swap of those files fails the install). pillow and pytokens
 ship per-platform or per-interpreter wheels, so they stay version pins: hashing
-one wheel would refuse every other OS/arch/CPython. The install runs with
+one wheel would refuse every other OS/arch/CPython. mypy and its compiled
+runtime deps (librt, ast-serialize) are in that second group for the same
+reason: mypy 2.x publishes per-interpreter wheels only. The install runs with
 `--no-deps`, so the two files are the entire closure: nothing is resolved out
 of the index to satisfy a dependency the files do not name, and a tool that
 grows one fails its first run rather than pulling an unpinned package.
 
 - runtime: pyte (LGPL-3.0), wcwidth (MIT), pillow (MIT)
-- tools: black, ruff, and their transitive closure (click, packaging,
-  pathspec, platformdirs, mypy-extensions, pytokens)
+- tools: black, ruff, mypy, and their transitive closure (click, packaging,
+  pathspec, platformdirs, mypy-extensions, pytokens, librt, ast-serialize,
+  typing-extensions)
 
 ## JavaScript, site/ only
 

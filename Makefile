@@ -712,7 +712,7 @@ $(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt .py
 	@touch $@
 
 .PHONY: scripts-check
-scripts-check: ## black and ruff over scripts/ (same pins as CI)
+scripts-check: ## black, ruff and mypy over scripts/ (same pins as CI)
 	@pin=$$(awk -F'"' '/^\[tool\.uv\]$$/ { u = 1; next } /^\[/ { u = 0 } u && /^required-version/ { print $$2 }' pyproject.toml | tr -d ' \t'); \
 		if [ "$$pin" != ">=$(UV_MIN)" ]; then \
 			echo "make scripts-check: pyproject.toml required-version '$$pin' disagrees with the uv line of .tool-versions '$(UV_MIN)'" >&2; \
@@ -721,6 +721,12 @@ scripts-check: ## black and ruff over scripts/ (same pins as CI)
 	@$(MAKE) --no-print-directory scripts-env
 	$(SCRIPTS_BIN)/black --check scripts/
 	$(SCRIPTS_BIN)/ruff check scripts/
+	# The type checker runs over the same target ruff does, from the same
+	# [tool.mypy] files list, so a Python file ruff passes and mypy cannot
+	# resolve is a failure here rather than a silent pass. --strict is
+	# redundant with pyproject.toml's strict = true and is left off on
+	# purpose: one place decides how strict this is.
+	$(SCRIPTS_BIN)/mypy --no-incremental
 
 .PHONY: screenshot
 screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.txt OUT=docs/images/dashboard.png [SCALE COLS ROWS]

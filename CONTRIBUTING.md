@@ -18,7 +18,7 @@
   CI's `bun-version-file`.
 - `uv` at or above the version in the `uv` line of `.tool-versions` for
   `make scripts-check` (CI installs that file's version via `version-file`;
-  black/ruff pins in `scripts/requirements-dev.txt`). The target names a
+  black/ruff/mypy pins in `scripts/requirements-dev.txt`). The target names a
   too-old uv rather than failing on an unknown flag.
 - The Python in `.python-version`, exact like the other toolchains. `make
   scripts-env` passes it to `uv venv` as `--python`, so uv downloads that
@@ -173,7 +173,7 @@ weight, so a recapture that blows the budget fails there.
 | `make tidy` | run `go mod tidy` to clean up go.mod and go.sum |
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
 | `make govulncheck` | `govulncheck` over both sqlite tag halves at the Makefile pin (same pin as CI) |
-| `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
+| `make scripts-check` | black, ruff and mypy (strict) over `scripts/` (same pins as CI) |
 | `make site-lint` | biome format-check and lint over the files `biome.jsonc` includes (the Worker and the jsonc configs) at the Makefile `BIOME` pin (CI parity) |
 | `make site-fmt` | rewrite those files with the biome formatter, then re-lint |
 | `make site-check` | `bun test site/` |
@@ -241,11 +241,12 @@ Worker and the jsonc configs, at the `BIOME` pin in the Makefile, config in
 (`bun test site/`), `make scripts-check`, and `make repro-check-pair`.
 `scripts-check` installs the exact versions in
 `scripts/requirements-dev.txt` into an isolated env under `dist/`
-(`make scripts-env`, black, ruff, plus the renderer deps). Pure-Python pins
+(`make scripts-env`, black, ruff, mypy, plus the renderer deps). Pure-Python pins
 carry a wheel sha256; bumping one of those lines means updating the hash too,
 and the install fails if a fetched file does not match. Do not run unpinned
 `uvx black` /
-`uvx ruff`: those resolve to whatever PyPI returns today. Platform-specific
+`uvx ruff` /
+`uvx mypy`: those resolve to whatever PyPI returns today. Platform-specific
 files also need `make vet-cross` (the same gate `release.yml` runs before
 shipping).
 

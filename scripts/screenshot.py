@@ -204,7 +204,8 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
     geometry from the caller.
     """
     try:
-        # Imported here so `screenshot.py --help` works without pyte/pillow.
+        # Imported here, not at module scope, so `screenshot.py --help` works
+        # without pyte/pillow and the except branch below reports them by name.
         import pyte  # noqa: PLC0415
         from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
     except ImportError as e:
