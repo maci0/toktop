@@ -74,3 +74,20 @@ func TestPagesToBytesSaturates(t *testing.T) {
 		t.Errorf("stat RSS wrap: %d, want saturation", rss)
 	}
 }
+
+// The tick sum is the other half of the same stat line: utime+stime must
+// saturate, since a wrapped sum reads as no CPU used at all.
+func TestStatTicksSaturate(t *testing.T) {
+	// Fields 4..13 are the ten tokens between state and utime; utime is
+	// field 14, stime field 15, rss field 24.
+	const huge = "18446744073709551615"
+	const filler = "0 0 0 0 0 0 0 0 0 0 "
+	ticks, _ := procStatCPUAndRSS("1 (x) S " + filler + huge + " " + huge + " 0 0 0 0 0 0 0 0 0")
+	if ticks != ^uint64(0) {
+		t.Errorf("stat tick sum = %d, want saturation", ticks)
+	}
+	ticks, _ = procStatCPUAndRSS("1 (x) S " + filler + "10 20 0 0 0 0 0 0 0 0 0")
+	if ticks != 30 {
+		t.Errorf("stat tick sum = %d, want 30", ticks)
+	}
+}
