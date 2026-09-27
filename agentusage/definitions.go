@@ -243,8 +243,16 @@ func LoadDefinitions(path string) error {
 
 // DefinitionsPath is where agent definitions live by default. It follows
 // gauntlet's location so one file serves both tools.
+//
+// GAUNTLET_HOME is honored only when absolute, the same rule the XDG base
+// directories get in openCodeDBPath and defaultKnownHostsPath. A relative
+// value would place agents.json under whatever directory the run started in,
+// where a missing file is not an error: the defined agents would simply never
+// appear, looking like agents producing no tokens. Falling back to the
+// documented default keeps the run reading the file it always read; the
+// startup warning (warnIgnoredGauntletHome) names the ignored value.
 func DefinitionsPath() string {
-	if h := os.Getenv("GAUNTLET_HOME"); h != "" {
+	if h := os.Getenv("GAUNTLET_HOME"); filepath.IsAbs(h) {
 		return filepath.Join(h, "agents.json")
 	}
 	home, err := os.UserHomeDir()

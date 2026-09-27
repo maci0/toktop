@@ -349,6 +349,20 @@ func TestDefinitionsPathPrefersGauntletHome(t *testing.T) {
 	}
 }
 
+// A relative GAUNTLET_HOME is ignored, like a relative XDG base directory: it
+// would resolve agents.json against the working directory, and a missing file
+// is not an error there, so the defined agents would vanish silently.
+func TestDefinitionsPathIgnoresRelativeGauntletHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
+	t.Setenv("GAUNTLET_HOME", filepath.Join("relative", "gauntlet"))
+	got := DefinitionsPath()
+	if !strings.HasPrefix(got, home) {
+		t.Errorf("DefinitionsPath() = %q, want the home-relative default under %q", got, home)
+	}
+}
+
 // The definition a watcher reads from is a coeffect resolved on every poll,
 // not a fact fixed at attach: a definition reloaded with a different root must
 // reach a watcher that is already running.

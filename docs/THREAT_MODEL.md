@@ -118,16 +118,20 @@ Every externally reachable input, with its code location:
    `ssh://[user@]host[:port]` targets (interpretArgs / ParseTarget); and the
    `update` subcommand with `--check` and `--repo owner/name`
    (cmd/toktop/update.go). `--repo` is checked with `ValidateRepo`
-   (owner/name only). `--add` rejects non-http(s), missing host, and userinfo
-   (validateAddURL, endpoints.go). An `ssh://` URL that embeds a password,
-   path, query, or fragment is rejected at startup (internal/remote/target.go).
+   (owner/name only). `--add` rejects non-http(s), missing host, and userinfo,
+   and refuses the same endpoint twice, since two polls of it read as twice
+   the tokens (validateAddURL, parseAdd, endpoints.go). An `ssh://` URL that
+   embeds a password, path, query, or fragment is rejected at startup
+   (internal/remote/target.go).
    The live dashboard refuses to start when stdout is not a terminal
    (main.go); `--once` is the non-TTY path.
 3. **Environment variables**: secrets `OMNIROUTE_API_KEY`,
    `TOKTOP_BEARER`, `TOKTOP_SSH_PASSWORD`, `GITHUB_TOKEN`; plus
    `SSH_AUTH_SOCK`, `TOKTOP_COLUMNS`/`TOKTOP_LINES`, `TOKTOP_LOG_LEVEL`
    (cmd/toktop/main.go; internal/remote/auth.go; internal/selfupdate;
-   internal/ingest), `GAUNTLET_HOME` (agentusage/definitions.go),
+   internal/ingest), `GAUNTLET_HOME` (agentusage/definitions.go; honored
+   only when absolute, so a relative value cannot pull definitions from the
+   working directory, and it is named as ignored at startup under `--agents`),
    `XDG_CONFIG_HOME` (internal/remote/knownhosts.go, 19-28),
    `XDG_DATA_HOME` (agentusage/opencode_sqlite.go, only when
    `--opencode-db` is on, which it is by default with `--agents`), and

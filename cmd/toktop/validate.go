@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -81,6 +82,23 @@ func warnIgnoredFrameEnv(once, plain bool) {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
+	}
+}
+
+// warnIgnoredGauntletHome names a $GAUNTLET_HOME that is set but not a path
+// DefinitionsPath can use. agentusage honors it only when absolute, so a
+// relative value silently falls back to ~/.gauntlet and the agents.json the
+// operator pointed at is never read. Silence there looks like agents producing
+// no tokens, so the value is named instead.
+//
+// Only --agents reads the file, so the warning fires there too: without it
+// nothing consulted the variable.
+func warnIgnoredGauntletHome(agents bool) {
+	if !agents {
+		return
+	}
+	if v := os.Getenv("GAUNTLET_HOME"); v != "" && !filepath.IsAbs(v) {
+		fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n", v)
 	}
 }
 

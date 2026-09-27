@@ -56,7 +56,7 @@ func registerFlags() *cliFlags {
 		flag.BoolVar(&cli.showVer, "version", false, "print version and exit")
 		flag.BoolVar(&cli.showHelp, "help", false, "show help and exit")
 		flag.BoolVar(&cli.showHelp, "h", false, "show help and exit")
-		flag.Func("add", "attach an openai-compatible backend http(s) URL (repeatable)", func(v string) error {
+		flag.Func("add", "attach an openai-compatible backend http(s) URL (repeatable, once per endpoint)", func(v string) error {
 			return parseAdd(v, &cli.adds)
 		})
 		// Error paths (unknown flag, bad value) print this usage on stderr and

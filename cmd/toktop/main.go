@@ -121,6 +121,7 @@ func main() {
 	warnIgnoredFlags(explicit, f.demo, f.once, f.plain, f.agents, f.noIngest, len(f.adds), len(remoteTargets))
 	warnIgnoredFrameEnv(f.once, f.plain)
 	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, len(f.adds), len(remoteTargets))
+	warnIgnoredGauntletHome(f.agents)
 	if !f.noIngest {
 		if err := validateIngestAddr(f.ingest); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
@@ -582,7 +583,8 @@ var toktopEnvVars = map[string]bool{
 
 // warnUnknownEnv reports unrecognized TOKTOP_* variables once at startup:
 // a misspelled knob would otherwise be ignored silently and look like a
-// no-op feature.
+// no-op feature. Sorted, so the same set of names reads the same way in
+// every capture of the startup output.
 func warnUnknownEnv() {
 	var unknown []string
 	for _, kv := range os.Environ() {
@@ -593,6 +595,7 @@ func warnUnknownEnv() {
 		unknown = append(unknown, name)
 	}
 	if len(unknown) > 0 {
+		slices.Sort(unknown)
 		fmt.Fprintf(os.Stderr, "toktop: ignoring unknown environment variable(s): %s\n",
 			strings.Join(unknown, ", "))
 	}

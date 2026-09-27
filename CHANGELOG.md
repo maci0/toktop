@@ -46,6 +46,19 @@ support channel (see SECURITY.md).
 
 ### Changed
 
+- `$GAUNTLET_HOME` is honored only when it is an absolute path, like the XDG
+  base directories. A relative one resolved `agents.json` against the working
+  directory, where a missing file is not an error: the agents it defined
+  never appeared, looking like agents producing no tokens. The ignored value
+  is named at startup under `--agents`.
+- The README no longer says a non-loopback `--ingest` bind is rejected. It is
+  warned about at startup and runs, because a relay on another host is a
+  legitimate setup.
+- The same `--add` endpoint named twice is a usage error. Each `--add` builds
+  its own provider and the dashboard sums them, so the duplicate read as
+  double the tokens instead of as the mistake it was.
+- Unknown `TOKTOP_*` variables are reported in sorted order, so the same set
+  of names reads the same way in every capture of the startup output.
 - `toktop --help` ends with the exit codes (`0`, `1`, `2`, `130`) and the
   split between results on stdout and status on stderr.
   `toktop update --help` gained the examples block the top-level screen

@@ -271,6 +271,15 @@ func TestWarnUnknownEnv(t *testing.T) {
 			t.Fatalf("warnUnknownEnv() printed %q, want silence", got)
 		}
 	})
+	t.Run("several names come out sorted", func(t *testing.T) {
+		t.Setenv("TOKTOP_ZULU", "x")
+		t.Setenv("TOKTOP_ALPHA", "x")
+		got := captureWarnUnknownEnv(t)
+		want := "TOKTOP_ALPHA, TOKTOP_ZULU"
+		if !strings.Contains(got, want) {
+			t.Fatalf("warnUnknownEnv() printed %q, want %q in that order", got, want)
+		}
+	})
 }
 
 func TestFrameEnv(t *testing.T) {
@@ -323,6 +332,37 @@ func TestValidateOnceEnv(t *testing.T) {
 			}
 			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
 				t.Fatalf("validateOnceEnv() = %v, want error mentioning %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// A GAUNTLET_HOME that cannot be used is named at startup under --agents:
+// nothing else would report it, and the agents.json it names is never read.
+func TestWarnIgnoredGauntletHome(t *testing.T) {
+	tests := []struct {
+		name       string
+		agents     bool
+		gauntlet   string
+		wantStderr string
+	}{
+		{name: "unset passes", agents: true},
+		{name: "absolute passes", agents: true, gauntlet: filepath.Join(string(filepath.Separator), "srv", "gauntlet")},
+		{name: "relative is named", agents: true, gauntlet: "gauntlet", wantStderr: "$GAUNTLET_HOME"},
+		{name: "not read without agents", gauntlet: "gauntlet"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("GAUNTLET_HOME", tt.gauntlet)
+			got := captureStderr(t, func() { warnIgnoredGauntletHome(tt.agents) })
+			if tt.wantStderr == "" {
+				if got != "" {
+					t.Fatalf("warnIgnoredGauntletHome() printed %q, want silence", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.wantStderr) {
+				t.Fatalf("warnIgnoredGauntletHome() printed %q, want mention of %q", got, tt.wantStderr)
 			}
 		})
 	}
@@ -1143,6 +1183,26 @@ func TestValidateAddURL(t *testing.T) {
 	}
 	if got := strings.Join(adds, ","); got != "https://10.0.0.5:8000" {
 		t.Fatalf("trimmed --add stored %q", got)
+	}
+}
+
+// The same endpoint named twice would be polled twice and summed twice, so it
+// is a usage error rather than a second provider.
+func TestParseAddRejectsDuplicate(t *testing.T) {
+	var adds []string
+	if err := parseAdd("http://127.0.0.1:8000/v1", &adds); err != nil {
+		t.Fatal(err)
+	}
+	for _, dup := range []string{"http://127.0.0.1:8000/v1", " http://127.0.0.1:8000/v1/ "} {
+		if err := parseAdd(dup, &adds); err == nil {
+			t.Fatalf("parseAdd(%q) = nil error, want rejection as a duplicate", dup)
+		}
+	}
+	if err := parseAdd("http://127.0.0.1:8000/v2", &adds); err != nil {
+		t.Fatalf("a distinct endpoint must be accepted: %v", err)
+	}
+	if got := strings.Join(adds, ","); got != "http://127.0.0.1:8000/v1,http://127.0.0.1:8000/v2" {
+		t.Fatalf("adds = %q", got)
 	}
 }
 
