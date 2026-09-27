@@ -52,9 +52,10 @@ width on tablets. Both formats retain their 1280w and 1920w candidates. Served f
 this Worker so a deploy updates share cards and the page together.
 `wrangler.jsonc` sets `run_worker_first` so those image paths hit the Worker
 (cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline. Measured
-against the current source with Bun 1.4.2: 11,090 bytes identity / 3,917 gzip /
-3,269 brotli for the HTML (previously 10,027 / 3,698 / 3,086), still inside the
-~14 KB initial congestion window. The budget
+against the current source with Bun 1.4.2: 11,026 bytes identity / 3,907 gzip /
+3,256 brotli for the HTML (previously 11,090 / 3,917 / 3,269), still inside the
+~14 KB initial congestion window. The PNG original is the one download no
+srcset narrows, so it carries a ceiling of its own in the same test. The budget
 is pinned by a test, so drift fails `bun test site/`; numbers above are
 re-measurable with it:
 

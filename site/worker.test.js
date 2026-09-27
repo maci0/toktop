@@ -162,7 +162,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(3917);
+    expect(bytes.byteLength).toBe(3907);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -403,9 +403,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   const brotli = new Uint8Array(
     await (await call({ "accept-encoding": "br" })).arrayBuffer(),
   ).byteLength;
-  expect(identity).toBe(11090);
-  expect(gzipped).toBe(3917);
-  expect(brotli).toBe(3269);
+  expect(identity).toBe(11026);
+  expect(gzipped).toBe(3907);
+  expect(brotli).toBe(3256);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -422,6 +422,17 @@ test("hero AVIF is smaller than WebP at each width, and 1280 is smaller than 192
   expect(assetBytes("dashboard.avif")).toBeLessThan(80_000);
   expect(assetBytes("dashboard-1280.avif")).toBeLessThan(50_000);
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(100_000);
+  expect(assetBytes("dashboard.webp")).toBeLessThan(160_000);
+});
+
+// The <img src> fallback and the og:image both point at the PNG original, so
+// it is the one download on the page that no srcset narrows: a client with
+// neither AVIF nor WebP pays all of it. Nothing else measures that path, so a
+// re-capture at a higher scale would double the worst-case hero weight with CI
+// green. The ceiling is above today's 303,865 and well under the ~14 KB the
+// rest of the page fits in, so it records the gap instead of hiding it.
+test("the PNG fallback stays bounded", () => {
+  expect(assetBytes("dashboard.png")).toBeLessThan(320_000);
 });
 
 function assetsEnv(bodies) {

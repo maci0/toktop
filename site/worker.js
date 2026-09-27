@@ -105,8 +105,6 @@ const HTML = htmlForWire(`<!doctype html>
      scrollbar would lock keyboard users out (WCAG 2.1.1). */
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   code { color: inherit; }
-  .up { color: var(--accent); }
-  .warm { color: var(--warm); }
   .dim { color: var(--dim); }
   /* The capture needs the 76rem column; copy does not. */
   p, ul { max-width: 62ch; }
