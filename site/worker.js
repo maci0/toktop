@@ -105,6 +105,14 @@ const HTML = htmlForWire(`<!doctype html>
     --fg: var(--dark-fg); --dim: var(--dark-dim);
     --accent: var(--dark-accent); --warm: var(--dark-warm);
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    /* The type scale, one named step per level. Size is the only thing that
+       marks a level here: no uppercase, no tracking, no color change, so a
+       section start has to be legible as one. The page is monospaced, so a
+       level is read as size alone. The h1 is exactly double the h2, and every
+       step below that one is within a few pixels of the next, so no level on
+       the page can be read as the level under it. */
+    --fs-h1: 2.6rem; --fs-h2: 1.3rem; --fs-lead: 1.05rem;
+    --fs-body: 15px; --fs-small: 13.5px; --fs-micro: 12.5px;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -120,12 +128,12 @@ const HTML = htmlForWire(`<!doctype html>
   body {
     margin: 0; padding: 0 1.25rem 5rem;
     background: var(--bg); color: var(--fg);
-    font-family: var(--mono); font-size: 15px; line-height: 1.6;
+    font-family: var(--mono); font-size: var(--fs-body); line-height: 1.6;
   }
   .skip-link {
     position: absolute; top: -100px; left: 1.25rem; z-index: 100;
     padding: .5rem 1rem; background: var(--panel); color: var(--fg);
-    border: 1px solid var(--accent); text-decoration: none; font-size: 13.5px;
+    border: 1px solid var(--accent); text-decoration: none; font-size: var(--fs-small);
   }
   .skip-link:focus, .skip-link:focus-visible {
     top: .7rem; outline: 2px solid var(--accent); outline-offset: 2px;
@@ -136,13 +144,13 @@ const HTML = htmlForWire(`<!doctype html>
   .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 1.25rem;
     align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
     background: var(--bg); border-bottom: 1px solid var(--line); }
-  .brand { font-weight: 700; font-size: 1.1rem; text-decoration: none; color: var(--fg);
+  .brand { font-weight: 700; font-size: var(--fs-lead); text-decoration: none; color: var(--fg);
     border-bottom: 0; white-space: nowrap; }
   .brand .cursor { color: var(--accent); }
-  nav { display: flex; gap: 1.1rem; font-size: 13.5px; margin-left: auto; }
+  nav { display: flex; gap: 1.1rem; font-size: var(--fs-small); margin-left: auto; }
   nav a { color: var(--dim); white-space: nowrap; padding: .3rem 0; }
   .hero { padding-top: 2.6rem; }
-  h1 { font-size: 2.6rem; margin: 0; }
+  h1 { font-size: var(--fs-h1); margin: 0; }
   /* Blinking content that starts automatically must be pausable/stoppable
      (WCAG 2.2.2); honoring prefers-reduced-motion is the static-page remedy,
      so the cursor only blinks for users who have not asked for stillness. */
@@ -150,15 +158,17 @@ const HTML = htmlForWire(`<!doctype html>
     h1 .cursor { color: var(--accent); animation: blink 1.2s step-end infinite; }
     @keyframes blink { 50% { opacity: 0; } }
   }
-  .tag { color: var(--dim); margin: .6rem 0 2rem; font-size: 1.05rem; max-width: 62ch; }
-  /* Sentence-case titles on the tagline size, not uppercase micro-labels.
+  .tag { color: var(--dim); margin: .6rem 0 2rem; font-size: var(--fs-lead); max-width: 62ch; }
+  /* Section titles are sentence case on their own step of the scale, not
+     uppercase micro-labels: the h2 is large enough to find while scrolling
+     and small enough to stay the same idea as the wordmark above it.
      Install/Run sit tight under the capture; the manifesto heading after
      the list keeps the larger gap. */
-  h2 { font-size: 1.05rem; color: var(--fg); font-weight: 600; margin: 2.8rem 0 .7rem; }
+  h2 { font-size: var(--fs-h2); color: var(--fg); font-weight: 600; margin: 2.8rem 0 .7rem; }
   .shot + h2, h2 + pre + h2 { margin-top: 1.5rem; }
   pre {
     background: var(--panel); border: 1px solid var(--line);
-    padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem; font-size: 13.5px;
+    padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem; font-size: var(--fs-small);
   }
   /* Narrow viewports clip code lines into a scroll container; a mouse-only
      scrollbar would lock keyboard users out (WCAG 2.1.1). */
@@ -180,24 +190,27 @@ const HTML = htmlForWire(`<!doctype html>
      pressure (temps, VRAM, power). A second accent alternated by position
      would say nothing and read as decoration. */
   .grid li:last-child { border-top-color: var(--warm); }
-  .grid b { display: block; font-size: .95rem; margin-bottom: .3rem; }
-  .grid p { margin: 0 0 .5rem; font-size: 13.5px; color: var(--dim); max-width: none; }
-  .grid code { display: block; font-size: 12.5px; white-space: normal; }
+  /* The pane name is body size in bold, its job the small step, its specimen
+     the micro step: a pane reads as name, then sentence, then terminal line,
+     which is the order the dashboard itself prints them in. */
+  .grid b { display: block; font-size: var(--fs-body); margin-bottom: .3rem; }
+  .grid p { margin: 0 0 .5rem; font-size: var(--fs-small); color: var(--dim); max-width: none; }
+  .grid code { display: block; font-size: var(--fs-micro); white-space: normal; }
   /* Key table: chips left, action right. */
   .keys { display: grid; grid-template-columns: auto 1fr; gap: .3rem .9rem;
-    max-width: 62ch; margin: 0 0 1rem; font-size: 13.5px; }
+    max-width: 62ch; margin: 0 0 1rem; font-size: var(--fs-small); }
   .keys dt, .keys dd { margin: 0; }
   .keys dd { color: var(--dim); }
   kbd { border: 1px solid var(--line); border-radius: 4px;
-    padding: 0 .4rem; font-family: inherit; font-size: 12.5px; background: var(--bg); }
+    padding: 0 .4rem; font-family: inherit; font-size: var(--fs-micro); background: var(--bg); }
   /* Links must not be identified by color alone (WCAG 1.4.1): underline at
      rest, not just on hover. */
   a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px;
       border-bottom: 1px solid transparent; }
   a:hover { border-bottom-color: currentColor; }
   footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
-           color: var(--dim); font-size: 13px; display: flex; gap: 1.5rem; flex-wrap: wrap; }
-  /* A 13px/1.6 line box is ~21px tall, under the 24px target-size floor
+           color: var(--dim); font-size: var(--fs-small); display: flex; gap: 1.5rem; flex-wrap: wrap; }
+  /* A small/1.6 line box is ~21px tall, under the 24px target-size floor
      (WCAG 2.2 AA SC 2.5.8); vertical padding makes each footer item a real
      target instead of leaning on the spacing exception. */
   footer > * { padding: .3rem 0; }
@@ -213,15 +226,18 @@ const HTML = htmlForWire(`<!doctype html>
     background: var(--bg); overflow: hidden;
   }
   .shot figcaption {
-    margin: 0; padding: .55rem 1rem; font-size: 13px;
+    margin: 0; padding: .55rem 1rem; font-size: var(--fs-small);
     color: var(--dim); background: var(--panel); border-bottom: 1px solid var(--line);
   }
   .shot img { display: block; width: 100%; height: auto; }
   section { scroll-margin-top: 4rem; }
+  /* A phone is one screen wide, so only the wordmark drops a step: the
+     section titles stay where the scale puts them, because they are read
+     one at a time and every one of them fits a 360px column at 1.3rem. */
   @media (max-width: 640px) {
     body { padding: 0 .85rem 4rem; }
     .bar { margin: 0 -.85rem; padding-inline: .85rem; gap: .8rem; }
-    nav { gap: .8rem; font-size: 12.5px; overflow-x: auto; }
+    nav { gap: .8rem; font-size: var(--fs-micro); overflow-x: auto; }
     h1 { font-size: 2rem; }
     .hero { padding-top: 2rem; }
     .grid { grid-template-columns: 1fr; }

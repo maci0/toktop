@@ -219,7 +219,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4125);
+    expect(bytes.byteLength).toBe(4176);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -471,6 +471,35 @@ test("section titles are sentence case on the body scale, not marketing labels",
   expect(identityBody.includes("max-width: 62ch")).toBe(true);
 });
 
+// Every level of the page is a named step, and the steps descend. Size is the
+// only thing marking a level on a page with no uppercase, no tracking and no
+// color change, so a rule that sizes text in rems of its own, or a step that
+// lands below the one under it, is a level the eye can no longer find.
+test("the type scale is named, ordered, and the one place a size is written", () => {
+  const steps = new Map(
+    [...identityBody.matchAll(/--fs-([\w-]+):\s*([\d.]+)(px|rem)/g)].map(
+      ([, name, value, unit]) => [name, Number(value) * (unit === "rem" ? 16 : 1)],
+    ),
+  );
+  expect([...steps.keys()].sort()).toEqual(["body", "h1", "h2", "lead", "micro", "small"].sort());
+  expect(steps.get("h1")).toBe(steps.get("h2") * 2);
+  expect(steps.get("h2")).toBeGreaterThan(steps.get("lead"));
+  expect(steps.get("lead")).toBeGreaterThan(steps.get("body"));
+  expect(steps.get("body")).toBeGreaterThan(steps.get("small"));
+  expect(steps.get("small")).toBeGreaterThan(steps.get("micro"));
+  // Every font-size in the page is one of those steps, or the wordmark at
+  // 2rem inside the max-width: 640px query.
+  for (const [, value] of identityBody.matchAll(/font-size:\s*([^;}]+)/g)) {
+    const token = /^var\(--fs-([\w-]+)\)$/.exec(value.trim());
+    if (token) {
+      expect(steps.has(token[1]), `${token[1]} is not a step on the scale`).toBe(true);
+      continue;
+    }
+    const size = Number.parseFloat(value);
+    expect(size * (value.trim().endsWith("rem") ? 16 : 1)).toBe(32);
+  }
+});
+
 // The second accent is cYellow in the terminal, where amber is pressure. On
 // the page it marks the pane about pressure and nothing else: a second accent
 // alternated by position is decoration, and decoration is what makes a page
@@ -629,9 +658,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(11878);
-  expect(gzipped).toBe(4125);
-  expect(brotli).toBe(3444);
+  expect(identity).toBe(12146);
+  expect(gzipped).toBe(4176);
+  expect(brotli).toBe(3499);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -687,7 +716,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(17_007);
+  expect(visit).toBe(17_062);
   expect(visit).toBeLessThan(25_000);
 });
 
@@ -1065,7 +1094,7 @@ test("a rejected method on either surface logs the request behind it", async () 
     const env = assetsEnv({ "/dashboard.webp": "webp-bytes" });
     const page = await call({ "cf-ray": "9a1b2c3d4e5f-TOK" }, { method: "POST", env });
     expect(page.status).toBe(405);
-    const image = await imageCall("/dashboard.webp", {}, { method: "PUT", env });
+    const image = await call({}, { path: "/dashboard.webp", method: "PUT", env });
     expect(image.status).toBe(405);
     expect(logs.parse()).toEqual([
       {

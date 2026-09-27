@@ -36,6 +36,13 @@ renderer's (`scripts/screenshot.py`); the three files are in three languages, so
 `bun test site/` is what keeps them one palette, and it fails on a hex that
 drifts, on a one-off hex in a rule, and on a violet anywhere in the three.
 
+The type is the same idea: the `--fs-*` steps in `:root` are the only place
+the page writes a size, one per level from `--fs-micro` to `--fs-h1`, and
+`bun test site/` checks the steps descend and that no rule sizes text in
+its own rems. The page has no uppercase, no tracking and no color change on
+a level, so size is the only thing that marks one; a step out of order or a
+size written in a rule is a heading the eye can no longer find.
+
 The Worker answers `/health` with `ok` for uptime checks, serves the
 dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 `/dashboard-1280.avif`, `/dashboard-768.avif`, `/dashboard.webp`,
@@ -73,7 +80,7 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,125 bytes rather than 11,878 bytes in the local Worker response test.
+transfers 4,176 bytes rather than 12,146 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
@@ -102,7 +109,7 @@ Worker spent before writing the response, failures included: a failed request
 is the one a visitor reports, and a timing series that covered only the served
 requests would describe exactly the ones nobody is asking about. A byte-count
 test cannot see a
-regression here: the page can send the same 3,444 bytes slowly. With the
+regression here: the page can send the same 3,499 bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
 has to be added to the page to collect it.
@@ -164,10 +171,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 11,878 bytes identity / 4,125 gzip /
-3,444 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,444 bytes
-plus the 13,563-byte 768w capture, 17,007 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 12,146 bytes identity / 4,176 gzip /
+3,499 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,499 bytes
+plus the 13,563-byte 768w capture, 17,062 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no
