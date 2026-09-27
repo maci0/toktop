@@ -454,6 +454,36 @@ func TestPollOllamaModels(t *testing.T) {
 	}
 }
 
+// expires_at is a bare integer on some Ollama-compatible proxies and a
+// gateway may drop the offset. Nothing reads it, so it must not decide
+// whether the poll succeeds.
+func TestPollOllamaToleratesNonRFC3339ExpiresAt(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/ps":
+			w.Write([]byte(`{"models":[` +
+				`{"name":"llama3:latest","size_vram":8000000000,"expires_at":1750000000},` +
+				`{"name":"qwen2:7b","size_vram":4700000000,"expires_at":""}]}`))
+		case "/api/version":
+			w.Write([]byte(`{"version":"0.5.4"}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	m, err := NewOllama(srv.URL).Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.Models) != 2 {
+		t.Fatalf("models = %+v, want 2", m.Models)
+	}
+	if m.Version != "0.5.4" {
+		t.Errorf("version = %q, want 0.5.4", m.Version)
+	}
+}
+
 // LM Studio enrichment must replace the thin OpenAI listing with the native
 // v0 feed, dropping non-LLM and unloaded entries so a probe cannot JIT-load.
 func TestPollLMStudioEnrichment(t *testing.T) {
