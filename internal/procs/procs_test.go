@@ -338,3 +338,36 @@ func TestSnapshotErrorThrottled(t *testing.T) {
 		t.Fatalf("error was not throttled by refreshMin: calls = %d, want 1", calls)
 	}
 }
+
+// The Windows lister names a PowerShell that must exist on the host. Which of
+// the two implementations an image carries is not fixed, so a name that is
+// missing there silently costs the whole process listing. Pin the preference
+// order and the miss.
+func TestPickShell(t *testing.T) {
+	present := func(names ...string) func(string) (string, error) {
+		return func(n string) (string, error) {
+			for _, p := range names {
+				if p == n {
+					return "/usr/bin/" + n, nil
+				}
+			}
+			return "", errors.New("not found")
+		}
+	}
+	for _, tc := range []struct {
+		name string
+		have []string
+		want string
+	}{
+		{"both installed", []string{"pwsh", "powershell"}, "pwsh"},
+		{"only the legacy shell", []string{"powershell"}, "powershell"},
+		{"only the supported shell", []string{"pwsh"}, "pwsh"},
+		{"neither", nil, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := pickShell(present(tc.have...), "pwsh", "powershell"); got != tc.want {
+				t.Errorf("pickShell = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

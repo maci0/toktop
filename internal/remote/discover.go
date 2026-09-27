@@ -114,19 +114,37 @@ func parseNetTCP(out string) []int {
 }
 
 // probeScript prints listening ports from the given candidate list. Uses bash
-// /dev/tcp first, falling back to nc. Kept as a fallback for hosts where
+// /dev/tcp first, falling back to nc. It is the fallback for hosts where
 // /proc/net/tcp is not readable.
+//
+// The remote side runs under the login shell of whatever account the key
+// belongs to, which is only bash on some of the machines this connects to
+// (dash and zsh are the common alternatives). /dev/tcp is a bash extension, so
+// it is used only when bash is the shell and nc(1) is the fallback everywhere.
+// Offering the bash branch to a shell without it costs a failed open per
+// candidate port on every probe, and the sibling sweep above claims the remote
+// scripts stay generic POSIX, which this one then would not.
 func probeScript(ports []int) string {
 	var b strings.Builder
-	b.WriteString("for p in")
-	for _, p := range ports {
-		b.WriteString(" " + strconv.Itoa(p))
+	b.WriteString(`ports="`)
+	for i, p := range ports {
+		if i > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(strconv.Itoa(p))
 	}
-	b.WriteString(`; do
-  if (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null; then echo "$p"
-  elif command -v nc >/dev/null 2>&1 && nc -z -w1 127.0.0.1 "$p" >/dev/null 2>&1; then echo "$p"
-  fi
-done`)
+	b.WriteString(`"`)
+	b.WriteString(`
+if [ -n "${BASH_VERSION:-}" ]; then
+  for p in $ports; do
+    (exec 3<>"/dev/tcp/127.0.0.1/$p") 2>/dev/null && echo "$p"
+  done
+elif command -v nc >/dev/null 2>&1; then
+  for p in $ports; do
+    nc -z -w 1 127.0.0.1 "$p" >/dev/null 2>&1 && echo "$p"
+  done
+fi
+exit 0`)
 	return b.String()
 }
 

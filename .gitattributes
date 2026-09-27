@@ -1,4 +1,8 @@
 # LF everywhere: make recipes and embedded POSIX scripts break with CRLF.
 * text=auto eol=lf
 
+# Shipped images. `text=auto` only keeps them intact through content sniffing,
+# so name every format the tree carries rather than the one that has a PNG.
 *.png binary
+*.webp binary
+*.avif binary

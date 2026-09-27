@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -21,15 +22,24 @@ type cimProc struct {
 	WorkingSetSize uint64 `json:"WorkingSetSize"`
 }
 
+// windowsShell is the PowerShell CIM runs under, resolved once. See pickShell
+// for why neither implementation can be named outright.
+var windowsShell = sync.OnceValue(func() string { return pickShell(exec.LookPath, "pwsh", "powershell") })
+
 // listWindows queries Win32_Process via PowerShell CIM once per poll.
 // There is no unprivileged pure-Go window into the NT process table with
 // command lines; CIM is the documented interface and needs no vendor libs.
 func listWindows() ([]raw, error) {
+	shell := windowsShell()
+	if shell == "" {
+		return nil, errNoShell
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), listTimeout)
 	defer cancel()
 	// PowerShell 5.1 otherwise writes redirected stdout in the OEM code
 	// page, which json.Unmarshal rejects for command lines that are not ASCII.
-	cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command",
+	// PowerShell 7 is UTF-8 already; the assignment is a no-op there.
+	cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-Command",
 		`$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine,WorkingSetSize | ConvertTo-Json -Compress`)
 	cmd.WaitDelay = listPipeGrace
 	out, err := cmd.Output()
@@ -95,6 +105,17 @@ var errBadJSON = jsonError{}
 type jsonError struct{}
 
 func (jsonError) Error() string { return "unexpected powershell output" }
+
+// errNoShell reports that the image carries neither PowerShell, so there is no
+// documented way to read Win32_Process. It names the way out rather than
+// surfacing the exec lookup failure, which reads as a missing file.
+var errNoShell = noShellError{}
+
+type noShellError struct{}
+
+func (noShellError) Error() string {
+	return "neither pwsh nor powershell is installed, so Win32_Process cannot be read"
+}
 
 func init() {
 	// CIM enumeration costs seconds; serve a cached list between refreshes.

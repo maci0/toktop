@@ -120,10 +120,18 @@ func TestDiscoverSweepsOverConnection(t *testing.T) {
 }
 
 // probeScript is the fallback when /proc/net/tcp is unreadable; pin its
-// shape so a drift cannot silently break discovery on hardened hosts.
+// shape so a drift cannot silently break discovery on hardened hosts. The
+// /dev/tcp branch is bash-only, so the gate on BASH_VERSION is part of what is
+// pinned: without it a dash or zsh login shell pays a failed open per port.
 func TestProbeScriptShape(t *testing.T) {
 	s := probeScript([]int{11434, 8080})
-	for _, want := range []string{"for p in 11434 8080", "/dev/tcp/127.0.0.1/$p", "nc -z"} {
+	for _, want := range []string{
+		`ports="11434 8080"`,
+		`[ -n "${BASH_VERSION:-}" ]`,
+		"/dev/tcp/127.0.0.1/$p",
+		"nc -z",
+		"exit 0",
+	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("probeScript missing %q:\n%s", want, s)
 		}

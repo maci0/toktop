@@ -56,6 +56,21 @@ func annotate(r *raw) {
 // platformList is implemented per GOOS.
 var platformList func() ([]raw, error)
 
+// pickShell returns the first name look resolves, or "" when none of them are
+// installed. Windows ships two PowerShell implementations and which one is
+// present varies by image: pwsh (PowerShell 7) is the supported line, and
+// Windows PowerShell 5.1 is an optional feature that Server Core and trimmed
+// images leave out, while an upgraded workstation may have only pwsh. Hard
+// coding either name loses process listing on the other half of the claim.
+func pickShell(look func(string) (string, error), names ...string) string {
+	for _, n := range names {
+		if _, err := look(n); err == nil {
+			return n
+		}
+	}
+	return ""
+}
+
 // clkTck is the jiffies-per-second constant on the linux path. USER_HZ is
 // fixed at 100 by the Linux ABI; there is no runtime probe.
 const clkTck = 100

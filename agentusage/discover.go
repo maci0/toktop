@@ -30,10 +30,10 @@ func (p Process) Watch(since time.Time) *Watcher {
 
 // Process discovery is implemented per GOOS: discover_linux.go walks /proc,
 // discover_darwin.go asks ps(1) and lsof(8), and platforms where a process's
-// working directory cannot be read without native calls (discover_windows.go,
-// discover_other.go) report nothing at all. None of those implementations
-// shell out to pgrep-style helpers to find the processes themselves: spawning
-// a process to count processes is how a monitor ends up measuring itself.
+// working directory cannot be read without native calls (unsupported.go)
+// report nothing at all. None of those implementations shell out to
+// pgrep-style helpers to find the processes themselves: spawning a process to
+// count processes is how a monitor ends up measuring itself.
 
 // knownNames is the set of agent names a discovered process is matched
 // against, keyed the way agentName looks them up: canonical (NFC, trimmed).
