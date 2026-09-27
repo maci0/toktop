@@ -62,8 +62,9 @@ verified out of band, as any first contact is.
   over one ssh connection: a vitals dump, a `/proc/net/tcp(+6)` read (falling
   back to an active port probe against the well-known list when the kernel
   hides the table), and a process sweep. The process sweep ships each command
-  line cut to its first 4096 characters, which is all an engine match can
-  read; the tail, where an inline prompt or a credential passed as a flag
+  line cut to its first 4096 bytes (the remote script pins `LC_ALL=C`, so
+  `cut -c` counts bytes rather than characters), which is all an engine match
+  can read; the tail, where an inline prompt or a credential passed as a flag
   sits, never crosses the connection.
 - **GitHub**, for `toktop update` only, which is never on the startup path.
   Requests are limited to `github.com`, `api.github.com` and
@@ -83,10 +84,10 @@ verified out of band, as any first contact is.
 The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or
 `remote`. Event fields are not logged. It also records the run's active
-configuration (the interval, the listen addresses, the log floor, the ssh and
-endpoint counts), with the bearer token named as `set` and never by its value,
-the address the ingest endpoint actually bound, and the model id a failing
-probe was sent to. Every line has the home directory folded to `~`, in the
+configuration (the interval, the listen addresses, the log floor, the mode
+flags, and the ssh target count, with the bearer token named as `set` and
+never by its value), the address the ingest endpoint actually bound, and the
+model id a failing probe was sent to. Every line has the home directory folded to `~`, in the
 message and in every attribute, so a request path or an error text carrying a
 path under `$HOME` cannot name the account: a logger built outside `logcfg` is
 the only way to write a line that has not been through that fold.

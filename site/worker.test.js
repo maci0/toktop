@@ -218,7 +218,7 @@ test("accept-encoding variants negotiate correctly", async () => {
     ["gzip", "gzip"],
     ["GZIP", "gzip"],
     ["*", "br"],
-    // zstd is bigger than gzip on this page (4,526 against 4,291), so the
+    // zstd is bigger than gzip on this page (4,585 against 4,345), so the
     // ranking the Worker negotiates from is a list, not the order the
     // codings are offered in, and a client naming both gets the smaller.
     ["zstd, gzip", "gzip"],
@@ -251,7 +251,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4329);
+    expect(bytes.byteLength).toBe(4328);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -738,9 +738,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12535);
-  expect(gzipped).toBe(4329);
-  expect(brotli).toBe(3653);
+  expect(identity).toBe(12524);
+  expect(gzipped).toBe(4328);
+  expect(brotli).toBe(3643);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -799,7 +799,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_230);
+  expect(visit).toBe(14_220);
   expect(visit).toBeLessThan(25_000);
 });
 
@@ -912,7 +912,7 @@ test("the hero's reserved box is the fallback capture's own size", () => {
 
 // A browser that reads the <link> never asks for this, but a crawler, a
 // bookmark or a client that ignored the data URI does, and the one-page
-// catch-all answered it with the whole document: 3,602 bytes of text/html for
+// catch-all answered it with the whole document: 3,606 bytes of text/html for
 // a request that wants an image, on a page whose whole budget is two requests.
 // The answer must be the icon itself, and it must not need the asset binding
 // the captures need.

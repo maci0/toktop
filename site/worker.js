@@ -332,8 +332,8 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
     <li><b>Probes</b><p>Real generations measuring TTFT and decode speed.</p><code>press p · or --probe N to auto-probe</code></li>
     <li><b>System</b><p>GPU/NPU, VRAM, temps, power beside the throughput.</p><code>nv0 82° 69% · vram 57G/80G · 397W</code></li>
   </ul>
-  <p class="dim">Agents read from transcripts: claude, codex,
-  qwen, copilot, pi, prime-agent, feynman, clanker and dsh keep JSONL;
+  <p class="dim">Transcripts: claude, codex, qwen, copilot, kimi, pi,
+  prime-agent, feynman, clanker and dsh keep JSONL;
   opencode and crush keep SQLite (needs the <code>sqlite</code> tag).
   Agents on a watched engine show <code>via &lt;engine&gt;</code>, counted once.</p>
   </section>
@@ -468,8 +468,8 @@ const COMPRESSIBLE = new Map([
   ["gzip", "gzip"],
 ]);
 
-// The same three codings, smallest body of this page first: brotli 3,653,
-// gzip 4,329, zstd 4,566 bytes. The page is a constant, so those sizes are
+// The same three codings, smallest body of this page first: brotli 3,643,
+// gzip 4,328, zstd 4,566 bytes. The page is a constant, so those sizes are
 // constants too, and ranking by them lets a request build only the coding it
 // is about to send instead of all three to compare them. zstd lands behind
 // gzip here because the page is short English words and markup, which is not

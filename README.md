@@ -451,7 +451,7 @@ the OpenSSH named pipe is used when that variable is unset.
 | key | action |
 |---|---|
 | `q` / `ctrl+c` | quit |
-| `esc` | close help / quit |
+| `esc` | close help / go back to engines / quit (whichever is live) |
 | `space` | pause / resume streaming |
 | `p` | probe every engine with a real generation |
 | `t` | toggle compressed timescale + grid |
@@ -628,7 +628,7 @@ follow the run rather than how long the process took.
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows, and so is an absolute one with no `agents.json` under it |
 | `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
-| `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with an `ssh://` target; a run on Linux with one fails at connect |
+| `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with a non-demo `ssh://` target; a run on Linux with one fails at connect |
 | `KIMI_CODE_HOME` | with `--agents`: directory under which kimi's `sessions` are read (default `~/.kimi-code`); a relative value is ignored and named at startup |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset |
 | `NO_COLOR` | strips terminal styling when set to a non-empty value (honored by the terminal renderer, as usual) |
@@ -657,11 +657,12 @@ not reported as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without
 `$TOKTOP_LOG_LEVEL` with `--demo --no-ingest` (and no `--agents`) are named as unused, matching the
 flag warnings, as is a `GAUNTLET_HOME` that is not an absolute path under
 `--agents` (or one with no `agents.json` under it), a relative `XDG_DATA_HOME` while opencode's database is read, and
-a relative `XDG_CONFIG_HOME` with an `ssh://` target. Out-of-range flag values (`--interval 0`, `--interval` below
+a relative `XDG_CONFIG_HOME` with an `ssh://` target outside `--demo`. Out-of-range flag values (`--interval 0`, `--interval` below
 50ms or above 1h, negative `--probe`, `--probe` above 86400, `--frames < 1`
 or above 180 with `--once`, an empty `--repo`, a malformed or duplicated
 `--add` or
-`--ingest`, an `ssh://` URL with a password, path, query, or fragment)
+`--ingest`, an `ssh://` URL with a password, a path other than the root `/`,
+a query, or a fragment)
 abort with exit code 2 instead of being silently adjusted; so do
 out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when `--once` renders, and
 a set-but-invalid `TOKTOP_LOG_LEVEL`. A bare `--interval 1` is rejected

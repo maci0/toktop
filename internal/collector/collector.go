@@ -407,9 +407,9 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		// /api/ps with a 4 MiB number puts those 4 MiB in the error, into
 		// the snapshot, and out again on every frame and on every --json
 		// run, and they are re-sanitized each time. The engine's HTTP status
-		// line rides the same string and is no better (ReadResponse does not
-		// check its bytes), so this is where both are made safe, once, at the
-		// boundary every other engine-supplied string already uses.
+		// line rides the same string, so this is where both are made safe,
+		// once, at the boundary every other engine-supplied string already
+		// uses.
 		ps.Err = core.Snippet([]byte(core.RedactHome(r.err.Error())))
 	case r.m == nil:
 		ps.Err = "empty poll result"

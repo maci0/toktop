@@ -39,9 +39,11 @@ drifts, on a one-off hex in a rule, and on a violet anywhere in the three.
 The type is the same idea: the `--fs-*` steps in `:root` are the only place
 the page writes a size, one per level from `--fs-micro` to `--fs-h1`, and
 `bun test site/` checks the steps descend and that no rule sizes text in
-its own rems. The page has no uppercase, no tracking and no color change on
-a level, so size is the only thing that marks one; a step out of order or a
-size written in a rule is a heading the eye can no longer find.
+its own rems (the wordmark's bare `2rem` inside the `max-width: 640px` query
+is the one exemption it allows). The page has no uppercase, no tracking and
+no color change on a level, so size is the only thing that marks one; a step
+out of order or a size written in a rule is a heading the eye can no longer
+find.
 
 The layout follows the capture it is showing: the four panes under "What it
 shows" are laid out the way the dashboard lays them out, with System running
@@ -99,18 +101,20 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. That ranking is a
 constant list in the Worker rather than a comparison of bodies, because the
-page is a constant too: brotli 3,653 bytes, gzip 4,329, zstd 4,566. zstd
+page is a constant too: brotli 3,643 bytes, gzip 4,328, zstd 4,566. zstd
 lands behind gzip here, so a client that named only `zstd, gzip` still gets
 gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,329 bytes rather than 12,535 bytes in the local Worker response test.
+transfers 4,328 bytes rather than 12,524 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
 Source comments
 in the HTML and CSS stay in `worker.js` and are stripped before the page is
-hashed, compressed, or sent. Every response carries `Vary: Accept-Encoding`,
-so caches never hand a compressed body to a client that cannot decode it.
+hashed, compressed, or sent. Every page response carries
+`Vary: Accept-Encoding` (the `406` included), so caches never hand a compressed
+page to a client that cannot decode it. The image, favicon and health paths
+serve a single fixed representation each and carry no `Vary`.
 
 A coding is built the first time a client asks for it and kept for the
 isolate's life, so a cold isolate that serves brotli pays the brotli build
@@ -136,7 +140,7 @@ Worker spent before writing the response, failures included: a failed request
 is the one a visitor reports, and a timing series that covered only the served
 requests would describe exactly the ones nobody is asking about. A byte-count
 test cannot see a
-regression here: the page can send the same 3,653 bytes slowly. With the
+regression here: the page can send the same 3,643 bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
 has to be added to the page to collect it.
@@ -206,10 +210,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 12,535 bytes identity / 4,329 gzip /
-3,653 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,653 bytes
-plus the 10,577-byte 768w capture, 14,230 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 12,524 bytes identity / 4,328 gzip /
+3,643 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,643 bytes
+plus the 10,577-byte 768w capture, 14,220 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no

@@ -155,6 +155,15 @@ func (m Model) renderHelp() string {
 	return clipBlock(placed, m.w, m.h)
 }
 
+// escLabel names what esc does from the current view. It is one key with
+// three outcomes, so a single fixed description would be wrong on two of them.
+func escLabel(focusAgents bool) string {
+	if focusAgents {
+		return "go back to the engines dashboard"
+	}
+	return "close help / quit"
+}
+
 // helpRows is the in-app key reference. It lists the same keys the footer
 // advertises, under the same conditions: a key with nothing to act on here
 // only earns a notice explaining that, and a reference that listed it anyway
@@ -172,7 +181,10 @@ func (m Model) helpRows() [][2]string {
 	}
 	rows := [][2]string{
 		{"q / ctrl+c", "quit"},
-		{"esc", "close help / quit"},
+		// esc has three jobs, and which one is live depends on the view:
+		// help is up (dismissed by the switch above), the agents dashboard
+		// has focus (returns to engines), otherwise it quits.
+		{"esc", escLabel(m.focusAgents)},
 		{"space", "pause / resume streaming"},
 	}
 	if m.canProbe() {

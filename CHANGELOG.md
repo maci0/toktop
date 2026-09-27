@@ -220,6 +220,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   U+FFFD, a name no other process on the machine spells it as. The host folds
   compose to NFC first, so a host typed in the NFD form a macOS terminal
   supplies is the host already trusted.
+- `esc` is described by what it does from the view you are in. It closed help,
+  returned to the engines dashboard when the agents dashboard had focus, and
+  quit otherwise, and the help screen named only the last two, so a reader who
+  had pressed `a` had no reference telling them `esc` was the way back.
 - `--frames` is named as a wait-only knob under `--once --json`, the way it
   already was under `--once --plain`. Both reports render the last snapshot
   alone, so the count buys the wait before the render and nothing else, and a

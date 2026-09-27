@@ -32,12 +32,13 @@
   `magick` (ImageMagick 7) plus `avifenc` (libavif) for `make site-assets`,
   which rebuilds the captures under `site/public/`. Nothing in `make pr` runs
   them, so a machine without them passes every gate and only fails when it
-  tries to recapture. `make site-assets` records the two versions in
-  `site/encoders.txt` and commits them with the captures; a machine whose
-  encoders disagree with that record is refused, so a recapture cannot
-  quietly rewrite every shipped capture with a different encoder's bytes.
-  Bumping them is a deliberate act: delete `site/encoders.txt`, recapture, and
-  commit the new record.
+  tries to recapture. `make site-assets` writes the two versions to
+  `site/encoders.txt`, which is not tracked yet, so the check against it is
+  inert until the first recapture commits the record; from then on a machine
+  whose encoders disagree with it is refused, so a recapture cannot quietly
+  rewrite every shipped capture with a different encoder's bytes. Bumping
+  them is a deliberate act: delete `site/encoders.txt`, recapture, and commit
+  the new record.
 - Network access on first run. `make` pins `GOTOOLCHAIN` to the `go.mod`
   version, so a host with a different compiler downloads that toolchain; the
   first `make lint` and `make vet-cross` download the `staticcheck` tool the
@@ -99,8 +100,9 @@ exec over a running image, so the dashboard exits instead.
 ## Regenerating the README screenshot
 
 `docs/images/dashboard.png` is captured from a live demo frame under tmux
-and rendered by `scripts/screenshot.py`. This is the only workflow that
-needs `tmux`, `magick` and `avifenc`; see Prerequisites.
+and rendered by `scripts/screenshot.py`. This is the only workflow that needs
+`tmux`; `magick` and `avifenc` are shared with `make site-assets`, which needs
+no tmux. See Prerequisites.
 
 ```
 make build VERSION=0.10.0
@@ -334,9 +336,12 @@ and verified breaks the checksum they recorded. Cut a new version instead.
 The publish step uploads every top-level file `dist/` holds, so `make release`
 first runs `dist-clean`, which deletes the regular files an earlier `make cover`
 or a previous local run left behind. Directories such as the site deploy lock
-and the nested `dist/bin` and `dist/repro` output are not touched, and
-anything named `toktop_*` or `toktop-*` is kept, so a `make -j release` cannot
-drop the SBOM another prerequisite just wrote.
+and the nested `dist/bin` and `dist/repro` output are not touched, and the keep
+list is version-scoped: `toktop_<version>_*` and `toktop-sbom-<version>*` for
+this `VERSION` only. An artifact from an earlier version is dropped, and so is
+`toktop_<version>_checksums.tar.gz`, which the tar step is about to rewrite;
+both are deliberate. The version scoping is what stops a `make -j release`
+from dropping the SBOM another prerequisite just wrote.
 
 ## Recovering a release
 
