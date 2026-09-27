@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -156,8 +157,10 @@ Environment (a flag always wins over the variable it mirrors):
                           is consulted first, and an explicit --bearer (even
                           empty) suppresses both
   TOKTOP_SSH_PASSWORD     ssh password for ssh:// targets, for headless runs
-  TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal)
-  TOKTOP_LINES            --once frame height, 21-512 (default: the terminal)
+  TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal,
+                          else 120 when stdout is not one)
+  TOKTOP_LINES            --once frame height, 21-512 (default: the terminal,
+                          else 38 when stdout is not one)
   TOKTOP_LOG_LEVEL        audit log floor for every subsystem that writes one
                           (engine, ssh, ingest): debug, info, warn, error
   GAUNTLET_HOME           directory holding agents.json (--agents), default
@@ -214,6 +217,24 @@ func flagParseError(err error) string {
 		return needsArg + longFlag(name)
 	}
 	return msg
+}
+
+// missingUnitHint names the one mistake behind --interval's bare "parse
+// error": a value with no unit. The flag package reads a number there as
+// nanoseconds and says nothing about it, so `--interval 1` produced a message
+// naming neither the flag's expectation nor a value that would work. The hint
+// is appended only when the value really is a bare number; one that carries a
+// unit and still failed was misspelled, and the unit is not the answer.
+func missingUnitHint(err error) string {
+	const prefix = "invalid value \""
+	raw, rest, ok := strings.Cut(strings.TrimPrefix(err.Error(), prefix), "\"")
+	if !ok || !strings.HasPrefix(rest, " for flag -interval: ") {
+		return ""
+	}
+	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
+		return ""
+	}
+	return " (a bare number is nanoseconds; use 1s or 500ms)"
 }
 
 // longFlag renders a flag name the help screen and the README use. The flag

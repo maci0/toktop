@@ -216,11 +216,13 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 	if interval <= 0 {
 		return fmt.Errorf("--interval must be positive, got %s", interval)
 	}
+	// A value under a millisecond is one written without a usable unit. The
+	// flag package rejects a bare number at Parse (missingUnitHint names the
+	// unit there), so what lands here is a spelled-out unit that is simply too
+	// small; the parenthetical states the reading rule, not a claim about this
+	// particular value.
 	if interval < intervalMin {
-		if interval < time.Millisecond {
-			return fmt.Errorf("--interval must be >= %s, got %s (bare numbers are nanoseconds; use 1s or 500ms)", intervalMin, interval)
-		}
-		return fmt.Errorf("--interval must be >= %s, got %s", intervalMin, interval)
+		return fmt.Errorf("--interval must be >= %s, got %s (a bare number reads as nanoseconds; use 1s or 500ms)", intervalMin, interval)
 	}
 	if interval > intervalMax {
 		return fmt.Errorf("--interval must be <= 1h, got %s", interval)

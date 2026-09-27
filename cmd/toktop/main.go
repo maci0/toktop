@@ -64,7 +64,7 @@ func main() {
 	// flagParseError restores the long form so the error names the flag as
 	// the help screen and the README document it.
 	if err := topFS.Parse(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %s\n", flagParseError(err))
+		fmt.Fprintf(os.Stderr, "toktop: %s%s\n", flagParseError(err), missingUnitHint(err))
 		usage(os.Stderr)
 		os.Exit(2)
 	}
