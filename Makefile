@@ -97,7 +97,29 @@ SHELL := /bin/bash
 # database lives inside the watched project. Build with TAGS= to leave the
 # driver out entirely.
 TAGS    ?= sqlite
-GOTAGS  := $(if $(TAGS),-tags $(TAGS),)
+# timetzdata embeds the IANA zone database in every binary. The header clock,
+# the feed timestamps and the text report all render through time.Local
+# (internal/ui/header.go, feed.go, plain.go), and a released binary resolves
+# that against the host's zone files: with none present (a scratch or distroless
+# container, a user who installed the download and has no Go toolchain) the Go
+# runtime falls back to UTC in silence, so an operator in Europe/Warsaw reads a
+# clock two hours behind and a feed whose events are stamped at instants they
+# never sent. Embedding the database costs about 440 KiB and removes both the
+# missing files and the builder's tzdata version from the artifact, and the
+# toolchain that supplies it is already pinned by GOTOOLCHAIN above. The zone
+# files on a host that has them still win, so nothing changes for a normal
+# desktop install.
+# It is a build tag of its own, never part of TAGS: TAGS is the driver gate
+# (`make TAGS=` builds without SQLite), and a build that silently lost its zone
+# database to that switch would read as a deliberate choice.
+ZONE_TAG := timetzdata
+# go's -tags is one flag, so a second -tags would replace the first rather
+# than add to it; the two lists are joined into a single value.
+GOTAGS  := -tags "$(strip $(TAGS) $(ZONE_TAG))"
+# The other half of the two-tag gate: the same run without TAGS, so the zone
+# database is in the test binary too and a test cannot pass against a runtime
+# that resolves time.Local differently from the release.
+GOTAGS_BARE := -tags "$(ZONE_TAG)"
 # Race detector is on by default so the loop matches `make test` / CI.
 # RACE=0 skips it (and the C compiler) for a faster edit cycle.
 RACE    ?= 1
@@ -271,8 +293,8 @@ NEED_CC = cc="$${CC:-}"; \
 .PHONY: test
 test: ## run all tests shuffled (both sqlite tag halves); RACE=0 skips -race
 	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
-	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(race_flag)-shuffle=on ./...
-	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on ./agentusage/...
+	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS_BARE) $(race_flag)-shuffle=on ./...
+	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS) $(race_flag)-shuffle=on ./agentusage/...
 
 # Same flags and toolchain as `make test`. PKG is required; RUN (or TEST) and
 # TESTTAGS are optional. Unset TESTTAGS on ./agentusage runs both halves of the
@@ -293,10 +315,10 @@ test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite
 	fi
 	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
 	@if [ -n "$(RUN_TO_CHECK)" ]; then $(CHECK_RUN_MATCHES); fi
-	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS) )$(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)"
+	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags "$(strip $(TESTTAGS) $(ZONE_TAG))"$(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)"
 	@if [ -n "$(BOTH_HALVES)" ]; then \
-		echo "make test-pkg: also running -tags sqlite (set TESTTAGS to run one half)"; \
-		CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags sqlite $(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)" || exit 1; \
+		echo "make test-pkg: also running the tagged half (set TESTTAGS to run one half)"; \
+		CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS) $(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)" || exit 1; \
 	fi
 
 # The package names under which an unset TESTTAGS means "run both halves of the
@@ -317,13 +339,13 @@ BOTH_HALVES = $(if $(TESTTAGS),,$(filter \
 # TEST_HALF is the tags of the half under test, set by the caller; the second
 # line is the sqlite half, which only runs when TESTTAGS is unset.
 define CHECK_RUN_MATCHES
-matched() { tags=""; [ -n "$$1" ] && tags="-tags $$1"; $(GO) test -mod=readonly $$tags -list "$(RUN_PATTERN)" "$(PKG)" 2>/dev/null | grep -E '^(Test|Example|Benchmark|Fuzz)' || true; }; \
+matched() { tags="-tags $(ZONE_TAG)"; [ -n "$$1" ] && tags="-tags $$1 $(ZONE_TAG)"; $(GO) test -mod=readonly $$tags -list "$(RUN_PATTERN)" "$(PKG)" 2>/dev/null | grep -E '^(Test|Example|Benchmark|Fuzz)' || true; }; \
 	names=$$(matched "$(TESTTAGS)"); \
 	if [ -z "$$names" ] && [ -n "$(BOTH_HALVES)" ]; then names=$$(matched sqlite); fi; \
 	if [ -z "$$names" ]; then \
 		echo "make test-pkg: no test in $(PKG) matches RUN=$(RUN_PATTERN); the run would report success without testing anything" >&2; \
-		all=$$($(GO) test -mod=readonly $(if $(TESTTAGS),-tags $(TESTTAGS)) -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); \
-		if [ -n "$(BOTH_HALVES)" ]; then all=$${all}$$'\n'$$($(GO) test -mod=readonly -tags sqlite -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); fi; \
+		all=$$($(GO) test -mod=readonly -tags "$(strip $(TESTTAGS) $(ZONE_TAG))" -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); \
+		if [ -n "$(BOTH_HALVES)" ]; then all=$${all}$$'\n'$$($(GO) test -mod=readonly $(GOTAGS) -list '.*' "$(PKG)" 2>/dev/null | grep -Eo '^(Test|Example|Benchmark|Fuzz)[A-Za-z0-9_]*' || true); fi; \
 		near=$$(printf '%s\n' "$$all" | grep -F "$(RUN_PATTERN)" || true); \
 		if [ -n "$$near" ]; then echo "  close: $$near" >&2; fi; \
 		echo "  list the names with: $(GO) test -list '.*' $(PKG)" >&2; \
@@ -347,8 +369,8 @@ sbom: ## generate CycloneDX SBOM of all dependencies into dist/
 
 .PHONY: vet
 vet: ## run go vet (both halves of the sqlite tag gate)
-	$(GO) vet -mod=readonly ./...
-	$(GO) vet -mod=readonly -tags sqlite ./agentusage/...
+	$(GO) vet -mod=readonly $(GOTAGS_BARE) ./...
+	$(GO) vet -mod=readonly $(GOTAGS) ./agentusage/...
 
 # Same per-platform gate release.yml runs before shipping; PLATFORMS is the
 # single source of truth so CI and local checks cannot list different targets.
@@ -361,22 +383,22 @@ vet-cross: ## vet + staticcheck every release platform from PLATFORMS
 	@for target in $(PLATFORMS); do \
 		goos=$${target%/*}; goarch=$${target#*/}; \
 		echo "checking $$goos/$$goarch"; \
-		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly ./... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly -tags sqlite ./agentusage/... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck ./... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck -tags sqlite ./agentusage/... || exit 1; \
+		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(GOTAGS_BARE) ./... || exit 1; \
+		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(GOTAGS) ./agentusage/... || exit 1; \
+		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS_BARE) ./... || exit 1; \
+		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS) ./agentusage/... || exit 1; \
 	done
 	@rm -rf $(DIST)/bin
 
 .PHONY: lint
 lint: ## run staticcheck (both halves of the sqlite tag gate)
-	$(STATICCHECK) ./...
-	$(STATICCHECK) -tags sqlite ./agentusage/...
+	$(STATICCHECK) $(GOTAGS_BARE) ./...
+	$(STATICCHECK) $(GOTAGS) ./agentusage/...
 
 .PHONY: govulncheck
 govulncheck: ## run govulncheck at the GOVULNCHECK pin (same pin as CI)
 	$(GO) run $(GOVULNCHECK) ./...
-	$(GO) run $(GOVULNCHECK) -tags sqlite ./...
+	$(GO) run $(GOVULNCHECK) $(GOTAGS) ./...
 
 # The dashboard captures under site/public are build outputs of
 # docs/images/dashboard.png, and site/worker.js names every one of them (the
