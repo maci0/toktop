@@ -166,7 +166,7 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets bool) {
 
 // warnUnusedEnv names secret and log-level variables that are set but will
 // not be read in this mode, matching warnIgnoredFlags for the flag form.
-func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
+func warnUnusedEnv(bearerFlag, demo, noIngest, agents bool, nAdd, nRemote int) {
 	if demo || nRemote == 0 {
 		if os.Getenv(remote.PasswordEnv) != "" {
 			if demo {
@@ -188,11 +188,11 @@ func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 		}
 	}
 	// The audit logger is not the ingest endpoint's: the collector, the ssh
-	// client and the attach path all build one from the same variable, so
-	// --no-ingest alone leaves the level in force. Only a demo run, which
-	// measures nothing real and has no ssh target, builds no logger at all
-	// once the endpoint is off.
-	if demo && noIngest && os.Getenv(logcfg.LevelEnv) != "" {
+	// client, the agent watch and the attach path all build one from the same
+	// variable, so --no-ingest alone leaves the level in force. Only a demo run,
+	// which measures no engine and has no ssh target, builds no logger at all
+	// once the endpoint and the agent watch are both off.
+	if demo && noIngest && !agents && os.Getenv(logcfg.LevelEnv) != "" {
 		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --demo --no-ingest; no audit log is written in that run\n", logcfg.LevelEnv)
 	}
 }

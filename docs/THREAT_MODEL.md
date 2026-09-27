@@ -1039,10 +1039,19 @@ Recorded as threats with locations; fixes do not happen in this document:
     30): connect failure and success (:215 warn, :221 info), a peer that
     stopped answering keepalives (:344), an unanswered channel open (:517),
     and a lost connection (:745 error).
-  - the engine collector (`internal/collector/collector.go`, 31, one line per
-    engine whose state changed: `logHealth` at :453, called warn for not
-    answering and info for answering again at :431-432, carrying label, addr,
-    reason and down-for).
+  - the engine collector (`internal/collector/collector.go`, 36, one line per
+    engine that crossed a boundary: `logHealth` at :549, called warn for not
+    answering and info for answering again at :396-397, carrying label, addr,
+    reason and down-for, and `logSlow` at :570, called warn for a poll that
+    answered past `slowPollThreshold` (:543, half of provider.PollTimeout) and
+    info when the next one answers in time, carrying label, addr, duration and
+    slow-for. Both latches are per endpoint, so a run of them writes one line,
+    and a failed poll clears the slow latch, because the outage line is the
+    louder signal and the next answer is measured fresh).
+  - the agent watch (`aw.SetOnError` in cmd/toktop/main.go): a condition the
+    watcher cannot return, warn, with the error text. The dedup latch that
+    keeps it to one line per distinct condition lives in the watcher
+    (agentwatch.go, `engineError`), not here.
   - the `--add` attach path (`var attachLog = logcfg.Logger`,
     cmd/toktop/attach.go, 29): a refused bearer and an unrecognized endpoint
     (:49, :55), an ssh target that was not attached and one that was (:80,

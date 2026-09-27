@@ -148,7 +148,7 @@ func main() {
 	warnUnknownEnv()
 	warnIgnoredFlags(explicit, f, len(f.adds), len(remoteTargets))
 	warnIgnoredFrameEnv(f.once, f.plain, f.jsonOut)
-	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, len(f.adds), len(remoteTargets))
+	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, f.agents, len(f.adds), len(remoteTargets))
 	warnIgnoredGauntletHome(f.agents)
 	warnIgnoredXDGHome(opencodeOn, !f.demo && len(remoteTargets) > 0)
 	if !f.noIngest {
@@ -280,7 +280,12 @@ func main() {
 		// Run has no error return, so an engine address that will not parse
 		// is reported here. Left unreported it silently double counts every
 		// agent's tokens against the engine it is already generating through.
+		// The UI shows the condition; the audit log keeps it, because the
+		// banner is gone with the run and a watch that stopped following an
+		// agent looks the same as one that never saw it.
 		aw.SetOnError(func(err error) {
+			logcfg.Logger().Warn("toktop: agent watch failed",
+				"error", logcfg.Field(core.RedactHome(err.Error()), 256))
 			select {
 			case feedErr <- "agent watch: " + err.Error():
 			default:

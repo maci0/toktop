@@ -30,6 +30,7 @@ type fakeProvider struct {
 	kind  string // defaults to core.KindOllama
 	m     *provider.Metrics
 	err   error
+	delay time.Duration // how long Poll takes before it answers
 }
 
 func (f *fakeProvider) asProvider() provider.Provider {
@@ -40,7 +41,14 @@ func (f *fakeProvider) asProvider() provider.Provider {
 	if kind == "" {
 		kind = core.KindOllama
 	}
-	return provider.Provider{Label: f.label, Addr: addr, Kind: kind, Poll: func(context.Context) (*provider.Metrics, error) {
+	return provider.Provider{Label: f.label, Addr: addr, Kind: kind, Poll: func(ctx context.Context) (*provider.Metrics, error) {
+		if f.delay > 0 {
+			select {
+			case <-time.After(f.delay):
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
 		return f.m, f.err
 	}}
 }

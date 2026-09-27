@@ -580,7 +580,7 @@ and the timestamps do not; the JSON report then omits `demo_origin`.
 | `TOKTOP_BEARER` | bearer token fallback for `--bearer` (checked after `OMNIROUTE_API_KEY`) |
 | `TOKTOP_SSH_PASSWORD` | ssh password for headless runs; otherwise an interactive prompt. A trailing newline (from `$(cat file)`) is stripped, everything else is sent as typed. Set but empty is named rather than passed over: a headless run fails saying so, and a terminal run says it is prompting instead |
 | `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. `--once --plain` renders no sized frame, so both are named as unused and never validated |
-| `TOKTOP_LOG_LEVEL` | audit log floor for every subsystem that writes one (ingest endpoint, engine collector, ssh client, `--add` attach): `debug`, `info` (default), `warn`, or `error`; a set-but-invalid value aborts with exit code 2 |
+| `TOKTOP_LOG_LEVEL` | audit log floor for every subsystem that writes one (ingest endpoint, engine collector, ssh client, `--add` attach, agent watch): `debug`, `info` (default), `warn`, or `error`; a set-but-invalid value aborts with exit code 2 |
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows, and so is an absolute one with no `agents.json` under it |
@@ -610,7 +610,7 @@ variables are reported at startup, so a typo fails loudly instead of doing
 nothing (`TOKTOP_SCREENSHOT_FONT` is recognized so a developer export is
 not reported as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without
 `--add`, `$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and
-`$TOKTOP_LOG_LEVEL` with `--demo --no-ingest` are named as unused, matching the
+`$TOKTOP_LOG_LEVEL` with `--demo --no-ingest` (and no `--agents`) are named as unused, matching the
 flag warnings, as is a `GAUNTLET_HOME` that is not an absolute path under
 `--agents` (or one with no `agents.json` under it), a relative `XDG_DATA_HOME` while opencode's database is read, and
 a relative `XDG_CONFIG_HOME` with an `ssh://` target. Out-of-range flag values (`--interval 0`, `--interval` below

@@ -82,6 +82,11 @@ type Collector struct {
 	// outage started and what it said, so the audit log records an engine
 	// going away and coming back once each instead of once per poll.
 	down map[string]downState
+	// slow latches the endpoints whose last successful poll ran past
+	// slowPollThreshold, with when the first one did, for the same reason
+	// down exists: a poll interval of a second would otherwise write a line
+	// per engine per second while an engine is merely struggling.
+	slow map[string]time.Time
 
 	probeMu       sync.Mutex // guards the probe fan-out state below
 	lastProbeWave time.Time  // wave gate: see probeWaveGap
@@ -133,6 +138,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		kvPct:         map[string]float64{},
 		agentIDs:      map[string]time.Time{},
 		down:          map[string]downState{},
+		slow:          map[string]time.Time{},
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
 		now:           time.Now,
@@ -316,10 +322,13 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
 }
 
 // result is one engine's poll outcome, paired so the fan-out can write each
-// engine's slot without a lock.
+// engine's slot without a lock. took is wall time, not the collector clock:
+// a demo or test run pins now to a seeded timeline, and a poll measured
+// against that would report every engine as instant.
 type result struct {
-	m   *provider.Metrics
-	err error
+	m    *provider.Metrics
+	err  error
+	took time.Duration
 }
 
 func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
@@ -332,8 +341,9 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			// cancels in-flight generations.
 			pctx, cancel := context.WithTimeout(ctx, provider.PollTimeout)
 			defer cancel()
+			started := time.Now()
 			m, err := p.Poll(pctx)
-			results[i] = result{m, err}
+			results[i] = result{m, err, time.Since(started)}
 		})
 	}
 	wg.Wait()
@@ -362,17 +372,21 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// needs named, and the dashboard's own "down" marker is replaced a frame
 	// later. Collected, not written inline, so a slow stderr cannot stall the
 	// poll loop the snapshot depends on.
-	var recovered, failed []healthChange
+	var failed, recovered, slow, fast []healthChange
 	snap.Agents = slices.Clone(c.agents)
 	snap.Probes = slices.Clone(c.probes)
 	snap.Sys = cloneSys(sys)
 	for i, r := range results {
-		ps, change, changed := c.providerSnapshot(c.providers[i], r, now, byPort)
-		if changed {
-			// The two kinds are exclusive: an engine either answered or did not.
-			if ps.Err != "" {
+		ps, changes := c.providerSnapshot(c.providers[i], r, now, byPort)
+		for _, change := range changes {
+			switch {
+			case change.kind == changeSlow:
+				slow = append(slow, change)
+			case change.kind == changeFast:
+				fast = append(fast, change)
+			case ps.Err != "":
 				failed = append(failed, change)
-			} else {
+			default:
 				recovered = append(recovered, change)
 			}
 		}
@@ -381,6 +395,8 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	c.mu.Unlock()
 	logHealth(failed, slog.LevelWarn, "toktop: engine not answering")
 	logHealth(recovered, slog.LevelInfo, "toktop: engine answering again")
+	logSlow(slow, slog.LevelWarn, "toktop: engine poll slow")
+	logSlow(fast, slog.LevelInfo, "toktop: engine poll back to normal")
 	// Send outside the critical section: a stalled consumer must neither pin
 	// emit past cancellation nor freeze RecordAgent/RecordProbe/ProbeAll
 	// behind c.mu while this send waits for buffer space.
@@ -394,12 +410,12 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 // updating the per-key baselines, history rings and health state that entry is
 // keyed on. Call with c.mu held.
 //
-// The health transition the poll caused is returned separately so emit can
+// The health transitions the poll caused are returned separately so emit can
 // collect the whole sweep's transitions and log them after the lock: an engine
 // going away is the dependency failure an operator needs named, and a slow
-// stderr must not stall the poll loop the snapshot depends on. changed is
-// false when this engine did not cross the answering boundary.
-func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, change healthChange, changed bool) {
+// stderr must not stall the poll loop the snapshot depends on. The list is
+// empty when this engine crossed neither boundary.
+func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, changes []healthChange) {
 	ps = core.ProviderSnapshot{
 		Label: p.Label,
 		Kind:  p.Kind,
@@ -424,7 +440,23 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		ps.OK = true
 		if was, ok := c.down[key]; ok {
 			delete(c.down, key)
-			change, changed = healthChange{p, was, now.Sub(was.since)}, true
+			changes = append(changes, healthChange{
+				p: p, kind: changeUp, reason: was.reason, since: was.since, heldFor: now.Sub(was.since),
+			})
+		}
+		// A poll that answered inside the budget is also the end of a slow
+		// run, so the latch is cleared even when the answer arrived late in
+		// the previous poll. Emptied without a line: a failed poll has its
+		// own outage line, and a recovery from one already says the engine
+		// came back.
+		if r.took < slowPollThreshold {
+			if since, ok := c.slow[key]; ok {
+				delete(c.slow, key)
+				changes = append(changes, healthChange{p: p, kind: changeFast, since: since, heldFor: now.Sub(since)})
+			}
+		} else if _, ok := c.slow[key]; !ok {
+			c.slow[key] = now
+			changes = append(changes, healthChange{p: p, kind: changeSlow, since: now, took: r.took})
 		}
 		ps.Models = r.m.Models
 		ps.Running = r.m.Running
@@ -462,18 +494,53 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 	if ps.Err != "" {
 		if _, ok := c.down[key]; !ok {
 			c.down[key] = downState{since: now, reason: ps.Err}
-			change, changed = healthChange{p, downState{now, ps.Err}, 0}, true
+			changes = append(changes, healthChange{p: p, kind: changeDown, reason: ps.Err, since: now})
 		}
+		// The outage supersedes any slow run in progress: the engine is not
+		// answering, and its next answer is measured fresh, so a stale latch
+		// cannot report a slowdown that ended before the outage began.
+		delete(c.slow, key)
 	}
-	return ps, change, changed
+	return ps, changes
 }
 
-// healthChange is one engine crossing into or out of the answering state.
+// changeKind is which boundary an engine crossed on the last poll. A poll can
+// cross two at once (an engine recovers and comes back slow), so a change
+// carries its own kind rather than being inferred from the snapshot entry.
+type changeKind uint8
+
+const (
+	// changeDown and changeUp are the answering boundary: a poll that
+	// failed, and one that answered after failing.
+	changeDown changeKind = iota
+	changeUp
+	// changeSlow and changeFast are the latency boundary: a poll that
+	// answered but took too long, and one that answered in time again.
+	changeSlow
+	changeFast
+)
+
+// healthChange is one engine crossing the answering or the latency boundary.
+// reason is the failure text that started an answering run, so the recovery
+// line names the outage it ends. took is the duration that tripped the latency
+// boundary, and is zero on the change that ends the run. heldFor is how long
+// the run lasted when the change was reported.
 type healthChange struct {
 	p       provider.Provider
-	state   downState
-	downFor time.Duration
+	kind    changeKind
+	reason  string
+	since   time.Time
+	heldFor time.Duration
+	took    time.Duration
 }
+
+// slowPollThreshold is the duration past which a poll that still answered is
+// audited. Half of provider.PollTimeout: an engine that needs more of the
+// budget than that is on its way to the timeout that turns the same engine
+// into an outage line, and until that timeout the dashboard reports it
+// healthy, since a slow answer and a fast one are the same green. A var so
+// tests can shrink it instead of sleeping past the real one.
+var slowPollThreshold = provider.PollTimeout / 2
 
 // logHealth writes one audit line per engine that changed state this poll. The
 // transitions are already deduplicated in emit, so a fleet of engines that is
@@ -488,10 +555,33 @@ func logHealth(changes []healthChange, level slog.Level, msg string) {
 		attrs := []any{
 			"engine", logcfg.Field(ch.p.Label, 128),
 			"addr", logcfg.Field(ch.p.Addr, 256),
-			"reason", logcfg.Field(ch.state.reason, 256),
+			"reason", logcfg.Field(ch.reason, 256),
 		}
-		if ch.downFor > 0 {
-			attrs = append(attrs, "down_for", ch.downFor.Round(time.Millisecond))
+		if ch.heldFor > 0 {
+			attrs = append(attrs, "down_for", ch.heldFor.Round(time.Millisecond))
+		}
+		lg.Log(context.Background(), level, msg, attrs...)
+	}
+}
+
+// logSlow writes one audit line per engine that crossed the latency boundary.
+// It carries the duration that tripped it, which no snapshot exposes: the
+// dashboard shows whether an engine answered, never how long the answer took.
+func logSlow(changes []healthChange, level slog.Level, msg string) {
+	if len(changes) == 0 {
+		return
+	}
+	lg := audit()
+	for _, ch := range changes {
+		attrs := []any{
+			"engine", logcfg.Field(ch.p.Label, 128),
+			"addr", logcfg.Field(ch.p.Addr, 256),
+		}
+		if ch.took > 0 {
+			attrs = append(attrs, "duration", ch.took.Round(time.Millisecond))
+		}
+		if ch.heldFor > 0 {
+			attrs = append(attrs, "slow_for", ch.heldFor.Round(time.Millisecond))
 		}
 		lg.Log(context.Background(), level, msg, attrs...)
 	}

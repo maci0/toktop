@@ -1054,6 +1054,7 @@ func TestWarnUnusedEnv(t *testing.T) {
 		bearerFlag bool
 		demo       bool
 		noIngest   bool
+		agents     bool
 		nAdd       int
 		nRemote    int
 		sshPass    string
@@ -1072,6 +1073,7 @@ func TestWarnUnusedEnv(t *testing.T) {
 		{name: "bearer env with demo warns", bearer: "x", demo: true, nAdd: 1, wantSub: "TOKTOP_BEARER"},
 		{name: "bearer flag suppresses env warning", bearerFlag: true, bearer: "x"},
 		{name: "log level with demo and no-ingest warns", logLevel: "warn", demo: true, noIngest: true, wantSub: "TOKTOP_LOG_LEVEL"},
+		{name: "log level with demo, no-ingest and agents silent", logLevel: "warn", demo: true, noIngest: true, agents: true},
 		{name: "log level with no-ingest but a collector silent", logLevel: "warn", noIngest: true},
 		{name: "log level with ingest silent", logLevel: "warn"},
 	}
@@ -1082,7 +1084,7 @@ func TestWarnUnusedEnv(t *testing.T) {
 			t.Setenv("TOKTOP_BEARER", tt.bearer)
 			t.Setenv("TOKTOP_LOG_LEVEL", tt.logLevel)
 			got := captureStderr(t, func() {
-				warnUnusedEnv(tt.bearerFlag, tt.demo, tt.noIngest, tt.nAdd, tt.nRemote)
+				warnUnusedEnv(tt.bearerFlag, tt.demo, tt.noIngest, tt.agents, tt.nAdd, tt.nRemote)
 			})
 			if tt.wantSub == "" {
 				if got != "" {
