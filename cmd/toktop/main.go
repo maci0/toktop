@@ -186,6 +186,14 @@ func main() {
 	case "version":
 		os.Exit(runVersion(os.Stdout, nil))
 	}
+	// Targets are parsed here, before the TTY check below, so a malformed
+	// ssh:// URL is named as the mistake it is rather than reported as
+	// "stdout is not a terminal" when the run is piped or redirected.
+	targets, err := parseTargets(remoteTargets)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "toktop:", err)
+		os.Exit(2)
+	}
 
 	explicit := map[string]bool{}
 	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
@@ -287,12 +295,7 @@ func main() {
 		}
 
 		var sysWrap func() core.SysSample
-		for _, raw := range remoteTargets {
-			tgt, err := remote.ParseTarget(raw)
-			if err != nil {
-				fmt.Fprintln(os.Stderr, "toktop:", err)
-				os.Exit(2)
-			}
+		for _, tgt := range targets {
 			// Only when set: an empty flag must keep the IdentityFile
 			// resolved from ~/.ssh/config by ParseTarget.
 			if f.sshKey != "" {
@@ -701,17 +704,17 @@ func runHelp(out io.Writer, args []string) int {
 		}
 		return outputStatus(usage(out))
 	}
+	// A topic names the command whose help applies, so the extra-argument
+	// message points at the screen that would have answered it.
 	switch args[0] {
 	case "update":
 		if len(args) > 1 {
-			fmt.Fprintf(os.Stderr, "toktop help: unexpected argument %q (see 'toktop --help')\n", args[1])
-			return 2
+			return rejectExtra("toktop update", args[1])
 		}
 		return runUpdate(context.Background(), out, []string{"--help"})
 	case "version":
 		if len(args) > 1 {
-			fmt.Fprintf(os.Stderr, "toktop help: unexpected argument %q (see 'toktop --help')\n", args[1])
-			return 2
+			return rejectExtra("toktop version", args[1])
 		}
 		return outputStatus(usage(out))
 	}
@@ -771,12 +774,28 @@ func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 	return "", remotes, nil
 }
 
+// parseTargets resolves every ssh:// target up front. A bad URL is a usage
+// error, and the caller is still deciding whether stdout is a terminal, so
+// parsing here keeps the two complaints from competing.
+func parseTargets(raws []string) ([]remote.Target, error) {
+	targets := make([]remote.Target, 0, len(raws))
+	for _, raw := range raws {
+		tgt, err := remote.ParseTarget(raw)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, tgt)
+	}
+	return targets, nil
+}
+
 // unexpectedArg names the leftover and how to fix it. Only http(s) URLs
-// suggest --add; bare words point at --help.
+// suggest --add; a subcommand names itself, because the first-argument
+// dispatch is what recognized it; bare words point at --help.
 func unexpectedArg(arg string) error {
 	switch {
-	case arg == "update":
-		return fmt.Errorf("toktop: unexpected argument %q (the update subcommand must be first: toktop update)", arg)
+	case arg == "update", arg == "help", arg == "version":
+		return fmt.Errorf("toktop: unexpected argument %q (the %s command must come first: toktop %s)", arg, arg, arg)
 	case strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://"):
 		return fmt.Errorf("toktop: unexpected argument %q (did you mean --add %s?)", arg, arg)
 	default:

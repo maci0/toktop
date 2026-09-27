@@ -836,8 +836,8 @@ func TestRunHelp(t *testing.T) {
 		if out.Len() != 0 {
 			t.Fatalf("runHelp(update extra) wrote %q to stdout", out.String())
 		}
-		if !strings.Contains(got, "extra") || !strings.Contains(got, "toktop --help") {
-			t.Fatalf("stderr = %q, want extra and --help", got)
+		if !strings.Contains(got, "extra") || !strings.Contains(got, "toktop update --help") {
+			t.Fatalf("stderr = %q, want extra and the update help", got)
 		}
 	})
 	t.Run("extra after version topic is a usage error", func(t *testing.T) {
@@ -850,8 +850,8 @@ func TestRunHelp(t *testing.T) {
 		if out.Len() != 0 {
 			t.Fatalf("runHelp(version extra) wrote %q to stdout", out.String())
 		}
-		if !strings.Contains(got, "extra") || !strings.Contains(got, "toktop --help") {
-			t.Fatalf("stderr = %q, want extra and --help", got)
+		if !strings.Contains(got, "extra") || !strings.Contains(got, "toktop version --help") {
+			t.Fatalf("stderr = %q, want extra and the version help", got)
 		}
 	})
 	t.Run("help flag variants print top-level help", func(t *testing.T) {
@@ -939,6 +939,8 @@ func TestInterpretArgs(t *testing.T) {
 		{name: "https url hints --add", args: []string{"https://example:8000"}, wantErr: "--add"},
 		{name: "bare word points at --help", args: []string{"helpme"}, wantErr: "toktop --help"},
 		{name: "update not first", args: []string{"update"}, wantErr: "toktop update"},
+		{name: "help not first", args: []string{"ssh://a", "help"}, wantErr: "toktop help"},
+		{name: "version not first", args: []string{"ssh://a", "version"}, wantErr: "toktop version"},
 		{name: "ssh then junk", args: []string{"ssh://a", "nope"}, wantErr: "toktop --help"},
 	}
 	for _, tt := range tests {
@@ -964,6 +966,26 @@ func TestInterpretArgs(t *testing.T) {
 				t.Fatalf("remotes = %v, want %d", remotes, tt.wantN)
 			}
 		})
+	}
+}
+
+func TestParseTargets(t *testing.T) {
+	if got, err := parseTargets(nil); err != nil || len(got) != 0 {
+		t.Fatalf("parseTargets(nil) = %v, %v; want no targets and no error", got, err)
+	}
+	got, err := parseTargets([]string{"ssh://maci@box:2222", "ssh://other"})
+	if err != nil {
+		t.Fatalf("parseTargets(valid) = %v, want nil", err)
+	}
+	if len(got) != 2 || got[0].Host != "box" || got[0].Port != 2222 {
+		t.Fatalf("parseTargets(valid) = %+v, want box:2222 and other", got)
+	}
+	// A bad target must be refused here, before anything asks whether stdout
+	// is a terminal: a redirected run would otherwise blame the terminal.
+	for _, bad := range []string{"ssh://", "ssh://user:secret@box", "ssh://a b"} {
+		if _, err := parseTargets([]string{bad}); err == nil {
+			t.Fatalf("parseTargets(%q) = nil error, want rejection", bad)
+		}
 	}
 }
 
