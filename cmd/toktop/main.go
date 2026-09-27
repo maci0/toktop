@@ -573,7 +573,10 @@ func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, n
 	}
 	if f.once {
 		b.WriteString(" once")
-		if f.plain {
+		// Only the report that is actually rendered is named: --json
+		// replaces the text report, so a line reading "once plain json"
+		// claims a knob is in force that the run ignored.
+		if f.plain && !f.jsonOut {
 			b.WriteString(" plain")
 		}
 		if f.jsonOut {

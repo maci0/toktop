@@ -22,6 +22,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `toktop update --repo` named a malformed repository as `repo "x" must be
+  owner/name` and exited without the usage screen, while every other usage
+  error in that subcommand names its flag in the long form the help screen
+  documents and prints the screen underneath. The flag is now named and the
+  screen shown, as an unknown flag or a missing value already did.
+- The startup configuration line named `--plain` in a `--once --plain --json`
+  run, which renders the JSON object and ignores the text report. Only the
+  report that is actually printed is named now.
+- `toktop --opencode-db` stated its default twice in `--help`, once as
+  "default on" inside the description and once as the "(default true)" every
+  non-zero default carries.
+- `scripts/screenshot.py --bogus` answered a mistyped option with the whole
+  usage screen instead of naming it: a lone option is one argument, so the
+  positional count was judged first. Options are now named before the count.
 - `GET /healthz` ends its body with the newline every other answer on the
   ingest endpoint already carried (`http.Error` appends one, the `202` ack
   writes one, and the site's own `/health` answers `ok\n`). A probe reading a

@@ -53,7 +53,10 @@ func registerFlags() *cliFlags {
 		topFS.StringVar(&cli.ingest, "ingest", "127.0.0.1:8420", "agent event ingest listen address (host:port)")
 		topFS.BoolVar(&cli.noIngest, "no-ingest", false, "disable the agent event HTTP endpoint")
 		topFS.BoolVar(&cli.agents, "agents", false, "watch AI coding agents on this machine by reading their session transcripts")
-		topFS.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (default on; needs a build with -tags sqlite; --opencode-db=false skips it)")
+		// The default is appended by defaultDoc as "(default true)", the same
+		// way --ingest and --frames carry theirs; a "default on" left in the
+		// usage string printed the default twice, in two spellings.
+		topFS.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (needs a build with -tags sqlite; --opencode-db=false skips it)")
 		topFS.BoolVar(&cli.once, "once", false, "render one frame and exit (non-interactive; use when piping)")
 		topFS.BoolVar(&cli.plain, "plain", false, "with --once: render a linear text report instead of the dashboard frame (screen-reader friendly)")
 		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once: print the final snapshot as JSON on stdout instead of a frame (for scripts)")

@@ -91,7 +91,12 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	}
 
 	if err := selfupdate.ValidateRepo(*repo); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop update: %v\n", err)
+		// A bad --repo is a usage error, and every other one in this
+		// subcommand names its flag in long form and prints the usage screen
+		// under it. ValidateRepo writes the bare word "repo" because the
+		// library has no flag to name, so the flag is put back here.
+		fmt.Fprintf(os.Stderr, "toktop update: --%s\n", err)
+		updateUsage(os.Stderr, fs)
 		return 2
 	}
 

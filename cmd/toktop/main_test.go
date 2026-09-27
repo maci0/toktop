@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"os"
@@ -651,6 +652,19 @@ func TestUsageDocumentsFlagsInLongForm(t *testing.T) {
 	}
 }
 
+// defaultDoc appends "(default X)" to every flag whose default is not the
+// zero value, so a description that also states the default prints it twice
+// and in two spellings ("default on" beside "default true").
+func TestFlagDefaultStatedOnce(t *testing.T) {
+	registerFlags()
+	topFS.VisitAll(func(f *flag.Flag) {
+		if strings.Contains(f.Usage, "default") {
+			t.Errorf("--%s states its default in the description, which defaultDoc appends again: %q",
+				f.Name, f.Usage)
+		}
+	})
+}
+
 // Each flag's description hangs under the flag name by spaces. Go's
 // PrintDefaults indents it with a tab, which lands every description on a
 // tab stop instead of under the two-space flag column.
@@ -830,14 +844,19 @@ func TestReportRelease(t *testing.T) {
 
 func TestRunUpdateUsageErrors(t *testing.T) {
 	tests := []struct {
-		name    string
-		args    []string
-		wantSub string // required substring on stderr
+		name     string
+		args     []string
+		wantSub  string // required substring on stderr
+		wantSubs []string
 	}{
 		{name: "unknown flag", args: []string{"--bogus"}, wantSub: "flag provided but not defined"},
 		{name: "unexpected argument", args: []string{"extra"}, wantSub: "unexpected argument"},
 		{name: "unexpected argument points at help", args: []string{"extra"}, wantSub: "toktop update --help"},
-		{name: "repo path traversal", args: []string{"--repo", "maci0/toktop/../../../users/octocat"}, wantSub: "owner/name"},
+		// A bad --repo is a usage error like any other, so it names the flag
+		// in the long form the help screen documents and prints that screen,
+		// the way an unparseable --check value does.
+		{name: "repo path traversal", args: []string{"--repo", "maci0/toktop/../../../users/octocat"},
+			wantSubs: []string{`--repo "maci0/toktop/../../../users/octocat" must be owner/name`, "Usage:"}},
 		{name: "repo query string", args: []string{"--repo", "maci0/toktop?evil=1"}, wantSub: "owner/name"},
 		{name: "empty repo", args: []string{"--repo", ""}, wantSub: "owner/name"},
 	}
@@ -850,8 +869,13 @@ func TestRunUpdateUsageErrors(t *testing.T) {
 			if code != 2 {
 				t.Fatalf("runUpdate(%v) = %d, want 2", tt.args, code)
 			}
-			if !strings.Contains(got, tt.wantSub) {
-				t.Fatalf("stderr = %q, want mention of %q", got, tt.wantSub)
+			for _, want := range append([]string{tt.wantSub}, tt.wantSubs...) {
+				if want == "" {
+					continue
+				}
+				if !strings.Contains(got, want) {
+					t.Fatalf("stderr = %q, want mention of %q", got, want)
+				}
 			}
 		})
 	}
@@ -1592,6 +1616,26 @@ func TestLogActiveConfig(t *testing.T) {
 		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
 		if !strings.Contains(buf.String(), "ingest=off") {
 			t.Fatalf("logActiveConfig() = %q, want ingest=off", buf.String())
+		}
+	})
+	// The line records the knobs that will actually apply, so a --plain that
+	// --json replaced is not named: "once plain json" reads as two reports.
+	t.Run("only the report that renders is named", func(t *testing.T) {
+		for _, tc := range []struct{ plain, jsonOut bool; want string }{
+			{plain: true, want: "once plain"},
+			{jsonOut: true, want: "once json"},
+			{plain: true, jsonOut: true, want: "once json"},
+		} {
+			f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", once: true, plain: tc.plain, jsonOut: tc.jsonOut}
+			var buf strings.Builder
+			logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
+			got := buf.String()
+			if !strings.Contains(got, tc.want) {
+				t.Errorf("logActiveConfig(plain=%v, json=%v) = %q, want %q", tc.plain, tc.jsonOut, got, tc.want)
+			}
+			if tc.jsonOut && strings.Contains(got, "plain") {
+				t.Errorf("logActiveConfig(plain=%v, json=%v) = %q, want no plain: the JSON report replaced it", tc.plain, tc.jsonOut, got)
+			}
 		}
 	})
 	t.Run("bearer value is never printed", func(t *testing.T) {

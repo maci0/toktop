@@ -160,9 +160,9 @@ def main() -> None:
     if "-h" in args or "--help" in args:
         usage(sys.stdout)
         raise SystemExit(0)
-    if len(args) < MIN_ARGS:
-        usage(sys.stderr)
-        raise SystemExit(2)
+    # Options are named before the arity is judged: a lone mistyped flag is
+    # one argument, so the count check ran first and answered it with the
+    # whole usage screen, which says nothing about the flag that was wrong.
     for a in args:
         if a.startswith("-"):
             print(
@@ -170,6 +170,9 @@ def main() -> None:
                 file=sys.stderr,
             )
             raise SystemExit(2)
+    if len(args) < MIN_ARGS:
+        usage(sys.stderr)
+        raise SystemExit(2)
     if len(args) > MAX_ARGS:
         print(
             f"screenshot.py: unexpected argument {args[MAX_ARGS]!r} "
