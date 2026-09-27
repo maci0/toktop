@@ -381,15 +381,17 @@ func shCat(doc string) string {
 	return "cat <<'OUT'\n" + strings.TrimRight(doc, "\n") + "\nOUT\n"
 }
 
-// cmdEcho is the batch body that prints doc verbatim. cmd escapes nothing
-// inside echo, and the fixtures carry no metacharacter it would act on, so one
-// echo per line reproduces the document byte for byte.
-func cmdEcho(doc string) string {
-	var b strings.Builder
-	for _, line := range strings.Split(strings.TrimRight(doc, "\n"), "\n") {
-		b.WriteString("echo " + line + "\r\n")
+// cmdType writes doc to a side file and returns the batch body that prints it
+// with `type`. Text passed through echo does not survive cmd: a lone percent is
+// variable syntax and is dropped ("GPU use (%)" reached the parser as
+// "GPU use ()"), and &, |, < and > end the command. A document that has to
+// reach the parser byte for byte is typed from a file instead.
+func cmdType(t *testing.T, dir, stem, doc string) string {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, stem+".out"), []byte(doc), 0o600); err != nil {
+		t.Fatal(err)
 	}
-	return b.String()
+	return "type \"%~dp0" + stem + ".out\"\r\n"
 }
 
 // A caller that cancels (the UI tearing down, the sysmon budget spent) must
@@ -403,7 +405,7 @@ func TestSampleCanceledContextSkipsVendorCLIs(t *testing.T) {
 	marker := filepath.Join(dir, "cli-ran")
 	fake := fakeTool(t, dir, "toktop-fake-smi",
 		"touch "+marker+"\n"+nvidiaCSV,
-		"type nul > \""+marker+"\"\r\n"+cmdEcho(nvidiaCSV))
+		"type nul > \""+marker+"\"\r\n"+cmdType(t, dir, "nvidia-csv", nvidiaCSV))
 	stubTools(t, func(string) (string, error) { return fake, nil })
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -429,7 +431,7 @@ func TestSampleCanceledContextSkipsVendorCLIs(t *testing.T) {
 func TestSampleReadsVendorCLIOutput(t *testing.T) {
 	requireFakeCLIs(t)
 	dir := t.TempDir()
-	fake := fakeTool(t, dir, "toktop-fake-smi", shCat(nvidiaCSV), cmdEcho(nvidiaCSV))
+	fake := fakeTool(t, dir, "toktop-fake-smi", shCat(nvidiaCSV), cmdType(t, dir, "nvidia-csv", nvidiaCSV))
 	stubTools(t, func(string) (string, error) { return fake, nil })
 
 	var nvidia []core.GPUDevice
@@ -459,13 +461,13 @@ func TestSampleOrdersVendorsAndIndices(t *testing.T) {
 	nvidiaOrder := "1, Fake NVIDIA B, 65, 1, 2, 98, 350, 550.0\n" +
 		"0, Fake NVIDIA A, 65, 1, 2, 98, 350, 550.0\n"
 	xpuSh := "case \"$1\" in\ndiscovery) " + shCat(xpuFakeDiscovery) + ";;\n*) " + shCat(xpuFakeMetrics) + ";;\nesac\n"
-	xpuCmd := "if \"%~1\"==\"discovery\" goto discovery\r\n" + cmdEcho(xpuFakeMetrics) +
-		"exit /b 0\r\n:discovery\r\n" + cmdEcho(xpuFakeDiscovery)
+	xpuCmd := "if \"%~1\"==\"discovery\" goto discovery\r\n" + cmdType(t, dir, "xpu-metrics", xpuFakeMetrics) +
+		"exit /b 0\r\n:discovery\r\n" + cmdType(t, dir, "xpu-discovery", xpuFakeDiscovery)
 	// Intel's indices sort ahead of nvidia's on purpose: only the vendor rank
 	// may decide the order, and a plain index sort would get it wrong.
 	paths := map[string]string{
-		"nvidia-smi": fakeTool(t, dir, "nvidia-smi", shCat(nvidiaOrder), cmdEcho(nvidiaOrder)),
-		"rocm-smi":   fakeTool(t, dir, "rocm-smi", shCat(rocmFakeJSON), cmdEcho(rocmFakeJSON)),
+		"nvidia-smi": fakeTool(t, dir, "nvidia-smi", shCat(nvidiaOrder), cmdType(t, dir, "nvidia-order", nvidiaOrder)),
+		"rocm-smi":   fakeTool(t, dir, "rocm-smi", shCat(rocmFakeJSON), cmdType(t, dir, "rocm-json", rocmFakeJSON)),
 		"xpu-smi":    fakeTool(t, dir, "xpu-smi", xpuSh, xpuCmd),
 	}
 	stubTools(t, func(name string) (string, error) {
