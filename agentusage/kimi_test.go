@@ -195,6 +195,27 @@ func TestKimiIgnoresOtherProjects(t *testing.T) {
 	}
 }
 
+// The directory a project's sessions live in is named for twelve hex digits of
+// a hash, so the session's own recorded cwd is what decides ownership: one
+// found under this project's directory but started somewhere else is not
+// billed here.
+func TestKimiIgnoresASessionThatNamesAnotherProject(t *testing.T) {
+	store := kimiHome(t)
+	work, other := kimiWorkDir(t), kimiWorkDir(t)
+	dir := kimiSession(t, store, work, "session_collided")
+	state := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(state, []byte(`{"cwd":`+jsonPath(other)+`}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	w := Watch("kimi", work, time.Now())
+	append_(t, kimiWire(dir, "main"), kimiUsageLine(10, 5000, 0, 0))
+	w.poll(nil)
+	if got := w.Sample().Output; got != 0 {
+		t.Fatalf("output tokens %d, want 0: the session's own cwd was ignored", got)
+	}
+}
+
 // A subagent writes its own wire log under the same session directory, and
 // its tokens are its own, so both logs count.
 func TestKimiSubagentWireLogsCount(t *testing.T) {

@@ -34,6 +34,18 @@ type adapter struct {
 	// agents whose usage records do not repeat it. nil when every usage line
 	// carries its own cwd.
 	sessionCwd func(line []byte) (string, bool)
+	// sessionCwdFile reads the working directory from a file beside the
+	// transcript, for an agent that records it there rather than in the
+	// transcript itself (kimi keeps it in the state.json of the session
+	// directory its agents/ directory sits under). nil when the transcript or
+	// its header names the directory.
+	sessionCwdFile func(path string) (string, bool)
+}
+
+// perFileOwner reports whether ownership is decided per transcript file
+// rather than per usage line, from the header line or from a file beside it.
+func (a adapter) perFileOwner() bool {
+	return a.sessionCwd != nil || a.sessionCwdFile != nil
 }
 
 var adaptersMu sync.RWMutex
@@ -106,11 +118,17 @@ var adapters = map[string]adapter{
 	// roots are the project directories this working directory owns rather
 	// than the store: kimiRoots derives them. A subagent's log sits under the
 	// same session directory and counts too, its tokens being its own.
+	//
+	// The derived directory is named for a twelve-hex-digit hash of the
+	// working directory, so the session's own recorded cwd confirms the
+	// attribution rather than trusting the name: a collision would otherwise
+	// bill another project's tokens to this one.
 	"kimi": {
-		roots:  kimiRoots,
-		suffix: "wire.jsonl",
-		kind:   perMessage,
-		parse:  parseKimi,
+		roots:          kimiRoots,
+		suffix:         "wire.jsonl",
+		kind:           perMessage,
+		parse:          parseKimi,
+		sessionCwdFile: kimiSessionCwd,
 	},
 }
 
