@@ -173,6 +173,23 @@ weight, so a recapture that blows the budget fails there.
 | `make repro-check` | build every release platform twice, from two different source paths and two different build caches, then diff |
 | `make repro-check-pair` | the same gate over `REPRO_PLATFORMS`, the pair the PR gate and the release job both build twice |
 
+## Deploying the site
+
+`make site-deploy` and `make site-rollback` are the only paths that touch
+`toktop.ai`, and both drive wrangler, which needs a Cloudflare credential.
+Either export `CLOUDFLARE_API_TOKEN` (an API token with Workers Scripts
+edit permission) and `CLOUDFLARE_ACCOUNT_ID` for the account that owns the
+Worker, or run `bunx wrangler@4.126.0 login` once and let wrangler keep the
+OAuth token in `~/.wrangler`. The two come from the Cloudflare dashboard
+(My Profile, API Tokens) and from the account's Workers overview; nothing
+about them belongs in this repository, and no CI job deploys the site.
+
+The Makefile takes `dist/site.lock` for the whole of either target, so a
+second deploy or a rollback on another machine will not run against the
+Worker at the same time. That lock is per checkout: `dist/` is gitignored, so
+two clones can each hold it. The platform's own deployment history is what
+resolves a genuine collision, through the Cloudflare dashboard's deploy log.
+
 ## Before opening a PR
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
