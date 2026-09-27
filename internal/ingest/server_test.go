@@ -9,6 +9,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -1013,6 +1015,34 @@ func TestIngestStripsTagCharsFromAgent(t *testing.T) {
 	awaitEvents(t, rec, 1)
 	if rec.evs[0].Agent != "claue" {
 		t.Errorf("agent = %q, want claue with tag character stripped", rec.evs[0].Agent)
+	}
+}
+
+// A harness that names where its agent is working sends the path in the
+// note, the same way the locally watched agents do. The account that owns
+// $HOME must not ride along into the retained feed, the live dashboard and
+// the --once --plain report, which is often redirected into a file.
+func TestIngestFoldsHomeOutOfNote(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if got, err := os.UserHomeDir(); err != nil || got != home {
+		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
+	}
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	resp := post(t, "http://"+s.Addr()+"/v1/events",
+		fmt.Sprintf(`{"agent":"coder","note":"in %s/projects/app"}`, home))
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 1)
+	if got, want := rec.evs[0].Note, "in ~/projects/app"; got != want {
+		t.Errorf("note = %q, want %q", got, want)
 	}
 }
 

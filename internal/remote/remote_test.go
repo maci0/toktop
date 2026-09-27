@@ -68,10 +68,10 @@ func TestParseTarget(t *testing.T) {
 		port    int
 		wantErr bool
 	}{
-		{"ssh://maci@192.168.0.211", "maci", "192.168.0.211", 22, false},
+		{"ssh://user@192.168.1.5", "user", "192.168.1.5", 22, false},
 		{"ssh://root@gpu-box:2222", "root", "gpu-box", 2222, false},
 		{"ssh://192.168.1.5", "", "192.168.1.5", 22, false},
-		{"ssh://maci@box/", "maci", "box", 22, false},
+		{"ssh://user@box/", "user", "box", 22, false},
 		{"http://x", "", "", 0, true},
 		{"ssh://", "", "", 0, true},
 		{"ssh://h:notaport", "", "h", 0, true},
@@ -317,6 +317,12 @@ func TestSshDiagnosticsOmitHomeDirectory(t *testing.T) {
 	if keyErr == nil {
 		t.Fatal("missing key accepted")
 	}
+	// A directory named as a key reaches a second branch, and that one
+	// spelled the expanded path itself rather than a stat error.
+	_, dirErr := ResolveKeyFile(filepath.Join(home, ".ssh"))
+	if dirErr == nil {
+		t.Fatal("directory key accepted")
+	}
 	// The key chain is assembled before any dial, so an unparsable key fails
 	// without a network round trip.
 	_, connErr := Connect(t.Context(), Target{Host: "box", KeyFile: key})
@@ -328,6 +334,7 @@ func TestSshDiagnosticsOmitHomeDirectory(t *testing.T) {
 		err  error
 	}{
 		{"ResolveKeyFile", keyErr},
+		{"ResolveKeyFile directory", dirErr},
 		{"Connect", connErr},
 	} {
 		msg := tc.err.Error()

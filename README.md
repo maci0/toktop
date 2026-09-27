@@ -11,7 +11,7 @@ hammering them.
 toktop --demo            # simulated fleet, works instantly
 toktop                   # auto-discovers local engines (ports + processes)
 toktop --agents          # also watch the coding agents on this machine
-toktop ssh://maci@box    # watch engines on another host
+toktop ssh://user@box    # watch engines on another host
 ```
 
 ## Install

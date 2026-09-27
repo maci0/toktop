@@ -108,6 +108,15 @@ support channel (see SECURITY.md).
   `Retry-After: 1` that a POST gets while 64 bodies are already decoding.
   The cap was described only in the release notes, so a sender reading the
   endpoint contract had no status to handle and no backoff to honor.
+- An `ssh://` target naming a directory as its key no longer prints the
+  expanded path in the `--ssh-key` diagnostic. Every other ssh diagnostic
+  already folds your home directory to `~`; that one branch spelled the path
+  and so named the account in a line meant to be pasted into an issue.
+- An ingested event's free-form note is stored with your home directory
+  folded to `~`, the rewrite a watched agent's working directory already
+  got. A harness that names where it is working no longer puts the account
+  into the retained feed, the dashboard, or a `--once --plain` report
+  redirected into a file.
 - A probe no longer reports throughput thousands of times too high when an
   engine's `eval_duration` is plausible only in microseconds or milliseconds
   and the decode itself is fast. The unit fit kept the raw value whenever

@@ -280,9 +280,10 @@ func expandTilde(p string) string {
 // directory fails before any ssh dial, rather than as a generic auth
 // rejection after discovery has already run.
 //
-// A stat failure is folded to a plain error with the home directory
-// rewritten to "~", like Connect: the key path is under $HOME, and the reason
-// it could not be read is worth more to the operator than the account name.
+// Every diagnostic this returns names a file under $HOME, so the home is
+// rewritten to "~" on each of them, like Connect: the reason the key could
+// not be used is worth more to the operator than the account name, and these
+// lines are what gets pasted into issues.
 func ResolveKeyFile(file string) (string, error) {
 	file = expandTilde(strings.TrimSpace(file))
 	if file == "" {
@@ -293,7 +294,7 @@ func ResolveKeyFile(file string) (string, error) {
 		return "", errors.New(core.RedactHome(err.Error()))
 	}
 	if !fi.Mode().IsRegular() {
-		return "", fmt.Errorf("%s is not a regular file", file)
+		return "", fmt.Errorf("%s is not a regular file", core.RedactHome(file))
 	}
 	return file, nil
 }

@@ -53,7 +53,14 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	}
 	ev.Model = core.ClampField(core.SanitizeText(ev.Model), 128)
 	ev.ViaEngine = core.ClampField(core.SanitizeText(ev.ViaEngine), 128)
-	ev.Note = core.ClampField(core.SanitizeText(ev.Note), 512) // free-form fields are capped so one giant event cannot dominate the retained feed
+	// Free-form fields are capped so one giant event cannot dominate the
+	// retained feed, and the note gets the same home rewrite the locally
+	// watched agents get (agentwatch.shortDir): a note naming a working
+	// directory is the one event field that routinely carries a path, and a
+	// path under $HOME names the account. It reaches the feed, the live
+	// dashboard and the --once --plain report, which is often redirected
+	// into a file or a journal.
+	ev.Note = core.ClampField(core.RedactHome(core.SanitizeText(ev.Note)), 512)
 	// Token counts are unsigned quantities; negative or absurd values
 	// are junk from a misbehaving sender and must not enter the
 	// retained feed (summing MaxInt64 across events wraps the totals).

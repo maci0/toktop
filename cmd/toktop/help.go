@@ -30,7 +30,7 @@ Usage:
 Examples:
   toktop --demo                simulated fleet, works instantly
   toktop                       auto-discover engines on this machine
-  toktop ssh://maci@box        watch another host's engines over ssh
+  toktop ssh://user@box        watch another host's engines over ssh
   toktop --add http://10.0.0.5:8000   attach an endpoint (repeatable)
   toktop --agents              also watch coding agents on this machine
                                (opencode's session database included)

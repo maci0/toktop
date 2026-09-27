@@ -1026,7 +1026,7 @@ func TestInterpretArgs(t *testing.T) {
 		{name: "help update", args: []string{"help", "update"}, wantCmd: "help", wantN: 1},
 		{name: "version", args: []string{"version"}, wantCmd: "version"},
 		{name: "version extra", args: []string{"version", "x"}, wantErr: "toktop version:"},
-		{name: "one ssh", args: []string{"ssh://maci@box"}, wantN: 1},
+		{name: "one ssh", args: []string{"ssh://user@box"}, wantN: 1},
 		{name: "two ssh", args: []string{"ssh://a", "ssh://b"}, wantN: 2},
 		{name: "http url hints --add", args: []string{"http://127.0.0.1:8000"}, wantErr: "--add"},
 		{name: "https url hints --add", args: []string{"https://example:8000"}, wantErr: "--add"},
@@ -1068,7 +1068,7 @@ func TestParseTargets(t *testing.T) {
 	if got, err := parseTargets(nil); err != nil || len(got) != 0 {
 		t.Fatalf("parseTargets(nil) = %v, %v; want no targets and no error", got, err)
 	}
-	got, err := parseTargets([]string{"ssh://maci@box:2222", "ssh://other"})
+	got, err := parseTargets([]string{"ssh://user@box:2222", "ssh://other"})
 	if err != nil {
 		t.Fatalf("parseTargets(valid) = %v, want nil", err)
 	}

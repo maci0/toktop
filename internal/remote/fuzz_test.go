@@ -118,10 +118,10 @@ func assertPorts(t *testing.T, which string, ports []int) []int {
 func FuzzParseTarget(f *testing.F) {
 	for _, seed := range []string{
 		"ssh://gpu",
-		"ssh://maci@192.168.0.211",
+		"ssh://user@192.168.1.5",
 		"ssh://root@gpu-box:2222",
 		"ssh://192.168.1.5",
-		"ssh://maci@box/",
+		"ssh://user@box/",
 		"ssh://root@[::1]:22",
 		"ssh://dev@cluster.internal:2222",
 		"ssh://box.lab",

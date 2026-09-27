@@ -52,7 +52,10 @@ file, no cache and no database. If you want the feed to disappear, quit.
   `127.0.0.1:8420` by default, authenticates nobody, and prints a warning
   when bound anywhere else. The `/v1/events` body is `id`, `agent`, `model`,
   `kind`, token counts, a timestamp, `via_engine` and a free-form note, all
-  of which are stored in memory and rendered on your terminal.
+  of which are stored in memory and rendered on your terminal. A note
+  naming a directory under your home is stored with the home folded to `~`,
+  the same rewrite the working directory gets when an agent is watched
+  locally.
 
 The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or
