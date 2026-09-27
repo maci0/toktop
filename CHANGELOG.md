@@ -15,6 +15,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- toktop.ai answers a revalidation or a refused encoding before it builds a
+  compressed copy of the page. A 304 and a 406 carry no body, and both waited
+  on the brotli, zstd and gzip pipeline first. An isolate that only ever
+  serves revalidations now builds no representation at all.
 - The feed panel's error line is rendered as the message arrives, and its
   badge now reads "feed error" rather than "ingest down". The agent watch
   reports through the same channel, so a monitored engine address that will

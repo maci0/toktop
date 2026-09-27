@@ -66,8 +66,9 @@ not span.
 Clients that advertise brotli, zstd, or gzip get a cached compressed body.
 Compression starts inside a request, not during module initialization, so
 Worker stream APIs run in a request context. Only completed bytes are shared
-across requests; simultaneous cold requests compress independently rather
-than sharing request-owned stream work. Clients that advertise none of those
+across requests; the in-flight build is shared too, because the cache holds the
+promise rather than the value, so a burst of cold requests waits on one
+pipeline instead of each starting its own. Clients that advertise none of those
 get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. Unlisted identity
@@ -84,6 +85,15 @@ so caches never hand a compressed body to a client that cannot decode it.
 The three codings are built concurrently. A cold isolate pays that build
 inside the first request it is answering, so awaiting them in sequence makes
 that one request wait for the sum of the three rather than the slowest one.
+
+Answers that carry no body are decided before that build runs. A 406 comes from
+what the Worker offers (`identity` plus `br`, `zstd` and `gzip`) read against
+`Accept-Encoding`, and a 304 from `If-None-Match`, so neither waits on three
+codings it will not send. An isolate that only ever serves revalidations never
+builds a representation at all, and the reload after a deploy is answered off
+the isolate's first request rather than after the pipeline. A client whose only
+acceptable coding the runtime then fails to build still gets its 406 from the
+build itself; the offer check answers the refusals a client can state up front.
 
 ## Timing
 

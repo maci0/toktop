@@ -68,6 +68,56 @@ test("compression starts in a request and only completed bytes are reused", asyn
   }
 });
 
+// A 304 and a 406 carry no body, so neither may wait on the three compressed
+// representations it will not send. The construction count is the observable:
+// an isolate that only ever sees revalidations never builds a coding at all.
+test("revalidation and refusal answer without building any representation", async () => {
+  const NativeCompressionStream = globalThis.CompressionStream;
+  let constructions = 0;
+  globalThis.CompressionStream = new Proxy(NativeCompressionStream, {
+    construct(target, args) {
+      constructions++;
+      return Reflect.construct(target, args);
+    },
+  });
+  try {
+    const etag = (await call()).headers.get("etag");
+    // The conditional request is the first one the fresh isolate sees, so a
+    // build here would show up as a nonzero count.
+    const { default: freshWorker } = await import("./worker.js?no-build");
+    expect(constructions).toBe(0);
+
+    for (const headers of [
+      { "if-none-match": etag },
+      { "if-none-match": "*", "accept-encoding": "gzip" },
+    ]) {
+      const res = await freshWorker.fetch(new Request(ORIGIN, { headers }), {});
+      expect(res.status).toBe(304);
+      expect(await res.text()).toBe("");
+      expect(constructions).toBe(0);
+    }
+
+    for (const ae of ["identity;q=0", "*;q=0", "deflate, identity;q=0"]) {
+      const res = await freshWorker.fetch(
+        new Request(ORIGIN, { headers: { "accept-encoding": ae } }),
+        {},
+      );
+      expect(res.status).toBe(406);
+      expect(constructions).toBe(0);
+    }
+
+    // The bytes are still there for a client that wants them.
+    const body = await freshWorker.fetch(
+      new Request(ORIGIN, { headers: { "accept-encoding": "gzip" } }),
+      {},
+    );
+    expect(constructions).toBe(3);
+    expect(await decompress(new Uint8Array(await body.arrayBuffer()), "gzip")).toBe(identityBody);
+  } finally {
+    globalThis.CompressionStream = NativeCompressionStream;
+  }
+});
+
 test("no accept-encoding: identity body, no content-encoding", async () => {
   const res = await call();
   expect(res.status).toBe(200);

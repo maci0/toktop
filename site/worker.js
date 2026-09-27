@@ -475,6 +475,16 @@ async function buildRepresentations(request) {
   return [{ coding: null, bytes: IDENTITY }, ...compressed.filter((rep) => rep !== null)];
 }
 
+// The codings this Worker offers, for the acceptability check that runs
+// before a body exists. A coding the runtime then fails to build is still
+// caught in representationFor, which returns nothing acceptable.
+const OFFERED_CODINGS = [null, ...COMPRESSIBLE.map(([coding]) => coding)];
+
+function refusesEveryCoding(acceptEncoding) {
+  const qByCoding = parseAcceptEncoding(acceptEncoding);
+  return OFFERED_CODINGS.every((coding) => quality(qByCoding, coding ?? "identity") <= 0);
+}
+
 // Highest q the client offered, then the smallest body at that q. A Chrome
 // `gzip, deflate, br, zstd` request therefore gets brotli rather than gzip,
 // and a `br;q=0.1, gzip` request still gets gzip.
@@ -534,6 +544,16 @@ function errorResponse(started, status, body, extraHeaders = {}) {
       "server-timing": serverTiming(started),
       ...extraHeaders,
     },
+  });
+}
+
+// A client that refuses every coding gets an uncacheable 406, conditional
+// requests included: it cannot read any representation of the page, so a 304
+// would leave it holding a copy it still cannot decode. The Vary rides along
+// so a shared cache keys the refusal on what the client asked for.
+function notAcceptable(request, started) {
+  return errorResponse(started, 406, request.method === "HEAD" ? null : "not acceptable", {
+    vary: VARY,
   });
 }
 
@@ -739,11 +759,18 @@ async function handle(request, env, started) {
   }
   // One page: anything else is that page too, rather than a 404 nobody
   // learns anything from.
-  const chosen = await representationFor(request.headers.get("accept-encoding"), request);
-  if (chosen === null) {
-    return errorResponse(started, 406, request.method === "HEAD" ? null : "not acceptable", {
-      vary: VARY,
-    });
+  const acceptEncoding = request.headers.get("accept-encoding");
+  // Refusability is answered from the offer alone, before any compressed
+  // body is built, so a client that can read nothing never waits for the
+  // three codings to exist. Revalidation is answered next, and for the same
+  // reason: a 304 carries no body, so it must not wait on a build it will not
+  // use. An isolate that only ever sees revalidations never builds at all,
+  // and a cold one answers the reload that follows a deploy without paying
+  // brotli, zstd and gzip first. The build still runs for a client that needs
+  // the bytes, and its 406 still applies when the only coding a client wanted
+  // is one the runtime could not produce.
+  if (refusesEveryCoding(acceptEncoding)) {
+    return notAcceptable(request, started);
   }
   if (ifNoneMatchMatches(request.headers.get("if-none-match"))) {
     // Revalidation answers keep the validator and policy headers but no body.
@@ -757,6 +784,10 @@ async function handle(request, env, started) {
         ...SECURITY_HEADERS,
       },
     });
+  }
+  const chosen = await representationFor(acceptEncoding, request);
+  if (chosen === null) {
+    return notAcceptable(request, started);
   }
   const headers = {
     ...PAGE_HEADERS,
