@@ -66,7 +66,11 @@ against.
 - `make sbom` on every release: a CycloneDX inventory with per-module licenses
   ships next to the binaries.
 - `cmd/toktop/deps_test.go`: a direct require that nothing imports, or that has
-  no entry in this file, fails the test run.
+  no entry in this file, fails the test run. The same file holds the module of
+  every `tool` directive, every pin in the requirements files, and every tool
+  the Makefile fetches, so a module, a distribution, or a `go run`/`bunx`
+  version that arrives without a reason here, or without a version, fails the
+  test run too.
 
 A release ships the checksums file and the SBOM, not a sigstore attestation, so
 a downloaded binary is verified against the checksum its own release page

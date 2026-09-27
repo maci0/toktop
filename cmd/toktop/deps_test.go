@@ -22,34 +22,51 @@ const modulePath = "github.com/maci0/toktop"
 // TestDirectDependenciesAreImported.
 const dependencyTable = "docs/DEPENDENCIES.md"
 
-// directRequires returns the modules go.mod requires without the indirect
-// marker, which is the set this tree chose rather than inherited.
-func directRequires(t *testing.T) []string {
+// goModRequires returns every module go.mod requires, and the subset of those
+// that carry no indirect marker. The marked-out set is what this tree chose
+// rather than inherited: a tool directive marks its module indirect, and the
+// dependency tests below read the unmarked set for that reason.
+func goModRequires(t *testing.T) (all, direct []string) {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(moduleRoot, "go.mod"))
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
 	}
-	var direct []string
 	inBlock := false
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
+		fields := []string(nil)
 		switch {
 		case line == "require (":
 			inBlock = true
+			continue
 		case inBlock && line == ")":
 			inBlock = false
-		case strings.HasPrefix(line, "require ") && !strings.Contains(line, "// indirect"):
-			direct = append(direct, strings.Fields(strings.TrimPrefix(line, "require "))[0])
+			continue
+		case strings.HasPrefix(line, "require "):
+			fields = strings.Fields(strings.TrimPrefix(line, "require "))
 		case inBlock && line != "" && !strings.HasPrefix(line, "//"):
-			if !strings.Contains(line, "// indirect") {
-				direct = append(direct, strings.Fields(line)[0])
-			}
+			fields = strings.Fields(line)
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		all = append(all, fields[0])
+		if !strings.Contains(line, "// indirect") {
+			direct = append(direct, fields[0])
 		}
 	}
 	if len(direct) == 0 {
 		t.Fatal("go.mod parsed to no direct requires; the parser no longer understands the file")
 	}
+	return all, direct
+}
+
+// directRequires returns the modules go.mod requires without the indirect
+// marker, which is the set this tree chose rather than inherited.
+func directRequires(t *testing.T) []string {
+	t.Helper()
+	_, direct := goModRequires(t)
 	return direct
 }
 
@@ -261,5 +278,216 @@ func TestImportsPointDownward(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("walk module: %v", err)
+	}
+}
+
+// toolModules returns the module each `tool` directive in go.mod names. The
+// directive spells a package inside the module (honnef.co/go/tools/cmd/
+// staticcheck), so the module is the longest require in go.mod that is a
+// prefix of the directive.
+func toolModules(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, "go.mod"))
+	if err != nil {
+		t.Fatalf("read go.mod: %v", err)
+	}
+	requires, _ := goModRequires(t)
+	var modules []string
+	inBlock := false
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		fields := []string(nil)
+		switch {
+		case line == "tool (":
+			inBlock = true
+			continue
+		case inBlock && line == ")":
+			inBlock = false
+			continue
+		case strings.HasPrefix(line, "tool "):
+			fields = strings.Fields(strings.TrimPrefix(line, "tool "))
+		case inBlock && line != "" && !strings.HasPrefix(line, "//"):
+			fields = strings.Fields(line)
+		}
+		if len(fields) == 0 {
+			continue
+		}
+		pkg := fields[0]
+		module := ""
+		for _, require := range requires {
+			if (pkg == require || strings.HasPrefix(pkg, require+"/")) && len(require) > len(module) {
+				module = require
+			}
+		}
+		if module == "" {
+			t.Fatalf("tool directive %q names no module go.mod requires; a tool outside the module graph cannot be verified", pkg)
+		}
+		modules = append(modules, module)
+	}
+	return modules
+}
+
+func TestToolDirectivesAreDocumented(t *testing.T) {
+	reasoned, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
+	if err != nil {
+		t.Fatalf("read %s: %v", dependencyTable, err)
+	}
+	tools := toolModules(t)
+	if len(tools) == 0 {
+		t.Fatal("go.mod parsed to no tool directives; the parser no longer understands the file")
+	}
+	for _, module := range tools {
+		if !strings.Contains(string(reasoned), module) {
+			t.Errorf("%s is run by a tool directive and has no entry in %s; record why it is here", module, dependencyTable)
+		}
+	}
+}
+
+// pythonPins returns the distribution name of every exact pin in the
+// requirements files under scripts/. Both files, because a package that moves
+// from runtime to tooling is still a pin the table has to account for.
+func pythonPins(t *testing.T) []string {
+	t.Helper()
+	var names []string
+	for _, file := range []string{"requirements.txt", "requirements-dev.txt"} {
+		raw, err := os.ReadFile(filepath.Join(moduleRoot, "scripts", file))
+		if err != nil {
+			t.Fatalf("read scripts/%s: %v", file, err)
+		}
+		for _, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(line)
+			// Comments carry the reason a pin is there; `-r` pulls in the
+			// other file, whose names this walks directly. A `--hash` line
+			// continues the pin above it, so the name is already counted.
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-r ") || strings.HasPrefix(line, "--") {
+				continue
+			}
+			name, _, _ := strings.Cut(line, "==")
+			name = strings.TrimSpace(name)
+			if name == "" || strings.ContainsAny(name, " \t") {
+				t.Fatalf("scripts/%s: %q is not an exact name==version pin", file, line)
+			}
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		t.Fatal("the requirements files parsed to no pins; the parser no longer understands them")
+	}
+	return names
+}
+
+func TestPythonPinsAreDocumented(t *testing.T) {
+	reasoned, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
+	if err != nil {
+		t.Fatalf("read %s: %v", dependencyTable, err)
+	}
+	for _, name := range pythonPins(t) {
+		if !strings.Contains(string(reasoned), name) {
+			t.Errorf("%s is pinned by a requirements file and has no entry in %s; record why it is here", name, dependencyTable)
+		}
+	}
+}
+
+// makeVars returns the `NAME := value` assignments in the Makefile. The
+// version pins live in those assignments, so a recipe names its tool through
+// one and a recipe that grows a bare package name is the drift to catch.
+func makeVars(t *testing.T) map[string]string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	vars := map[string]string{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		name, value, ok := strings.Cut(line, " := ")
+		if !ok {
+			continue
+		}
+		name = strings.TrimSpace(name)
+		if name == "" || strings.ContainsAny(name, " \t$") {
+			continue
+		}
+		vars[name] = strings.TrimSpace(value)
+	}
+	if len(vars) == 0 {
+		t.Fatal("the Makefile parsed to no assignments; the parser no longer understands the file")
+	}
+	return vars
+}
+
+// expandVars substitutes $(NAME) with the assignment makeVars read, once, and
+// leaves anything it cannot resolve alone so the caller can name it.
+func expandVars(s string, vars map[string]string) string {
+	var out strings.Builder
+	for {
+		before, after, found := strings.Cut(s, "$(")
+		out.WriteString(before)
+		if !found {
+			return out.String()
+		}
+		name, rest, closed := strings.Cut(after, ")")
+		if !closed {
+			out.WriteString("$(" + after)
+			return out.String()
+		}
+		if value, ok := vars[name]; ok {
+			out.WriteString(value)
+		} else {
+			out.WriteString("$(" + name + ")")
+		}
+		s = rest
+	}
+}
+
+// unpinnedTools returns every tool in the Makefile that a recipe fetches
+// without naming a version: `go run` without @version resolves whatever the
+// proxy serves that minute, and `bunx` without @version installs the latest
+// release. A pin held in an assignment counts, because that is where the
+// version pins live.
+func unpinnedTools(t *testing.T) []string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, "Makefile"))
+	if err != nil {
+		t.Fatalf("read Makefile: %v", err)
+	}
+	vars := makeVars(t)
+	var unpinned []string
+	found := 0
+	for _, line := range strings.Split(string(raw), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(expandVars(line, vars))
+		var tool string
+		for i, field := range fields {
+			if i == 0 || i+1 >= len(fields) {
+				continue
+			}
+			// `$(GO) run` and `bunx` fetch from a registry or a proxy. A bare
+			// `run` after an ordinary word is a recipe running something
+			// local, or the prose of a target's help line.
+			if (field == "run" && strings.HasPrefix(fields[i-1], "$(")) || field == "bunx" {
+				tool = fields[i+1]
+			}
+		}
+		if tool == "" {
+			continue
+		}
+		found++
+		_, version, ok := strings.Cut(tool, "@")
+		if !ok || version == "" || strings.ContainsAny(version, "$ ") {
+			unpinned = append(unpinned, line)
+		}
+	}
+	if found == 0 {
+		t.Fatal("the Makefile parsed to no tool invocations; the parser no longer understands the file")
+	}
+	return unpinned
+}
+
+func TestToolPinsAreExact(t *testing.T) {
+	for _, line := range unpinnedTools(t) {
+		t.Errorf("Makefile fetches a tool without a version: %s; pin it in a variable above the recipe", line)
 	}
 }
