@@ -27,6 +27,31 @@ func addDef(t *testing.T, name string, spec Spec) {
 	})
 }
 
+// writeDefs writes body to a definitions file in a fresh temp dir and returns
+// its path, for the tests that load it through LoadDefinitions.
+func writeDefs(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "agents.json")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// dropDefs removes loaded definitions from the registry when the test ends.
+// A name the load refused to register is deleted harmlessly, so a rejecting
+// test can pass the same list as an accepting one.
+func dropDefs(t *testing.T, names ...string) {
+	t.Helper()
+	t.Cleanup(func() {
+		defsMu.Lock()
+		for _, name := range names {
+			delete(defs, name)
+		}
+		defsMu.Unlock()
+	})
+}
+
 // Agents backs the --agents picker and Discover: built-ins must stay listed,
 // runtime definitions join them sorted, and a definition shadowing a built-in
 // must not appear twice.
@@ -91,10 +116,7 @@ func TestLoadDefinitionsRejectsNull(t *testing.T) {
 	} {
 		t.Run(body, func(t *testing.T) {
 			addDef(t, "existing-agent", Spec{Roots: []string{"/original"}})
-			path := filepath.Join(t.TempDir(), "agents.json")
-			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			path := writeDefs(t, body)
 			err := LoadDefinitions(path)
 			if !errors.Is(err, ErrInvalidDefinitions) {
 				t.Fatalf("LoadDefinitions() = %v, want ErrInvalidDefinitions", err)
@@ -113,10 +135,7 @@ func TestLoadDefinitionsRejectsNull(t *testing.T) {
 func TestLoadDefinitionsEmptyObjects(t *testing.T) {
 	for _, body := range []string{`{}`, `{"launchonly": {}}`, `{"launchonly": {"usage": null}}`} {
 		t.Run(body, func(t *testing.T) {
-			path := filepath.Join(t.TempDir(), "agents.json")
-			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			path := writeDefs(t, body)
 			if err := LoadDefinitions(path); err != nil {
 				t.Fatal(err)
 			}
@@ -136,10 +155,7 @@ func TestLoadDefinitionsMissingFileIsNotAnError(t *testing.T) {
 // A malformed file must be refused: running with a half-loaded agent set is
 // worse than refusing.
 func TestLoadDefinitionsRejectsMalformedFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents.json")
-	if err := os.WriteFile(path, []byte("{oops"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeDefs(t, "{oops")
 	err := LoadDefinitions(path)
 	if err == nil {
 		t.Fatal("malformed definitions accepted")
@@ -159,7 +175,6 @@ func TestLoadDefinitionsRejectsMalformedFile(t *testing.T) {
 // nothing about transcripts and must be skipped, a blank name is unusable,
 // and a full entry carries every usage field through.
 func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents.json")
 	body := `{
 		"launchonly": {"cmd": ["x"]},
 		"noroots": {"usage": {}},
@@ -167,17 +182,11 @@ func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
 		"full": {"usage": {"roots": ["~/.full/sessions"], "suffix": ".ndjson",
 			"cumulative": true, "header_cwd": true}}
 	}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeDefs(t, body)
 	if err := LoadDefinitions(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		defsMu.Lock()
-		delete(defs, "full")
-		defsMu.Unlock()
-	})
+	dropDefs(t, "full")
 
 	if _, ok := definedSpec("launchonly"); ok {
 		t.Error("launch-only definition registered")
@@ -209,22 +218,15 @@ func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
 // a spec whose roots are all blank is not readable: Supported must not say
 // yes for an agent Watch would reject.
 func TestLoadDefinitionsTrimsNamesAndSkipsBlankRoots(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents.json")
 	body := `{
 		"  trimmed  ": {"usage": {"roots": ["~/.trimmed/sessions"]}},
 		"blankroots": {"usage": {"roots": ["", "  "]}}
 	}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeDefs(t, body)
 	if err := LoadDefinitions(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		defsMu.Lock()
-		delete(defs, "trimmed")
-		defsMu.Unlock()
-	})
+	dropDefs(t, "trimmed")
 
 	if _, ok := definedSpec("trimmed"); !ok {
 		t.Fatal("whitespace name should be stored trimmed")
@@ -250,20 +252,12 @@ func TestLoadDefinitionsTrimsNamesAndSkipsBlankRoots(t *testing.T) {
 // macOS-typed definitions file and a precomposed JSON key would otherwise
 // register two specs for the same name.
 func TestLoadDefinitionsNormalizesNamesToNFC(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents.json")
 	body := "{\"cafe\\u0301\": {\"usage\": {\"roots\": [\"~/.cafe/sessions\"]}}}"
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeDefs(t, body)
 	if err := LoadDefinitions(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		defsMu.Lock()
-		delete(defs, "caf\u00e9")
-		delete(defs, "cafe\u0301")
-		defsMu.Unlock()
-	})
+	dropDefs(t, "caf\u00e9", "cafe\u0301")
 
 	if _, ok := definedSpec("caf\u00e9"); !ok {
 		t.Fatal("NFC lookup missed the NFD-defined agent")
@@ -287,22 +281,13 @@ func TestLoadDefinitionsNormalizesNamesToNFC(t *testing.T) {
 // NFD-keyed definition beside a different NFC-keyed one registers two
 // distinct agents.
 func TestLoadDefinitionsKeepsDistinctNFDSpellingSeparate(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents.json")
 	body := `{"cafe\u0301": {"usage": {"roots": ["~/.nfd/sessions"]}},
 		"caf\u00e9d": {"usage": {"roots": ["~/.nfc/sessions"]}}}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeDefs(t, body)
 	if err := LoadDefinitions(path); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() {
-		defsMu.Lock()
-		delete(defs, "caf\u00e9")
-		delete(defs, "cafe\u0301")
-		delete(defs, "caf\u00e9d")
-		defsMu.Unlock()
-	})
+	dropDefs(t, "caf\u00e9", "cafe\u0301", "caf\u00e9d")
 
 	nfd, nfdOK := definedSpec("cafe\u0301")
 	if !nfdOK {
@@ -322,12 +307,9 @@ func TestLoadDefinitionsKeepsDistinctNFDSpellingSeparate(t *testing.T) {
 // last. The loader must refuse the ambiguous file without registering
 // anything.
 func TestLoadDefinitionsRejectsNFCCollisions(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "agents.json")
 	body := `{"cafe\u0301": {"usage": {"roots": ["~/.nfd/sessions"]}},
 		"caf\u00e9": {"usage": {"roots": ["~/.nfc/sessions"]}}}`
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	path := writeDefs(t, body)
 	err := LoadDefinitions(path)
 	if !errors.Is(err, ErrInvalidDefinitions) {
 		t.Fatalf("colliding names = %v, want ErrInvalidDefinitions", err)

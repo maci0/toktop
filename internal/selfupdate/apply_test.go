@@ -56,9 +56,15 @@ func allowTestAssetURLs(t *testing.T) {
 // about the hash.
 func releaseServer(t *testing.T, payload []byte, sum string) *Release {
 	t.Helper()
+	name := AssetName("9.9.9")
+	return releaseServerRaw(t, payload, checksumsArchive(t, sum+"  "+name+"\n"))
+}
+
+// releaseServerRaw serves one asset and a prepared checksums-archive body.
+func releaseServerRaw(t *testing.T, payload, sums []byte) *Release {
+	t.Helper()
 	allowTestAssetURLs(t)
 	name := AssetName("9.9.9")
-	sums := checksumsArchive(t, sum+"  "+name+"\n")
 	mux := http.NewServeMux()
 	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) { w.Write(payload) })
 	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) { w.Write(sums) })
@@ -103,23 +109,7 @@ func TestApplyRejectsChecksumMismatch(t *testing.T) {
 }
 
 func TestApplyRejectsOversizedChecksums(t *testing.T) {
-	allowTestAssetURLs(t)
-	name := AssetName("9.9.9")
-	mux := http.NewServeMux()
-	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("x")) })
-	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) {
-		w.Write(bytes.Repeat([]byte("x"), 1<<20+1))
-	})
-	srv := httptest.NewServer(mux)
-	t.Cleanup(srv.Close)
-
-	rel := &Release{TagName: "v9.9.9"}
-	body := `{"tag_name":"v9.9.9","assets":[
-		{"name":"` + name + `","browser_download_url":"` + srv.URL + `/asset"},
-		{"name":"` + checksumsName("9.9.9") + `","browser_download_url":"` + srv.URL + `/checksums"}]}`
-	if err := json.Unmarshal([]byte(body), rel); err != nil {
-		t.Fatal(err)
-	}
+	rel := releaseServerRaw(t, []byte("x"), bytes.Repeat([]byte("x"), 1<<20+1))
 
 	target := filepath.Join(t.TempDir(), "toktop")
 	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {

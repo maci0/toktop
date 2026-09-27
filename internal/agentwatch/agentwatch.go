@@ -101,9 +101,8 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	w.now = fn
 }
 
-// instant reads w.now. Kept as a method so poll/record sites stay one short
-// call instead of repeating the field dereference.
-
+// instant reads the injected clock, which the record path stamps from so a
+// transcript event lands on the same timeline as the sample that carried it.
 func (w *Watcher) instant() time.Time { return w.now() }
 
 // Run follows agents until the context is canceled. Call LoadDefinitions

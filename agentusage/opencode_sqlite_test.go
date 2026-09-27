@@ -192,59 +192,50 @@ func TestFoldSessionDirectoryFollowsTheFilesystem(t *testing.T) {
 	}
 }
 
+// A session recorded under a folded spelling of the watched directory matches
+// under the production GOOS default and with folding forced on, so a
+// regression that only folds in tests cannot hide. Linux compares bytes and
+// skips the default case.
 func TestOpenCodeDBMatchesFoldedDirectorySpellings(t *testing.T) {
-	orig := foldSessionDirectory
-	foldSessionDirectory = true
-	t.Cleanup(func() { foldSessionDirectory = orig })
+	for _, tc := range []struct {
+		name  string
+		setup func(*testing.T)
+	}{
+		{"folding forced on", func(t *testing.T) {
+			orig := foldSessionDirectory
+			foldSessionDirectory = true
+			t.Cleanup(func() { foldSessionDirectory = orig })
+		}},
+		{"production GOOS default", func(t *testing.T) {
+			if !foldSessionDirectory {
+				t.Skip("this OS compares session directories by bytes")
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.setup(t)
 
-	path := opencodeDB(t)
-	work := t.TempDir()
-	stored := strings.ToUpper(filepath.ToSlash(work))
-	if stored == work {
-		t.Skip("temp dir has no case or slash to fold")
-	}
-	addSession(t, path, "s-mine", stored)
-	start := time.Now()
-	addMessage(t, path, "m1", "s-mine", start.Add(time.Second),
-		`{"role":"assistant","tokens":{"output":42}}`)
-	withOpenCodeDB(t, path)
+			path := opencodeDB(t)
+			work := t.TempDir()
+			stored := strings.ToUpper(filepath.ToSlash(work))
+			if stored == work {
+				t.Skip("temp dir has no case or slash to fold")
+			}
+			addSession(t, path, "s-mine", stored)
+			start := time.Now()
+			addMessage(t, path, "m1", "s-mine", start.Add(time.Second),
+				`{"role":"assistant","tokens":{"output":42}}`)
+			withOpenCodeDB(t, path)
 
-	w := Watch("opencode", work, start)
-	if w == nil {
-		t.Fatal("the source is registered, so a watcher is expected")
-	}
-	w.poll(nil)
-	if got := w.Sample().Output; got != 42 {
-		t.Fatalf("output tokens %d, want 42: folded directory spelling was not matched", got)
-	}
-}
-
-// Same matching as TestOpenCodeDBMatchesFoldedDirectorySpellings, but with
-// the production GOOS default so a regression that only folds in tests cannot
-// hide. Linux compares bytes and skips.
-func TestOpenCodeDBFoldsDirectoriesOnThisOS(t *testing.T) {
-	if !foldSessionDirectory {
-		t.Skip("this OS compares session directories by bytes")
-	}
-	path := opencodeDB(t)
-	work := t.TempDir()
-	stored := strings.ToUpper(filepath.ToSlash(work))
-	if stored == work {
-		t.Skip("temp dir has no case or slash to fold")
-	}
-	addSession(t, path, "s-mine", stored)
-	start := time.Now()
-	addMessage(t, path, "m1", "s-mine", start.Add(time.Second),
-		`{"role":"assistant","tokens":{"output":42}}`)
-	withOpenCodeDB(t, path)
-
-	w := Watch("opencode", work, start)
-	if w == nil {
-		t.Fatal("the source is registered, so a watcher is expected")
-	}
-	w.poll(nil)
-	if got := w.Sample().Output; got != 42 {
-		t.Fatalf("output tokens %d, want 42: folded directory spelling was not matched", got)
+			w := Watch("opencode", work, start)
+			if w == nil {
+				t.Fatal("the source is registered, so a watcher is expected")
+			}
+			w.poll(nil)
+			if got := w.Sample().Output; got != 42 {
+				t.Fatalf("output tokens %d, want 42: folded directory spelling was not matched", got)
+			}
+		})
 	}
 }
 

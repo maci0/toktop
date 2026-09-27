@@ -1383,58 +1383,61 @@ func TestProbeAllDropsModelOnceUnloaded(t *testing.T) {
 }
 
 // Catalog entries without VRAM must lose to a loaded model, otherwise 'p'
-// JIT-loads whatever /v1/models listed first.
-func TestProbeAllPrefersLoadedModel(t *testing.T) {
-	var got atomic.Value
-	got.Store("")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		if m, _ := body["model"].(string); m != "" {
-			got.Store(m)
-		}
-		io.WriteString(w, "{\"response\":\"one\",\"done\":true,\"eval_count\":1,\"eval_duration\":1000000}\n")
-	}))
-	defer srv.Close()
-
-	oldGap := probeWaveGap
-	probeWaveGap = 0
-	defer func() { probeWaveGap = oldGap }()
-
-	fp := fakeProvider{
-		label: "p", addr: srv.URL,
-		m: &provider.Metrics{Models: []core.ModelInfo{
+// JIT-loads whatever /v1/models listed first. A blank or embedding name is
+// not a probe target at all: a chat completion against an embedding weight is
+// a wasted billed request, and an embed-only inventory has nothing to ask.
+func TestProbeAllTargetSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		models []core.ModelInfo
+		want   string // model id the probe POSTs, empty when no probe may run
+	}{
+		{"prefers the loaded model", []core.ModelInfo{
 			{Name: "catalog-only"},
 			{Name: "loaded", SizeVRAM: 1 << 30},
-		}},
+		}, "loaded"},
+		{"skips a blank model name", []core.ModelInfo{{Name: "   "}}, ""},
+		{"skips an embedding model", []core.ModelInfo{
+			{Name: "text-embedding-3-small", SizeVRAM: 1 << 30},
+			{Name: "llama3"},
+		}, "llama3"},
+		{"skips an embed-only inventory", []core.ModelInfo{{Name: "nomic-embed-text"}}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var got atomic.Value
+			got.Store("")
+			var hits atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				hits.Add(1)
+				var body map[string]any
+				json.NewDecoder(r.Body).Decode(&body)
+				if m, _ := body["model"].(string); m != "" {
+					got.Store(m)
+				}
+				io.WriteString(w, "{\"response\":\"one\",\"done\":true,\"eval_count\":1,\"eval_duration\":1000000}\n")
+			}))
+			defer srv.Close()
+
+			oldGap := probeWaveGap
+			probeWaveGap = 0
+			defer func() { probeWaveGap = oldGap }()
+
+			fp := fakeProvider{
+				label: "p", addr: srv.URL,
+				m: &provider.Metrics{Models: tc.models},
+			}
+			c := New([]provider.Provider{fp.asProvider()}, time.Second)
+			emitOnce(t, c)
+			c.ProbeAll()
+			if tc.want == "" {
+				waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
+					"probe ran against a model that must be skipped")
+				return
+			}
+			waitFor(t, func() bool { return got.Load().(string) == tc.want },
+				"probe did not target the selected model")
+		})
 	}
-	c := New([]provider.Provider{fp.asProvider()}, time.Second)
-	emitOnce(t, c)
-	c.ProbeAll()
-	waitFor(t, func() bool { return got.Load().(string) == "loaded" },
-		"probe did not target the loaded model")
-}
-
-func TestProbeAllSkipsBlankModelName(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		hits.Add(1)
-	}))
-	defer srv.Close()
-
-	oldGap := probeWaveGap
-	probeWaveGap = 0
-	defer func() { probeWaveGap = oldGap }()
-
-	fp := fakeProvider{
-		label: "p", addr: srv.URL,
-		m: &provider.Metrics{Models: []core.ModelInfo{{Name: "   "}}},
-	}
-	c := New([]provider.Provider{fp.asProvider()}, time.Second)
-	emitOnce(t, c)
-	c.ProbeAll()
-	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
-		"probe ran with a blank model id")
 }
 
 // Probe samples ride the collector clock, not probe.Run's wall-clock start,
@@ -1471,60 +1474,6 @@ func TestProbeAllStampsWithInjectedClock(t *testing.T) {
 		t.Fatalf("equal-timestamp probes not ordered by addr: %q then %q",
 			probes[0].Addr, probes[1].Addr)
 	}
-}
-
-// A chat completion against an embedding weight is a wasted billed request.
-func TestProbeAllSkipsEmbeddingModel(t *testing.T) {
-	var got atomic.Value
-	got.Store("")
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
-		if m, _ := body["model"].(string); m != "" {
-			got.Store(m)
-		}
-		io.WriteString(w, "{\"response\":\"one\",\"done\":true,\"eval_count\":1,\"eval_duration\":1000000}\n")
-	}))
-	defer srv.Close()
-
-	oldGap := probeWaveGap
-	probeWaveGap = 0
-	defer func() { probeWaveGap = oldGap }()
-
-	fp := fakeProvider{
-		label: "p", addr: srv.URL,
-		m: &provider.Metrics{Models: []core.ModelInfo{
-			{Name: "text-embedding-3-small", SizeVRAM: 1 << 30},
-			{Name: "llama3"},
-		}},
-	}
-	c := New([]provider.Provider{fp.asProvider()}, time.Second)
-	emitOnce(t, c)
-	c.ProbeAll()
-	waitFor(t, func() bool { return got.Load().(string) == "llama3" },
-		"probe targeted the embedding model instead of the chat id")
-}
-
-func TestProbeAllSkipsEmbedOnlyInventory(t *testing.T) {
-	var hits atomic.Int32
-	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-		hits.Add(1)
-	}))
-	defer srv.Close()
-
-	oldGap := probeWaveGap
-	probeWaveGap = 0
-	defer func() { probeWaveGap = oldGap }()
-
-	fp := fakeProvider{
-		label: "p", addr: srv.URL,
-		m: &provider.Metrics{Models: []core.ModelInfo{{Name: "nomic-embed-text"}}},
-	}
-	c := New([]provider.Provider{fp.asProvider()}, time.Second)
-	emitOnce(t, c)
-	c.ProbeAll()
-	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
-		"probe ran against an embed-only inventory")
 }
 
 // 429/503 must keep ProbeAll from POSTing that backend until Retry-After

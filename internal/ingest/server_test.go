@@ -637,14 +637,8 @@ func TestIngestDropsAbsurdTokenCounts(t *testing.T) {
 // Modest skew stays honored.
 func TestIngestClampsFarFutureTimestamps(t *testing.T) {
 	rec := &memRecorder{}
-	s, err := newServer("127.0.0.1:0", rec, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
 	frozen := time.Unix(1_700_000_000, 0).UTC()
-	s.SetNow(func() time.Time { return frozen })
-	go s.Serve()
-	t.Cleanup(func() { s.Close() })
+	s := startIngestAt(t, rec, frozen)
 
 	farFuture := frozen.Add(time.Hour).Format(time.RFC3339)
 	nearFuture := frozen.Add(10 * time.Second).Format(time.RFC3339)
@@ -689,14 +683,8 @@ func TestIngestTreatsEmptyTimestampAsAbsent(t *testing.T) {
 // in the feed, not a second wall-clock read.
 func TestIngestStampsWithInjectedClock(t *testing.T) {
 	rec := &memRecorder{}
-	s, err := newServer("127.0.0.1:0", rec, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
 	frozen := time.Unix(1_700_000_000, 0).UTC()
-	s.SetNow(func() time.Time { return frozen })
-	go s.Serve()
-	t.Cleanup(func() { s.Close() })
+	s := startIngestAt(t, rec, frozen)
 
 	farFuture := frozen.Add(time.Hour).Format(time.RFC3339)
 	resp := post(t, "http://"+s.Addr()+"/v1/events",
@@ -1120,6 +1108,25 @@ func startIngestLog(t *testing.T, rec core.AgentRecorder, lg *slog.Logger) *Serv
 	if err != nil {
 		t.Fatal(err)
 	}
+	return serveIngest(t, s)
+}
+
+// startIngestAt freezes the clock, so an event stamp the server fills in
+// itself (missing ts, far-future clamp) is now rather than a second
+// wall-clock read.
+func startIngestAt(t *testing.T, rec core.AgentRecorder, now time.Time) *Server {
+	t.Helper()
+	s, err := newServer("127.0.0.1:0", rec, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.SetNow(func() time.Time { return now })
+	return serveIngest(t, s)
+}
+
+// serveIngest runs a built server on its goroutine and closes it with the test.
+func serveIngest(t *testing.T, s *Server) *Server {
+	t.Helper()
 	go s.Serve()
 	t.Cleanup(func() { s.Close() })
 	return s

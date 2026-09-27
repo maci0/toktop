@@ -51,9 +51,6 @@ support channel (see SECURITY.md).
   the write, and a lock left behind by a killed process is broken rather than
   waited on. The store's rename is flushed to disk, so a crash cannot revert
   to the previous one and drop the pin just added.
-
-### Fixed
-
 - The error a mid-stream `POST /v1/events` failure returns now says how to
   recover from it. A stream whose events carry their own `id`, or that was
   sent without `Idempotency-Key`, is resumed by sending the remaining lines.
@@ -65,9 +62,6 @@ support channel (see SECURITY.md).
   not leave a partial file in the install directory or the config directory
   for good. A staging file young enough to be a download in flight is left
   alone.
-
-### Fixed
-
 - A transcript rewritten to a shorter length is counted once, not twice. The
   watcher re-read such a file from its start, and the records it had already
   billed were added a second time.
