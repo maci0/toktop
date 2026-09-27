@@ -2355,3 +2355,121 @@ func TestHelpOverlayIsTitled(t *testing.T) {
 		t.Errorf("compact help overlay has no title:\n%s", out)
 	}
 }
+
+// The PROBES panel is 31% of the pane, so on the narrowest dashboard it has
+// 16 cells. The two hints it prints while no probe has run are the only
+// instruction that panel ever gives, and at the longer spellings both ended in
+// an ellipsis exactly where the dashboard is smallest.
+func TestProbeEmptyHintsFitTheNarrowestProbesColumn(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	inner := minDashW - minDashW*38/100 - minDashW*31/100 - 4
+	for _, line := range strings.Split(strip(m.probesBody(inner, 8)), "\n") {
+		if line == "" {
+			continue
+		}
+		if w := lipgloss.Width(line); w > inner {
+			t.Errorf("probe hint is %d cells in a %d-cell column: %q", w, inner, line)
+		}
+	}
+}
+
+// A demo tag plus every key hint overruns a narrow pane. The row used to be
+// clipped at the pane edge, which took "? help" with it: the one key that
+// leads to the reference listing the others.
+func TestFooterKeepsHelpOnANarrowPane(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}, Demo: true, DemoSeed: 42}, nil)
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Agents:    []core.AgentEvent{{Agent: "claude"}},
+	}
+	m.w, m.h, m.ready = minDashW, 32, true
+	got := strip(m.renderFooter())
+	if !strings.Contains(got, "? help") {
+		t.Errorf("footer lost the help hint on a %d-column pane: %q", minDashW, got)
+	}
+	if !strings.Contains(got, "q quit") || !strings.Contains(got, "DEMO seed 42") {
+		t.Errorf("footer lost a key that fits: %q", got)
+	}
+	if w := lipgloss.Width(got); w > minDashW {
+		t.Errorf("footer is %d cells on a %d-column pane: %q", w, minDashW, got)
+	}
+}
+
+// The agents view is fed by the local session-log watch under --agents and by
+// harness events POSTed to the ingest endpoint without it. The title named the
+// first on both, so a run that never read a session log claimed to have.
+func TestAgentsTitleNamesWhereTheTokensCameFrom(t *testing.T) {
+	events := []core.AgentEvent{{Agent: "claude", OutputTokens: 10, At: time.Now()}}
+	local := New(Config{Version: "t", Agents: true}, nil)
+	local.snap = core.Snapshot{Agents: events}
+	local.w, local.h, local.ready = 110, 36, true
+	if out := strip(local.View()); !strings.Contains(out, "session logs") {
+		t.Errorf("agents view does not name the local session-log source:\n%s", out)
+	}
+	fed := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420"}, nil)
+	fed.snap = core.Snapshot{Agents: events}
+	fed.w, fed.h, fed.ready = 110, 36, true
+	out := strip(fed.View())
+	if !strings.Contains(out, "ingest endpoint") {
+		t.Errorf("agents view does not name the ingest source:\n%s", out)
+	}
+	if strings.Contains(out, "session logs") {
+		t.Errorf("agents view claims a session-log watch this run never made:\n%s", out)
+	}
+}
+
+// ENGINES draws as many blocks as the row budget holds and names the rest only
+// as a count, so the engine at the end of the collector's order is the one
+// that disappears on a short pane. A failed engine is the one row that carries
+// the reason, so the panel draws the down engines first; the healthy ones keep
+// their order and still line up with ENGINE STATE beside them.
+func TestEnginesPanelDrawsFailuresFirst(t *testing.T) {
+	provs := make([]core.ProviderSnapshot, 5)
+	for i := range provs {
+		provs[i] = core.ProviderSnapshot{Label: fmt.Sprintf("engine-%d", i), OK: true,
+			Models: []core.ModelInfo{{Name: "m"}}}
+	}
+	provs[4] = core.ProviderSnapshot{Label: "engine-4", Err: "connection refused"}
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: provs}
+	// Three blocks is all this budget holds.
+	body, shown := m.providersBody(60, 6)
+	if shown != 3 {
+		t.Fatalf("drew %d engines, want 3", shown)
+	}
+	if !strings.Contains(strip(body), "engine-4") {
+		t.Errorf("the failed engine was the block that got cut:\n%s", strip(body))
+	}
+	if !strings.Contains(strip(body), "connection refused") {
+		t.Errorf("the failed engine's reason did not reach the panel:\n%s", strip(body))
+	}
+	// The healthy pair keeps the collector's order, so the panel still reads
+	// across to ENGINE STATE.
+	if first, second, _ := strings.Cut(strip(body), "engine-0"); !strings.Contains(second, "engine-1") || first == "" {
+		t.Errorf("healthy engines reordered:\n%s", strip(body))
+	}
+}
+
+// The kind badge names a category two engines share ("vllm" on two ports), so
+// the engine's own label is what the block needs; a label that only repeats
+// the badge is noise.
+func TestEngineBlockNamesTheEngine(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{
+		{Label: "vllm-a100", Kind: core.KindVLLM, OK: true, Models: []core.ModelInfo{{Name: "Qwen"}}},
+		{Label: "vllm-b200", Kind: core.KindVLLM, OK: true, Models: []core.ModelInfo{{Name: "Llama"}}},
+		{Label: "ollama", Kind: core.KindOllama, OK: true, Models: []core.ModelInfo{{Name: "gemma"}}},
+	}}
+	body, _ := m.providersBody(60, 8)
+	for _, want := range []string{"vllm-a100", "vllm-b200", "gemma"} {
+		if !strings.Contains(strip(body), want) {
+			t.Errorf("ENGINES block does not carry %q:\n%s", want, strip(body))
+		}
+	}
+	// The ollama row names the kind once, not twice.
+	row, _, _ := strings.Cut(strip(body), "gemma")
+	if n := strings.Count(row, "ollama"); n != 1 {
+		t.Errorf("label repeating the kind badge printed %d times:\n%s", n, row)
+	}
+}

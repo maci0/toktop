@@ -171,8 +171,19 @@ func (m Model) renderAgentsOnly() string {
 			title += part
 		}
 	}
-	if hint := dim("  local, read from their own session logs"); m.w >= 78 {
-		add(hint)
+	// Where the tokens come from, and only where that is true: the same view
+	// is fed by the local session-log watch under --agents and by harness
+	// events POSTed to the ingest endpoint without it, and the session-log
+	// claim was wrong for the second.
+	switch {
+	case m.cfg.Agents:
+		if hint := dim("  local, read from their own session logs"); m.w >= 78 {
+			add(hint)
+		}
+	case m.cfg.IngestAddr != "":
+		if hint := dim("  from the ingest endpoint"); m.w >= 56 {
+			add(hint)
+		}
 	}
 	// This view has no PROBES panel, so the title is where a probe lands: the
 	// badge alone left p with no outcome anywhere on screen.

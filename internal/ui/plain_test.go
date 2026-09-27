@@ -87,14 +87,17 @@ func TestPlainFrameCarriesTheData(t *testing.T) {
 	}
 }
 
+// An engine with no models (the normal state of a down one) names no model
+// anywhere: a "-" placeholder in the dashboard row read as a model called "-",
+// and the plain report already dropped it.
 func TestEngineModelLabels(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		models []core.ModelInfo
 		label  string
 	}{
-		{name: "nil", label: "-"},
-		{name: "empty", models: []core.ModelInfo{}, label: "-"},
+		{name: "nil"},
+		{name: "empty", models: []core.ModelInfo{}},
 		{name: "first", models: []core.ModelInfo{{Name: "first"}, {Name: "second"}}, label: "first"},
 		{name: "empty first", models: []core.ModelInfo{{}, {Name: "second"}}},
 		{name: "sanitized", models: []core.ModelInfo{{Name: "\x1b[31mfirst\x1b[0m"}}, label: "first"},
@@ -105,13 +108,19 @@ func TestEngineModelLabels(t *testing.T) {
 			}}}
 			m := Model{snap: snap}
 			row, _, _ := strings.Cut(strip(func() string { b, _ := m.providersBody(80, 4); return b }()), "\n")
-			fields := strings.Fields(row)
-			wantFields := 2
-			if tc.label != "" {
-				wantFields++
+			// The row carries the engine's own label as well as its model, so
+			// the model is looked for by name rather than as the last cell.
+			named := false
+			for _, f := range strings.Fields(row) {
+				if f == tc.label {
+					named = true
+				}
 			}
-			if len(fields) != wantFields || (tc.label != "" && fields[len(fields)-1] != tc.label) {
-				t.Errorf("dashboard model row = %q, want label %q", row, tc.label)
+			if named != (tc.label != "") {
+				t.Errorf("dashboard model row = %q, want model %q present=%v", row, tc.label, tc.label != "")
+			}
+			if !strings.Contains(row, "engine") {
+				t.Errorf("dashboard row does not name the engine: %q", row)
 			}
 			var plain strings.Builder
 			writeEnginesPlain(&plain, snap)

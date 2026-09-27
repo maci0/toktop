@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/maci0/toktop/internal/core"
 )
 
@@ -15,10 +17,17 @@ import (
 // therefore ends mid-block, and the cut left a name with no gauge under it, so
 // the block that does not fit is dropped whole. Returning the drawn count is
 // what keeps the title's "+N more" in step with the body below it.
+//
+// Down engines are drawn first. The panel shows as many engines as the row
+// budget holds and the rest are named only as a count, so a pane too short for
+// the fleet hides whatever sits at the end of the collector's order, and that
+// is where a failed engine lands: the one row carrying its reason was the one
+// row that got cut. Healthy engines keep their relative order, so the panel
+// still lines up with ENGINE STATE beside it.
 func (m Model) providersBody(w, rows int) (string, int) {
 	var b strings.Builder
 	used, shown := 0, 0
-	for _, p := range m.snap.Providers {
+	for _, p := range m.providersByStatus() {
 		block := providerBlock(p, w)
 		if used+len(block) > rows {
 			break
@@ -32,17 +41,68 @@ func (m Model) providersBody(w, rows int) (string, int) {
 	return b.String(), shown
 }
 
+// providersByStatus lists the failed engines ahead of the healthy ones, each
+// group in the snapshot's own order.
+func (m Model) providersByStatus() []core.ProviderSnapshot {
+	ordered := make([]core.ProviderSnapshot, 0, len(m.snap.Providers))
+	for _, p := range m.snap.Providers {
+		if !p.OK {
+			ordered = append(ordered, p)
+		}
+	}
+	for _, p := range m.snap.Providers {
+		if p.OK {
+			ordered = append(ordered, p)
+		}
+	}
+	return ordered
+}
+
+// Cells the engine block's first row spends on identity, narrowest pane
+// first: the label is what tells two engines of one kind apart, so it is
+// taken before the model and before the version, and a cell with too few
+// cells left is dropped whole rather than cut to an ellipsis that says
+// nothing.
+const (
+	labelCells   = 10
+	modelMinCell = 4
+	versionCells = 9
+)
+
 func providerBlock(p core.ProviderSnapshot, w int) []string {
 	dot := dotUp
 	if !p.OK {
 		dot = dotBad
 	}
-	model := shorten(core.SanitizeText(primaryModel(p)), w-15)
-	line1 := dot + " " + kindBadge(p.Kind) + " " + styleValue.Render(model)
-	if p.Version != "" {
-		line1 += " " + dim("v"+shorten(core.SanitizeText(p.Version), 12))
+	row := dot + " " + kindBadge(p.Kind)
+	// The label comes first because the kind badge names a category two
+	// engines on different ports share ("vllm"), while the label is the only
+	// thing telling them apart. ENGINE STATE and the plain report name it too;
+	// the block did not, so two engines of one kind read as the same line. A
+	// label that only repeats the badge adds nothing and is dropped.
+	room := w - lipgloss.Width(row) - 1
+	label := strings.TrimSpace(core.SanitizeText(p.Label))
+	if !strings.EqualFold(label, strings.TrimSpace(p.Kind)) {
+		label = shorten(label, min(labelCells, max(room, 0)))
+	} else {
+		label = ""
 	}
-	block := []string{clip(line1, w)}
+	if label != "" {
+		row += " " + styleValue.Render(label)
+		room -= widthOf(label) + 1
+	}
+	// No models is the normal state of a down engine, and the "-" placeholder
+	// primaryModel returns for that read as a model named "-". The plain report
+	// drops the same placeholder; the block does too.
+	if model := primaryModel(p); model != "" && model != "-" && room > modelMinCell {
+		row += " " + styleValue.Render(shorten(core.SanitizeText(model), room-1))
+		room = 0
+	}
+	if p.Version != "" && room > versionCells {
+		row += " " + dim("v"+shorten(core.SanitizeText(p.Version), 12))
+	}
+	line1 := clip(row, w)
+	block := []string{line1}
 	if !p.OK {
 		return append(block, styleBad.Render("  "+clip(shorten(core.SanitizeText(p.Err), w-3), w-3)))
 	}
@@ -209,10 +269,12 @@ func (m Model) probesBody(w, h int) string {
 		shown++
 	}
 	if len(m.snap.Probes) == 0 {
-		out.WriteString(dim("press ") + styleInfo.Render("p") + dim(" to fire a probe") + "\n")
-		// Short enough for the narrowest legal pane's PROBES column: the
-		// longer spelling ended in an ellipsis on every dashboard.
-		out.WriteString(dim("q to quit, re-run with --probe N"))
+		// Short enough for the narrowest legal pane's PROBES column, which is
+		// 31% of 62 cells wide: the longer spellings ended in an ellipsis on
+		// every narrow dashboard, so the one instruction the empty panel has
+		// was the one thing that could not be read.
+		out.WriteString(dim("press ") + styleInfo.Render("p") + dim(" to probe") + "\n")
+		out.WriteString(dim("quit, --probe N"))
 	}
 	return out.String()
 }

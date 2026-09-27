@@ -42,34 +42,44 @@ func (m Model) canSwapFocus() bool {
 const noticeMinCells = 16
 
 func (m Model) renderFooter() string {
-	foot := styleInfo.Render("q") + dim(" quit  ") +
+	base := styleInfo.Render("q") + dim(" quit  ") +
 		styleInfo.Render("space") + dim(" pause  ")
+	// The keys that are not on every frame, in the order they are dropped.
+	// "?" is not among them: it is how a reader finds the reference that lists
+	// the rest, so a row too narrow for the full list sheds from the right
+	// rather than letting the pane clip the last hint away.
+	var opt []string
 	if m.canProbe() {
-		foot += styleInfo.Render("p") + dim(" probe  ")
+		opt = append(opt, styleInfo.Render("p")+dim(" probe  "))
 	}
 	if m.canTimescale() {
-		foot += styleInfo.Render("t") + dim(" timescale  ")
+		opt = append(opt, styleInfo.Render("t")+dim(" timescale  "))
 	}
 	if m.canSwapFocus() {
-		label := " agents"
+		label := " agents  "
 		if m.focusAgents {
-			label = " engines"
+			label = " engines  "
 		}
-		foot += styleInfo.Render("a") + dim(label+"  ")
+		opt = append(opt, styleInfo.Render("a")+dim(label))
 	}
-	foot += styleInfo.Render("?") + dim(" help")
+	foot := func() string { return base + strings.Join(opt, "") + styleInfo.Render("?") + dim(" help") }
 	tag := ""
 	if m.cfg.Demo {
 		tag = styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
 	}
+	keys := foot()
+	for m.w > 0 && len(opt) > 0 && widthOf(tag)+widthOf(keys) > m.w {
+		opt = opt[:len(opt)-1]
+		keys = foot()
+	}
 	if m.notice == "" {
-		return tag + foot
+		return tag + keys
 	}
 	// The notice shares the footer row so a key that did nothing is answered
 	// where the key itself is printed.
 	sep := dim("  ·  ")
-	if avail := m.w - widthOf(tag) - widthOf(foot) - widthOf(sep); avail >= noticeMinCells {
-		return tag + foot + sep + styleWarn.Render(m.notice)
+	if avail := m.w - widthOf(tag) - widthOf(keys) - widthOf(sep); avail >= noticeMinCells {
+		return tag + keys + sep + styleWarn.Render(m.notice)
 	}
 	room := max(m.w-widthOf(tag), 0)
 	return tag + styleWarn.Render(shorten(m.notice, room))
