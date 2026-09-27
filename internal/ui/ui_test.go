@@ -39,6 +39,30 @@ func TestClosedSnapshotChannelStopsScheduling(t *testing.T) {
 	}
 }
 
+// pressKey sends a key to m and stores the model the update returned, so a
+// test can step the model forward and still read the command it scheduled.
+func pressKey(m *Model, s string) tea.Cmd {
+	nm, cmd := m.Update(keyMsg(s))
+	*m = nm.(Model)
+	return cmd
+}
+
+// assertFitsPane fails unless out is at most h lines and every line is at
+// most w cells wide. The frame must fit its pane exactly: bubbletea clips
+// overflow from the top, which hides the header, and any line wider than
+// the pane wraps and drags every later row out of alignment.
+func assertFitsPane(t *testing.T, label, out string, w, h int) {
+	t.Helper()
+	if got := lipgloss.Height(out); got > h {
+		t.Errorf("%s is %d lines, overflows pane %d", label, got, h)
+	}
+	for i, ln := range strings.Split(out, "\n") {
+		if lw := lipgloss.Width(ln); lw > w {
+			t.Fatalf("%s line %d renders %d cells, want <= %d:\n%s", label, i, lw, w, ln)
+		}
+	}
+}
+
 func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case " ":
@@ -56,11 +80,7 @@ func keyMsg(s string) tea.KeyMsg {
 func TestUpdateKeyMap(t *testing.T) {
 	var probes atomic.Int32
 	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
-	key := func(s string) tea.Cmd {
-		nm, cmd := m.Update(keyMsg(s))
-		m = nm.(Model)
-		return cmd
-	}
+	key := func(s string) tea.Cmd { return pressKey(&m, s) }
 	sendSnap := func(label string) {
 		nm, _ := m.Update(snapMsg(core.Snapshot{Providers: []core.ProviderSnapshot{{Label: label}}}))
 		m = nm.(Model)
@@ -167,11 +187,7 @@ func TestHelpOverlayMutesActionKeys(t *testing.T) {
 func testHelpOverlayMutesActionKeys(t *testing.T) {
 	var probes atomic.Int32
 	m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
-	key := func(s string) tea.Cmd {
-		nm, cmd := m.Update(keyMsg(s))
-		m = nm.(Model)
-		return cmd
-	}
+	key := func(s string) tea.Cmd { return pressKey(&m, s) }
 
 	nm, _ := m.Update(snapMsg(core.Snapshot{
 		Providers: []core.ProviderSnapshot{{Label: "engine", OK: true}},
@@ -1078,16 +1094,7 @@ func TestEmptyStateFitsPane(t *testing.T) {
 	cfg := Config{Version: "t", IngestAddr: "127.0.0.1:8420", Agents: true}
 	for _, sz := range [][2]int{{62, 30}, {90, 30}, {110, 36}} {
 		w, h := sz[0], sz[1]
-		out := StaticFrame(cfg, core.Snapshot{}, w, h)
-		if got := lipgloss.Height(out); got > h {
-			t.Errorf("%dx%d: empty frame is %d lines, overflows pane", w, h, got)
-		}
-		for i, ln := range strings.Split(out, "\n") {
-			if lw := lipgloss.Width(ln); lw > w {
-				t.Fatalf("%dx%d: line %d renders %d cells, want <= %d:\n%s",
-					w, h, i, lw, w, ln)
-			}
-		}
+		assertFitsPane(t, fmt.Sprintf("%dx%d empty frame", w, h), StaticFrame(cfg, core.Snapshot{}, w, h), w, h)
 	}
 }
 
@@ -1225,21 +1232,11 @@ func busySnap() core.Snapshot {
 	}
 }
 
-// The frame must fit its pane exactly: bubbletea clips overflow from the
-// top, which hides the header, and any line wider than the pane wraps and
-// drags every later row out of alignment.
 func TestFrameFitsPaneAtCommonSizes(t *testing.T) {
 	for _, sz := range [][2]int{{62, 30}, {70, 31}, {80, 32}, {100, 34}, {120, 38}, {160, 44}} {
 		w, h := sz[0], sz[1]
-		out := StaticFrame(Config{Version: "0.1.0", IngestAddr: "127.0.0.1:8420"}, busySnap(), w, h)
-		if got := lipgloss.Height(out); got > h {
-			t.Errorf("%dx%d: frame is %d lines, overflows pane", w, h, got)
-		}
-		for i, ln := range strings.Split(out, "\n") {
-			if lw := lipgloss.Width(ln); lw > w {
-				t.Fatalf("%dx%d: line %d renders %d cells, want <= %d:\n%s", w, h, i, lw, w, ln)
-			}
-		}
+		assertFitsPane(t, fmt.Sprintf("%dx%d frame", w, h),
+			StaticFrame(Config{Version: "0.1.0", IngestAddr: "127.0.0.1:8420"}, busySnap(), w, h), w, h)
 	}
 	// The header must survive intact on roomy panes.
 	out := strip(StaticFrame(Config{Version: "t"}, busySnap(), 160, 40))
@@ -1458,14 +1455,7 @@ func TestMinimalViewFitsPane(t *testing.T) {
 	m.snap = core.Snapshot{Providers: ps}
 	m.w, m.h, m.ready = 40, 10, true
 	out := m.View()
-	if got := lipgloss.Height(out); got > 10 {
-		t.Errorf("compact frame is %d lines, overflows pane 10", got)
-	}
-	for i, ln := range strings.Split(out, "\n") {
-		if lw := lipgloss.Width(ln); lw > 40 {
-			t.Fatalf("line %d renders %d cells, want <= 40:\n%s", i, lw, ln)
-		}
-	}
+	assertFitsPane(t, "compact frame", out, 40, 10)
 	if !strings.Contains(strip(out), "q quit") {
 		t.Errorf("key hint lost when engines overflow the pane:\n%s", strip(out))
 	}
@@ -1968,14 +1958,7 @@ func TestHelpFitsCompactPane(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	m.help, m.w, m.h, m.ready = true, 40, 10, true
 	out := m.View()
-	if got := lipgloss.Height(out); got > 10 {
-		t.Errorf("help is %d lines, overflows pane 10", got)
-	}
-	for i, ln := range strings.Split(out, "\n") {
-		if lw := lipgloss.Width(ln); lw > 40 {
-			t.Fatalf("help line %d renders %d cells, want <= 40:\n%s", i, lw, ln)
-		}
-	}
+	assertFitsPane(t, "help", out, 40, 10)
 	plain := strip(out)
 	for _, want := range []string{"quit", "pause", "help"} {
 		if !strings.Contains(plain, want) {
@@ -2014,14 +1997,10 @@ func TestHelpDescribesLiveProbe(t *testing.T) {
 
 func TestKeyMapCaseInsensitiveAndDismiss(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
-	key := func(s string) (Model, tea.Cmd) {
-		nm, cmd := m.Update(keyMsg(s))
-		m = nm.(Model)
-		return m, cmd
-	}
+	key := func(s string) tea.Cmd { return pressKey(&m, s) }
 
 	// Upper-case Q quits
-	if _, cmd := key("Q"); cmd == nil {
+	if cmd := key("Q"); cmd == nil {
 		t.Error("Q must quit")
 	}
 
@@ -2049,8 +2028,7 @@ func TestKeyMapCaseInsensitiveAndDismiss(t *testing.T) {
 
 	// esc unfocuses agents without quitting
 	m.focusAgents = true
-	_, cmd := key("esc")
-	if cmd != nil {
+	if cmd := key("esc"); cmd != nil {
 		t.Error("esc while focused on agents must not quit")
 	}
 	if m.focusAgents {

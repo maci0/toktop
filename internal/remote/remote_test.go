@@ -25,6 +25,32 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+// useSSHConfig points ParseTarget at an ssh_config holding body, written to
+// the test's temp dir so no test reads the developer's own config. It
+// returns the path, for subtests that rewrite the file in place.
+func useSSHConfig(t *testing.T, body string) string {
+	t.Helper()
+	cfg := filepath.Join(t.TempDir(), "config")
+	if err := os.WriteFile(cfg, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldPath, oldRead := sshConfigPath, configReader
+	t.Cleanup(func() { sshConfigPath, configReader = oldPath, oldRead })
+	sshConfigPath = func() string { return cfg }
+	configReader = func(path string) ([]byte, error) { return os.ReadFile(path) }
+	return cfg
+}
+
+// stubSSHConfig points ParseTarget at path and reads it through read, for
+// the cases the outcome hinges on the read failing rather than the contents.
+func stubSSHConfig(t *testing.T, path string, read func(string) ([]byte, error)) {
+	t.Helper()
+	oldPath, oldRead := sshConfigPath, configReader
+	t.Cleanup(func() { sshConfigPath, configReader = oldPath, oldRead })
+	sshConfigPath = func() string { return path }
+	configReader = read
+}
+
 // disableAgent keeps the auth chain from picking up a running ssh-agent
 // (SSH_AUTH_SOCK, or the Windows OpenSSH named pipe).
 func disableAgent(t *testing.T) {
@@ -148,9 +174,7 @@ func TestParseTargetUnparseableNamesTheShape(t *testing.T) {
 }
 
 func TestParseTargetSSHConfig(t *testing.T) {
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config")
-	if err := os.WriteFile(cfg, []byte(`
+	useSSHConfig(t, `
 # comment
 Host gpu
   hostname 192.168.0.212
@@ -163,24 +187,17 @@ Host *.lab
 
 Host *
   user fallback
-`), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	oldPath, oldRead := sshConfigPath, configReader
-	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
-	sshConfigPath = func() string { return cfg }
-	configReader = func(path string) ([]byte, error) { return os.ReadFile(path) }
+`)
 
 	tgt, err := ParseTarget("ssh://gpu")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Target{User: "maci", Host: "192.168.0.212", Port: 2022,
-		KeyFile: filepath.Join(dir, ".ssh", "gpu_key")}
-	// expandTilde resolves to $HOME, not dir; just verify suffix
+	want := Target{User: "maci", Host: "192.168.0.212", Port: 2022}
 	if tgt.User != want.User || tgt.Host != want.Host || tgt.Port != want.Port {
 		t.Errorf("resolved = %+v, want %+v", tgt, want)
 	}
+	// expandTilde resolves to $HOME, not the temp dir; verify the suffix only.
 	if !strings.HasSuffix(tgt.KeyFile, "gpu_key") {
 		t.Errorf("keyfile = %q", tgt.KeyFile)
 	}
@@ -198,16 +215,7 @@ Host *
 }
 
 func TestParseTargetSSHConfigTabsAndNegation(t *testing.T) {
-	dir := t.TempDir()
-	cfg := filepath.Join(dir, "config")
-	tabbed := "Host\tgpu\n\tHostName\t10.9.8.7\n\tPort\t2022\n"
-	if err := os.WriteFile(cfg, []byte(tabbed), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	oldPath, oldRead := sshConfigPath, configReader
-	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
-	sshConfigPath = func() string { return cfg }
-	configReader = func(path string) ([]byte, error) { return os.ReadFile(path) }
+	cfg := useSSHConfig(t, "Host\tgpu\n\tHostName\t10.9.8.7\n\tPort\t2022\n")
 
 	tgt, err := ParseTarget("ssh://gpu")
 	if err != nil {
@@ -1296,12 +1304,8 @@ func TestPasswordSourceEnvSetButEmpty(t *testing.T) {
 // dials the wrong port with no key, and the operator sees a bare
 // authentication rejection with nothing pointing at the config file.
 func TestParseTargetFailsLoudOnUnreadableSSHConfig(t *testing.T) {
-	oldPath, oldRead := sshConfigPath, configReader
-	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
-	sshConfigPath = func() string { return "/home/operator/.ssh/config" }
-	configReader = func(path string) ([]byte, error) {
-		return nil, fs.ErrPermission
-	}
+	stubSSHConfig(t, "/home/operator/.ssh/config",
+		func(string) ([]byte, error) { return nil, fs.ErrPermission })
 
 	if _, err := ParseTarget("ssh://gpu"); err == nil {
 		t.Fatal("ParseTarget returned nil error for an unreadable ssh config, want the read failure")
@@ -1312,10 +1316,8 @@ func TestParseTargetFailsLoudOnUnreadableSSHConfig(t *testing.T) {
 
 // An absent config is not a failure: toktop must still connect.
 func TestParseTargetToleratesAbsentSSHConfig(t *testing.T) {
-	oldPath, oldRead := sshConfigPath, configReader
-	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
-	sshConfigPath = func() string { return "/home/operator/.ssh/config" }
-	configReader = func(path string) ([]byte, error) { return nil, os.ErrNotExist }
+	stubSSHConfig(t, "/home/operator/.ssh/config",
+		func(string) ([]byte, error) { return nil, os.ErrNotExist })
 
 	tgt, err := ParseTarget("ssh://gpu")
 	if err != nil {

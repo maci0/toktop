@@ -276,16 +276,8 @@ func TestAgentsOnlyFrameFitsPane(t *testing.T) {
 	}
 	for _, sz := range [][2]int{{62, 30}, {80, 32}, {110, 36}, {160, 44}} {
 		w, h := sz[0], sz[1]
-		out := StaticFrame(Config{Version: "t"}, snap, w, h)
-		if got := lipgloss.Height(out); got > h {
-			t.Errorf("%dx%d: frame is %d lines, overflows pane", w, h, got)
-		}
-		for i, ln := range strings.Split(out, "\n") {
-			if lw := lipgloss.Width(ln); lw > w {
-				t.Fatalf("%dx%d: line %d renders %d cells, want <= %d:\n%s",
-					w, h, i, lw, w, ln)
-			}
-		}
+		assertFitsPane(t, fmt.Sprintf("%dx%d frame", w, h),
+			StaticFrame(Config{Version: "t"}, snap, w, h), w, h)
 	}
 }
 
@@ -432,16 +424,7 @@ func TestAgentsFocusFrameFitsPane(t *testing.T) {
 		m.snap, m.w, m.h, m.ready, m.clock = snap, w, h, true, snap.At
 		nm, _ := m.Update(keyMsg("a"))
 		m = nm.(Model)
-		out := m.View()
-		if got := lipgloss.Height(out); got > h {
-			t.Errorf("%dx%d: agents focus is %d lines, overflows pane", w, h, got)
-		}
-		for i, ln := range strings.Split(out, "\n") {
-			if lw := lipgloss.Width(ln); lw > w {
-				t.Fatalf("%dx%d: line %d renders %d cells, want <= %d:\n%s",
-					w, h, i, lw, w, ln)
-			}
-		}
+		assertFitsPane(t, fmt.Sprintf("%dx%d agents focus", w, h), m.View(), w, h)
 	}
 }
 
