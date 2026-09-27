@@ -5,6 +5,7 @@ package agentusage
 
 import (
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,6 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
-	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // pollEvery is how often a transcript is re-read. It bounds how stale a live
@@ -58,9 +58,29 @@ var (
 	rootLists  = map[string]rootListing{}
 )
 
-// audit builds the logger for the lines this file writes. A var so a test can
+// audit builds the logger for the lines this file writes. It starts at the
+// process logger, so a program that embeds this package hears about a walk
+// that could not finish without configuring anything, and SetLogger hands it
+// the host's own logger (toktop hands it the audit log). A var, so a test can
 // point it at a handler it can read.
-var audit = logcfg.Logger
+var audit = slog.Default
+
+// SetLogger sends the lines this package audits to l. The default is the
+// process logger from [slog.Default]; a program that reads agents alongside
+// its own output passes the logger it already writes to, so a failed walk is
+// one line in the stream the program keeps rather than a second stream it
+// does not. A nil logger restores the default.
+//
+// The lines carry no program name, because which program is reading agents is
+// the host's to say. A host that needs its own name in the message prepends
+// it in the handler it passes.
+func SetLogger(l *slog.Logger) {
+	if l == nil {
+		audit = slog.Default
+		return
+	}
+	audit = func() *slog.Logger { return l }
+}
 
 func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 
@@ -178,7 +198,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			// caller re-walks rather than serving this one, and the reason is
 			// audited because the only other symptom is agents reporting no
 			// tokens.
-			audit().Warn("toktop: agent transcript walk failed",
+			audit().Warn("agent transcript walk failed",
 				"root", core.RedactHome(root),
 				"error", core.Snippet([]byte(err.Error())))
 			files, fresh = nil, time.Time{}
@@ -283,7 +303,7 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 				// a store that could not be walked would record "read to the
 				// end" for files the walk never reached, and the next append to
 				// one of them would be skipped.
-				audit().Warn("toktop: agent transcript walk failed",
+				audit().Warn("agent transcript walk failed",
 					"root", core.RedactHome(root),
 					"error", core.Snippet([]byte(err.Error())))
 				return nil

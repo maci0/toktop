@@ -97,6 +97,11 @@ func main() {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		os.Exit(2)
 	}
+	// agentusage is a package other programs embed, so it audits through the
+	// process logger until a host hands it one. Here that host is toktop:
+	// after this line a transcript walk that could not finish lands in the
+	// same audit stream as everything else, at the floor validated above.
+	agentusage.SetLogger(logcfg.Logger())
 	// The plain report and the JSON report render no sized frame, so a frame
 	// override is named as unused there rather than validated: rejecting
 	// TOKTOP_COLUMNS=10 for a frame that is never composed aborts a run

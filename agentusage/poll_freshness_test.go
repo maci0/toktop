@@ -317,9 +317,7 @@ func appendLine(t *testing.T, path string, out int) {
 func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	var lines bytes.Buffer
 	old := audit
-	audit = func() *slog.Logger {
-		return slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	}
+	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer func() { audit = old }()
 	t.Cleanup(func() {
 		rootListMu.Lock()
@@ -348,5 +346,25 @@ func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	}
 	if !strings.Contains(lines.String(), "agent transcript walk failed") {
 		t.Fatalf("the failed walk wrote no audit line:\n%s", lines.String())
+	}
+}
+
+// SetLogger is the seam a host program writes its audit lines through, and
+// nil is its documented way back to the process logger. A restore that left
+// the previous logger installed would keep a handler the host has let go of
+// wired into every later walk.
+func TestSetLoggerInstallsAndRestores(t *testing.T) {
+	old := audit
+	defer func() { audit = old }()
+	var lines bytes.Buffer
+	host := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	SetLogger(host)
+	if got := audit(); got != host {
+		t.Fatal("SetLogger did not install the logger it was given")
+	}
+	SetLogger(nil)
+	if got := audit(); got != slog.Default() {
+		t.Fatal("SetLogger(nil) did not restore the process logger")
 	}
 }

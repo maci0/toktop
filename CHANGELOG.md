@@ -36,8 +36,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   samples, under the same rules as `Rate` and `InputRate`. `Sample.Thinking`
   and `Delta.Thinking` were already public, so a consumer showing a thinking
   rate had to write the division itself.
+- `agentusage.SetLogger` sends the lines the package audits (a transcript
+  store that could not be walked) to a logger the embedding program chooses.
+  Until now a program that only imported `agentusage` read them through
+  toktop's own audit configuration: `TOKTOP_LOG_LEVEL`, a text handler on
+  stderr, and a message that began `toktop:`. The default is the process
+  logger from `log/slog`, which is where a Go program already sends its own.
 
 ### Changed
+
+- A transcript walk that could not finish audits `agent transcript walk
+  failed` without a leading `toktop:`, like every other line in that stream
+  now carries the program from its own log handler. toktop installs its audit
+  logger into `agentusage` at startup, so the line still reaches the same
+  stream at the same level, folded and redacted as before.
 
 - A dashboard pane too narrow for a full row now shows the measurement and
   shortens the decoration, where before the decoration was drawn at its own

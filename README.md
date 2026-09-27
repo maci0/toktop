@@ -223,6 +223,11 @@ the instant the run started and the two agree.
 
 `Agents` lists every agent name the package knows (built in, defined, or
 registered), and `Supported` says whether one of them can be read here. A
+transcript store that cannot be walked is reported rather than read as empty,
+on the process logger from `log/slog` unless `SetLogger` is handed the logger
+the embedding program already writes to (nil restores the default).
+
+A
 dashboard also needs to know when an agent's tokens are already being counted
 by an engine it watches: `Peers` lists the TCP endpoints a process is
 connected to, `ConnectedTo` answers that for one process, and
