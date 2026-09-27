@@ -33,6 +33,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A transcript directory that is not there is an empty store, not a failed
+  walk. Clanker reads `<project>/state`, which is absent until the agent
+  writes it, and a process whose working directory was a deleted zig cache
+  temp logged `agent transcript walk failed` once a second for each of those
+  paths. A directory that cannot be read for any other reason is still
+  reported.
 - On Windows, a process's CPU time is converted from the 100-nanosecond units
   Win32 reports into the same jiffies the other platforms count. The divisor
   was 100 of those units per jiffy instead of 100,000, so a process using half

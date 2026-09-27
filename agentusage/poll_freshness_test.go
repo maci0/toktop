@@ -326,9 +326,14 @@ func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	})
 
 	now := time.Now()
-	key := rootListKey("/nonexistent/transcript/root", ".jsonl")
-	// A root that cannot be opened is the simplest walk that does not finish.
-	if got := listTranscripts("/nonexistent/transcript/root", ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	// A root that exists but is not a directory is a walk that does not finish.
+	// A path that is simply absent is an empty store, covered separately.
+	root := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	key := rootListKey(root, ".jsonl")
+	if got := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("failed walk listed %v, want nothing", got)
 	}
 
@@ -365,9 +370,15 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer func() { audit = old }()
 
-	// A store that is not there: the error names the path under $HOME the
-	// walk could not open.
-	root := filepath.Join(home, ".claude", "projects", "gone")
+	// A store path that is a file: the open fails, and the error names the
+	// path under $HOME the walk could not open.
+	root := filepath.Join(home, ".claude", "projects", "not-a-directory")
+	if err := os.MkdirAll(filepath.Dir(root), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	now := time.Now()
 	if got := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("failed walk listed %v, want nothing", got)
@@ -381,9 +392,104 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 	}
 	// RedactHome folds with the platform separator, so the folded root is
 	// spelled the way this platform spells a path.
-	foldedRoot := "root=" + filepath.Join("~", ".claude", "projects", "gone")
+	foldedRoot := "root=" + filepath.Join("~", ".claude", "projects", "not-a-directory")
 	if !strings.Contains(got, foldedRoot) {
 		t.Errorf("the audit line does not fold the root to ~:\n%s", got)
+	}
+}
+
+// A transcript root that has not been created yet is an empty store. Clanker
+// reads <project>/state, and a deleted zig-cache temp is the same shape:
+// warning once a second per path is the flood this guards against. The empty
+// answer is cached for one rescan, and a directory that appears after that
+// is listed.
+func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
+	var lines bytes.Buffer
+	old := audit
+	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer func() { audit = old }()
+
+	root := filepath.Join(t.TempDir(), "state")
+	key := rootListKey(root, "token_stats.jsonl")
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		delete(rootLists, key)
+		rootListMu.Unlock()
+	})
+
+	now := time.Now()
+	cutoff := now.Add(-recencyWindow)
+	if got := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
+		t.Fatalf("missing root listed %v", got)
+	}
+	if strings.Contains(lines.String(), "agent transcript walk failed") {
+		t.Fatalf("a missing root was audited as a failed walk:\n%s", lines.String())
+	}
+	rootListMu.Lock()
+	c := rootLists[key]
+	rootListMu.Unlock()
+	if c.at.IsZero() {
+		t.Fatal("a missing root was left unstamped, so every rescan walks it again and warns")
+	}
+
+	// Still inside the rescan window: the cached empty listing stands, and
+	// creating the directory does not show up yet.
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	name := filepath.Join(root, "token_stats.jsonl")
+	if err := os.WriteFile(name, []byte("{\"output_tokens\":3}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
+		t.Fatalf("cached empty listing listed %v", got)
+	}
+
+	later := now.Add(rescanEvery)
+	got := listTranscripts(root, "token_stats.jsonl", cutoff, later, false)
+	if len(got) != 1 || got[0] != name {
+		t.Fatalf("after rescan = %v, want [%s]", got, name)
+	}
+	if strings.Contains(lines.String(), "agent transcript walk failed") {
+		t.Fatalf("the rescan audited a walk that finished:\n%s", lines.String())
+	}
+}
+
+// Clanker's state directory is the project it was started in plus "state".
+// A zig test leaves the working directory deleted. Watch and Poll must not
+// warn, and a log that shows up afterwards is still counted.
+func TestClankerMissingStateDirIsQuiet(t *testing.T) {
+	var lines bytes.Buffer
+	old := audit
+	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer func() { audit = old }()
+
+	work := t.TempDir()
+	w := Watch("clanker", work, time.Now())
+	if w == nil {
+		t.Fatal("clanker watcher")
+	}
+	if s := w.Poll(); !s.Empty() {
+		t.Fatalf("missing state dir counted %+v", s)
+	}
+	if strings.Contains(lines.String(), "agent transcript walk failed") {
+		t.Fatalf("missing state dir warned:\n%s", lines.String())
+	}
+
+	dir := filepath.Join(work, "state")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "token_stats.jsonl"), []byte(
+		"{\"prompt_tokens\":10,\"completion_tokens\":4,\"total_tokens\":14}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := w.Poll()
+	if s.Input != 10 || s.Output != 4 {
+		t.Fatalf("sample = %+v, want input 10 output 4", s)
+	}
+	if strings.Contains(lines.String(), "agent transcript walk failed") {
+		t.Fatalf("reading the new log warned:\n%s", lines.String())
 	}
 }
 

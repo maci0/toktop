@@ -228,9 +228,18 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 // finish. A walk that stops partway (an unreadable subtree, a filesystem error)
 // has seen some of the store and not the rest, which is a different answer from
 // an empty one: the caller must not cache the partial list as a fresh listing.
+//
+// A root that is not there is an empty store. Clanker keeps its log in
+// <project>/state, which does not exist until the agent writes it, and a
+// process whose working directory was a deleted build temp is the same
+// answer. Warning on every rescan logged one line per vanished directory.
+// A root that exists but cannot be opened is still a failure.
 func walkTranscripts(root, suffix string, cutoff time.Time) ([]string, error) {
 	r, err := os.OpenRoot(root)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	defer r.Close()
