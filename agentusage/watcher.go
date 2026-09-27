@@ -48,6 +48,12 @@ type Watcher struct {
 	// fromDefs whether it was derived at all: see refreshAdapter.
 	defsGen  uint64
 	fromDefs bool
+	// adGone records that the definition this watcher derives from was
+	// withdrawn, so it has nothing to walk. The published sample is left
+	// where it was: a watcher with no readable source holds its last reading
+	// rather than reporting zeroes an operator would read as deleted
+	// sessions. See forgetSpec.
+	adGone bool
 	// roots is the expanded form of ad.roots(w.dir), cached for the same
 	// reason the adapter is: it is recomputed on every openTranscript.
 	roots []string

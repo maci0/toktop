@@ -255,6 +255,12 @@ func (w *Watcher) attachCandidates() []string {
 // wall time. A replay that steps the clock one poll interval at a time ages
 // the listing the same way however long the replay actually took.
 func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
+	if w.adGone {
+		// The definition that named this agent's store was withdrawn, so there
+		// is no tree to walk. Falling through would use the adapter the
+		// previous generation left behind, which is the disowned store.
+		return nil
+	}
 	now := w.clock()()
 	force := w.scanned.IsZero()
 	if cache && !force && core.Age(now, w.scanned) < rescanEvery {

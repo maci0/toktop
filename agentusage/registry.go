@@ -353,10 +353,27 @@ func (w *Watcher) refreshAdapter() {
 	}
 	spec, defined := definedSpec(w.tool)
 	if !defined {
+		// The reload stopped naming this agent, so the store the adapter
+		// walks is one no spec claims any more. Returning with the adapter in
+		// place is what pinned it: a watcher that derived from a definition
+		// would keep walking and billing that store for the life of the
+		// process, long after ResetDefinitions or a file that no longer lists
+		// the agent took the definition away. A redirect is handled by the
+		// derive below, so only the withdrawal needs a branch here.
+		//
+		// The counts already published stay, exactly as a withdrawn source
+		// leaves them: the watcher simply has nothing to read, and the sample
+		// holds its last value rather than dropping to zero and reading as an
+		// agent whose sessions were deleted.
+		w.forgetSpec()
 		return
 	}
 	ad, ok := specAdapter(spec)
 	if !ok {
+		// A spec with no usable root is as unreadable as no spec: it names
+		// nothing to walk, so it is withdrawn the same way rather than
+		// leaving the previous adapter walking a tree this one disowns.
+		w.forgetSpec()
 		return
 	}
 	// A load that landed while this derived leaves the adapter and the
@@ -380,6 +397,24 @@ func (w *Watcher) refreshAdapter() {
 	w.cached, w.scanned = nil, time.Time{}
 	w.defsGen = gen
 	w.fromDefs = true
+	w.adGone = false
+}
+
+// forgetSpec stops a watcher whose definition was withdrawn from walking the
+// store that spec named. The adapter itself is kept rather than zeroed, because
+// a watcher built on one has no usable nil adapter (roots and parse are called
+// unconditionally), and a load that names the agent again re-derives over it
+// on the next poll. The generation is recorded so the withdrawal is settled in
+// one pass instead of being re-decided four times a second, and the listing
+// and the expanded roots go with it, since both name the disowned tree.
+func (w *Watcher) forgetSpec() {
+	if !w.fromDefs {
+		return // never derived from a definition, so nothing to withdraw
+	}
+	w.adGone = true
+	w.cached, w.scanned = nil, time.Time{}
+	w.roots = nil
+	w.defsGen = defsGen.Load()
 }
 
 // Supported reports whether live usage can be read for an agent.

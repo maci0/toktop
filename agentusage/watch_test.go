@@ -1552,3 +1552,56 @@ func TestSampleStampFollowsInjectedClock(t *testing.T) {
 		t.Fatalf("sample At = %v after SetNow(nil), want wall time at or after %v", s.At, frozen)
 	}
 }
+
+// A definitions reload reaches a running watcher, which is the whole point of
+// the generation counter: the adapter is re-derived, and the listing naming
+// the previous generation's roots is dropped with it. Withdrawing the
+// definition is the same event seen from the other side, and it used to be the
+// one case nothing handled. refreshAdapter returned on an undefined spec, so
+// the watcher kept the adapter the last load gave it and went on walking and
+// billing a transcript store no spec claimed any more, for the life of the
+// process. ResetDefinitions and a file that stops listing the agent both reach
+// this path.
+func TestWithdrawnDefinitionStopsTheWatcherReading(t *testing.T) {
+	store := t.TempDir()
+	work := t.TempDir()
+	// A definition-derived watcher parses generically, so the record is the
+	// bare shape parseGeneric reads: a cwd beside the counters.
+	line := func(out int) string {
+		return `{"cwd":` + jsonPath(work) + `,"output_tokens":` + strconv.Itoa(out) + `}`
+	}
+	addDef(t, "withdrawn", Spec{Roots: []string{store}})
+
+	w := Watch("withdrawn", work, time.Now())
+	if w == nil {
+		t.Fatal("a defined agent with a root is readable")
+	}
+	append_(t, filepath.Join(store, "session.jsonl"), line(5))
+	if s := w.Poll(); s.Output != 5 {
+		t.Fatalf("poll before the withdrawal = %d, want 5", s.Output)
+	}
+
+	defsMu.Lock()
+	delete(defs, "withdrawn")
+	bumpDefsGen()
+	defsMu.Unlock()
+
+	// Growth after the withdrawal must not be read: the store is disowned.
+	append_(t, filepath.Join(store, "session.jsonl"), line(9))
+	after := w.Poll()
+	if after.Output != 5 {
+		t.Fatalf("poll after the withdrawal = %d, want the last published 5", after.Output)
+	}
+	if w.candidates() != nil {
+		t.Fatal("a watcher whose definition was withdrawn still lists candidates")
+	}
+
+	// Reinstating the definition re-derives and reading resumes from the
+	// retained read position, so the 9 written while it was withdrawn is
+	// picked up along with the new 4: 5 + 9 + 4, not a restart at zero.
+	addDef(t, "withdrawn", Spec{Roots: []string{store}})
+	append_(t, filepath.Join(store, "session.jsonl"), line(4))
+	if s := w.Poll(); s.Output != 18 {
+		t.Fatalf("poll after the definition returned = %d, want 18", s.Output)
+	}
+}
