@@ -424,6 +424,10 @@ func TestValidateOnceEnv(t *testing.T) {
 func TestWarnIgnoredGauntletHome(t *testing.T) {
 	// t.TempDir is absolute on every platform; a hand-built "/srv/gauntlet"
 	// is drive-relative on Windows, where the warning is then correct.
+	populated := t.TempDir()
+	if err := os.WriteFile(filepath.Join(populated, "agents.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name       string
 		agents     bool
@@ -431,7 +435,8 @@ func TestWarnIgnoredGauntletHome(t *testing.T) {
 		wantStderr string
 	}{
 		{name: "unset passes", agents: true},
-		{name: "absolute passes", agents: true, gauntlet: t.TempDir()},
+		{name: "absolute with definitions passes", agents: true, gauntlet: populated},
+		{name: "absolute without definitions is named", agents: true, gauntlet: t.TempDir(), wantStderr: "no agent definitions"},
 		{name: "relative is named", agents: true, gauntlet: "gauntlet", wantStderr: "$GAUNTLET_HOME"},
 		{name: "not read without agents", gauntlet: "gauntlet"},
 	}
@@ -1041,7 +1046,8 @@ func TestWarnUnusedEnv(t *testing.T) {
 		{name: "bearer env with add silent", bearer: "x", nAdd: 1},
 		{name: "bearer env with demo warns", bearer: "x", demo: true, nAdd: 1, wantSub: "TOKTOP_BEARER"},
 		{name: "bearer flag suppresses env warning", bearerFlag: true, bearer: "x"},
-		{name: "log level with no-ingest warns", logLevel: "warn", noIngest: true, wantSub: "TOKTOP_LOG_LEVEL"},
+		{name: "log level with demo and no-ingest warns", logLevel: "warn", demo: true, noIngest: true, wantSub: "TOKTOP_LOG_LEVEL"},
+		{name: "log level with no-ingest but a collector silent", logLevel: "warn", noIngest: true},
 		{name: "log level with ingest silent", logLevel: "warn"},
 	}
 	for _, tt := range tests {

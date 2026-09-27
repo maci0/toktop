@@ -13,6 +13,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- `TOKTOP_LOG_LEVEL` is no longer reported as unused under `--no-ingest`. The
+  variable sets the floor for every audit log the process writes, and the
+  engine collector, the ssh client and the `--add` attach path all write one;
+  only a `--demo --no-ingest` run, which measures nothing real and has no ssh
+  target, builds no logger at all, and that is the case now named.
+- An absolute `$GAUNTLET_HOME` holding no `agents.json` is named at startup
+  under `--agents`, the way a relative one already was. A missing definitions
+  file is not an error to load, so the directory the operator pointed at being
+  empty read as in-house agents producing no tokens.
+
 ## [0.15.0] - 2026-09-27
 
 Binaries, checksums, and a CycloneDX SBOM are on

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/remote"
@@ -99,11 +100,15 @@ func warnIgnoredFrameEnv(once, plain, jsonOut bool) {
 	}
 }
 
-// warnIgnoredGauntletHome names a $GAUNTLET_HOME that is set but not a path
-// DefinitionsPath can use. agentusage honors it only when absolute, so a
-// relative value silently falls back to ~/.gauntlet and the agents.json the
-// operator pointed at is never read. Silence there looks like agents producing
-// no tokens, so the value is named instead.
+// warnIgnoredGauntletHome names a $GAUNTLET_HOME that is set but cannot
+// deliver the agent definitions it points at. agentusage honors the variable
+// only when absolute, so a relative value silently falls back to
+// ~/.gauntlet; an absolute one resolves to $GAUNTLET_HOME/agents.json, and a
+// missing file is not an error to LoadDefinitions, because the default
+// ~/.gauntlet usually has no agents.json either. Both failures look the same
+// from the dashboard: in-house agents simply never appear, which reads as
+// agents producing no tokens. The value is named instead, in the two forms
+// the operator can act on.
 //
 // Only --agents reads the file, so the warning fires there too: without it
 // nothing consulted the variable.
@@ -111,9 +116,20 @@ func warnIgnoredGauntletHome(agents bool) {
 	if !agents {
 		return
 	}
-	if v := os.Getenv("GAUNTLET_HOME"); v != "" && !filepath.IsAbs(v) {
-		fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n", v)
+	v := os.Getenv("GAUNTLET_HOME")
+	if v == "" {
+		return
 	}
+	if !filepath.IsAbs(v) {
+		fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n", v)
+		return
+	}
+	path := agentusage.DefinitionsPath()
+	if _, err := os.Stat(path); err == nil {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME points at no agent definitions (%s is missing); no in-house agents are watched\n",
+		core.RedactHome(path))
 }
 
 // warnIgnoredXDGHome names an $XDG_DATA_HOME or $XDG_CONFIG_HOME that is set
@@ -168,8 +184,13 @@ func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 			}
 		}
 	}
-	if noIngest && os.Getenv(logcfg.LevelEnv) != "" {
-		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --no-ingest\n", logcfg.LevelEnv)
+	// The audit logger is not the ingest endpoint's: the collector, the ssh
+	// client and the attach path all build one from the same variable, so
+	// --no-ingest alone leaves the level in force. Only a demo run, which
+	// measures nothing real and has no ssh target, builds no logger at all
+	// once the endpoint is off.
+	if demo && noIngest && os.Getenv(logcfg.LevelEnv) != "" {
+		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --demo --no-ingest; no audit log is written in that run\n", logcfg.LevelEnv)
 	}
 }
 
