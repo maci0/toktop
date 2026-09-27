@@ -193,6 +193,21 @@ func sameProcess(was, found agentusage.Process) bool {
 	return was.Tool == found.Tool && was.Dir == found.Dir
 }
 
+// storeKey names the transcript store a process writes to. A store is
+// identified by the tool and the working directory, never by the PID:
+// agentusage.Watch resolves its source from that pair, so two processes in one
+// repo enumerate the same sessions.
+func storeKey(p agentusage.Process) string { return p.Tool + "\x00" + p.Dir }
+
+// closedDone is the done channel of a tracker with no watcher of its own. It
+// is already closed, so stopOne's wait returns at once instead of blocking on
+// a goroutine that was never started.
+func closedDone() chan struct{} {
+	c := make(chan struct{})
+	close(c)
+	return c
+}
+
 // discover starts following new agent processes and forgets exited ones.
 func (w *Watcher) discover(ctx context.Context) {
 	found := w.runningAgents()
@@ -239,23 +254,39 @@ func (w *Watcher) discover(ctx context.Context) {
 		w.stopOne(t)
 	}
 
-	// Watch walks transcript stores; doing that under w.mu would stall
-	// report() for agents already being followed. cancel is set before
-	// the map insert so stopOne never observes a nil cancel.
+	// A store is followed once. Two watchers tailing the same transcripts each
+	// report the same growth under their own PID, and the two records carry
+	// different sample ids, so the collector's id window cannot merge them and
+	// every token written by either process is counted twice. The first live
+	// process for a store follows it; the rest are tracked (they belong on the
+	// dashboard) with no watcher of their own, and pick the store up below if
+	// the follower exits.
 	var started []*tracked
 	var startCtx []context.Context
-	for _, p := range newProcs {
-		// A watcher counts only what is written after it attaches, so an agent
-		// already halfway through a task contributes from here on rather than
-		// retroactively. That keeps the rate honest at the cost of the first
-		// part of a session toktop was not running for.
-		//
-		// since is wall time even when SetNow injects a simulated clock:
-		// session stores record real timestamps, and comparing them to a
-		// demo origin would count the whole history as this run.
+	w.mu.Lock()
+	claimed := make(map[string]bool)
+	for _, t := range w.tracked {
+		if t.watch != nil {
+			claimed[storeKey(t.proc)] = true
+		}
+	}
+	w.mu.Unlock()
+
+	// attach gives p its own watcher. follow inserts a tracker with none.
+	//
+	// A watcher counts only what is written after it attaches, so an agent
+	// already halfway through a task contributes from here on rather than
+	// retroactively. That keeps the rate honest at the cost of the first part
+	// of a session toktop was not running for. since is wall time even when
+	// SetNow injects a simulated clock: session stores record real timestamps,
+	// and comparing them to a demo origin would count the whole history as this
+	// run. Watch walks transcript stores; doing that under w.mu would stall
+	// report() for agents already being followed. cancel is set before the map
+	// insert so stopOne never observes a nil cancel.
+	attach := func(p agentusage.Process) {
 		watch := p.Watch(time.Now())
 		if watch == nil {
-			continue // this agent keeps nothing readable
+			return // this agent keeps nothing readable
 		}
 		// The sample stamp is not a filesystem comparison, so it follows the
 		// injected clock: report derives the event id from it, and an id
@@ -268,12 +299,52 @@ func (w *Watcher) discover(ctx context.Context) {
 		if _, seen := w.tracked[p.PID]; seen {
 			w.mu.Unlock()
 			cancel()
-			continue
+			return
 		}
 		w.tracked[p.PID] = t
 		w.mu.Unlock()
 		started = append(started, t)
 		startCtx = append(startCtx, tctx)
+	}
+	follow := func(p agentusage.Process) {
+		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), done: closedDone(), cancel: func() {}}
+		w.mu.Lock()
+		if _, seen := w.tracked[p.PID]; seen {
+			w.mu.Unlock()
+			return
+		}
+		w.tracked[p.PID] = t
+		w.mu.Unlock()
+	}
+
+	// newProcs is PID-ordered, so the lowest PID for a store takes it and the
+	// choice does not depend on map iteration.
+	for _, p := range newProcs {
+		if claimed[storeKey(p)] {
+			follow(p)
+			continue
+		}
+		before := len(started)
+		attach(p)
+		if len(started) > before {
+			claimed[storeKey(p)] = true
+		}
+	}
+
+	// Handover: a store whose follower exited is picked up by a process still
+	// running against it, so a live agent is never left unwatched. Ordered by
+	// PID like every other pass, so the choice is reproducible.
+	w.mu.Lock()
+	var promote []agentusage.Process
+	for _, t := range w.trackedList() {
+		if t.watch == nil && !claimed[storeKey(t.proc)] {
+			claimed[storeKey(t.proc)] = true
+			promote = append(promote, t.proc)
+		}
+	}
+	w.mu.Unlock()
+	for _, p := range promote {
+		attach(p)
 	}
 
 	for i, t := range started {

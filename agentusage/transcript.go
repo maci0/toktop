@@ -42,6 +42,11 @@ func (w *Watcher) readNew(path string) {
 		w.forgetCounts(path)
 		w.offsets[path] = 0
 		delete(w.owner, path)
+		// The carry is the unterminated tail of the bytes just abandoned, and
+		// the rewind below reads the new version from byte zero. Left in place
+		// it would be prepended to that version's first line, which then fails
+		// to parse and is dropped with the offset already past it.
+		delete(w.zstdCarry, path)
 	}
 	mine, decided := w.owns(path)
 	if !decided {
