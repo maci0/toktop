@@ -277,12 +277,12 @@ func TestDshZstdTailCapContinuesNextPoll(t *testing.T) {
 	appendBytes(t, path, first)
 	appendBytes(t, path, second)
 
-	old := zstdTailBytes
+	old := zstdTailBytes.Load()
 	// Big enough for the header and first message frame, too small for
 	// the second: the leftover must be picked up on the next poll rather
 	// than dropped or forcing a full-file buffer.
-	zstdTailBytes = int64(len(header) + len(first) + len(second)/2)
-	t.Cleanup(func() { zstdTailBytes = old })
+	zstdTailBytes.Store(int64(len(header) + len(first) + len(second)/2))
+	t.Cleanup(func() { zstdTailBytes.Store(old) })
 
 	w.poll(nil)
 	if got := w.Sample().Output; got != 11 {

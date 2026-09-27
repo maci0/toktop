@@ -172,14 +172,14 @@ func TestOpenCodeDBDropsAbsurdCounts(t *testing.T) {
 // A missing database is an ordinary state (no opencode on this machine), not
 // an error, and must never invent a number.
 func TestUsageQueryForPlaceholderCount(t *testing.T) {
-	orig := foldSessionDirectory
-	t.Cleanup(func() { foldSessionDirectory = orig })
+	orig := foldSessionDirectory.Load()
+	t.Cleanup(func() { foldSessionDirectory.Store(orig) })
 
-	foldSessionDirectory = false
+	foldSessionDirectory.Store(false)
 	if n := strings.Count(usageQueryFor(2), "?"); n != 3 {
 		t.Errorf("unfolded usageQueryFor(2) has %d placeholders, want 3 (2 dirs + time)", n)
 	}
-	foldSessionDirectory = true
+	foldSessionDirectory.Store(true)
 	if n := strings.Count(usageQueryFor(2), "?"); n != 5 {
 		t.Errorf("folded usageQueryFor(2) has %d placeholders, want 5 (2 dirs twice + time)", n)
 	}
@@ -187,8 +187,8 @@ func TestUsageQueryForPlaceholderCount(t *testing.T) {
 
 func TestFoldSessionDirectoryFollowsTheFilesystem(t *testing.T) {
 	want := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
-	if foldSessionDirectory != want {
-		t.Fatalf("foldSessionDirectory = %v, want %v on %s", foldSessionDirectory, want, runtime.GOOS)
+	if got := foldSessionDirectory.Load(); got != want {
+		t.Fatalf("foldSessionDirectory = %v, want %v on %s", got, want, runtime.GOOS)
 	}
 }
 
@@ -202,12 +202,12 @@ func TestOpenCodeDBMatchesFoldedDirectorySpellings(t *testing.T) {
 		setup func(*testing.T)
 	}{
 		{"folding forced on", func(t *testing.T) {
-			orig := foldSessionDirectory
-			foldSessionDirectory = true
-			t.Cleanup(func() { foldSessionDirectory = orig })
+			orig := foldSessionDirectory.Load()
+			foldSessionDirectory.Store(true)
+			t.Cleanup(func() { foldSessionDirectory.Store(orig) })
 		}},
 		{"production GOOS default", func(t *testing.T) {
-			if !foldSessionDirectory {
+			if !foldSessionDirectory.Load() {
 				t.Skip("this OS compares session directories by bytes")
 			}
 		}},
@@ -244,9 +244,9 @@ func TestOpenCodeDBMatchesFoldedDirectorySpellings(t *testing.T) {
 // watcher resolves /work/équipe. Go's strings.ToLower folds É, SQLite's
 // lower() does not, so the stored spelling is folded before it is bound.
 func TestOpenCodeDBFoldsNonASCIICaseDifferences(t *testing.T) {
-	orig := foldSessionDirectory
-	foldSessionDirectory = true
-	t.Cleanup(func() { foldSessionDirectory = orig })
+	orig := foldSessionDirectory.Load()
+	foldSessionDirectory.Store(true)
+	t.Cleanup(func() { foldSessionDirectory.Store(orig) })
 
 	path := opencodeDB(t)
 	base := t.TempDir()
@@ -540,9 +540,9 @@ func TestUsageQueryStartsAtSession(t *testing.T) {
 	addMessage(t, path, "m-mine", "s-mine", start.Add(time.Second),
 		`{"role":"assistant","tokens":{"output":1}}`)
 
-	orig := foldSessionDirectory
-	foldSessionDirectory = false
-	t.Cleanup(func() { foldSessionDirectory = orig })
+	orig := foldSessionDirectory.Load()
+	foldSessionDirectory.Store(false)
+	t.Cleanup(func() { foldSessionDirectory.Store(orig) })
 
 	db, err := sql.Open("sqlite", path)
 	if err != nil {

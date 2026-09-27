@@ -96,7 +96,9 @@ type Watcher struct {
 
 	// now stamps the published sample. The transcript mtimes it is compared
 	// against stay wall time in every mode; only the stamp a caller turns into
-	// an event id and a feed timestamp comes from here.
+	// an event id and a feed timestamp comes from here. Guarded by mu, like
+	// sample: SetNow and read run on different goroutines whenever a caller
+	// sets the clock after starting Run.
 	now func() time.Time
 
 	mu     sync.Mutex
@@ -238,16 +240,22 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
 	}
+	w.mu.Lock()
 	w.now = fn
+	w.mu.Unlock()
 }
 
-// instant reads the injected stamp clock, falling back to the wall clock for a
-// Watcher built without one.
-func (w *Watcher) instant() time.Time {
+// clock returns the injected stamp clock, or the wall clock for a Watcher built
+// without one. It reads the field under mu, and callers invoke the result with
+// no lock held: the clock is caller-supplied, and calling it under mu is a
+// self-deadlock the moment it re-enters the watcher.
+func (w *Watcher) clock() func() time.Time {
+	w.mu.Lock()
+	defer w.mu.Unlock()
 	if w.now == nil {
-		return time.Now()
+		return time.Now
 	}
-	return w.now()
+	return w.now
 }
 
 // resolveDir is the form a working directory is compared in: absolute, with
@@ -468,14 +476,13 @@ func (w *Watcher) Poll() Sample {
 	}
 	// Force a fresh walk: this is the caller's last chance to see a session
 	// file created seconds ago, and a run short enough to finish inside
-	// rescanEvery would otherwise report nothing at all. Clearing the stamp is
-	// what forces it; the listing itself is what candidates rewrites. The cost
-	// is one walk per final read, not one per periodic poll: Run's ticker goes
-	// through poll, which still reuses the cached listing.
-	w.pollMu.Lock()
-	w.scanned = time.Time{}
-	w.pollMu.Unlock()
-	w.poll(nil)
+	// rescanEvery would otherwise report nothing at all. The stamp is cleared
+	// inside read, under the same pollMu the walk runs under, so a ticker poll
+	// landing between the two cannot re-stamp scanned and make this read
+	// reuse its listing. The cost is one walk per final read, not one per
+	// periodic poll: Run's ticker goes through poll, which still reuses the
+	// cached listing.
+	w.pollForce(nil, true)
 	return w.Sample()
 }
 
@@ -489,8 +496,10 @@ func (w *Watcher) Sample() Sample {
 	return w.sample
 }
 
-func (w *Watcher) poll(onChange func(Sample)) {
-	s, changed := w.read()
+func (w *Watcher) poll(onChange func(Sample)) { w.pollForce(onChange, false) }
+
+func (w *Watcher) pollForce(onChange func(Sample), force bool) {
+	s, changed := w.read(force)
 	// Callback after read has released pollMu: onChange may Poll (final read,
 	// tests), and holding the lock across it deadlocks that path.
 	if changed && onChange != nil {
@@ -504,9 +513,16 @@ func (w *Watcher) poll(onChange func(Sample)) {
 // raised while parsing an agent's transcript cannot leave a watcher holding
 // pollMu for the rest of the dashboard's life with no goroutine left to
 // unlock it.
-func (w *Watcher) read() (Sample, bool) {
+//
+// force clears the listing's freshness stamp before the walk, so this read
+// re-lists its roots rather than reusing a listing another poll stamped while
+// this call was between the two.
+func (w *Watcher) read(force bool) (Sample, bool) {
 	w.pollMu.Lock()
 	defer w.pollMu.Unlock()
+	if force {
+		w.scanned = time.Time{}
+	}
 	var out, thinking, total, input int
 	if w.source.present() {
 		// The provider is resolved per poll rather than trusted from attach:
@@ -539,6 +555,9 @@ func (w *Watcher) read() (Sample, bool) {
 			total = max(total, v)
 		}
 	}
+	// Stamped before mu is taken: reading the clock needs mu, and calling it
+	// under mu would deadlock against this watcher's own accessor.
+	at := w.clock()()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	// Counts are what the transcripts say right now, not a running total that
@@ -549,7 +568,7 @@ func (w *Watcher) read() (Sample, bool) {
 	changed := out != w.sample.Output || total != w.sample.Total ||
 		thinking != w.sample.Thinking || input != w.sample.Input
 	if changed {
-		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: w.instant()}
+		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: at}
 	}
 	return w.sample, changed
 }

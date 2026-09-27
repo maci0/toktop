@@ -89,7 +89,7 @@ func (w *Watcher) readNew(path string) {
 	// A capped zstd read leaves bytes past this window. Stamping now would
 	// make the next poll treat the file as idle and skip the rest. A torn
 	// frame at EOF is still stamped: the next append changes size.
-	if isDshZstd(path) && fi.Size()-off > zstdTailBytes {
+	if isDshZstd(path) && fi.Size()-off > zstdTailBytes.Load() {
 		return
 	}
 	w.stamps[path] = stamp

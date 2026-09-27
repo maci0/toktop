@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
 )
@@ -51,7 +52,12 @@ const (
 // read. Complete frames inside the window are counted; a torn frame at the
 // end is retried next poll. Without a cap, a session that grew by hundreds
 // of megabytes between polls would pin that whole tail in one buffer.
-var zstdTailBytes int64 = zstdMaxFrameBytes
+//
+// Atomic because every dsh watcher's goroutine reads it on every poll while a
+// caller (or a test) lowering the cap to exercise a torn frame writes it.
+var zstdTailBytes atomic.Int64
+
+func init() { zstdTailBytes.Store(zstdMaxFrameBytes) }
 
 // RFC 8878 block types in the 3-byte block header. Type 3 is reserved
 // and rejected by the default arm in zstdFrameLen.
@@ -162,7 +168,7 @@ func parseDsh(line []byte) (values, string, bool) {
 // batch cannot pin an unbounded buffer; leftover complete frames are
 // picked up on the next poll.
 func (w *Watcher) consumeZstd(f *os.File, off int64) (recs []values, complete int64, ok bool) {
-	src, err := io.ReadAll(io.LimitReader(f, zstdTailBytes))
+	src, err := io.ReadAll(io.LimitReader(f, zstdTailBytes.Load()))
 	if err != nil {
 		return nil, 0, false
 	}

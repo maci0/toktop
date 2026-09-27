@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/text/cases"
@@ -100,7 +101,14 @@ const usageQuery = `
 // either path separator. NTFS and the default APFS configuration look names
 // up that way; an agent records whichever spelling its runtime produced.
 // Linux compares bytes. Tests may flip it.
-var foldSessionDirectory = runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+//
+// Atomic because every opencode watcher's goroutine consults it on every read
+// while a caller (or a test) flips it underneath them.
+var foldSessionDirectory atomic.Bool
+
+func init() {
+	foldSessionDirectory.Store(runtime.GOOS == "windows" || runtime.GOOS == "darwin")
+}
 
 // usageQueryFor builds the query for n directory spellings. Only the number of
 // placeholders varies: every value still travels as a bound parameter.
@@ -111,7 +119,7 @@ func usageQueryFor(n int) string {
 func directoryPred(n int) string {
 	ph := strings.TrimSuffix(strings.Repeat("?,", n), ",")
 	pred := "session.directory IN (" + ph + ")"
-	if foldSessionDirectory {
+	if foldSessionDirectory.Load() {
 		pred = "(" + pred + " OR replace(session.directory, char(92), '/') COLLATE toktop_directory IN (" + ph + "))"
 	}
 	return pred
@@ -134,7 +142,7 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 	for _, d := range dirs {
 		args = append(args, d)
 	}
-	if foldSessionDirectory {
+	if foldSessionDirectory.Load() {
 		for _, d := range dirs {
 			args = append(args, foldDir(filepath.ToSlash(d)))
 		}

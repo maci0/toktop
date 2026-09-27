@@ -420,7 +420,7 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 //   - The caller's context is done. That is shutdown, and Close owns the
 //     connection. Returning without waiting leaves the parked NewSession to be
 //     released when Close closes the conn, which is the only thing that can
-//     release it anyway.
+//     release it anyway; a reaper closes whatever it yields.
 //   - sessionOpenTimeout expired with the caller still live. A peer that does
 //     not answer a channel open at all is not slow, it is wedged (sshd out of
 //     MaxSessions, a child that will not reap). Nothing recovers that, and the
@@ -432,37 +432,47 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	var (
+	// The outcome travels back on a channel rather than through captured
+	// variables: a shared sess/err pair is still being written by the parked
+	// open when the timeout or cancel arms, and reading it there races the
+	// write. The channel is buffered so the goroutine never blocks on a
+	// receiver that has already walked away.
+	type openResult struct {
 		sess *ssh.Session
 		err  error
-	)
-	done := make(chan struct{})
+	}
+	done := make(chan openResult, 1)
 	go func() {
-		defer close(done)
-		sess, err = c.conn.NewSession()
+		sess, err := c.conn.NewSession()
+		done <- openResult{sess, err}
 	}()
 	timer := time.NewTimer(sessionOpenTimeout)
 	defer timer.Stop()
 	select {
-	case <-done:
+	case r := <-done:
 		if err := ctx.Err(); err != nil {
-			if sess != nil {
-				sess.Close()
+			if r.sess != nil {
+				r.sess.Close()
 			}
 			return nil, err
 		}
-		return sess, err
+		return r.sess, r.err
 	case <-timer.C:
-		if sess != nil {
-			sess.Close()
-		}
 		c.conn.Close()
-		<-done // conn.Close is what releases the parked open
+		r := <-done // conn.Close is what releases the parked open
+		if r.sess != nil {
+			r.sess.Close()
+		}
 		return nil, fmt.Errorf("ssh channel open unanswered after %s: %w", sessionOpenTimeout, context.DeadlineExceeded)
 	case <-ctx.Done():
-		if sess != nil {
-			sess.Close()
-		}
+		// Reap in the background rather than reading the pair here: the open
+		// is still parked, and Close, which owns the connection, is what
+		// releases it. A session that lands after the drop is closed here.
+		go func() {
+			if r := <-done; r.sess != nil {
+				r.sess.Close()
+			}
+		}()
 		return nil, ctx.Err()
 	}
 }

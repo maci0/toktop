@@ -35,6 +35,10 @@ const recencyWindow = 2 * time.Minute
 type rootListing struct {
 	files []string
 	at    time.Time
+	// walk is closed when the walk in flight for this key finishes, and is nil
+	// when none is. A caller that finds one waits for it rather than starting a
+	// second walk over the same tree.
+	walk chan struct{}
 }
 
 var (
@@ -65,23 +69,52 @@ func (a adapter) fileSuffixes() []string {
 
 // listTranscripts returns recent files under root matching suffix. force
 // bypasses the shared cache so a final Poll cannot miss a file created
-// inside the last rescan window. The walk runs under rootListMu so
-// concurrent watchers of the same root share one fill, and a slower empty
-// result cannot overwrite a newer listing.
+// inside the last rescan window.
+//
+// Concurrent watchers of the same root share one walk, and only that walk
+// blocks: a store with thousands of files takes long enough that holding
+// rootListMu across it stalled every watcher reading an unrelated root, and
+// with one goroutine per agent process one slow store paused all of them. The
+// walk therefore runs outside the map lock, with an in-flight channel as the
+// per-root claim on it. A slower empty result still cannot overwrite a newer
+// listing: only the goroutine holding the claim writes one.
 func listTranscripts(root, suffix string, cutoff time.Time, force bool) []string {
 	key := rootListKey(root, suffix)
-	rootListMu.Lock()
-	defer rootListMu.Unlock()
-	now := time.Now()
-	pruneRootListsLocked(now, rescanEvery)
-	if !force {
-		if c, ok := rootLists[key]; ok && now.Sub(c.at) < rescanEvery {
-			return append([]string(nil), c.files...)
+	for {
+		rootListMu.Lock()
+		now := time.Now()
+		pruneRootListsLocked(now, rescanEvery)
+		c := rootLists[key]
+		if !force && c.walk == nil && !c.at.IsZero() && now.Sub(c.at) < rescanEvery {
+			out := append([]string(nil), c.files...)
+			rootListMu.Unlock()
+			return out
 		}
+		if c.walk != nil {
+			// A walk for this root is already running. Wait for its result and
+			// re-check: the walk it publishes answers this call, and a force
+			// caller that lost the race still gets one of its own.
+			walk := c.walk
+			rootListMu.Unlock()
+			<-walk
+			continue
+		}
+		// This call owns the walk for key. The placeholder carries the current
+		// instant so the prune pass leaves it alone, and no files so a reader
+		// that arrives now takes the wait branch above rather than reading an
+		// absent result as an empty store.
+		done := make(chan struct{})
+		rootLists[key] = rootListing{at: now, walk: done}
+		rootListMu.Unlock()
+
+		files := walkTranscripts(root, suffix, cutoff)
+
+		rootListMu.Lock()
+		rootLists[key] = rootListing{files: files, at: time.Now()}
+		close(done)
+		rootListMu.Unlock()
+		return append([]string(nil), files...)
 	}
-	out := walkTranscripts(root, suffix, cutoff)
-	rootLists[key] = rootListing{files: out, at: now}
-	return append([]string(nil), out...)
 }
 
 func walkTranscripts(root, suffix string, cutoff time.Time) []string {
