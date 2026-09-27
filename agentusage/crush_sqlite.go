@@ -59,17 +59,23 @@ const (
 // crushDBPaths is the unique set of crush databases for dirs. Two spellings
 // of one directory share one file; the walk that finds it is the same for
 // a usage read and a session snapshot.
+//
+// The dedup folds each candidate once, not once per comparison: the set is
+// walked for every path, and folding a path means scanning and copying it
+// (NFC on macOS, Clean plus two case folds on Windows), so comparing the
+// folded forms made the lookup quadratic in work per byte.
 func crushDBPaths(dirs []string) []string {
-	var paths []string
+	var paths, folded []string
 	for _, dir := range dirs {
 		path := crushDBPath(dir)
 		if path == "" {
 			continue
 		}
-		if slices.ContainsFunc(paths, func(p string) bool { return sameSpelling(p, path) }) {
+		key := foldSpelling(path)
+		if slices.ContainsFunc(folded, func(f string) bool { return spellingEqual(f, key) }) {
 			continue
 		}
-		paths = append(paths, path)
+		paths, folded = append(paths, path), append(folded, key)
 	}
 	return paths
 }

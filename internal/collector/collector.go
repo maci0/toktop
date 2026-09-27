@@ -427,7 +427,7 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		ps.Running = r.m.Running
 		ps.Waiting = r.m.Waiting
 		ps.TTFTms = r.m.TTFTms
-		if port := urlPort(p.Addr); port > 0 && isLoopbackURL(p.Addr) {
+		if port, loopback := loopbackPort(p.Addr); port > 0 && loopback {
 			if proc, ok := byPort[port]; ok {
 				ps.PID, ps.ProcRSS, ps.ProcCPU = proc.PID, proc.RSS, proc.CPUPct
 			}
@@ -654,9 +654,10 @@ func (c *Collector) ProbeAll() {
 	c.mu.Lock()
 	var targets []probeTarget
 	for _, p := range c.providers {
-		if model := c.lastModel[providerKey(p)]; model != "" {
+		key := providerKey(p)
+		if model := c.lastModel[key]; model != "" {
 			targets = append(targets, probeTarget{
-				key: providerKey(p),
+				key: key,
 				req: probe.Request{Kind: p.Kind, Base: p.Addr, Model: model},
 			})
 		}
@@ -741,6 +742,10 @@ func isLoopbackURL(addr string) bool {
 	if err != nil {
 		return false
 	}
+	return hostIsLoopback(u)
+}
+
+func hostIsLoopback(u *url.URL) bool {
 	host := u.Hostname()
 	return strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
 }
@@ -751,7 +756,14 @@ func isLoopbackURL(addr string) bool {
 // an unrelated provider.
 func urlPort(addr string) int {
 	u, err := url.Parse(addr)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
+	if err != nil {
+		return 0
+	}
+	return httpPort(u)
+}
+
+func httpPort(u *url.URL) int {
+	if u.Scheme != "http" && u.Scheme != "https" {
 		return 0
 	}
 	if _, port, err := net.SplitHostPort(u.Host); err == nil {
@@ -764,4 +776,16 @@ func urlPort(addr string) int {
 		return 443
 	}
 	return 80
+}
+
+// loopbackPort answers both halves of the engine-block process lookup from
+// one parse. urlPort and isLoopbackURL each parsed the same address string,
+// and every provider's frame asked for both, so each engine paid two parses
+// per frame to decide whether a listening port belongs to it.
+func loopbackPort(addr string) (port int, loopback bool) {
+	u, err := url.Parse(addr)
+	if err != nil {
+		return 0, false
+	}
+	return httpPort(u), hostIsLoopback(u)
 }

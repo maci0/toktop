@@ -16,4 +16,15 @@ package agentusage
 func dirVariants(p string) []string { return []string{p} }
 
 // sameSpelling reports whether two recorded paths denote the same directory.
-func sameSpelling(a, b string) bool { return a == b }
+func sameSpelling(a, b string) bool {
+	return spellingEqual(foldSpelling(a), foldSpelling(b))
+}
+
+// foldSpelling brings a recorded path to the one form sameSpelling compares
+// in, and spellingEqual compares two such forms. Split out so a caller
+// comparing a path against a set can fold each one once instead of on every
+// comparison. Outside macOS and Windows nothing folds: a path is its own
+// spelling, and one plain comparison stands in for the whole set walk.
+func foldSpelling(p string) string { return p }
+
+func spellingEqual(a, b string) bool { return a == b }

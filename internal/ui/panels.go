@@ -132,11 +132,11 @@ func engineStats(p core.ProviderSnapshot, w int) string {
 	out := "▲" + fmtRate(p.OutTokPS)
 	in := "▼" + fmtRate(p.InTokPS)
 	queue := fmt.Sprintf("run %d wait %d", p.Running, p.Waiting)
-	parts := []string{out, in, queue}
-	if widthOf(strings.Join(parts, " ")) > w {
-		parts = []string{out, queue}
+	row := out + " " + in + " " + queue
+	if widthOf(row) > w {
+		return out + " " + queue
 	}
-	return strings.Join(parts, " ")
+	return row
 }
 
 // gaugesBody renders the healthy engines' detail blocks, three rows each (or

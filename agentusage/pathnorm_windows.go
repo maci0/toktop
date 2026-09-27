@@ -35,5 +35,13 @@ func dirVariants(p string) []string {
 // sameSpelling reports whether two recorded paths denote the same directory
 // after cleaning, slash folding, and ASCII/Unicode case folding.
 func sameSpelling(a, b string) bool {
-	return strings.EqualFold(filepath.ToSlash(filepath.Clean(a)), filepath.ToSlash(filepath.Clean(b)))
+	return spellingEqual(foldSpelling(a), foldSpelling(b))
 }
+
+// foldSpelling brings a recorded path to the one form sameSpelling compares
+// in, and spellingEqual compares two such forms. Split out so a caller
+// comparing a path against a set can fold each one once instead of on every
+// comparison.
+func foldSpelling(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
+
+func spellingEqual(a, b string) bool { return strings.EqualFold(a, b) }

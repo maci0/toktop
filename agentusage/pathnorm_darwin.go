@@ -37,5 +37,14 @@ func dirVariants(p string) []string {
 // byte equality, or agreement once both are brought to one normalization form
 // and compared without regard to case (the APFS default).
 func sameSpelling(a, b string) bool {
-	return a == b || strings.EqualFold(norm.NFC.String(a), norm.NFC.String(b))
+	return spellingEqual(foldSpelling(a), foldSpelling(b))
 }
+
+// foldSpelling brings a recorded path to the one form sameSpelling compares
+// in, and spellingEqual compares two such forms. Split out so a caller
+// comparing a path against a set can fold each one once instead of on every
+// comparison: normalizing is a scan and an allocation, and the set a
+// candidate is looked up in is walked once per entry.
+func foldSpelling(p string) string { return norm.NFC.String(p) }
+
+func spellingEqual(a, b string) bool { return strings.EqualFold(a, b) }
