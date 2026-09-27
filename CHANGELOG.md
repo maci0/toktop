@@ -37,6 +37,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- A `--demo` run names its seed, and the `--origin` it was pinned to, on the
+  startup line and in the audit record. The report that carried both was never
+  written for a run that ended early, so a demo run that crashed left the log
+  behind without the one input that reproduces it: the same `--seed` and
+  `--origin`, spelled as they were given, replay the run.
 - The run's active configuration is audited as one record at startup, beside
   the line stderr already carried. The dashboard hides stderr under the alt
   screen, so the startup line was the one piece of a run's configuration that

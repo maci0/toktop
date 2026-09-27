@@ -1635,6 +1635,31 @@ func TestLogActiveConfig(t *testing.T) {
 			t.Fatalf("logActiveConfig() = %q, want ingest=off", buf.String())
 		}
 	})
+	// A demo run replays from its seed and, when the operator pinned one,
+	// from its origin. A run that crashes leaves the audit log and no report,
+	// so the line has to carry both or the run cannot be reproduced from what
+	// survived it.
+	t.Run("demo names the seed and the pinned origin", func(t *testing.T) {
+		var buf strings.Builder
+		logActiveConfig(&buf, &cliFlags{interval: time.Second, demo: true, seed: 7, origin: "2026-01-01T00:00:00Z"},
+			map[string]bool{}, 0, 0, false)
+		got := buf.String()
+		if !strings.Contains(got, " seed=7") || !strings.Contains(got, " origin=2026-01-01T00:00:00Z") {
+			t.Fatalf("logActiveConfig() = %q, want the demo seed and origin", got)
+		}
+		buf.Reset()
+		logActiveConfig(&buf, &cliFlags{interval: time.Second, demo: true, seed: 42},
+			map[string]bool{}, 0, 0, false)
+		if got := buf.String(); !strings.Contains(got, " seed=42") || strings.Contains(got, " origin=") {
+			t.Fatalf("logActiveConfig() = %q, want the seed alone on a run that started on the wall clock", got)
+		}
+		buf.Reset()
+		logActiveConfig(&buf, &cliFlags{interval: time.Second, seed: 7},
+			map[string]bool{}, 0, 0, false)
+		if strings.Contains(buf.String(), "seed=") {
+			t.Fatalf("logActiveConfig() = %q, want no seed outside a demo run", buf.String())
+		}
+	})
 	// The line records the knobs that will actually apply, so a --plain that
 	// --json replaced is not named: "once plain json" reads as two reports.
 	t.Run("only the report that renders is named", func(t *testing.T) {

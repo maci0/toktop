@@ -110,10 +110,10 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 
 // appleGPUFromDisplay decodes one SPDisplaysDataType entry. VRAM is resolved
 // in two passes, neither of which lets a map range decide the answer: the
-// first is an exact lookup on "vram", whose result does not depend on the
-// order the runtime visits the map, and the second walks the keys sorted, so
-// two runs of one binary on one Mac report the same VRAM for the same card
-// and the identity cache can hold that total for the life of the process.
+// first takes the exact "vram" key, then a sorted walk of the keys that fold
+// to it, and the second walks the substring candidates sorted, so two runs of
+// one binary on one Mac report the same VRAM for the same card and the
+// identity cache can hold that total for the life of the process.
 func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 	dev := core.GPUDevice{Vendor: "apple"}
 	if name, ok := d["_name"].(string); ok {
@@ -147,14 +147,29 @@ func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 // vramField is the string under name, matched case-insensitively the way the
 // vram substring candidates are. system_profiler's key spelling has drifted
 // across releases, so an exact lookup alone would miss a differently-cased
-// field that the old single-pass range happened to catch.
+// field the old single-pass range happened to catch.
+//
+// Two keys can fold to one name ("vram" beside "VRAM"), and a range that
+// returned whichever the runtime visited first reported a different total on
+// each run of one binary, and no total at all on the runs that landed on the
+// spelling that is not a string. The exact spelling answers first; past it the
+// keys are walked sorted, so the same card reports the same size for the life
+// of the process.
 func vramField(d map[string]any, name string) (string, bool) {
-	for k, v := range d {
+	if s, ok := d[name].(string); ok {
+		return s, true
+	}
+	for _, k := range slices.Sorted(maps.Keys(d)) {
 		if core.FoldASCII(k) != name {
 			continue
 		}
-		s, ok := v.(string)
-		return s, ok
+		// A spelling that is not a string says nothing about the size, so the
+		// walk continues: a profiler that emits a numeric "VRAM" beside a
+		// sized "Vram" has an answer in the second key, and stopping at the
+		// first match would report none.
+		if s, ok := d[k].(string); ok {
+			return s, true
+		}
 	}
 	return "", false
 }

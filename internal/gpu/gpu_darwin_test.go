@@ -157,3 +157,26 @@ func TestAppleDisplayPicksVramIndependentlyOfMapOrder(t *testing.T) {
 		t.Fatal("anonymous display accepted")
 	}
 }
+
+// Two spellings of one key fold to the same name, and a range that returned
+// whichever the runtime visited first made the same Mac report a different
+// VRAM size from one poll to the next, or none at all when the visit landed
+// on the spelling that is not a string.
+func TestVramFieldPicksOneSpellingDeterministically(t *testing.T) {
+	// The exact spelling wins even though it sorts after the folded one.
+	if s, ok := vramField(map[string]any{"VRAM": "8 GB", "vram": "36 GB"}, "vram"); !ok || s != "36 GB" {
+		t.Fatalf("vramField = %q, %v; want the exact key", s, ok)
+	}
+	// With the exact key absent, the sorted walk takes the first spelling
+	// that folds to the name and holds a string.
+	for range 200 {
+		s, ok := vramField(map[string]any{"VRAM": 8, "Vram": "18 GB", "sppci_model": "Apple M3 Max"}, "vram")
+		if !ok || s != "18 GB" {
+			t.Fatalf("vramField = %q, %v; want the first string spelling in sorted order", s, ok)
+		}
+	}
+	// A name no key folds to is absent, not an empty success.
+	if s, ok := vramField(map[string]any{"vram": "8 GB"}, "bandwidth"); ok || s != "" {
+		t.Fatalf("vramField = %q, %v; want absent", s, ok)
+	}
+}

@@ -624,6 +624,17 @@ func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, open
 	}
 	if f.demo {
 		cfg = append(cfg, configFlag{key: "demo", bare: true})
+		// The two inputs a demo run replays from, on the startup line and in
+		// the audit log. A run that ends in a crash leaves the log behind and
+		// nothing else: the report that carries the seed is never written, so
+		// without these the run that produced the lines around them cannot be
+		// reproduced from what survived it. The origin is recorded as the flag
+		// value the operator gave, so the replay is a copy of the command
+		// rather than a re-derivation of it.
+		cfg = append(cfg, configFlag{key: "seed", value: strconv.FormatInt(f.seed, 10)})
+		if f.origin != "" {
+			cfg = append(cfg, configFlag{key: "origin", value: f.origin})
+		}
 	}
 	if f.agents {
 		cfg = append(cfg, configFlag{key: "agents", bare: true})
