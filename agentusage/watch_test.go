@@ -1635,3 +1635,57 @@ func TestWithdrawnDefinitionStopsTheWatcherReading(t *testing.T) {
 		t.Fatalf("poll after the definition returned = %d, want 18", s.Output)
 	}
 }
+
+// A watcher left running against a long-lived agent would otherwise hold
+// per-file bookkeeping for every session file the agent ever wrote. The
+// recency window releases a counted file once its last write is older than
+// the window, and the cap releases the least recently written of the rest, so
+// a store that keeps writing inside the window still cannot grow the maps
+// without bound. A released transcript keeps its read position: the offset is
+// seeded to the file's end, so a later append is growth and not a re-read.
+func TestCountedFilesAreCapped(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	w := Watch("claude", work, time.Now())
+	if w == nil {
+		t.Fatal("no claude adapter")
+	}
+
+	n := countedCap + 8
+	for i := range n {
+		append_(t, filepath.Join(store, "session"+strconv.Itoa(i)+".jsonl"), claudeLine(work, i+1))
+	}
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := len(w.seen); got != n {
+		t.Fatalf("%d files counted, want %d", got, n)
+	}
+
+	stepped := time.Now().Add(recencyWindow + time.Minute)
+	w.SetNow(func() time.Time { return stepped })
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := len(w.seen); got > countedCap {
+		t.Fatalf("%d counted files retained after ageing, want at most %d", got, countedCap)
+	}
+
+	var held string
+	for i := range n {
+		p := filepath.Join(store, "session"+strconv.Itoa(i)+".jsonl")
+		if _, ok := w.seen[p]; !ok {
+			held = p
+			break
+		}
+	}
+	if held == "" {
+		t.Fatal("nothing was released, so the cap is not exercised")
+	}
+	w.SetNow(time.Now)
+	before := w.Sample().Output
+	append_(t, held, claudeLine(work, 5000))
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := w.Sample().Output; got < before+5000 {
+		t.Fatalf("appending to a released transcript reported %d, want at least %d", got, before+5000)
+	}
+}

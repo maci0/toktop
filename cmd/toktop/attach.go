@@ -7,7 +7,6 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"time"
 
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/core"
@@ -214,6 +213,6 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 			"reason", "no recognized engine API")
 	}
 	stats := &remote.Stats{Client: cli}
-	go stats.Run(ctx, 5*time.Second)
+	go stats.Run(ctx, remote.DefaultPollEvery)
 	return providers, stats, nil
 }

@@ -56,6 +56,16 @@ type Client struct {
 	listeners []net.Listener
 	forwards  map[int]int // remote port -> local port already bound for it
 	stopped   bool
+	// relays is the set of local connections a relay is currently piping. A
+	// piped pair parks in Read on both ends, and neither copy has a deadline,
+	// so an engine that accepts a connection and then stalls holds a file
+	// descriptor, two copy goroutines and an ssh channel until its own peer
+	// goes away. Keeping the set lets teardown close them instead: closing
+	// one end unblocks both copies, since the other direction's read returns
+	// on that side's close.
+	relays      map[net.Conn]struct{}
+	relayDone   sync.WaitGroup
+	relayActive chan struct{} // caps concurrent relayed connections
 
 	connectedAt   time.Time     // when the handshake finished, for the drop line's uptime
 	keepaliveDone chan struct{} // closed when the keepalive goroutine exits
@@ -279,7 +289,8 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		return nil, fmt.Errorf("ssh %s: %w", t.UserHost(), err)
 	}
 	c := &Client{Target: t, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
-		keepaliveDone: make(chan struct{}), connectedAt: time.Now()}
+		keepaliveDone: make(chan struct{}), connectedAt: time.Now(),
+		relays: map[net.Conn]struct{}{}, relayActive: make(chan struct{}, maxConcurrentRelays)}
 	go c.watchClose()
 	go c.keepalive()
 	return c, nil
@@ -389,6 +400,14 @@ const stderrDrainGrace = time.Second
 // forwardBindAttempts bounds the rebind loop that steers a kernel-chosen
 // ephemeral port away from the forwarded set.
 const forwardBindAttempts = 8
+
+// maxConcurrentRelays caps how many forwarded connections one client pipes at
+// once. A loopback port handed to a client is not a secret, so nothing bounds
+// how many connections can arrive; each costs a file descriptor, two copy
+// goroutines and an ssh channel, and a peer that holds the socket open without
+// speaking holds all three until teardown. Past the cap a connection is
+// accepted and closed, which the local client sees as a refused connection.
+const maxConcurrentRelays = 64
 
 // stderrBuf collects a remote command's stderr. x/crypto/ssh copies it from
 // a background goroutine that is only drained when Session.Output's Wait
@@ -670,7 +689,12 @@ func (c *Client) relay(l net.Listener, rport int) {
 		if err != nil {
 			return // listener closed by Close()
 		}
+		if !c.acquireRelay(local) {
+			local.Close()
+			continue
+		}
 		go func(local net.Conn) {
+			defer c.releaseRelay(local)
 			defer local.Close()
 			ctx, cancel := context.WithTimeout(context.Background(), forwardDialTimeout)
 			defer cancel()
@@ -736,17 +760,74 @@ func (c *Client) auditForwardFailure(rport int, err error) {
 		"error", logcfg.RedactedField(err.Error(), 256))
 }
 
-// closeListeners reclaims every local forward listener (and thereby its relay
-// goroutine). Idempotent; safe alongside Forward and Close.
-func (c *Client) closeListeners() {
+// acquireRelay records local as a connection this client is piping, or refuses
+// it when the cap is full or the client is already stopping. The slot and the
+// WaitGroup are taken under the same lock closeRelays uses to snapshot the
+// set, so a teardown cannot miss a connection that has passed the cap check
+// and not yet been registered.
+func (c *Client) acquireRelay(local net.Conn) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.stopped {
+		return false
+	}
+	if c.relayActive == nil {
+		c.relayActive = make(chan struct{}, maxConcurrentRelays)
+	}
+	if c.relays == nil {
+		c.relays = map[net.Conn]struct{}{}
+	}
+	select {
+	case c.relayActive <- struct{}{}:
+	default:
+		return false
+	}
+	c.relays[local] = struct{}{}
+	c.relayDone.Add(1)
+	return true
+}
+
+func (c *Client) releaseRelay(local net.Conn) {
+	c.mu.Lock()
+	delete(c.relays, local)
+	gate := c.relayActive
+	c.mu.Unlock()
+	if gate != nil {
+		<-gate
+	}
+	c.relayDone.Done()
+}
+
+// closeRelays unblocks and joins every connection a relay is piping. Closing
+// one end of the pair releases both copy directions, so the wait is bounded by
+// the close rather than by a peer that may never speak again.
+func (c *Client) closeRelays() {
+	c.mu.Lock()
+	conns := make([]net.Conn, 0, len(c.relays))
+	for l := range c.relays {
+		conns = append(conns, l)
+	}
+	c.relays = map[net.Conn]struct{}{}
+	c.mu.Unlock()
+	for _, l := range conns {
+		l.Close()
+	}
+	c.relayDone.Wait()
+}
+
+// closeListeners reclaims every local forward listener (and thereby its relay
+// goroutine) and every connection one is piping. Idempotent; safe alongside
+// Forward and Close.
+func (c *Client) closeListeners() {
+	c.mu.Lock()
 	c.stopped = true
 	for _, l := range c.listeners {
 		l.Close()
 	}
 	c.listeners = nil
 	c.forwards = nil
+	c.mu.Unlock()
+	c.closeRelays()
 }
 
 // Close tears down relays and the connection. Safe more than once, and

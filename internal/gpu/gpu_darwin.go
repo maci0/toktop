@@ -190,7 +190,7 @@ const ioAccelRefresh = 2 * time.Second
 func applyIOAccelStats(ctx context.Context, devs []core.GPUDevice) {
 	ioAccelMu.Lock()
 	defer ioAccelMu.Unlock()
-	if time.Since(ioAccelAt) >= ioAccelRefresh {
+	if core.Age(time.Now(), ioAccelAt) >= ioAccelRefresh {
 		// run() caps the spawn so a hung ioreg cannot pin ioAccelMu and stall
 		// every later Sample. The caller's budget (sysmon gpuBudget) is the
 		// parent, so a cancelled Sample does not wait out runTimeout.

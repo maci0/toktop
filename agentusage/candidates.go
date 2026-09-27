@@ -4,10 +4,12 @@
 package agentusage
 
 import (
+	"cmp"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -397,6 +399,72 @@ func (w *Watcher) forgetIdle(live []string) {
 	}
 	for _, path := range drop {
 		w.dropFile(path)
+	}
+	w.trimCounted(live)
+}
+
+// countedCap bounds the per-file bookkeeping for transcripts that have aged
+// out of the walk but still carry this attach's counts. Those are kept so a
+// later append is read from where it stopped instead of from byte zero, and
+// every one of them is an entry in seen, total, base, baseThink, baseInput,
+// stamps and offsets. A watcher left running against a long-lived agent would
+// otherwise hold one of each per session file written while it ran.
+const countedCap = 512
+
+// trimCounted releases the bookkeeping of the least recently written counted
+// transcripts once there are more than countedCap of them. Ageing a file out
+// is the recency window's job; this is the backstop for a store that keeps
+// every file inside it, where the window never drops anything.
+//
+// A released transcript is not forgotten, only cut loose: its offset is seeded
+// to the file's current end, so a later append is still read as growth rather
+// than re-read from byte zero. What is lost is the remainder of a session that
+// went idle while the run held more sessions than the cap. The published
+// sample drops by that much, and Sample.Delta reports no growth, so the next
+// reading is measured from the smaller figure.
+func (w *Watcher) trimCounted(live []string) {
+	if len(w.seen) <= countedCap {
+		return
+	}
+	inWalk := make(map[string]struct{}, len(live))
+	for _, path := range live {
+		inWalk[path] = struct{}{}
+	}
+	type aged struct {
+		path   string
+		mtimeN int64
+	}
+	cut := make([]aged, 0, len(w.seen))
+	for path := range w.seen {
+		if _, ok := inWalk[path]; ok {
+			continue
+		}
+		cut = append(cut, aged{path: path, mtimeN: w.stamps[path].mtimeNanos})
+	}
+	room := countedCap - len(live)
+	if room < 0 {
+		room = 0
+	}
+	if len(cut) <= room {
+		return
+	}
+	// Oldest first: the transcript least likely to be appended to is the one
+	// whose remaining growth is cheapest to lose.
+	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeN, b.mtimeN) })
+	for _, a := range cut[:len(cut)-room] {
+		if a.mtimeN == 0 {
+			// Never stamped, so the end is unknown and re-seeding it would
+			// read the whole file again. Drop it outright instead.
+			w.dropFile(a.path)
+			continue
+		}
+		fi, err := os.Stat(a.path)
+		if err != nil {
+			w.dropFile(a.path)
+			continue
+		}
+		w.offsets[a.path] = fi.Size()
+		w.forgetCounts(a.path)
 	}
 }
 

@@ -369,27 +369,34 @@ const CmdlinePrefix = matchJoinBytes
 // byte of that line. An argument that straddles the cut is clipped rather
 // than dropped whole, the way the sweep's cut -c clips mid-token.
 //
+// The kept arguments are cloned rather than shared. A local listing builds
+// them with strings.Split over one whole /proc/PID/cmdline buffer and a sweep
+// with strings.Fields over one whole ps line, so every element is a window
+// onto the same bytes: returning a subslice, however short, would pin the
+// entire command line for the life of the sampler, which is the retention the
+// bound exists to prevent.
+//
 // Exported for the sweep's own reader, which splits a line that was cut in
 // characters, so the Info it builds is bounded in bytes the same way.
 func ClipArgs(args []string) []string {
+	kept := make([]string, 0, len(args))
 	spent := 0
 	for i, a := range args {
 		if i > 0 {
 			spent++ // the separator a join writes between two arguments
 		}
 		if spent >= CmdlinePrefix {
-			return args[:i]
+			break
 		}
 		room := CmdlinePrefix - spent
-		if len(a) <= room {
-			spent += len(a)
-			continue
+		if len(a) > room {
+			kept = append(kept, strings.Clone(clipUTF8Prefix(a, room)))
+			break
 		}
-		out := make([]string, i, i+1)
-		copy(out, args[:i])
-		return append(out, clipUTF8Prefix(a, room))
+		spent += len(a)
+		kept = append(kept, strings.Clone(a))
 	}
-	return args
+	return kept
 }
 
 // clipUTF8Prefix keeps at most n bytes of s, ending on a code-point

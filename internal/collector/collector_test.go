@@ -201,6 +201,31 @@ func TestRatesZeroElapsedHoldsPriorRate(t *testing.T) {
 	}
 }
 
+// A clock stepped backwards makes the interval negative, so no rate is
+// defined. Holding the prior one would report the old rate unchanged for as
+// long as the step lasts, so the baseline is re-seeded and the interval the
+// step made reports no throughput.
+func TestRatesBackwardClockReseedsBaseline(t *testing.T) {
+	c := New(nil, time.Second)
+	now := time.Now()
+	c.rates("p", &provider.Metrics{OutTotal: 100}, now)
+	out, _ := c.rates("p", &provider.Metrics{OutTotal: 400}, now.Add(time.Second))
+	if out <= 0 {
+		t.Fatalf("rate before the step = %v, want a positive rate to lose", out)
+	}
+
+	stepped, _ := c.rates("p", &provider.Metrics{OutTotal: 700}, now.Add(-5*time.Minute))
+	if stepped != 0 {
+		t.Fatalf("rate across a backward step = %v, want 0", stepped)
+	}
+
+	// The next interval measures from the step, not from the pre-step sample.
+	next, _ := c.rates("p", &provider.Metrics{OutTotal: 800}, now.Add(-5*time.Minute).Add(time.Second))
+	if next <= 0 {
+		t.Fatalf("rate after the step = %v, want a positive rate measured from the new baseline", next)
+	}
+}
+
 // Engines that publish instantaneous tok/s gauges (SGLang, TRT-LLM) must feed
 // the rate directly instead of counter deltas. The expected values are
 // literals, not ema() calls: an expectation built from the same helper as the

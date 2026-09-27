@@ -24,6 +24,11 @@ func FuzzParseAgentLines(f *testing.F) {
 		`{"type":"assistant","payload":{"type":"token_count","info":{"total_token_usage":{"output_tokens":310,"reasoning_output_tokens":22,"total_tokens":9000}}}}`,
 		`{"type":"assistant/message","usage":{"inputTokens":9245,"outputTokens":276,"reasoningTokens":144,"cacheReadTokens":0}}`,
 		`{"type":"assistant/chunk","data":{"chunk":{"type":"usage","usage":{"inputTokens":10,"outputTokens":4,"reasoningTokens":2}}}}`,
+		`{"type":"usage.record","usage":{"inputOther":900,"inputCacheRead":100,"inputCacheCreation":5,"output":120}}`,
+		`{"type":"usage.record","usage":{"inputOther":-100,"inputCacheRead":-3,"output":-50}}`,
+		`{"type":"token_count.measured","contextSize":32768}`,
+		`{"type":"usage.record","usage":{"inputOther":9223372036854775807,"output":9223372036854775807}}`,
+		`{"type":"usage.record","usage":"many","inputOther":1.5,"output":[1]}`,
 		`{"type":"session_meta","payload":{"cwd":"/home/dev"}}`,
 		`{"type":"assistant","message":{"usage":{"input_tokens":-100,"output_tokens":-50,"cache_read_input_tokens":-3,"thinking_tokens":-9}}}`,
 		`{"type":"assistant","message":{"usage":{"input_tokens":9223372036854775807,"output_tokens":9223372036854775807,"cache_read_input_tokens":9223372036854775807,"cache_creation_input_tokens":9223372036854775807}}}`,
@@ -82,6 +87,12 @@ func FuzzParseAgentLines(f *testing.F) {
 		assertUsage("dsh", d, dok)
 		if d2, _, dok2 := parseDsh(line); dok2 != dok || d2 != d {
 			t.Fatalf("parseDsh not deterministic for %q", line)
+		}
+
+		k, _, kok := parseKimi(line)
+		assertUsage("kimi", k, kok)
+		if k2, _, kok2 := parseKimi(line); kok2 != kok || k2 != k {
+			t.Fatalf("parseKimi not deterministic for %q", line)
 		}
 	})
 }

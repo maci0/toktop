@@ -870,6 +870,90 @@ func TestForwardCannotRestartAfterListenerTeardown(t *testing.T) {
 	}
 }
 
+// A forward is a loopback port, not a secret: nothing bounds how many
+// connections arrive on it, and each one the relay pipes costs a file
+// descriptor, two copy goroutines and an ssh channel for as long as the far
+// end holds it open. Past the cap a connection is closed rather than piped.
+func TestRelayCapsConcurrentConnections(t *testing.T) {
+	withKnownHosts(t)
+	srv := newTestSSHServer(t, "", 0)
+	defer srv.Close()
+
+	up, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer up.Close()
+	go func() {
+		var held []net.Conn
+		defer func() {
+			for _, c := range held {
+				c.Close()
+			}
+		}()
+		for {
+			c, err := up.Accept()
+			if err != nil {
+				return
+			}
+			held = append(held, c)
+		}
+	}()
+	rport := up.Addr().(*net.TCPAddr).Port
+
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cli.Close()
+	fwd, err := cli.Forward([]int{rport})
+	if err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	laddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(fwd[rport]))
+
+	var held []net.Conn
+	defer func() {
+		for _, c := range held {
+			c.Close()
+		}
+	}()
+	for range maxConcurrentRelays {
+		c, err := net.Dial("tcp", laddr)
+		if err != nil {
+			t.Fatalf("dial %d through the forward: %v", len(held)+1, err)
+		}
+		held = append(held, c)
+	}
+	waitForRelayCount(t, cli, maxConcurrentRelays)
+
+	c, err := net.Dial("tcp", laddr)
+	if err != nil {
+		t.Fatalf("dial past the cap: %v", err)
+	}
+	defer c.Close()
+	c.SetReadDeadline(time.Now().Add(5 * time.Second))
+	if _, err := c.Read(make([]byte, 1)); err == nil {
+		t.Fatalf("connection %d was piped past the cap of %d", maxConcurrentRelays+1, maxConcurrentRelays)
+	}
+}
+
+func waitForRelayCount(t *testing.T, cli *Client, n int) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	got := 0
+	for time.Now().Before(deadline) {
+		cli.mu.Lock()
+		got = len(cli.relays)
+		cli.mu.Unlock()
+		if got == n {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("client piping %d connections, want %d", got, n)
+}
+
 // An abnormal drop must reclaim the forward listeners. After an unattended
 // loss nobody calls Close (the attach-site watcher only reports it), so
 // listeners left bound would hold an fd and a relay goroutine apiece for the

@@ -332,6 +332,32 @@ func TestFractionalCounterIsAbsent(t *testing.T) {
 	}
 }
 
+func TestParseGenericFoldsTheCachedPromptShares(t *testing.T) {
+	// The three Anthropic shares are one billable prompt, so the generic
+	// walker adds them. Reading them as three competing values reported the
+	// largest alone, and a line carrying only the cache shares reported no
+	// prompt at all, where the bespoke claude parser read the whole bill.
+	v, _, ok := parseGeneric([]byte(`{"usage":{"input_tokens":900,"cache_read_input_tokens":50000,` +
+		`"cache_creation_input_tokens":2000,"output_tokens":120}}`))
+	if !ok {
+		t.Fatal("a line carrying the three prompt shares was read as no usage")
+	}
+	if want := 52900; v.input != want {
+		t.Fatalf("input %d, want %d (900 + 50000 + 2000)", v.input, want)
+	}
+	if v.total != 53020 {
+		t.Fatalf("total %d, want 53020", v.total)
+	}
+	if _, _, ok := parseGeneric([]byte(`{"usage":{"cache_creation_input_tokens":7}}`)); !ok {
+		t.Fatal("a prompt carried entirely by the cache-write share read as no usage")
+	}
+	kv, _, kok := parseKimi([]byte(`{"type":"usage.record","usage":{"inputOther":100,"inputCacheRead":5000,"inputCacheCreation":200,"output":300}}`))
+	gv, _, gok := parseGeneric([]byte(`{"type":"usage.record","usage":{"inputOther":100,"inputCacheRead":5000,"inputCacheCreation":200,"output":300}}`))
+	if !kok || !gok || kv.input != gv.input || kv.total != gv.total {
+		t.Fatalf("generic %+v (ok=%v) differs from the kimi adapter %+v (ok=%v)", gv, gok, kv, kok)
+	}
+}
+
 func TestParseGenericKeepsInputWhenTotalIsAbsent(t *testing.T) {
 	v, _, ok := parseGeneric([]byte(`{"usage":{"input_tokens":900,"output_tokens":120}}`))
 	if !ok || v.output != 120 || v.input != 900 {

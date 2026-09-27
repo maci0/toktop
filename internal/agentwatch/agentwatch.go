@@ -516,12 +516,27 @@ func (w *Watcher) stopAll() {
 	}
 }
 
+// stopWait bounds how long a stop waits for a tracker's read loop to unwind.
+// Cancel stops the ticker, but the poll already in flight is inside the kernel
+// walking a transcript store or reading a transcript, and neither takes the
+// context. A mount that stopped answering would otherwise hang shutdown, and
+// with it process exit, for as long as the read blocks. Past the bound the
+// tail read is dropped: the transcripts of an exited agent are one more poll
+// from the dashboard anyway.
+const stopWait = 3 * time.Second
+
 func (w *Watcher) stopOne(t *tracked) {
 	if t.cancel != nil {
 		t.cancel()
 	}
 	if t.done != nil {
-		<-t.done
+		timer := time.NewTimer(stopWait)
+		defer timer.Stop()
+		select {
+		case <-t.done:
+		case <-timer.C:
+			return
+		}
 	}
 	if t.watch != nil {
 		w.report(t, t.watch.Poll())

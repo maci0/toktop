@@ -135,7 +135,7 @@ func cpuModelCached() string {
 	if cpuModelVal != "" {
 		return cpuModelVal
 	}
-	if !cpuModelAt.IsZero() && time.Since(cpuModelAt) < cpuModelRetry {
+	if !cpuModelAt.IsZero() && core.Age(time.Now(), cpuModelAt) < cpuModelRetry {
 		return cpuModelVal
 	}
 	cpuModelVal = cpuModelProbe()
@@ -190,7 +190,7 @@ var (
 func hostStaticInfo() hostStatic {
 	hostStaticMu.Lock()
 	defer hostStaticMu.Unlock()
-	if hostStaticAt.IsZero() || (hostStaticFill < hostStaticTries && time.Since(hostStaticAt) >= hostStaticRetry) {
+	if hostStaticAt.IsZero() || (hostStaticFill < hostStaticTries && core.Age(time.Now(), hostStaticAt) >= hostStaticRetry) {
 		hostStaticVal = mergeHostStatic(hostStaticVal, loadHostStatic())
 		hostStaticAt = time.Now()
 		hostStaticFill++

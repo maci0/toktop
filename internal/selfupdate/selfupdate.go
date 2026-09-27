@@ -204,9 +204,18 @@ func githubAssetURL(raw string) bool {
 // the client's default policy, so it also caps the hop count. It also strips
 // the Authorization header on hops off api.github.com so GITHUB_TOKEN never
 // leaks to CDN or storage hosts.
+// maxReleaseJSON bounds the release metadata body. It is a few hundred bytes
+// of decoded struct; past this the body is a mistake or an attack, and either
+// way should not be read into memory to be rejected.
+const maxReleaseJSON = 4 << 20
+
+// maxRedirects caps the hop count of a download, so a redirect loop between
+// GitHub's own hosts still ends.
+const maxRedirects = 10
+
 func githubRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) >= 10 {
-		return errors.New("stopped after 10 redirects")
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
 	}
 	if req.URL.Scheme != "https" || req.URL.User != nil || !githubDownloadHost(req.URL.Hostname()) {
 		return fmt.Errorf("refusing redirect to %s", req.URL.Redacted())
@@ -262,7 +271,7 @@ func Check(ctx context.Context, repo string) (*Release, error) {
 		return nil, fmt.Errorf("github returned %s for %s", resp.Status, latest)
 	}
 	var rel Release
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseJSON)).Decode(&rel); err != nil {
 		return nil, fmt.Errorf("cannot parse github release from %s: %w", latest, err)
 	}
 	if rel.TagName == "" {
@@ -322,6 +331,14 @@ func Apply(ctx context.Context, rel *Release) (string, error) {
 // without replacing the test binary. The results are named so the staging
 // file's cleanup can fold its own failure into the error being returned.
 func applyTo(ctx context.Context, rel *Release, self string) (installed string, err error) {
+	// Recovery before the network. A killed update can leave the binary under
+	// the displaced name with nothing at the installed path, and a download
+	// that then fails (offline, rate-limited, checksum mismatch) would leave
+	// it that way. Restoring first is a no-op unless the installed path is
+	// missing.
+	if err := restoreDisplaced(self, self+displacedSuffix); err != nil {
+		return "", err
+	}
 	want := AssetName(rel.Version())
 	sumsFile := checksumsName(rel.Version())
 	assetURL, sumsURL := releaseAssets(rel)
@@ -356,6 +373,13 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 			return "", fmt.Errorf("cannot checksum %s: %w", self, cerr)
 		}
 	} else if have == expect {
+		// Already this release, so nothing is downloaded or installed. The
+		// leftover .old a killed or locked install leaves is still cleared
+		// here, because install is the only other place that removes it and
+		// this path never reaches install. Best effort: the .old holds a
+		// running image on the platform that has one, so a refusal to delete
+		// it is a condition the next install retries, not a failed update.
+		_ = os.Remove(self + displacedSuffix)
 		return self, nil
 	}
 

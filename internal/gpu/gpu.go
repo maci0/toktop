@@ -77,7 +77,7 @@ var lookPath = exec.LookPath
 func lookup(name string) (string, bool) {
 	if v, ok := tools.Load(name); ok {
 		ti := v.(*toolInfo)
-		if time.Since(ti.at) < toolWindow(ti.ok) {
+		if core.Age(time.Now(), ti.at) < toolWindow(ti.ok) {
 			return ti.path, ti.ok
 		}
 	}

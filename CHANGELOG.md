@@ -37,6 +37,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- `remote.DefaultPollEvery` is the 5s an ssh host is sampled at, and what
+  `Stats.Run` uses when its period is not positive. A caller that wanted the
+  default copied the number, and the two drifted the moment either side
+  changed.
+
 - Kimi Code CLI sessions are read under `--agents`, so one shows a live rate
   beside the other agents. It keeps an event log per session and per agent
   under `~/.kimi-code/sessions/<workDirKey>/<session>/agents/<id>/wire.jsonl`,
@@ -182,6 +187,56 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   is built once per probe sweep rather than per lookup.
 
 ### Fixed
+
+- A forwarded port pipes at most 64 connections at once, and tearing the ssh
+  connection down closes the ones it is already piping. A client that opened
+  connections and stayed silent held a file descriptor, two goroutines and an
+  ssh channel apiece for as long as the dashboard ran.
+- A long `--agents` run releases the bookkeeping of the least recently written
+  counted transcripts once it is following more than 512 of them. The read
+  position is kept, so a later append still counts as growth, and the tokens
+  already reported stay reported. Without the cap a store that keeps every
+  session inside the recency window grew one entry per file in each of the
+  watcher's maps for the life of the run.
+- Shutting down no longer waits forever on an agent read stuck in a transcript
+  on a mount that stopped answering. The wait is three seconds, and the tail
+  read of an agent that has exited is dropped rather than holding process exit.
+- A defined agent's transcript that reports cached prompt shares is counted
+  for all of them. `cache_read_input_tokens`, `cache_creation_input_tokens`
+  and Kimi's `inputCacheRead` and `inputCacheCreation` were either ignored or
+  folded by maximum, so a line carrying only a cached share read as no usage
+  and a line carrying all three read as the largest share. They add to the
+  uncached share, the same fold the claude and dsh parsers already apply.
+- A wall clock stepped backwards reseeds an engine's throughput instead of
+  holding the previous rate for as long as the step lasts. A sample at the
+  same instant as the one before it still holds the prior rate, so two
+  readings with no elapsed time do not produce a NaN.
+- A local process listing copies the arguments it keeps. The listing splits
+  one `/proc` buffer into windows, and returning those windows pinned the tail
+  past the prefix (an inline prompt, a path, a credential) for the life of the
+  sampler, which is the retention the prefix exists to prevent.
+- A host-key pin with a trailing comment is the same pin as the line without
+  one. A store another tool annotated was read as a changed key on the next
+  connect.
+- An ssh config value may carry a trailing `#` comment. `HostName`, `Port`,
+  `User` and `IdentityFile` kept the comment in the value, which then failed
+  the host check or failed to parse and was dropped. A `#` with no whitespace
+  before it stays part of the value.
+- A `--json` demo report includes `demo_seed` when the seed is 0. The field
+  was an integer with `omitempty`, so that one seed was omitted and a replay
+  could not tell it from a run that named no seed. A run that is not a demo
+  still omits the field.
+- A CPU temperature label is trimmed of its trailing comma before it is
+  shortened, so the dashboard's seven-cell budget is spent on the label
+  rather than on the separator the split needed.
+- `toktop update` restores a binary left beside the install path by a killed
+  update before it tries the network, and a run that is already that release
+  removes the leftover. A download that then fails used to leave the install
+  missing, and a release that was already installed left the displaced copy
+  in place until a later install needed the name.
+- `$TOKTOP_LOG_LEVEL` with `--demo --no-ingest` is described as setting the
+  startup config record. The warning said no audit log was written, which the
+  startup record contradicted.
 
 - A Kimi Code CLI session's tokens are counted again. The working directory a
   session ran in is recorded in its `state.json`, which the CLI writes beside

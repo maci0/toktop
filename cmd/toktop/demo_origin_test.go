@@ -189,6 +189,25 @@ func TestJSONOmitsUnpinnedDemoOrigin(t *testing.T) {
 	}
 }
 
+// Seed 0 is a working seed. omitempty on a plain integer dropped exactly that
+// one, so a replay of the report could not tell it from a run that named none.
+func TestJSONKeepsDemoSeedZero(t *testing.T) {
+	out, err := ui.JSONFrame(ui.Config{Version: "test", Demo: true, DemoSeed: 0}, core.Snapshot{})
+	if err != nil {
+		t.Fatalf("JSONFrame: %v", err)
+	}
+	if !strings.Contains(out, `"demo_seed": 0`) {
+		t.Fatalf("demo seed 0 was omitted:\n%s", out)
+	}
+	plain, err := ui.JSONFrame(ui.Config{Version: "test", DemoSeed: 0}, core.Snapshot{})
+	if err != nil {
+		t.Fatalf("JSONFrame: %v", err)
+	}
+	if strings.Contains(plain, "demo_seed") {
+		t.Fatalf("a non-demo run reported a seed:\n%s", plain)
+	}
+}
+
 // A different seed must still change the run, or the replay above would pass
 // on a source that draws nothing.
 func TestDemoSeedChangesTheRun(t *testing.T) {
