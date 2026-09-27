@@ -427,11 +427,19 @@ function quality(qByCoding, coding) {
 // Content-Encoding token -> CompressionStream format. deflate is omitted on
 // purpose: the zlib wrapper versus raw-deflate split is still a footgun, and
 // every browser that speaks deflate also speaks gzip.
-const COMPRESSIBLE = [
+const COMPRESSIBLE = new Map([
   ["br", "brotli"],
   ["zstd", "zstd"],
   ["gzip", "gzip"],
-];
+]);
+
+// The same three codings, smallest body of this page first: brotli 3,499,
+// gzip 4,176, zstd 4,406 bytes. The page is a constant, so those sizes are
+// constants too, and ranking by them lets a request build only the coding it
+// is about to send instead of all three to compare them. zstd lands behind
+// gzip here because the page is short English words and markup, which is not
+// what a zstd dictionary is for.
+const CODING_BY_SIZE = ["br", "gzip", "zstd"];
 
 async function compressFormat(format) {
   return new Uint8Array(
@@ -443,90 +451,90 @@ async function compressFormat(format) {
 
 const IDENTITY = new TextEncoder().encode(HTML);
 
-// The in-flight build, or the finished one. A promise, not the resolved
-// value: a cold isolate interleaves concurrent requests at every await, so a
-// value-only cache is a check-then-act that lets a whole burst of them run
-// the compression pipeline together. Assigning the promise synchronously
+// The built body of each coding, or the in-flight build. A promise, not the
+// resolved value: a cold isolate interleaves concurrent requests at every
+// await, so a value-only cache is a check-then-act that lets a whole burst of
+// them start the same pipeline together. Assigning the promise synchronously
 // means the second caller awaits the first one's work instead of repeating it.
-let representations;
-
-function pageRepresentations(request) {
-  representations ??= buildRepresentations(request).catch((err) => {
-    // Only completed bytes are ever cached, so a failed build has to clear
-    // the slot: a rejection left in place would answer every later request
-    // with the same failure until the isolate was recycled.
-    representations = undefined;
-    throw err;
-  });
-  return representations;
-}
+// A coding is built when a client asks for it, so an isolate that only ever
+// sees brotli never pays the gzip and zstd builds, and one that only ever
+// revalidates builds nothing at all.
+const BODIES = new Map();
 
 // The request rides along only so a dropped coding names the edge request
 // that hit it: the build is shared, so the first caller's ray is the one on
 // the line, not a claim about every request it served.
-//
-// The three run concurrently. A cold isolate pays this build inside the first
-// request, before the page it is answering, and awaiting them in sequence
-// makes that request wait for the sum of the three rather than the slowest
-// one. The bytes are the same either way and the CPU is the same either way;
-// only the time to the first byte of that request changes.
-async function buildRepresentations(request) {
-  const compressed = await Promise.all(
-    COMPRESSIBLE.map(async ([coding, format]) => {
-      try {
-        return { coding, bytes: await compressFormat(format) };
-      } catch (err) {
-        // A runtime without the format is the ordinary case. Anything else
-        // (out of memory, a stream that dies mid-pipeline) would ship the
-        // page at its uncompressed size forever without a word, so name it.
+function pageBody(coding, request) {
+  if (!BODIES.has(coding)) {
+    BODIES.set(
+      coding,
+      compressFormat(COMPRESSIBLE.get(coding)).catch((err) => {
+        // A runtime without the format is the ordinary case, and the bytes
+        // will not turn up later, so the slot keeps that answer rather than
+        // retrying a build this isolate cannot make. Anything else (out of
+        // memory, a stream that dies mid-pipeline) would ship the page at
+        // its uncompressed size forever without a word, so name it.
         logFailure(request, "coding-dropped", {
           coding,
           // A throw carries any value, null included, so err may have no message.
           error: String(err?.message ?? err),
         });
         return null;
-      }
-    }),
-  );
-  return [{ coding: null, bytes: IDENTITY }, ...compressed.filter((rep) => rep !== null)];
+      }),
+    );
+  }
+  return BODIES.get(coding);
 }
 
 // The codings this Worker offers, for the acceptability check that runs
 // before a body exists. A coding the runtime then fails to build is still
-// caught in representationFor, which returns nothing acceptable.
-const OFFERED_CODINGS = [null, ...COMPRESSIBLE.map(([coding]) => coding)];
+// caught in representationFor, which moves on to the next one.
+const OFFERED_CODINGS = [null, ...COMPRESSIBLE.keys()];
 
 function refusesEveryCoding(acceptEncoding) {
   const qByCoding = parseAcceptEncoding(acceptEncoding);
   return OFFERED_CODINGS.every((coding) => quality(qByCoding, coding ?? "identity") <= 0);
 }
 
-// Highest q the client offered, then the smallest body at that q. A Chrome
-// `gzip, deflate, br, zstd` request therefore gets brotli rather than gzip,
-// and a `br;q=0.1, gzip` request still gets gzip.
+// Highest q the client offered, then the smallest body at that q, which for
+// this page is the CODING_BY_SIZE order. A Chrome `gzip, deflate, br, zstd`
+// request therefore gets brotli rather than gzip, and a `br;q=0.1, gzip`
+// request still gets gzip. Identity comes last: a client that named no
+// coding the Worker can build still gets the page.
+function acceptableCodings(qByCoding) {
+  return [...CODING_BY_SIZE, null]
+    .map((coding, rank) => ({ coding, rank, q: quality(qByCoding, coding ?? "identity") }))
+    .filter((entry) => entry.q > 0)
+    .sort((a, b) => b.q - a.q || a.rank - b.rank)
+    .map((entry) => entry.coding);
+}
+
+// The first acceptable coding this isolate can build, built here when no
+// earlier request wanted it. A coding the runtime cannot build falls through
+// to the next rather than costing the client the page.
 async function representationFor(acceptEncoding, request) {
-  const reps = await pageRepresentations(request);
   const qByCoding = parseAcceptEncoding(acceptEncoding);
-  let best = null;
-  for (const rep of reps) {
-    const q = quality(qByCoding, rep.coding ?? "identity");
-    if (q <= 0) continue;
-    if (
-      best === null ||
-      q > best.q ||
-      (q === best.q && rep.bytes.byteLength < best.bytes.byteLength)
-    ) {
-      best = { ...rep, q };
-    }
+  for (const coding of acceptableCodings(qByCoding)) {
+    if (coding === null) return { coding, bytes: IDENTITY };
+    // Sequential on purpose: the next coding is the fallback for one that
+    // cannot be built, so building them together would spend the bytes of a
+    // body this request would then throw away.
+    // biome-ignore lint/performance/noAwaitInLoops: a fallback chain, not a fan-out.
+    const bytes = await pageBody(coding, request);
+    if (bytes !== null) return { coding, bytes };
   }
-  return best;
+  return null;
 }
 
 // Fresh for five minutes, then served from the browser's copy while a cheap
 // 304 revalidation runs in the background: repeat visitors paint instantly
-// and are never more than the first max-age behind a deploy.
-// biome-ignore lint/security/noSecrets: a Cache-Control directive list, not a credential.
-const PAGE_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=86400";
+// and never wait on the edge. The revalidate window is an hour, the same one
+// the captures use: it is how long a returning browser can keep painting a
+// page from before a deploy, and a day of that would leave a visitor reading
+// yesterday's install commands. Past the hour the copy is still served while
+// the check runs, so the cost is one conditional request on a visit that is
+// already past max-age, and never a blank screen.
+const PAGE_CACHE_CONTROL = "public, max-age=300, stale-while-revalidate=3600";
 
 // Several encodings live under one URL, so every cached copy must be keyed on
 // what the accepting client asked for; without Vary a shared cache could hand

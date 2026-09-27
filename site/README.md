@@ -64,7 +64,9 @@ those same headers and no body, as a served `HEAD` does.
 The page carries an ETag derived from its own bytes: reloads and visits
 past the five-minute freshness window answer with an empty 304 instead of
 resending the body, and `stale-while-revalidate` lets returning browsers paint
-from their copy while that check runs. The validator is weak (`W/`) because
+from their copy while that check runs. That window is an hour, the one the
+captures use, and it is how long a returning browser can paint a page from
+before the deploy that replaced it. The validator is weak (`W/`) because
 the page ships in several encodings under one URL, which one strong tag may
 not span.
 
@@ -78,7 +80,11 @@ promise rather than the value, so a burst of cold requests waits on one
 pipeline instead of each starting its own. Clients that advertise none of those
 get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
-br, zstd` request is answered with brotli rather than gzip. Unlisted identity
+br, zstd` request is answered with brotli rather than gzip. That ranking is a
+constant list in the Worker rather than a comparison of bodies, because the
+page is a constant too: brotli 3,499 bytes, gzip 4,176, zstd 4,406. zstd
+lands behind gzip here, so a client that named only `zstd, gzip` still gets
+gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
 transfers 4,176 bytes rather than 12,146 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
@@ -89,18 +95,22 @@ in the HTML and CSS stay in `worker.js` and are stripped before the page is
 hashed, compressed, or sent. Every response carries `Vary: Accept-Encoding`,
 so caches never hand a compressed body to a client that cannot decode it.
 
-The three codings are built concurrently. A cold isolate pays that build
-inside the first request it is answering, so awaiting them in sequence makes
-that one request wait for the sum of the three rather than the slowest one.
+A coding is built the first time a client asks for it and kept for the
+isolate's life, so a cold isolate that serves brotli pays the brotli build
+alone: measured against this page, brotli takes 23 ms, gzip 0.7 ms and zstd
+4 ms, and building all three inside the request that only needs one of them
+charged every visitor the lot. The build a request wants is started before
+the negotiation finishes, and one it will not send is never started.
 
-Answers that carry no body are decided before that build runs. A 406 comes from
+Answers that carry no body are decided before any build runs. A 406 comes from
 what the Worker offers (`identity` plus `br`, `zstd` and `gzip`) read against
-`Accept-Encoding`, and a 304 from `If-None-Match`, so neither waits on three
-codings it will not send. An isolate that only ever serves revalidations never
+`Accept-Encoding`, and a 304 from `If-None-Match`, so neither waits on a coding
+it will not send. An isolate that only ever serves revalidations never
 builds a representation at all, and the reload after a deploy is answered off
-the isolate's first request rather than after the pipeline. A client whose only
-acceptable coding the runtime then fails to build still gets its 406 from the
-build itself; the offer check answers the refusals a client can state up front.
+the isolate's first request rather than after a pipeline. A client whose only
+acceptable coding the runtime cannot build falls through to the next one it
+named, and gets its 406 only when none of them can be built; the offer check
+answers the refusals a client can state up front.
 
 ## Timing
 
@@ -146,13 +156,13 @@ stay silent.
 ## Performance budget
 
 One request for the page, no JavaScript, no webfonts, inline CSS only. The
-hero is the real dashboard capture: AVIF (55,392 bytes at 1920px, 30,963 at
-1280px, 13,563 at 768px), then WebP (148,050 / 81,540 / 36,130 bytes), then
+hero is the real dashboard capture: AVIF (45,559 bytes at 1920px, 25,360 at
+1280px, 10,577 at 768px), then WebP (148,050 / 81,540 / 36,130 bytes), then
 the full-size PNG for a client that speaks neither. A phone lays the figure
 out at about 360 CSS px,
 so the 768w candidate is the slot a 2x screen takes: without it every phone
-rounded up to 1280w and fetched 30,963 bytes to fill 722 of them, which is the
-56% the 768w AVIF saves. A 3x phone (1083 device pixels) and a 1x desktop
+rounded up to 1280w and fetched 25,360 bytes to fill 722 of them, which is the
+58% the 768w AVIF saves. A 3x phone (1083 device pixels) and a 1x desktop
 (1216) still take 1280w, and 1920w remains the 2x desktop slot.
 For public visitors, including mobile networks, `sizes` follows the body
 gutters, figure borders, and 76rem column cap rather than declaring a desktop
@@ -174,11 +184,21 @@ Measured
 against the current source with Bun 1.4.2: 12,146 bytes identity / 4,176 gzip /
 3,499 brotli for the HTML, still inside the
 ~14 KB initial congestion window. A phone's whole visit is those 3,499 bytes
-plus the 13,563-byte 768w capture, 17,062 bytes in two requests; that pair has
+plus the 10,577-byte 768w capture, 14,076 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no
 srcset narrows, so it carries a ceiling of its own in the same test.
+
+The AVIF candidates are encoded at `-q 32`, which is where this capture stops
+paying: 10,577 bytes at 768w against 13,563 at `-q 40`, at 30.0 dB PSNR
+against the resized source. The page draws that candidate into about 662 device
+pixels, so the browser downscales it and the difference is not on screen at the
+size anyone reads it. 4:2:0 was measured for the same widths and is not
+smaller: the frame is mostly flat dark background, so there is little chroma to
+subsample, and it costs luma detail on the text that is the picture. WebP
+stays at `-quality 82`; a browser that reaches for it has no AVIF at all and
+gets the better-looking of the two.
 
 The share card is a fourth file, not a fifth srcset candidate: the og
 crawlers fetch the one URL in `og:image` and draw it at card size, so

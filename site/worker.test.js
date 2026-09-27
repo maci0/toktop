@@ -67,12 +67,23 @@ test("compression starts in a request and only completed bytes are reused", asyn
     expect(new Uint8Array(await concurrent.arrayBuffer())).toEqual(bytes);
     // One build for the pair, not one each: the cache holds the in-flight
     // promise, so the concurrent request awaited this one's compression
-    // instead of starting a second pipeline.
+    // instead of starting a second pipeline. One, not three: a client that
+    // asked for gzip never pays the brotli and zstd builds.
     const afterFirst = constructions;
-    expect(afterFirst).toBe(3);
+    expect(afterFirst).toBe(1);
     const second = await freshWorker.fetch(request());
     expect(new Uint8Array(await second.arrayBuffer())).toEqual(bytes);
     expect(constructions).toBe(afterFirst);
+    // A coding is built when a client asks for it, so the brotli body is
+    // built now and the gzip body is served from the first build.
+    const brotli = await freshWorker.fetch(
+      new Request(ORIGIN, { headers: { "accept-encoding": "br" } }),
+    );
+    expect(brotli.headers.get("content-encoding")).toBe("br");
+    expect(await decompress(new Uint8Array(await brotli.arrayBuffer()), "brotli")).toBe(
+      identityBody,
+    );
+    expect(constructions).toBe(2);
   } finally {
     globalThis.CompressionStream = NativeCompressionStream;
   }
@@ -116,12 +127,13 @@ test("revalidation and refusal answer without building any representation", asyn
       expect(constructions).toBe(0);
     }
 
-    // The bytes are still there for a client that wants them.
+    // The bytes are still there for a client that wants them, and the
+    // isolate builds the one coding that client asked for.
     const body = await freshWorker.fetch(
       new Request(ORIGIN, { headers: { "accept-encoding": "gzip" } }),
       {},
     );
-    expect(constructions).toBe(3);
+    expect(constructions).toBe(1);
     expect(await decompress(new Uint8Array(await body.arrayBuffer()), "gzip")).toBe(identityBody);
   } finally {
     globalThis.CompressionStream = NativeCompressionStream;
@@ -201,6 +213,11 @@ test("accept-encoding variants negotiate correctly", async () => {
     ["gzip", "gzip"],
     ["GZIP", "gzip"],
     ["*", "br"],
+    // zstd is bigger than gzip on this page (4,406 against 4,176), so the
+    // ranking the Worker negotiates from is a list, not the order the
+    // codings are offered in, and a client naming both gets the smaller.
+    ["zstd, gzip", "gzip"],
+    ["gzip, deflate, br, zstd", "br"],
     ["gzip;q=0.5, br", "br"],
     ["br;q=0.1, gzip", "gzip"],
     ["br", "br"],
@@ -726,7 +743,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(17_062);
+  expect(visit).toBe(14_076);
   expect(visit).toBeLessThan(25_000);
 });
 
@@ -746,6 +763,20 @@ test("a re-capture reaches a returning browser within a day, not a week", () => 
   expect(directives.get("stale-while-revalidate")).toBeLessThanOrEqual(86_400);
 });
 
+// The page carries the same window the captures do. Its bytes change only at a
+// deploy, so a browser holding one serves it from cache and revalidates behind
+// the paint: that is what keeps a repeat visit off the edge. The window is
+// still how long a returning browser can paint a page from before the deploy
+// that replaced it, so it is an hour rather than a day, and it is pinned here
+// because nothing else measures the page's freshness.
+test("the page's revalidate window is the hour the captures use", async () => {
+  const policy = "public, max-age=300, stale-while-revalidate=3600";
+  const cacheControl = (await call()).headers.get("cache-control");
+  expect(cacheControl).toBe(policy);
+  const revalidated = await call({ "if-none-match": (await call()).headers.get("etag") });
+  expect(revalidated.headers.get("cache-control")).toBe(policy);
+});
+
 test("hero AVIF is smaller than WebP at every width, and each width beats the next", () => {
   for (const width of ["768", "1280", ""]) {
     const suffix = width ? `-${width}` : "";
@@ -757,9 +788,9 @@ test("hero AVIF is smaller than WebP at every width, and each width beats the ne
   expect(assetBytes("dashboard-1280.avif")).toBeLessThan(assetBytes("dashboard.avif"));
   expect(assetBytes("dashboard-768.webp")).toBeLessThan(assetBytes("dashboard-1280.webp"));
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(assetBytes("dashboard.webp"));
-  expect(assetBytes("dashboard.avif")).toBeLessThan(60_000);
-  expect(assetBytes("dashboard-1280.avif")).toBeLessThan(35_000);
-  expect(assetBytes("dashboard-768.avif")).toBeLessThan(15_000);
+  expect(assetBytes("dashboard.avif")).toBeLessThan(50_000);
+  expect(assetBytes("dashboard-1280.avif")).toBeLessThan(30_000);
+  expect(assetBytes("dashboard-768.avif")).toBeLessThan(12_000);
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(100_000);
   expect(assetBytes("dashboard-768.webp")).toBeLessThan(45_000);
   expect(assetBytes("dashboard.webp")).toBeLessThan(160_000);
@@ -767,9 +798,9 @@ test("hero AVIF is smaller than WebP at every width, and each width beats the ne
 
 // The slot a phone actually takes: a 2x screen at the 360 CSS px the figure
 // occupies needs 722 device pixels, so the srcset hands it the 768w candidate.
-// Without that entry the browser rounds up to 1280w and downloads 30,963 bytes
+// Without that entry the browser rounds up to 1280w and downloads 25,360 bytes
 // to fill 722 of them. A 768w capture covers 36% of the 1280w area and lands
-// at 44% of its weight; the ceiling is set past that, so a re-capture that
+// at 42% of its weight; the ceiling is set past that, so a re-capture that
 // drops or fattened the phone candidate fails here instead of quietly
 // doubling the weight of the visit that matters most.
 test("the phone slot is served by the 768w capture, not the 1280w one", () => {

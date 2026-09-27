@@ -408,10 +408,18 @@ site-assets: require-encoders ## rebuild the site dashboard captures from docs/i
 	magick docs/images/dashboard.png -strip -resize 1280x -quality 82 site/public/dashboard-1280.webp
 	magick docs/images/dashboard.png -strip -resize 768x -quality 82 site/public/dashboard-768.webp
 	magick docs/images/dashboard.png -strip -resize 1200x -colors 128 PNG8:site/public/dashboard-card.png
+	# avifenc -q 32 is the measured floor for this capture: 10,577 bytes at
+	# 768w against 13,563 at -q 40, a 22% cut of the image that is 79% of a
+	# phone's visit, at 30.0 dB PSNR against the resized source. The page
+	# draws that candidate into about 662 device pixels, so the browser
+	# downscales it, and a 2x crop of the 768w frame shows no artifact a
+	# reader would see. 4:2:0 was measured too and is not smaller here: the
+	# frame is mostly flat dark background, so there is little chroma to
+	# subsample, and it costs luma detail on the text that is the picture.
 	@for width in 1920 1280 768; do \
 		stem=$$( [ "$$width" = 1920 ] && echo dashboard || echo "dashboard-$$width" ); \
 		magick docs/images/dashboard.png -strip -resize $${width}x $(DIST)/$$stem.png; \
-		avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
+		avifenc -q 32 -s 2 -y 444 --ignore-exif --ignore-xmp \
 			$(DIST)/$$stem.png site/public/$$stem.avif; \
 	done
 	@bun test site/
