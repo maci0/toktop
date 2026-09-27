@@ -327,6 +327,8 @@ func (s *Server) instant() time.Time {
 // Addr returns the actual bound address (useful when starting on :0).
 func (s *Server) Addr() string { return s.addr }
 
+// Serve runs the ingest endpoint until Close. A Close from any goroutine is
+// reported as a nil error, since that is how a run ends.
 func (s *Server) Serve() error {
 	err := s.srv.Serve(s.ln)
 	if err == http.ErrServerClosed {
@@ -335,6 +337,9 @@ func (s *Server) Serve() error {
 	return err
 }
 
+// Close stops the endpoint and releases the listener. It is idempotent, and
+// in-flight requests are dropped rather than drained: nothing posted to this
+// endpoint outlives the process that receives it.
 func (s *Server) Close() error {
 	err := s.srv.Close()
 	// Serve is the only path that tracks ln on the http.Server. Close

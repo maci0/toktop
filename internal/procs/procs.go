@@ -89,6 +89,10 @@ type Sampler struct {
 	cached     []Info
 }
 
+// NewSampler returns a Sampler with the platform's default refresh window.
+// A caller that lists processes more than once in a run should share one
+// sampler: the underlying listing is throttled, and the CPU tick deltas it
+// keeps are only meaningful across successive calls.
 func NewSampler() *Sampler {
 	return &Sampler{prev: map[int]uint64{}, refreshMin: defaultSamplerRefresh}
 }

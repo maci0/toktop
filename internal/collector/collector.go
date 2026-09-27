@@ -33,6 +33,10 @@ type prevSample struct {
 	inEMA    float64
 }
 
+// Collector polls every configured engine and the host on one interval and
+// hands the result to consumers as a core.Snapshot. It owns the probe ring,
+// the agent feed and the smoothing of per-engine rates, so nothing downstream
+// has to reconcile two observations of the same engine.
 type Collector struct {
 	providers []provider.Provider
 	interval  time.Duration

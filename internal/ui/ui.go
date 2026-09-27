@@ -36,6 +36,9 @@ type Config struct {
 	FeedErr <-chan string
 }
 
+// Model is the bubbletea dashboard: it holds the newest snapshot, the
+// viewport size and the transient state a frame cannot be rebuilt from
+// (pause, help, which panel estate is in focus, a pending notice).
 type Model struct {
 	cfg         Config
 	ch          <-chan core.Snapshot
@@ -67,6 +70,9 @@ type Model struct {
 	sum *core.AgentSummary
 }
 
+// New builds the dashboard model over a snapshot stream. ch carries the
+// collector's frames; a frame that has not arrived yet is what the warm-up
+// glyph stands in for, so the first render is never a frame of zeroes.
 func New(cfg Config, ch <-chan core.Snapshot) Model {
 	// The header clock only advances on ticks, so until the first one lands
 	// (~1s in) it must show the launch time rather than a zero-value midnight.
@@ -151,6 +157,9 @@ func tickClock() tea.Cmd {
 
 // --- model ----------------------------------------------------------------
 
+// Init starts the header clock, the snapshot wait and, when the feed can
+// degrade, the channel that reports it. Each waits in a goroutine bubbletea
+// owns, so none of them blocks the first render.
 func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{tickClock(), waitSnap(m.ch)}
 	if m.cfg.FeedErr != nil {
@@ -159,6 +168,10 @@ func (m Model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// Update folds one message (keypress, tick, snapshot, resize) into the model.
+// A snapshot taken while the frame is paused updates the probe results and
+// nothing else, so pausing freezes the whole frame rather than only the
+// header clock.
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -298,6 +311,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // --- view ------------------------------------------------------------------
 
+// View draws one frame at the model's current size. It fills the agent
+// summary first, since the header, charts, feed and agents view each read a
+// different slice of it and the retained feed is long enough that walking it
+// per consumer shows up in a frame.
 func (m Model) View() string {
 	if !m.ready {
 		// Same glyph the probe panel uses for work in progress: the status

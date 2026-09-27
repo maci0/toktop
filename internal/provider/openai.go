@@ -20,6 +20,10 @@ type OpenAICompat struct {
 	version versionCache
 }
 
+// NewOpenAICompat monitors any OpenAI-shaped server at base. label names it
+// in the UI (an engine found by fingerprinting passes its kind, an endpoint
+// attached with --add names itself) and kind is the fingerprint the rest of
+// the dashboard keys behavior off.
 func NewOpenAICompat(base, label, kind string) Provider {
 	o := &OpenAICompat{base: strings.TrimRight(base, "/"), label: label, kind: kind}
 	return Provider{Label: o.label, Addr: o.base, Kind: o.kind, Poll: o.poll}

@@ -78,6 +78,9 @@ const retryAfterDefault = 15 * time.Second
 // silence probes for hours.
 const retryAfterMax = 5 * time.Minute
 
+// Request is one generation to measure: which engine dialect to speak, where
+// it lives, and the model to ask for. An empty Model is refused by Run, since
+// some engines read it as "load the default model".
 type Request struct {
 	Kind  string // core.KindOllama | openai-compatible kinds
 	Base  string
@@ -349,6 +352,11 @@ func capModel(name string) string {
 	return core.TruncateClusters(strings.TrimSpace(name), ModelNameMax)
 }
 
+// SelectModel picks the model a probe should measure from what an engine
+// reports it has: the first model that occupies VRAM, since a probe of one
+// the daemon has not loaded pays its load time, and otherwise the first name
+// left. Embedding and rerank models are never probed: they take no prompt
+// tokens and report no decode rate.
 func SelectModel(models []core.ModelInfo) string {
 	var fallback string
 	for _, m := range models {

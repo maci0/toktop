@@ -14,6 +14,8 @@ type Ollama struct {
 	version versionCache
 }
 
+// NewOllama monitors the daemon at base, reachable over plain HTTP without a
+// token.
 func NewOllama(base string) Provider {
 	o := &Ollama{base: strings.TrimRight(base, "/")}
 	return Provider{Label: "ollama", Addr: o.base, Kind: core.KindOllama, Poll: o.poll}

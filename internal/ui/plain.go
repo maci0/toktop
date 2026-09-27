@@ -1,14 +1,5 @@
 package ui
 
-// PlainTextFrame renders one snapshot as a linear, text-only report: the
-// non-visual counterpart to StaticFrame. The dashboard frame draws charts as
-// braille dot-matrix rows, panels as box-drawing borders and meters as bar
-// glyphs; a screen reader meets those as floods of "braille pattern dots-…"
-// announcements or skips them silently, and the side-by-side mid-row scrambles
-// into interleaved column fragments when read line by line. This frame carries
-// every number as words in reading order instead (WCAG 1.1.1): no braille, no
-// borders, no bars, no multi-column layout. It is what `--once --plain` prints.
-
 import (
 	"fmt"
 	"strings"
@@ -17,6 +8,14 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+// PlainTextFrame renders one snapshot as a linear, text-only report: the
+// non-visual counterpart to the dashboard frame. That frame draws charts as
+// braille dot-matrix rows, panels as box-drawing borders and meters as bar
+// glyphs; a screen reader meets those as floods of "braille pattern dots-…"
+// announcements or skips them silently, and the side-by-side mid-row scrambles
+// into interleaved column fragments when read line by line. This frame carries
+// every number as words in reading order instead (WCAG 1.1.1): no braille, no
+// borders, no bars, no multi-column layout. It is what `--once --plain` prints.
 func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	var b strings.Builder
 	if cfg.Demo {

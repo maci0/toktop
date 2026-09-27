@@ -46,6 +46,9 @@ const (
 	KindOmniRoute = "omnirouter" // OmniRoute local AI gateway (port 20128)
 )
 
+// ModelInfo is one model an engine reports it holds. The sizes are whatever
+// the engine published: zero means the engine did not say, which is not the
+// same as an empty model.
 type ModelInfo struct {
 	Name     string
 	SizeVRAM uint64

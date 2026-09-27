@@ -63,6 +63,9 @@ type Source struct {
 	probes  []core.ProbeSample
 }
 
+// NewSource builds the simulated fleet: interval is the simulated tick (a
+// non-positive value becomes a second) and seed fixes the whole run, so two
+// sources stepped at the same instants produce the same frames.
 func NewSource(interval time.Duration, seed int64) *Source {
 	if interval <= 0 {
 		interval = time.Second
