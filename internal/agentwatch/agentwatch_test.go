@@ -41,6 +41,15 @@ func (r *recorder) all() []core.AgentEvent {
 	return append([]core.AgentEvent(nil), r.events...)
 }
 
+// recOutput sums the output tokens reported so far.
+func recOutput(r *recorder) int64 {
+	var n int64
+	for _, ev := range r.all() {
+		n += ev.OutputTokens
+	}
+	return n
+}
+
 func (w *Watcher) following(pid int) bool {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -113,7 +122,9 @@ func TestWatchesARunningAgent(t *testing.T) {
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 120))
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 240))
 
-	waitFor(t, 3*time.Second, func() bool { return len(rec.all()) > 0 })
+	// Both lines land in one read or split across two, so the first event can
+	// carry only the 120. Wait for the full spend before summing.
+	waitFor(t, 3*time.Second, func() bool { return recOutput(rec) == 360 })
 
 	var total int64
 	for _, ev := range rec.all() {
