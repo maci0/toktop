@@ -5,8 +5,9 @@ with file references so each claim can be re-verified against code. Individual
 vulnerabilities and their fixes belong to sec-review; this file records where
 they live and what already stands in their way.
 
-- **Last reviewed:** 2026-09-18 (ingest audit coverage only; other sections retain
-  their earlier verification dates and may contain stale line references)
+- **Last reviewed:** 2026-09-27 (every claim below re-read against code at
+  this commit: ingest, bearer, provider, probe, remote, selfupdate, selfreload,
+  gpu, agentusage, workflows, Makefile, site/worker.js)
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -49,13 +50,17 @@ What is worth stealing, corrupting, or denying:
   during `toktop update` and sent only to api.github.com
   (internal/selfupdate/selfupdate.go). Rate-limit relief, not a secret
   with broad scope, but it leaves the host on every update check that sets it.
-- **SSH credentials**: private keys read from `--ssh-key`, `~/.ssh/config`
-  IdentityFile, or `~/.ssh/id_*` defaults (internal/remote/auth.go,
-  44-60), the ssh-agent socket (auth.go, 183-189), and the password
+- **SSH credentials**: private keys read from `--ssh-key`, the
+  `IdentityFile` lines of `~/.ssh/config`, or the fixed default set
+  `~/.ssh/id_ed25519`, `~/.ssh/id_ecdsa`, `~/.ssh/id_rsa` (a list, not a
+  glob; internal/remote/auth.go, 17-28, and target.go, 234), the ssh-agent
+  socket (auth.go, 183-189), and the password
   from `TOKTOP_SSH_PASSWORD` or the terminal prompt (auth.go).
-- **Host-key pin store**: `os.UserConfigDir()/toktop/known_hosts`
-  (internal/remote/knownhosts.go). Corrupting it enables a forced
-  re-TOFU.
+- **Host-key pin store**: `$XDG_CONFIG_HOME/toktop/known_hosts` when that
+  variable is set, otherwise `os.UserConfigDir()/toktop/known_hosts`
+  (internal/remote/knownhosts.go, 19-28). The env var is read first on every
+  platform, so on macOS and Windows it widens the store's location past what
+  `UserConfigDir` would pick. Corrupting it enables a forced re-TOFU.
 - **Binary integrity**: the running executable is replaceable by design twice
   over: hot-reload on Unix (internal/selfreload/exec_unix.go) and
   `toktop update` (cmd/toktop/update.go). Whoever controls either channel
@@ -119,6 +124,7 @@ Every externally reachable input, with its code location:
    `SSH_AUTH_SOCK`, `TOKTOP_COLUMNS`/`TOKTOP_LINES`, `TOKTOP_LOG_LEVEL`
    (cmd/toktop/main.go; internal/remote/auth.go; internal/selfupdate;
    internal/ingest), `GAUNTLET_HOME` (agentusage/definitions.go),
+   `XDG_CONFIG_HOME` (internal/remote/knownhosts.go, 19-28),
    `XDG_DATA_HOME` (agentusage/opencode_sqlite.go, only when
    `--opencode-db` is on, which it is by default with `--agents`), and
    `TOKTOP_SCREENSHOT_FONT` (scripts/screenshot.py
@@ -159,12 +165,16 @@ Every externally reachable input, with its code location:
    `--opencode-db`, on by default with `--agents` and disabled with
    `--opencode-db=false` (cmd/toktop/main.go; agentusage/source.go).
    Agent definitions, including transcript roots, load once at startup from
-   `$GAUNTLET_HOME/agents.json` or `~/.gauntlet/agents.json`; a malformed
-   file warns on stderr and leaves only the built-in set
-   (cmd/toktop/main.go; agentusage/definitions.go).
+   `$GAUNTLET_HOME/agents.json` or `~/.gauntlet/agents.json`; a missing file
+   is a no-op, but a malformed one aborts startup with exit 2 rather than
+   silently watching a reduced agent set (cmd/toktop/main.go, 220-225;
+   agentusage/definitions.go, 143-164).
 9. **Config files read at startup**: `~/.ssh/config` (HostName/User/Port/
-   IdentityFile override target fields, internal/remote/target.go)
-   and the known_hosts store (knownhosts.go).
+   IdentityFile override target fields, internal/remote/target.go),
+   the known_hosts store (knownhosts.go), and
+   `$GAUNTLET_HOME/agents.json` or `~/.gauntlet/agents.json`
+   (agentusage/definitions.go). `XDG_CONFIG_HOME` relocates the
+   known_hosts store (knownhosts.go, 19-28).
 10. **Self hot-reload**: polls the running executable's stat identity and
     restarts into it when changed (internal/selfreload/selfreload.go,
     exec_unix.go; cmd/toktop/main.go). Default-on in interactive
@@ -177,6 +187,16 @@ Every externally reachable input, with its code location:
     (internal/procs/procs_darwin.go; agentusage/discover_darwin.go),
     lsof (agentusage/discover_darwin.go; peers_darwin.go), a PowerShell
     CIM query (internal/procs/procs_windows.go).
+12. **Site deployment** (operator-run, not CI): `make site-deploy` shells to
+    `bunx wrangler@4.126.0 deploy` inside `site/`, then polls
+    `https://toktop.ai/health` 6 times, 10s apart, and points at
+    `make site-rollback` when the new version never answers `ok`
+    (Makefile site-deploy / site-rollback, WRANGLER, SITE_HEALTH_URL,
+    SITE_HEALTH_TRIES, SITE_HEALTH_WAIT). The deploy tool is fetched from the
+    npm registry at run time by version tag rather than from a lockfile, and
+    it authenticates with whatever Cloudflare credentials the invoking shell
+    already holds. Anyone who can run that target with those credentials can
+    replace the site carrying the project's download links.
 
 Deployment surface:
 
@@ -208,6 +228,10 @@ Deployment surface:
   Accept-Encoding headers, compared as strings; nothing is stored, echoed
   into the page, or forwarded anywhere. `style-src 'unsafe-inline'` is idle:
   the HTML is a compile-time string.
+  Deployment is a local make target, not a CI job: `make site-deploy`
+  runs `bunx wrangler@4.126.0 deploy` with ambient Cloudflare credentials,
+  polls `https://toktop.ai/health` 6 times at 10s, and points at
+  `make site-rollback` on failure (Makefile, 251-270).
 
 ## Trust boundaries and data flow
 
@@ -246,11 +270,15 @@ Deployment surface:
 - **B4: secrets -> code.** Bearer token: enters via argv or env
   (main.go), lives in a package var (bearer.go), leaves
   in the `Authorization` header of requests bound for origins admitted by
-  `Allow`, populated solely from operator-named `--add` URLs (main.go);
-  discovery scans, forwarded remote engines, and probes elsewhere never carry
-  it (bearer.go gates Apply at every call site: discover.go;
-  provider.go; probe.go). There is no `bearer.Token` accessor; the
-  only outbound path is Apply. It is never written to disk or logs.
+  `Allow`, populated solely from operator-named `--add` URLs (main.go, the
+  only `Allow` call site). The token therefore rides identification, poll,
+  *and* probe requests to those origins (`Apply` at
+  internal/provider/discover.go, internal/provider/provider.go, and
+  internal/probe/probe.go, 419); every other destination is filtered out
+  inside `Apply` (bearer.go, 55-63, 75-83), so discovery scans and
+  ssh-forwarded remote engines never carry it. There is no
+  `bearer.Token` accessor; the only outbound path is Apply. It is never
+  written to disk or logs.
   SSH password: env or TTY prompt (auth.go), held in memory, used only
   for password and keyboard-interactive mechanisms. Keys: read from disk or
   agent, sign locally. `GITHUB_TOKEN`: env, sent only to api.github.com
@@ -329,9 +357,12 @@ ports that are then exposed on local loopback (client.go).
   attaching to an endpoint, not a defect, but it means `--add` trust equals
   credential disclosure to that origin.
 - *Denial of service*: slow responses bounded by scanTimeout 700ms /
-  PollTimeout 1.5s / probe timeout 30s; bodies capped (M8). Probe generation
-  is 32 tokens with think disabled, a content-byte hang-up, a 16 KiB line
-  cap, and 429/503 backoff (M10).
+  PollTimeout 1.5s / probe timeout 30s; bodies capped (M8). Identification
+  decoders are the exception: they read `resp.Body` with no limit
+  (provider/discover.go, 249, 303, 319), so a listener that answers a
+  scan can stream without bound inside the 700ms window (gap 5). Probe
+  generation is 32 tokens with think disabled, a content-byte hang-up, a
+  16 KiB line cap, and 429/503 backoff (M10).
 - *Elevation*: none; response bytes never reach execution or unsanitized
   output. Probe interpolates a capped model id (probe.go).
 
@@ -439,8 +470,8 @@ Controls verified in code, with the threats they cover:
 | M1: Origin-scoped bearer application. Token attached only to `Allow`-admitted origins, populated exclusively from operator `--add` URLs | Credential harvesting by scanned ports, forwarded remotes, and probes (B2/B4 disclosure; previous summary risk 1, fixed in commit 21e3feb) | internal/bearer/bearer.go; cmd/toktop/main.go; call sites discover.go; provider.go; probe.go; tests internal/bearer/bearer_test.go |
 | M2: Terminal escape/control-char sanitizer applied both at ingest and at render time (C0/C1 including UTF-8-encoded C1; bidi overrides/isolates; zero-width format; variation selectors). Mixed Latin+Cyrillic/Greek agent names collapse to `anonymous` | OSC/CSI clipboard-cursor-title injection from engines, remotes, and events; mixed-script impersonation of agent names (asset: terminal integrity, dashboard integrity) | internal/core/sanitize.go; ingest side server.go; render side internal/ui/ui.go, internal/ui/plain.go, internal/ui/format.go, internal/ui/agents.go |
 | M3: Ingest body cap 1 MiB + MaxBytesReader | unbounded upload into decode loop (B1 DoS) | server.go |
-| M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap | slowloris/drip DoS (B1) | server.go |
-| M5: Event field clamps (agent 64, model 128, note 512, kind 24 runes, id 128) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering) | server.go; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
+| M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go, 438-444, 495-497) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
+| M5: Event field clamps (id 128, agent 64, model 128, via_engine 128, note 512; kind clamped to 24 runes only when it is not one of the four known kinds, unknown kinds defaulting to `turn`) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering) | server.go; event.go:44-70, 177-183; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
 | M6: Event timestamp skew clamp: stamps >2 min in the future reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing) | server.go |
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go |
 | M8: Engine response caps: 4 MiB JSON, 8 MiB text, 256-rune error snippets | memory blowup and log flooding from hostile engines (B2 DoS/disclosure) | provider/provider.go httpStatus; core.Snippet |
@@ -454,32 +485,41 @@ Controls verified in code, with the threats they cover:
 | M16: Remote shell scripts: static bodies, only locally generated integers interpolated; no secret material sent to remote scripts | command injection into remote shell (B3 elevation) | discover.go; stats.go |
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance | credential handling in headless runs (B4) | auth.go |
 | M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution (B5) | selfupdate.go |
-| M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; malformed `~/.gauntlet/agents.json` warned instead of swallowed; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change; empty ingest bind exposing every interface; unitless `--interval 1` hammering engines; oversized `--once` frame OOM | main.go validateFlags, validateOnceEnv, logActiveConfig, validateAddURL, validateIngestAddr |
+| M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | main.go validateFlags, validateOnceEnv, logActiveConfig, validateAddURL, validateIngestAddr, 220-225; agentusage/definitions.go, 143-164 |
 | M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check | vulnerable-dependency drift (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, Makefile |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; watch.go; opencode_sqlite.go |
 | M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go; internal/ingest/server_test.go |
-| M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'`, CORP same-origin, no-store) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go |
+| M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, 81, 100-107 |
 | M27: logRemote rewrites non-loopback peer addresses to `"remote"` on the audit line and on http.Server.ErrorLog | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | server.go |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go |
 | M29: Transcript and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watch.go; crush_sqlite.go |
 
-Documentation claims checked against code this pass:
+Documentation claims checked against code this pass (2026-09-27):
 
+- README states a malformed `agents.json` "is reported at startup rather than
+  silently shrinking the watch" (README.md, 92-95). That matches the code;
+  this file previously said it warns and falls back to the built-in set, which
+  was wrong in both directions: the loader exits 2
+  (cmd/toktop/main.go, 220-225). Corrected above.
 - README "Zero vendor libraries", "Engines: how discovery works", and the SSH
   auth chain match the code paths cited above, including ioreg on Darwin.
 - README documents the post-21e3feb scoping accurately: "--bearer TOKEN ...
   sent to --add endpoints only" and the environment-variable table listing
   `GITHUB_TOKEN` for `toktop update`; both match bearer.go and
-  selfupdate.go.
+  selfupdate.go. This pass confirmed the token rides probes as well as
+  identification and polls, but only to `--add` origins.
 - README documents the Origin-header 403, the stream-resume semantics, and
   the ingest POST audit log; they match server.go Origin refusal, the fail()
   path, and logRequest.
 - README documents loopback listeners for ssh engine relays
   (client.go). The earlier claim that no local listeners exist is
   gone.
+- README's env table does not list `XDG_CONFIG_HOME`, which relocates the
+  known_hosts store on every platform (knownhosts.go, 19-28). Not a security
+  claim, so no fix is proposed here; the entry-point list records it.
 - SECURITY.md states there is no dedicated disclosure contact and no
   supported-version matrix, and that `toktop update` fetches the latest
   release. That matches selfupdate.go (Check always hits
@@ -563,12 +603,30 @@ Recorded as threats with locations; fixes do not happen in this document:
    to the toktop process. Restricting the listener (unix socket with
    mode 0600, or in-process HTTP instead of a TCP port) belongs to
    sec-review.
-5. **No per-peer ingest quotas** (Low): bounded per connection
+5. **Identification responses are decoded without a body cap** (Low-Medium,
+   new this pass): the engine-identification decoders in
+   `json.NewDecoder(resp.Body)` take no `io.LimitReader`, unlike the poll path
+   (internal/provider/provider.go, 83, 108). Enabling path: any process that
+   answers on a scanned well-known port, or any engine reached through an ssh
+   relay, can stream a JSON body that never ends. The 700 ms `scanTimeout`
+   client (internal/provider/discover.go, 20, 62) bounds how long, not how
+   many bytes: a loopback peer can push a large volume inside that window, and
+   a slow-drip body holds the discovery goroutine until the timeout fires.
+   Applying the existing 4 MiB cap to the identification decoders belongs to
+   sec-review.
+6. **No per-peer ingest quotas** (Low): bounded per connection
    (server.go) but not per peer; matters only once gap 1's exposure
    question is settled.
-6. **Hot-reload and PATH-based tool execution** (risk 5, Low): acceptable for
+7. **Hot-reload and PATH-based tool execution** (risk 5, Low): acceptable for
    a same-user dev tool; revisit if toktop ever runs privileged. Unix-only
    for the re-exec half.
+8. **Site deploy runs from a developer shell** (Low): `make site-deploy`
+   fetches wrangler from the npm registry at run time and uses ambient
+   Cloudflare credentials (Makefile, 254-270). The credential's blast radius
+   is a Cloudflare account, and the deploy tool is not lockfile-pinned; a
+   registry compromise or a hijacked developer machine reaches the published
+   site. The `/health` poll and `site-rollback` are the only recovery
+   controls.
 
 ## Response readiness (notes only)
 
