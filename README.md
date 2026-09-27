@@ -249,9 +249,12 @@ result from any of them means "cannot tell", which reads as "not connected".
 - **Agent feed** - any harness can POST usage events:
   ```
   curl -X POST localhost:8420/v1/events \
-    -H "Idempotency-Key: coder-$(date +%s)-1" -d \
+    -H "Idempotency-Key: coder-turn-1042" -d \
     '{"agent":"coder","kind":"tool","prompt_tokens":4200,"output_tokens":310,"thinking_tokens":40,"note":"shell(git status)"}'
   ```
+  The key names one turn, so a resend after a lost answer is counted once. A
+  key built from the clock (`$(date +%s)`) is a different key on every
+  attempt, which is a fresh operation to the feed: the retry counts again.
   `--agents` also fills this from local session logs. Per-agent rows show
   output, prompt and reasoning rates; an agent using a monitored engine is
   labelled `via` that engine so its tokens are not added twice.

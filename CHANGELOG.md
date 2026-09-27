@@ -55,6 +55,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The ingest examples in the README and on the site taught the two shapes a
+  harness must not copy: a key built from the clock
+  (`Idempotency-Key: coder-$(date +%s)-1`), which the shell re-evaluates on
+  every attempt so a retry presents a key the feed has never seen, and, on
+  the site, no key at all. Both are counted a second time when the answer is
+  lost and the request is resent. Each example now carries a key that names
+  one turn and says why a clock does not.
 - `toktop update --repo` named a malformed repository as `repo "x" must be
   owner/name` and exited without the usage screen, while every other usage
   error in that subcommand names its flag in the long form the help screen

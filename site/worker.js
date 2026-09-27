@@ -325,12 +325,16 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
 
   <section id="feed" aria-labelledby="feed-heading">
   <h2 id="feed-heading">Agent feed</h2>
-<pre tabindex="0" role="region" aria-label="Agent feed event payload"><code>curl -X POST localhost:8420/v1/events -d \
+<pre tabindex="0" role="region" aria-label="Agent feed event payload"><code>curl -X POST localhost:8420/v1/events \
+  -H "Idempotency-Key: coder-turn-1042" -d \
   '{"agent":"coder","output_tokens":310,"prompt_tokens":4200}'</code></pre>
   <p class="dim">Any harness can POST usage to the ingest endpoint
   (<code>127.0.0.1:8420</code>, <code>--no-ingest</code> disables it).
-  <code>--once --plain</code> prints a linear report for screen readers:
-  no braille, no borders, no columns.</p>
+  The <code>Idempotency-Key</code> names one turn, so a resend after a lost
+  answer counts once: mint it per turn, never from the clock, which would
+  make every retry a new turn.</p>
+  <p class="dim"><code>--once --plain</code> prints a linear report for screen
+  readers: no braille, no borders, no columns.</p>
   </section>
 
   <section id="measured" aria-labelledby="measured-heading">
@@ -433,8 +437,8 @@ const COMPRESSIBLE = new Map([
   ["gzip", "gzip"],
 ]);
 
-// The same three codings, smallest body of this page first: brotli 3,499,
-// gzip 4,176, zstd 4,406 bytes. The page is a constant, so those sizes are
+// The same three codings, smallest body of this page first: brotli 3,602,
+// gzip 4,291, zstd 4,526 bytes. The page is a constant, so those sizes are
 // constants too, and ranking by them lets a request build only the coding it
 // is about to send instead of all three to compare them. zstd lands behind
 // gzip here because the page is short English words and markup, which is not
