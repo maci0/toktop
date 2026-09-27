@@ -112,6 +112,13 @@ PLATFORMS := \
 	darwin/amd64 darwin/arm64 \
 	windows/amd64 windows/arm64
 
+# The subset the merge gate builds twice. Every platform in PLATFORMS is built
+# before a release, but the per-PR gate pays for two of them: the point is to
+# catch a timestamp or path leak, and any pair surfaces one. ci.yml calls
+# repro-check-pair, so the PR job and the local `make pr` cannot pick
+# different platforms.
+REPRO_PLATFORMS ?= linux/amd64 windows/amd64
+
 .DEFAULT_GOAL := help
 
 .PHONY: help
@@ -346,11 +353,12 @@ ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests
 	@$(MAKE) test RACE=1
 
 .PHONY: pr
-pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + scripts-check
+pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + scripts-check + repro-check-pair
 	@$(MAKE) ci
 	@$(MAKE) site-lint
 	@$(MAKE) site-check
 	@$(MAKE) scripts-check
+	@$(MAKE) repro-check-pair
 
 .PHONY: clean
 clean: ## remove build artifacts
@@ -470,6 +478,12 @@ repro-check: ## build every release platform twice under different path, cache, 
 		fi; \
 	done
 	@rm -rf $(DIST)/repro
+
+# The same gate over REPRO_PLATFORMS, so a contributor can reproduce the
+# merge-gate repro job locally instead of only the full pre-release sweep.
+.PHONY: repro-check-pair
+repro-check-pair: ## repro-check over REPRO_PLATFORMS (what the PR gate runs)
+	@$(MAKE) repro-check PLATFORMS="$(REPRO_PLATFORMS)"
 
 # XDG user bin on Linux; override on macOS so the binary lands on PATH
 # (PREFIX=/usr/local or PREFIX=$(brew --prefix)).

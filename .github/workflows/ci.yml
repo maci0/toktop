@@ -137,7 +137,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - run: make repro-check PLATFORMS="linux/amd64 windows/amd64"
+      - run: make repro-check-pair
 
   build:
     strategy:

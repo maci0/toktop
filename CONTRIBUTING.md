@@ -127,7 +127,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make cover` | coverage summary per package into `dist/` |
 | `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
-| `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `scripts-check` |
+| `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `scripts-check` + `repro-check-pair` |
 | `make fmt` / `make format` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
 | `make tidy` | run `go mod tidy` to clean up go.mod and go.sum |
@@ -142,6 +142,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
 | `make repro-check` | build every release platform twice, varying path, cache, locale, and TZ, then diff |
+| `make repro-check-pair` | the same gate over the two platforms the PR gate builds twice |
 
 ## Before opening a PR
 
@@ -165,7 +166,8 @@ make pr
 That is `make ci` (gofmt, tidy, staticcheck, vet, govulncheck, race tests for
 both sqlite tag halves), `make site-lint` (biome over the Worker, at the
 `BIOME` pin in the Makefile, config in `biome.jsonc`), `make site-check`
-(`bun test site/`), and `make scripts-check`. `scripts-check` installs the exact versions in
+(`bun test site/`), `make scripts-check`, and `make repro-check-pair`.
+`scripts-check` installs the exact versions in
 `scripts/requirements-dev.txt` into an isolated env (black, ruff, plus the
 renderer deps). Pure-Python pins carry a wheel sha256; bumping one of those
 lines means updating the hash too. Do not run unpinned `uvx black` /
@@ -179,10 +181,11 @@ cleanly, on the author's OS.
 
 A `repro` job builds two shipped platforms twice, varying the output path,
 the build cache, the locale, and the timezone between passes, and fails if
-the bytes differ. It is the guard on the reproducibility flags above. The tag
-push runs the same gate over that representative pair before it publishes, so
-the bytes being shipped are the bytes that were compared. Run
-`make repro-check` for the full `PLATFORMS` list before a release.
+the bytes differ. It is the guard on the reproducibility flags above, and
+`make pr` runs it over the same pair, so a reproducibility failure shows up
+before the push rather than after it. `make repro-check-pair` runs that pair
+on its own; `make repro-check` runs the full `PLATFORMS` list and is what to
+run before a release.
 
 ## Releases
 
