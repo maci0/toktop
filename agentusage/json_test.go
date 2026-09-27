@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -325,6 +327,25 @@ func TestParseGenericKeepsInputWhenTotalIsAbsent(t *testing.T) {
 	}
 }
 
+// Kimi Code CLI reports its prompt as three shares that add up. A definition
+// pointed at one of its logs reads them the same way the kimi adapter does, so
+// the generic reader sums them rather than keeping the largest.
+func TestParseGenericSumsKimiPromptShares(t *testing.T) {
+	line := `{"type":"usage.record","usage":{"inputOther":100,"inputCacheRead":5000,` +
+		`"inputCacheCreation":200,"output":300}}`
+	v, _, ok := parseGeneric([]byte(line))
+	if !ok || v.input != 5300 {
+		t.Fatalf("generic input = %d (ok=%v), want the three shares summed to 5300", v.input, ok)
+	}
+	if v.output != 300 || v.total != 5600 {
+		t.Fatalf("generic output/total = %d/%d, want 300/5600", v.output, v.total)
+	}
+	kv, _, kok := parseKimi([]byte(line))
+	if !kok || kv.input != v.input || kv.total != v.total {
+		t.Fatalf("generic %+v differs from the kimi adapter %+v", v, kv)
+	}
+}
+
 func TestParseGenericDropsAbsurdCounters(t *testing.T) {
 	if _, _, ok := parseGeneric([]byte(`{"usage":{"output_tokens":1e15}}`)); ok {
 		t.Fatal("1e15 tokens must not count")
@@ -571,5 +592,30 @@ func TestMixedCaseKeysReachTheCounters(t *testing.T) {
 	}
 	if ev.Usage.Output != 7 {
 		t.Fatalf("Output_Tokens read as %d, want 7", ev.Usage.Output)
+	}
+}
+
+// The kimi store keeps a session's state.json beside the agents/ directory the
+// wire log lives under, not inside it. Reading one level too high finds no
+// state.json, and a session with no recorded working directory is never
+// attributed, so its tokens never reach the report.
+func TestKimiSessionCwdReadsStateBesideTheAgentsDirectory(t *testing.T) {
+	root := t.TempDir()
+	session := filepath.Join(root, "key", "session-1")
+	agents := filepath.Join(session, "agents", "agent-1")
+	if err := os.MkdirAll(agents, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(session, "state.json"),
+		[]byte(`{"cwd":"/home/u/proj"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	wire := filepath.Join(agents, "wire.jsonl")
+	if err := os.WriteFile(wire, []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cwd, ok := kimiSessionCwd(wire)
+	if !ok || cwd != "/home/u/proj" {
+		t.Fatalf("kimiSessionCwd = %q/%v, want /home/u/proj/true", cwd, ok)
 	}
 }

@@ -391,6 +391,10 @@ func TestCutConfigField(t *testing.T) {
 		{"IdentityFile=~/key=backup", "IdentityFile", "~/key=backup", true},
 		{`IdentityFile "C:\Users\a b\id_ed25519"`, "IdentityFile", `C:\Users\a b\id_ed25519`, true},
 		{`IdentityFile "~/my key" # personal`, "IdentityFile", "~/my key", true},
+		{"HostName 10.0.0.5 # the gpu box", "HostName", "10.0.0.5", true},
+		{"Port 2222 # lab port", "Port", "2222", true},
+		{"User maci # me", "User", "maci", true},
+		{"IdentityFile ~/keys/a#b", "IdentityFile", "~/keys/a#b", true},
 		{`Host "build box"`, "Host", "build box", true},
 		{"#comment", "", "", false},
 		{"", "", "", false},
@@ -1364,6 +1368,26 @@ func TestKnownHostsStoreKeysHostsCaseInsensitively(t *testing.T) {
 	}
 	if len(again) != 1 {
 		t.Errorf("store holds %d records, want 1: %v", len(again), again)
+	}
+}
+
+// A record may carry a trailing comment, which the parser accepts. It is not
+// part of the key, so a store another tool annotated must not read as a
+// changed host key on the next connect.
+func TestKnownHostsPinIgnoresTrailingComment(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	key := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(testHostKeyPub(t))))
+	if err := writeKnownHosts(path, map[string]string{
+		"box.example:22": "box.example:22 " + key + " my laptop",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pinKey(store["box.example:22"]) != pinKey("box.example:22 "+key) {
+		t.Errorf("pinKey differs across a trailing comment, so an annotated store reads as a changed host key")
 	}
 }
 

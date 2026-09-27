@@ -32,10 +32,16 @@ type jsonUsage struct {
 	Thinking int
 	Total    int
 	Input    int
+	// PromptShares sums the keys in promptShareKeys, which are parts of one
+	// billed prompt count rather than rival readings of it. They are kept apart
+	// from Input because the per-field rule is a max, and three prompt shares
+	// of one line add up.
+	PromptShares int
 }
 
 func (u jsonUsage) Has() bool {
-	return values{output: u.Output, thinking: u.Thinking, total: u.Total, input: u.Input}.present()
+	return values{output: u.Output, thinking: u.Thinking, total: u.Total, input: u.Input}.present() ||
+		u.PromptShares > 0
 }
 
 // Keys recognized as token counters, mapped onto the fields above. These are
@@ -58,8 +64,12 @@ var (
 	inputKeys = map[string]bool{
 		"input_tokens": true, "inputtokens": true, "prompt_tokens": true,
 		"prompttokens": true, "prompttokencount": true, "input": true,
-		// Kimi Code CLI's own spelling of the three prompt shares, so a
-		// definition pointed at one of its logs reads what the agent read.
+	}
+	// Kimi Code CLI's own spelling of the three prompt shares, so a definition
+	// pointed at one of its logs reads what the agent read. The three are parts
+	// of one billed prompt count and add up, the way parseKimi adds them, so
+	// they are summed rather than maxed against each other.
+	promptShareKeys = map[string]bool{
 		"inputother": true, "inputcacheread": true, "inputcachecreation": true,
 	}
 	// Fields naming the working directory a record belongs to.
@@ -198,7 +208,8 @@ func walk(node any, ev *jsonEvent, depth int) {
 }
 
 func isNumberKey(lower string) bool {
-	return outputKeys[lower] || thinkingKeys[lower] || totalKeys[lower] || inputKeys[lower]
+	return outputKeys[lower] || thinkingKeys[lower] || totalKeys[lower] || inputKeys[lower] ||
+		promptShareKeys[lower]
 }
 
 // utf8BOM is the byte-order mark a transcript may open a record with. A
@@ -221,6 +232,8 @@ func assign(ev *jsonEvent, lower string, val any) {
 		ev.Usage.Total = max(ev.Usage.Total, n)
 	case inputKeys[lower]:
 		ev.Usage.Input = max(ev.Usage.Input, n)
+	case promptShareKeys[lower]:
+		ev.Usage.PromptShares = satAdd(ev.Usage.PromptShares, n)
 	}
 }
 
@@ -256,7 +269,7 @@ func parseGeneric(line []byte) (values, string, bool) {
 		return values{}, "", false
 	}
 	out := counter(ev.Usage.Output)
-	in := counter(ev.Usage.Input)
+	in := satAdd(counter(ev.Usage.Input), counter(ev.Usage.PromptShares))
 	tot := counter(ev.Usage.Total)
 	if tot == 0 && in > 0 {
 		tot = satAdd(in, out)

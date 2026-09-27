@@ -311,6 +311,15 @@ func Apply(ctx context.Context, rel *Release) (string, error) {
 // applyTo is Apply with an explicit target, so the install path can be tested
 // without replacing the test binary.
 func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
+	// Recovery before the network, and its ordering is the point: a killed
+	// update can leave the binary under the displaced name with nothing at the
+	// installed path, and a host with no binary cannot run `toktop update` to
+	// replace one. Restoring first means a run that then fails offline, is
+	// rate-limited or finds a checksum mismatch still leaves a working binary
+	// behind. It is a no-op unless the installed path is missing.
+	if err := restoreDisplaced(self, self+displacedSuffix); err != nil {
+		return "", err
+	}
 	want := AssetName(rel.Version())
 	sumsFile := checksumsName(rel.Version())
 	assetURL, sumsURL := releaseAssets(rel)
@@ -345,6 +354,13 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 			return "", fmt.Errorf("cannot checksum %s: %w", self, cerr)
 		}
 	} else if have == expect {
+		// Already this release, so nothing is downloaded or installed. The
+		// leftover .old a killed or locked install leaves is still cleared
+		// here, because install is the only other place that removes it and
+		// this path never reaches install. Best effort: the .old holds a
+		// running image on the platform that has one, so a refusal to delete
+		// it is a condition the next install retries, not a failed update.
+		_ = os.Remove(self + displacedSuffix)
 		return self, nil
 	}
 

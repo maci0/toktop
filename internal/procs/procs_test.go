@@ -154,12 +154,23 @@ func TestClipArgsKeepsOnlyTheReadablePrefix(t *testing.T) {
 	}
 }
 
-// A command line inside the bound is handed back untouched, so the common
-// listing of a normal engine allocates nothing extra.
+// A command line inside the bound is handed back with every argument intact.
+// The elements are cloned, because a listing builds them as windows onto one
+// whole /proc/PID/cmdline buffer: sharing them would pin the whole line, and
+// with it the prompt or path past the bound, for the life of the sampler.
 func TestClipArgsLeavesAShortCommandLineAlone(t *testing.T) {
 	args := []string{"vllm", "serve", "--port", "8001"}
-	if got := ClipArgs(args); &got[0] != &args[0] {
-		t.Fatalf("ClipArgs copied a command line that fits: %q", got)
+	got := ClipArgs(args)
+	if len(got) != len(args) {
+		t.Fatalf("ClipArgs = %q, want %q", got, args)
+	}
+	for i := range args {
+		if got[i] != args[i] {
+			t.Fatalf("ClipArgs = %q, want %q", got, args)
+		}
+		if &got[i] == &args[i] {
+			t.Fatalf("ClipArgs kept argument %d aliasing the caller's slice, so the whole command line stays retained", i)
+		}
 	}
 	if got := ClipArgs(nil); len(got) != 0 {
 		t.Fatalf("ClipArgs(nil) = %q, want empty", got)

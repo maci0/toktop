@@ -293,14 +293,21 @@ func parseKnownHosts(path string, b []byte) (map[string]string, error) {
 }
 
 // pinKey returns the key material of a stored record, which is everything
-// after the host field. Two records with the same pinKey are the same pin
-// however their host was spelled.
+// after the host field, less any trailing comment the record is allowed to
+// carry. Two records with the same pinKey are the same pin however their host
+// was spelled; a comment is not part of the key, so a store written by another
+// tool that annotates its lines is not read as a changed key.
 func pinKey(record string) string {
 	_, rest, ok := strings.Cut(record, " ")
 	if !ok {
 		return record
 	}
-	return strings.TrimSpace(rest)
+	rest = cutTrailingComment(strings.TrimSpace(rest))
+	key, _, _, _, err := ssh.ParseAuthorizedKey([]byte(rest))
+	if err != nil {
+		return rest
+	}
+	return strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
 }
 
 // malformedPin names the file and the line so a store that must be repaired

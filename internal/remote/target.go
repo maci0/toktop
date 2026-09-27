@@ -280,7 +280,7 @@ func cutConfigField(line string) (key, val string, ok bool) {
 // paths this exists to read.
 func unquote(s string) string {
 	if !strings.HasPrefix(s, `"`) {
-		return s
+		return cutTrailingComment(s)
 	}
 	var b strings.Builder
 	for i := 1; i < len(s); i++ {
@@ -292,6 +292,24 @@ func unquote(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// cutTrailingComment drops an unquoted ssh_config comment. A '#' starts one
+// only at the start of the argument or after whitespace, so a '#' inside a
+// value (a password-ish token, a path fragment) stays part of it. Without this
+// the comment rides along into User, which validTargetField then refuses, and
+// into Port and IdentityFile, which then fail to parse and are silently lost.
+func cutTrailingComment(s string) string {
+	for i := 0; i < len(s); i++ {
+		if s[i] != '#' {
+			continue
+		}
+		if i > 0 && s[i-1] != ' ' && s[i-1] != '\t' {
+			continue
+		}
+		return strings.TrimRight(s[:i], " \t")
+	}
+	return s
 }
 
 // validTargetField rejects a host or user that cannot be passed to ssh or

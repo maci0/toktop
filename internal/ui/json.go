@@ -31,7 +31,7 @@ func JSONFrame(cfg Config, s core.Snapshot) (string, error) {
 type jsonReport struct {
 	Version    string       `json:"version"`
 	Demo       bool         `json:"demo,omitempty"`
-	DemoSeed   int64        `json:"demo_seed,omitempty"`
+	DemoSeed   *int64       `json:"demo_seed,omitempty"`
 	DemoOrigin string       `json:"demo_origin,omitempty"`
 	At         time.Time    `json:"at"`
 	UptimeSecs float64      `json:"uptime_secs"`
@@ -154,6 +154,18 @@ func originStamp(at time.Time) string {
 	return at.UTC().Format(time.RFC3339)
 }
 
+// demoSeed reports the seed only in a demo run, where --seed is in effect.
+// Seed 0 is a working seed, so the field carries a pointer: a plain int with
+// omitempty would drop exactly that one and leave a replay reading a report
+// that never names the seed its frame prints.
+func demoSeed(cfg Config) *int64 {
+	if !cfg.Demo {
+		return nil
+	}
+	seed := cfg.DemoSeed
+	return &seed
+}
+
 func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 	now := frameNow(s, time.Time{})
 	sum := core.Summarize(s.Agents, now)
@@ -162,7 +174,7 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 	rep := jsonReport{
 		Version:    cfg.Version,
 		Demo:       cfg.Demo,
-		DemoSeed:   cfg.DemoSeed,
+		DemoSeed:   demoSeed(cfg),
 		DemoOrigin: originStamp(cfg.DemoOrigin),
 		At:         now,
 		UptimeSecs: s.Uptime.Seconds(),
