@@ -463,6 +463,23 @@ func (s *Server) Close() error {
 // decode loop for as long as the connection stays up.
 const maxEventBody = 1 << 20
 
+// maxInFlightEvents bounds the POST bodies decoded at any one instant.
+//
+// net/http runs one goroutine per accepted connection and nothing caps how
+// many it will accept, and the per-read deadline below is a whole minute, so
+// a peer that opens connections and then stops sending holds a descriptor
+// and a goroutine each for that minute. Past the cap a POST is refused
+// instead of read: the handler answers and returns at once, so the pile-up
+// costs the process nothing it cannot hand back, and a sender that retries
+// (503, Retry-After) gets in as soon as a slot frees.
+const maxInFlightEvents = 64
+
+// eventSlots counts the POST bodies being decoded. It is process-wide: the
+// endpoint is one listener bound to a fixed address, so the descriptors a
+// pile-up would cost are the process's either way, and a cap shared by every
+// server in it is the same bound. A var so tests can shrink it.
+var eventSlots = make(chan struct{}, maxInFlightEvents)
+
 // maxEventSkew bounds how far ahead of arrival a claimed event timestamp may
 // sit before it is clamped to the arrival instant. The stamp is a sender's
 // word: a wrong clock (or a forged event, since this endpoint authenticates
@@ -550,6 +567,19 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		msg := "browser-originated requests are not accepted; post from a script or agent without an Origin header"
 		armWrite()
 		reject(http.StatusForbidden, msg)
+		return
+	}
+	// The slot covers the decode, the one part of the request that can hold a
+	// goroutine and a descriptor for a body nobody finishes sending. Acquired
+	// after the Origin guard, which answers without reading anything.
+	select {
+	case eventSlots <- struct{}{}:
+		defer func() { <-eventSlots }()
+	default:
+		w.Header().Set("Retry-After", "1")
+		armWrite()
+		reject(http.StatusServiceUnavailable,
+			fmt.Sprintf("at most %d event streams are decoded at once; retry", maxInFlightEvents))
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)

@@ -101,6 +101,12 @@ support channel (see SECURITY.md).
 - The tag push compares the bytes it is about to ship. The reproducibility gate
   only ran on pull requests and pushes to main, so a release built bytes nobody
   had diffed; the release job now builds two platforms twice before publishing.
+- `POST /v1/events` bodies decoded at the same time are capped, and one past
+  the cap is refused with `503` and a `Retry-After` instead of read. The
+  endpoint answered every connection it accepted, and a body that stopped
+  mid-stream held its handler until the idle deadline, so a peer opening
+  connections and withholding bodies could hold a descriptor and a goroutine
+  each for as long as it liked.
 - An ssh failure no longer reports the home directory. A refused key, an
   unreadable host key store or a changed host key named the absolute path it
   worked on, and `$HOME` names the account; those paths now read `~/...`, as

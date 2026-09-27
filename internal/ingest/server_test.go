@@ -51,6 +51,14 @@ func postBody(t *testing.T, url, body string) (int, string) {
 	return resp.StatusCode, string(b)
 }
 
+// swapVar sets p to v for the test's duration and returns the restore func.
+func swapVar[T any](t *testing.T, p *T, v T) func() {
+	t.Helper()
+	old := *p
+	*p = v
+	return func() { *p = old }
+}
+
 // startIngest serves on an ephemeral port backed by rec and closes it at
 // cleanup.
 func startIngest(t *testing.T, rec core.AgentRecorder) *Server {
@@ -2163,5 +2171,63 @@ func TestAddrRedactHandler(t *testing.T) {
 	}
 	if !strings.Contains(derivedOut, "remote") {
 		t.Errorf("WithAttrs output missing expected tag: %q", derivedOut)
+	}
+}
+
+// net/http runs a goroutine per accepted connection and never caps how many
+// it accepts, and a POST body that stops mid-stream holds its goroutine until
+// the idle deadline. Past the in-flight cap a POST is refused immediately, so
+// a peer opening connections and withholding bodies costs the process no
+// descriptors it has to wait out.
+func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	// One slot, as the default cap would have many: the test is about the
+	// refusal, not about the size of the cap.
+	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
+
+	// A body that never ends: the pipe is closed only after the refusal, so
+	// the request holds its slot across the whole check.
+	pr, pw := io.Pipe()
+	stalled := make(chan error, 1)
+	go func() {
+		defer pw.Close()
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
+		if err != nil {
+			stalled <- err
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		stalled <- err
+	}()
+
+	// Wait for the stalled request to take the slot.
+	deadline := time.Now().Add(5 * time.Second)
+	for len(eventSlots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(eventSlots) == 0 {
+		t.Fatal("stalled POST never reached the decode loop")
+	}
+
+	start := time.Now()
+	code, body := postBody(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder","output_tokens":1}`)
+	if code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d %q, want 503", code, body)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("refusal took %s: the cap waits instead of refusing", elapsed)
+	}
+
+	// The slot is the stalled request's, not the refused one's: once its body
+	// ends, the endpoint takes events again.
+	pw.Close()
+	<-stalled
+	if code := post(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder","output_tokens":1}`); code != http.StatusAccepted {
+		t.Fatalf("status after the stalled request ended = %d, want 202", code)
 	}
 }
