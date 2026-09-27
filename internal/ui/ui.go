@@ -65,8 +65,14 @@ type Model struct {
 }
 
 // noticeTTL is how long a "that key does nothing here" explanation stays on
-// the footer line. Long enough to read, short enough not to become the footer.
-const noticeTTL = 3 * time.Second
+// the footer line. Long enough to read: the notice answers a key that changed
+// nothing on screen, so the reader has to look away from where they were
+// looking and find the footer first. Short enough not to become the footer.
+const noticeTTL = 6 * time.Second
+
+// probeTimeout is how long the "probing…" marker waits for its first result
+// before giving up, measured on wall time so a pause cannot pin it.
+const probeTimeout = 15 * time.Second
 
 // setNotice sets the transient footer explanation for a key press that had no
 // effect. The footer hides keys with nothing to act on, but a user who
@@ -165,7 +171,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Engines that never answer (no known model yet, all down) would
 		// leave the "probing…" marker up forever without this bail-out.
-		if !m.probeReq.IsZero() && m.clock.Sub(m.probeReq) > 15*time.Second {
+		// On the display clock, not wall time: a paused frame is meant to be
+		// still, so the marker holds until the frame is resumed.
+		if !m.probeReq.IsZero() && m.clock.Sub(m.probeReq) > probeTimeout {
 			m.probeReq = time.Time{}
 		}
 		if !m.noticeAt.IsZero() && time.Time(msg).Sub(m.noticeAt) >= noticeTTL {

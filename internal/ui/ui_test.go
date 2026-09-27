@@ -87,7 +87,14 @@ func TestUpdateKeyMap(t *testing.T) {
 	// Help is a full-screen replacement view: it must actually render its
 	// content, not just flip the flag.
 	m.w, m.h, m.ready = 110, 36, true
+	// p and t are documented only where they have something to act on, the
+	// same condition the footer puts on them, so the frame under test needs
+	// an engine for the key reference to carry those rows. The rest of the
+	// test runs from an empty snapshot, so put that back afterwards.
+	saved := m.snap
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
 	out := strip(m.View())
+	m.snap = saved
 	if !strings.Contains(out, "pause / resume streaming") {
 		t.Errorf("help view missing key rows:\n%s", out)
 	}
@@ -1837,7 +1844,9 @@ func TestHelpSaysFlagsNeedRerun(t *testing.T) {
 // p fires a real generation that burns tokens and GPU time: calling it
 // "synthetic" read as a no-op simulation.
 func TestHelpDescribesLiveProbe(t *testing.T) {
-	m := New(Config{Version: "t"}, nil)
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	// p is documented only where it has engines to probe, same as the footer.
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
 	m.help, m.w, m.h, m.ready = true, 110, 36, true
 	out := strip(m.View())
 	if !strings.Contains(out, "real generation") {
@@ -1940,6 +1949,82 @@ func TestFooterAdvertisesAgentsWithFlag(t *testing.T) {
 	out := strip(m.renderFooter())
 	if !strings.Contains(out, "a agents") {
 		t.Errorf("footer does not advertise 'a agents' when --agents is enabled:\n%s", out)
+	}
+}
+
+// The footer hides the keys with nothing to act on; the help screen is the
+// other half of the same reference. A key the footer hid but help still
+// documented sent first-timers to the empty setup card pressing p, t and a
+// and reading three refusals, so both surfaces read one set of conditions.
+func TestHelpListsExactlyTheKeysTheFooterAdvertises(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		snap core.Snapshot
+		want string // keys expected in both the footer and help
+	}{
+		{
+			name: "no engines, no agents (the setup card)",
+			cfg:  Config{Version: "t", Prober: func() {}},
+			want: "",
+		},
+		{
+			name: "engines only",
+			cfg:  Config{Version: "t", Prober: func() {}},
+			snap: core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}},
+			want: "pt",
+		},
+		{
+			name: "engines and agents",
+			cfg:  Config{Version: "t", Prober: func() {}},
+			snap: core.Snapshot{
+				Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+				Agents:    []core.AgentEvent{{Agent: "claude"}},
+			},
+			want: "pta",
+		},
+		{
+			name: "agents flag, engines not up yet",
+			cfg:  Config{Version: "t", Prober: func() {}, Agents: true},
+			snap: core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama"}}},
+			want: "pta",
+		},
+		{
+			name: "no prober in this run",
+			cfg:  Config{Version: "t"},
+			snap: core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}},
+			want: "t",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(tc.cfg, nil)
+			m.snap = tc.snap
+			m.w, m.h, m.ready = 110, 36, true
+			// Only the key section: the flag list below it is names, not keys.
+			listed := map[string]bool{}
+			for _, r := range m.helpRows() {
+				if r[0] == "" {
+					break
+				}
+				listed[r[0]] = true
+			}
+			foot := map[string]bool{}
+			for _, tok := range strings.Fields(strip(m.renderFooter())) {
+				foot[tok] = true
+			}
+			for _, k := range []string{"p", "t", "a"} {
+				inHelp := listed[k]
+				inFoot := foot[k]
+				want := strings.Contains(tc.want, k)
+				if inHelp != want {
+					t.Errorf("help %q = %v, want %v (footer: %v)", k, inHelp, want, inFoot)
+				}
+				if inFoot != want {
+					t.Errorf("footer %q = %v, want %v", k, inFoot, want)
+				}
+			}
+		})
 	}
 }
 

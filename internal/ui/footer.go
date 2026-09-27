@@ -11,23 +11,40 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-func (m Model) renderFooter() string {
-	foot := styleInfo.Render("q") + dim(" quit  ") +
-		styleInfo.Render("space") + dim(" pause  ")
+// canProbe, canTimescale and canSwapFocus are the single answer to "does this
+// key have something to act on right now". The footer and the help screen
+// both read them, so the key reference never advertises a key the footer just
+// hid, and never hides one the footer is printing.
+func (m Model) canProbe() bool {
 	// p fires real generations and the probing marker lives on the PROBES
 	// panel, which is absent without engines. Advertising it here would be
 	// a key that appears to do nothing (same rule as renderMinimal).
-	if m.cfg.Prober != nil && len(m.snap.Providers) > 0 {
+	return m.cfg.Prober != nil && len(m.snap.Providers) > 0
+}
+
+// canTimescale: t only changes the throughput chart; the empty setup card has
+// none.
+func (m Model) canTimescale() bool {
+	return len(m.snap.Providers) > 0 || len(m.snap.Agents) > 0
+}
+
+// canSwapFocus: a swaps which side gets the panel estate. Advertised only
+// where it changes something: without engines the agents view is already the
+// view, and the key stays live so a focus left on agents can be undone.
+func (m Model) canSwapFocus() bool {
+	return len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents)
+}
+
+func (m Model) renderFooter() string {
+	foot := styleInfo.Render("q") + dim(" quit  ") +
+		styleInfo.Render("space") + dim(" pause  ")
+	if m.canProbe() {
 		foot += styleInfo.Render("p") + dim(" probe  ")
 	}
-	// t only changes the throughput chart; the empty setup card has none.
-	if len(m.snap.Providers) > 0 || len(m.snap.Agents) > 0 {
+	if m.canTimescale() {
 		foot += styleInfo.Render("t") + dim(" timescale  ")
 	}
-	// a swaps which side gets the panel estate. Advertised only where it
-	// changes something: without engines the agents view is already the
-	// view, and the key stays live so a focus left on agents can be undone.
-	if len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents) {
+	if m.canSwapFocus() {
 		label := " agents"
 		if m.focusAgents {
 			label = " engines"
@@ -126,10 +143,12 @@ func (m Model) renderHelp() string {
 	return clipBlock(placed, m.w, m.h)
 }
 
-// helpRows is the in-app key reference. Compact panes drop p, t and the
-// restart-flag list, which name panels the compact strip does not draw;
-// matching that list here keeps help from advertising keys that appear to do
-// nothing. The "● probing…" badge p draws lives in the strip, not here.
+// helpRows is the in-app key reference. It lists the same keys the footer
+// advertises, under the same conditions: a key with nothing to act on here
+// only earns a notice explaining that, and a reference that listed it anyway
+// would send the reader looking for a control that is not on screen. Compact
+// panes drop the flag list too, which names panels the compact strip does not
+// draw. The "● probing…" badge p draws lives in a panel title, not here.
 func (m Model) helpRows() [][2]string {
 	if m.w < minDashW || m.h < minDashH {
 		return [][2]string{
@@ -139,24 +158,37 @@ func (m Model) helpRows() [][2]string {
 			{"? / h", "toggle this help"},
 		}
 	}
-	return [][2]string{
+	rows := [][2]string{
 		{"q / ctrl+c", "quit"},
 		{"esc", "close help / quit"},
 		{"space", "pause / resume streaming"},
-		{"p", "probe every engine with a real generation"},
-		{"t", "toggle compressed timescale + grid"},
-		{"a", "focus engines or agents"},
-		{"? / h", "toggle this help"},
-		{"", ""},
-		{"(flags)", "quit, then re-run with these"},
-		{"--demo", "simulated fleet, zero setup"},
-		{"--add URL", "attach an openai-compatible endpoint"},
-		{"ssh://host", "watch engines on another host"},
-		{"--agents", "also watch coding agents on this machine"},
-		{"--probe N", "auto-probe every N seconds"},
-		{"--once", "print one frame and exit"},
-		{"--plain", "with --once: linear text report"},
 	}
+	if m.canProbe() {
+		rows = append(rows, [2]string{"p", "probe every engine with a real generation"})
+	}
+	if m.canTimescale() {
+		rows = append(rows, [2]string{"t", "toggle compressed timescale + grid"})
+	}
+	if m.canSwapFocus() {
+		label := "focus the agents dashboard (esc comes back)"
+		if m.focusAgents {
+			label = "go back to the engines dashboard"
+		}
+		rows = append(rows, [2]string{"a", label})
+	}
+	rows = append(rows,
+		[2]string{"? / h", "toggle this help"},
+		[2]string{"", ""},
+		[2]string{"(flags)", "quit, then re-run with these"},
+		[2]string{"--demo", "simulated fleet, zero setup"},
+		[2]string{"--add URL", "attach an openai-compatible endpoint"},
+		[2]string{"ssh://host", "watch engines on another host"},
+		[2]string{"--agents", "also watch coding agents on this machine"},
+		[2]string{"--probe N", "auto-probe every N seconds"},
+		[2]string{"--once", "print one frame and exit"},
+		[2]string{"--plain", "with --once: linear text report"},
+	)
+	return rows
 }
 
 // renderMinimal is the degraded view for panes too small for the dashboard:
