@@ -51,10 +51,6 @@ const hexDigits = "0123456789abcdef"
 
 // fadeColor blends a hex color toward black by factor f (0..1). Non-hex
 // colors pass through untouched.
-//
-// The chart fade calls this per bisection step, so the hex is assembled by
-// hand: fmt.Sprintf here allocated several objects per step for one 7-byte
-// string.
 func fadeColor(c lipgloss.Color, f float64) string {
 	s := string(c)
 	if !strings.HasPrefix(s, "#") || len(s) != 7 {
@@ -64,18 +60,16 @@ func fadeColor(c lipgloss.Color, f float64) string {
 	if err != nil {
 		return s
 	}
-	r := uint64(float64(v>>16&0xff) * f)
-	g := uint64(float64(v>>8&0xff) * f)
-	b := uint64(float64(v&0xff) * f)
-	var out [7]byte
-	out[0] = '#'
-	for i, ch := range [3]uint64{r, g, b} {
-		out[1+i*2] = hexDigits[ch>>4&0xf]
-		out[2+i*2] = hexDigits[ch&0xf]
-	}
-	return string(out[:])
+	return formatHexRGB(
+		uint64(float64(v>>16&0xff)*f),
+		uint64(float64(v>>8&0xff)*f),
+		uint64(float64(v&0xff)*f),
+	)
 }
 
+// formatHexRGB assembles the 7-byte "#rrggbb" form by hand: the chart fade
+// calls it per bisection step, where fmt.Sprintf allocated several objects
+// for one short string.
 func formatHexRGB(r, g, b uint64) string {
 	var out [7]byte
 	out[0] = '#'
