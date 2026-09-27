@@ -171,13 +171,11 @@ func jsonRootKind(raw json.RawMessage) string {
 	}
 }
 
-// maxEventTokens bounds a token count on one event. Real usage never
-// approaches it; a sender claiming more is lying or broken, and summing
-// MaxInt64 values across the retained feed would wrap the agent totals.
-const maxEventTokens = 1 << 40
-
+// clampTokens refuses a count outside core.MaxEventTokens: real usage never
+// approaches the ceiling, and summing MaxInt64 values across the retained
+// feed would wrap the agent totals.
 func clampTokens(n int64) int64 {
-	if n < 0 || n > maxEventTokens {
+	if n < 0 || n > core.MaxEventTokens {
 		return 0
 	}
 	return n

@@ -681,6 +681,12 @@ func TestUniqueAgents(t *testing.T) {
 			{Agent: ""},
 			{Agent: "gemini"},
 		}, 3},
+		// One agent spelled two ways is one agent, the way AgentRates
+		// groups them: the header count must not out-count the list.
+		{"nfc and nfd spell one agent", []core.AgentEvent{
+			{Agent: "caf\u00e9"},
+			{Agent: "cafe\u0301"},
+		}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

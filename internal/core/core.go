@@ -84,6 +84,15 @@ type ProviderSnapshot struct {
 	InHist  []float64
 }
 
+// MaxEventTokens bounds one token count on one AgentEvent. Real usage never
+// approaches it; a sender claiming more is lying or broken, and every
+// producer of an event (the ingest endpoint, a transcript reader) clamps to
+// the same ceiling, so a value above it is refused rather than summed: a
+// retained window adding MaxInt64 values wraps its own totals negative. One
+// constant, because two producers drifting apart would let a value in that
+// the other would have refused.
+const MaxEventTokens = 1 << 40
+
 // Agent event kinds. Unknown values are accepted on the wire (forward
 // compatible with a harness that invents one) and render as a generic event.
 const (

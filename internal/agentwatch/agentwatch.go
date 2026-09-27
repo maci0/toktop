@@ -389,13 +389,12 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	})
 }
 
-// eventTokens bounds one event's token count the way the HTTP ingest path
-// does. A transcript file's accumulators saturate at MaxInt64, and the
-// retained agent window sums this field across events, so an unclamped value
-// wraps the agent total negative.
+// eventTokens bounds one event's token count to core.MaxEventTokens, the same
+// ceiling the HTTP ingest path applies. A transcript file's accumulators
+// saturate at MaxInt64, and the retained agent window sums this field across
+// events, so an unclamped value wraps the agent total negative.
 func eventTokens(n int) int64 {
-	const maxEventTokens = 1 << 40
-	if n <= 0 || int64(n) > maxEventTokens {
+	if n <= 0 || int64(n) > core.MaxEventTokens {
 		return 0
 	}
 	return int64(n)

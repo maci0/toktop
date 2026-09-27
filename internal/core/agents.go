@@ -31,6 +31,13 @@ type AgentRate struct {
 	ViaEngine string
 }
 
+// CanonicalAgent is an agent's identity: its name composed to NFC, so the two
+// spellings of one name (a macOS-typed decomposed "café" beside a precomposed
+// one from a JSON sender) are one agent. Every consumer that groups, counts or
+// names agents keys on this; keying on the raw name instead lets one agent
+// show up as two rows, or be counted twice.
+func CanonicalAgent(name string) string { return norm.NFC.String(name) }
+
 // AgentRates summarizes the recent event stream, busiest first.
 func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
 	return agentRatesFiltered(events, now, false)
@@ -61,7 +68,7 @@ func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []Agen
 		if ev.OutputTokens <= 0 && ev.PromptTokens <= 0 && ev.ThinkingTokens <= 0 && ev.ViaEngine == "" {
 			continue
 		}
-		agent := norm.NFC.String(ev.Agent)
+		agent := CanonicalAgent(ev.Agent)
 		a, ok := by[agent]
 		if !ok {
 			a = &acc{first: ev.At}
