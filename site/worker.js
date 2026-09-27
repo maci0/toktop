@@ -100,6 +100,12 @@ const HTML = htmlForWire(`<!doctype html>
 <meta property="og:image:alt" content="toktop running in a terminal: engine rows with throughput and KV-cache pressure beside an agent feed">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:image" content="https://toktop.ai${SHARE_CARD_PATH}">
+<!-- The browser's own chrome, painted from the same two palettes: without it
+     a phone paints its address bar and its overscroll glow in its default,
+     which is a second visual system over the page rather than around it. One
+     tag per scheme, because a single tag cannot follow prefers-color-scheme. -->
+<meta name="theme-color" content="${DARK.bg}" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="${LIGHT.bg}" media="(prefers-color-scheme: light)">
 <!-- the icon is the h1 cursor block in the accent and panel colors, not a placeholder emoji -->
 <link rel="icon" href="${FAVICON}">
 <style>
@@ -193,9 +199,14 @@ const HTML = htmlForWire(`<!doctype html>
   ul { padding-left: 1.1rem; margin: 0; }
   li { margin-bottom: .5rem; }
   li b { font-weight: 600; }
-  /* Feature grid: four panes, each a name, a job, a specimen. */
+  /* Feature grid: four panes, each a name, a job, a specimen. The System
+     pane runs the full width because that is where the dashboard puts it: the
+     SYS strip is a full-width row under the charts, not a quarter of the
+     frame, and its specimen is the longest line on the page. Four equal
+     cells would be the card grid, not this product. */
   .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem;
     max-width: none; margin: 0 0 1rem; padding: 0; list-style: none; }
+  .grid li:last-child { grid-column: 1 / -1; }
   .grid li { margin: 0; background: var(--panel); border: 1px solid var(--line);
     border-top: 2px solid var(--accent); padding: .9rem 1rem; }
   /* Warm marks the System pane and nothing else: it is cYellow in the
@@ -451,8 +462,8 @@ const COMPRESSIBLE = new Map([
   ["gzip", "gzip"],
 ]);
 
-// The same three codings, smallest body of this page first: brotli 3,632,
-// gzip 4,302, zstd 4,541 bytes. The page is a constant, so those sizes are
+// The same three codings, smallest body of this page first: brotli 3,663,
+// gzip 4,346, zstd 4,586 bytes. The page is a constant, so those sizes are
 // constants too, and ranking by them lets a request build only the coding it
 // is about to send instead of all three to compare them. zstd lands behind
 // gzip here because the page is short English words and markup, which is not

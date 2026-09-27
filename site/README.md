@@ -43,6 +43,16 @@ its own rems. The page has no uppercase, no tracking and no color change on
 a level, so size is the only thing that marks one; a step out of order or a
 size written in a rule is a heading the eye can no longer find.
 
+The layout follows the capture it is showing: the four panes under "What it
+shows" are laid out the way the dashboard lays them out, with System running
+the full width where the dashboard's SYS strip does, because its specimen is
+the longest line on the page. Four equal cells would be a card grid, and a
+card grid is not this product. The browser's own chrome is the page's
+palette too, through one `theme-color` per scheme, so a phone's address bar
+and overscroll glow are the terminal's background rather than a second
+system drawn over it. Neither costs a byte of JavaScript, and the page still
+ships without one.
+
 The Worker answers `/health` with `ok` for uptime checks, serves the
 dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 `/dashboard-1280.avif`, `/dashboard-768.avif`, `/dashboard.webp`,
@@ -89,11 +99,11 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. That ranking is a
 constant list in the Worker rather than a comparison of bodies, because the
-page is a constant too: brotli 3,606 bytes, gzip 4,293, zstd 4,526. zstd
+page is a constant too: brotli 3,663 bytes, gzip 4,346, zstd 4,586. zstd
 lands behind gzip here, so a client that named only `zstd, gzip` still gets
 gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,293 bytes rather than 12,386 bytes in the local Worker response test.
+transfers 4,346 bytes rather than 12,602 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
@@ -126,7 +136,7 @@ Worker spent before writing the response, failures included: a failed request
 is the one a visitor reports, and a timing series that covered only the served
 requests would describe exactly the ones nobody is asking about. A byte-count
 test cannot see a
-regression here: the page can send the same 3,606 bytes slowly. With the
+regression here: the page can send the same 3,663 bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
 has to be added to the page to collect it.
@@ -191,10 +201,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 12,386 bytes identity / 4,293 gzip /
-3,606 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,606 bytes
-plus the 10,577-byte 768w capture, 14,183 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 12,602 bytes identity / 4,346 gzip /
+3,663 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,663 bytes
+plus the 10,577-byte 768w capture, 14,240 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no

@@ -249,7 +249,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4302);
+    expect(bytes.byteLength).toBe(4346);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -544,6 +544,14 @@ test("the second accent marks the pressure pane, and only it", () => {
   expect(panes).toEqual(["Engines", "Agents", "Probes", "System"]);
 });
 
+// The panes are laid out the way the dashboard lays them out: the pressure
+// pane is the full-width SYS strip under the charts, not a fourth equal cell.
+// Four equal cells is the card grid, and a grid that one reflow "tidies" back
+// into symmetry is a grid that stopped being a picture of the product.
+test("the pressure pane runs the width the dashboard's SYS strip runs", () => {
+  expect(identityBody.includes(".grid li:last-child { grid-column: 1 / -1; }")).toBe(true);
+});
+
 // The page is a picture of a terminal, so it has to be the same terminal.
 // Three files carry the palette (this worker, internal/ui/theme.go,
 // scripts/screenshot.py) in three languages, and nothing in the build ties
@@ -688,9 +696,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12391);
-  expect(gzipped).toBe(4302);
-  expect(brotli).toBe(3632);
+  expect(identity).toBe(12602);
+  expect(gzipped).toBe(4346);
+  expect(brotli).toBe(3663);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -746,7 +754,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_209);
+  expect(visit).toBe(14_240);
   expect(visit).toBeLessThan(25_000);
 });
 
