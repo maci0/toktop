@@ -131,6 +131,8 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make site-check` | `bun test site/` |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
+| `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
+| `make repro-check` | build every release platform twice, varying path, cache, locale, and TZ, then diff |
 
 ## Before opening a PR
 
@@ -166,6 +168,11 @@ Keep platform-specific code behind build tags or runtime checks; the
 cross-compile job catches code that only builds, or only vets and lints
 cleanly, on the author's OS.
 
+A `repro` job builds two shipped platforms twice, varying the output path,
+the build cache, the locale, and the timezone between passes, and fails if
+the bytes differ. It is the guard on the reproducibility flags above. Run
+`make repro-check` for the full `PLATFORMS` list before a release.
+
 ## Releases
 
 Versions are 0.x: the CLI flags, the ingest `/v1/events` body, and the
@@ -179,8 +186,10 @@ stripped. `go install` without ldflags reads the module version Go embeds, so
 not a leftover `0.1.0`.
 
 Push a tag `v*`: GitHub Actions tests (both halves of the sqlite tag gate),
-cross-compiles every platform, generates checksums and a CycloneDX SBOM, and
-attaches binaries to the release. Versions with a prerelease suffix, such as
+cross-compiles every platform, generates checksums, a buildinfo manifest, and
+a CycloneDX SBOM, and attaches binaries to the release. The buildinfo file
+records the commit, toolchain, and flags behind the bytes, so a rebuild
+attempt has something to match; it is listed in checksums.txt too. Versions with a prerelease suffix, such as
 `v0.6.0-rc.1`, are marked as prereleases and excluded from the stable
 `toktop update` channel. Hyphens in build metadata do not mark a prerelease.
 The host-platform artifact is smoke-tested

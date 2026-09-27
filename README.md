@@ -481,7 +481,9 @@ and [docs/PRIVACY.md](docs/PRIVACY.md) for what it reads, sends and stores.
 
 Releases: push a tag `v*` and GitHub Actions attaches binaries for
 linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 and
-windows/arm64, plus a CycloneDX SBOM of every dependency (`make sbom`).
+windows/arm64, plus a CycloneDX SBOM of every dependency (`make sbom`) and a
+buildinfo manifest naming the commit, toolchain, and flags behind those
+bytes.
 Versions are 0.x: the CLI, the ingest `/v1/events` body, and the
 `agentusage` Go API may change without a major bump. Consumer-facing notes
 live in [CHANGELOG.md](CHANGELOG.md). CI

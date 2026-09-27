@@ -121,6 +121,24 @@ jobs:
         # and CI cannot run different black/ruff versions.
         run: make scripts-check
 
+  # The Makefile promises byte-identical artifacts from identical source. Two
+  # builds of each shipped platform under different paths, build caches,
+  # locales, and timezones are the only way to find out whether the promise
+  # still holds. A representative pair keeps this under the job budget; the
+  # local `make repro-check` covers all of PLATFORMS.
+  repro:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: make repro-check PLATFORMS="linux/amd64 windows/amd64"
+
   build:
     strategy:
       fail-fast: false

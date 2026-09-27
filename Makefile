@@ -314,7 +314,7 @@ check-changelog: ## verify CHANGELOG.md contains release section and link for VE
 release: check-changelog checksums sbom ## build every release platform and SBOM into dist/ with reproducible checksums
 
 .PHONY: checksums
-checksums: test-dist ## checksum the dist/ binaries into a byte-reproducible tarball
+checksums: buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
 	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
 		{ echo "$(TAR) rejects --sort: deterministic packaging needs GNU tar (install it as gtar)" >&2; exit 1; }
 	@cd $(DIST) && \
@@ -345,6 +345,67 @@ test-dist: ## build every release platform without packaging
 		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch \
 			$(GO) build $(GOTAGS) $(GO_BUILDFLAGS) -ldflags "$(LDFLAGS)" -o $(DIST)/$$name $(CMD) || exit 1; \
 	done
+
+# What produced the bytes, recorded next to them. A checksum list proves the
+# download arrived intact, not which toolchain made it; without the commit,
+# the toolchain, and the flags there is nothing faithful to rebuild against.
+# Named to match the toktop_* glob, so it lands in checksums.txt too.
+.PHONY: buildinfo
+buildinfo: test-dist ## record the toolchain, commit, and flags behind dist/ into a manifest
+	@mkdir -p $(DIST)
+	@{ \
+		echo "name: $(BINARY)"; \
+		echo "version: $(VERSION)"; \
+		echo "module: $$($(GO) list -m)"; \
+		echo "commit: $(shell git rev-parse HEAD 2>/dev/null || echo unknown)"; \
+		echo "dirty: $(shell test -n "$$(git status --porcelain 2>/dev/null)" && echo true || echo false)"; \
+		echo "source_date_epoch: $(SOURCE_DATE_EPOCH)"; \
+		echo "go: $$($(GO) env GOVERSION)"; \
+		echo "gotoolchain: $(GOTOOLCHAIN)"; \
+		echo "tags: $(TAGS)"; \
+		echo "buildflags: $(GO_BUILDFLAGS)"; \
+		echo "ldflags: $(LDFLAGS)"; \
+		echo "cgo_enabled: $(CGO_ENABLED)"; \
+		echo "goamd64: $(GOAMD64)"; \
+		echo "goarm64: $(GOARM64)"; \
+	} > $(DIST)/$(BINARY)_$(VERSION)_buildinfo.txt
+
+# The flags above promise byte-identical output; nothing tested that promise.
+# Build each platform twice with everything the Makefile neutralizes varied
+# between the passes: output path, build cache, locale, and timezone. A
+# timestamp leak or a surviving absolute path shows up as a diff, not as a
+# coincidence of one machine. diffoscope explains a failure when it is
+# installed; the diff itself is the verdict either way.
+.PHONY: repro-check
+repro-check: ## build every release platform twice under different path, cache, locale, and TZ, then diff
+	@$(CHECK_VERSION)
+	@rm -rf $(DIST)/repro
+	@for target in $(PLATFORMS); do \
+		goos=$${target%/*}; goarch=$${target#*/}; ext=""; \
+		if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
+		name="$(BINARY)_$(VERSION)_$${goos}_$${goarch}$${ext}"; \
+		for pass in a b; do \
+			mkdir -p $(DIST)/repro/$$pass/$${goos}_$${goarch} $(DIST)/repro/cache-$$pass; \
+			env LC_ALL=C TZ=UTC GOCACHE=$(CURDIR)/$(DIST)/repro/cache-$$pass \
+				GOOS=$$goos GOARCH=$$goarch CGO_ENABLED=0 \
+				$(GO) build $(GOTAGS) $(GO_BUILDFLAGS) -ldflags "$(LDFLAGS)" \
+				-o $(DIST)/repro/$$pass/$${goos}_$${goarch}/$$name $(CMD) || exit 1; \
+		done; \
+		a=$(DIST)/repro/a/$${goos}_$${goarch}/$$name; \
+		b=$(DIST)/repro/b/$${goos}_$${goarch}/$$name; \
+		if cmp -s "$$a" "$$b"; then \
+			echo "reproducible: $$name"; \
+		else \
+			echo "NOT reproducible: $$name" >&2; \
+			if command -v diffoscope >/dev/null 2>&1; then \
+				diffoscope "$$a" "$$b" >&2 || true; \
+			else \
+				echo "  install diffoscope to see what differs" >&2; \
+			fi; \
+			exit 1; \
+		fi; \
+	done
+	@rm -rf $(DIST)/repro
 
 # XDG user bin on Linux; override on macOS so the binary lands on PATH
 # (PREFIX=/usr/local or PREFIX=$(brew --prefix)).

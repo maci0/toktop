@@ -97,4 +97,5 @@ jobs:
             dist/toktop_${{ env.VERSION }}_windows_amd64.exe
             dist/toktop_${{ env.VERSION }}_windows_arm64.exe
             dist/toktop_${{ env.VERSION }}_checksums.tar.gz
+            dist/toktop_${{ env.VERSION }}_buildinfo.txt
             dist/toktop-sbom-${{ env.VERSION }}.cdx.json
