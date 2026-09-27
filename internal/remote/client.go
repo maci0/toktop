@@ -21,7 +21,17 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
+
+// audit builds the process logger for the lines this package writes. A var so
+// a test can point it at a handler it can read; every call site is rare
+// (one connect, one drop), so building it per call costs nothing.
+var audit = logcfg.Logger
+
+// logField prepares a value for an audit attribute the same way the ingest
+// endpoint does: one line, home folded, capped.
+func logField(s string, n int) string { return logcfg.Field(logcfg.RedactAddrs(s), n) }
 
 // runTimeout bounds one remote command (discovery or vitals poll). Var so
 // tests can shrink it, like bannerTimeout and the keepalive pacing below.
@@ -54,6 +64,7 @@ type Client struct {
 	forwards  map[int]int // remote port -> local port already bound for it
 	stopped   bool
 
+	connectedAt   time.Time     // when the handshake finished, for the drop line's uptime
 	keepaliveDone chan struct{} // closed when the keepalive goroutine exits
 }
 
@@ -197,8 +208,20 @@ func newClientConnCtx(ctx context.Context, c net.Conn, addr string, cfg *ssh.Cli
 func Connect(ctx context.Context, t Target) (*Client, error) {
 	c, err := dial(ctx, t)
 	if err != nil {
+		// The reason reaches stderr, where the alt screen hides it: a refused
+		// key, an unreachable host and an auth failure all look the same on a
+		// dashboard with no engines on it. The audit line is the record that
+		// outlives the frame.
+		audit().Warn("toktop: ssh connect failed",
+			"target", logField(t.userHost(), 256),
+			"port", t.Port,
+			"error", logField(err.Error(), 256))
 		return nil, errors.New(core.RedactHome(err.Error()))
 	}
+	audit().Info("toktop: ssh connected",
+		"target", logField(t.userHost(), 256),
+		"port", t.Port,
+		"dial", time.Since(c.connectedAt).Round(time.Millisecond))
 	return c, nil
 }
 
@@ -257,7 +280,7 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		return nil, fmt.Errorf("ssh %s: %w", t.userHost(), err)
 	}
 	c := &Client{Target: t, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
-		keepaliveDone: make(chan struct{})}
+		keepaliveDone: make(chan struct{}), connectedAt: time.Now()}
 	go c.watchClose()
 	go c.keepalive()
 	return c, nil
@@ -315,6 +338,13 @@ func (c *Client) keepalive() {
 		}
 		misses++
 		if misses >= 3 {
+			// watchClose records the drop; this says why, since an unanswered
+			// keepalive and a peer that closed the socket need different
+			// investigations and the wire error alone cannot tell them apart.
+			audit().Warn("toktop: ssh peer stopped answering keepalives",
+				"target", logField(c.Target.userHost(), 256),
+				"misses", misses,
+				"probe_every", keepaliveEvery)
 			c.conn.Close() // unblocks any probe still awaiting a reply
 			return
 		}
@@ -480,6 +510,13 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		}
 		return r.sess, r.err
 	case <-timer.C:
+		// A peer that never answers a channel open is wedged, not slow, and
+		// the close below ends the connection. That is the difference between
+		// a network blip and a host to investigate, so it is recorded before
+		// the error reaches the caller that will drop the target.
+		audit().Warn("toktop: ssh channel open unanswered",
+			"target", logField(c.Target.userHost(), 256),
+			"wait", sessionOpenTimeout)
 		c.conn.Close()
 		// conn.Close is what releases the parked open; the session it may
 		// still hand back belongs to the connection that just went away.
@@ -702,5 +739,13 @@ func (c *Client) watchClose() {
 	} else {
 		c.setErr(fmt.Errorf("ssh connection lost"))
 	}
+	// The drop is the end of every number this host contributed: the forwarded
+	// engines stop answering and the vitals loop gives up. Up to here the only
+	// record was one stderr line under the alt screen.
+	audit().Error("toktop: ssh connection lost",
+		"target", logField(c.Target.userHost(), 256),
+		"port", c.Target.Port,
+		"uptime", time.Since(c.connectedAt).Round(time.Second),
+		"error", logField(c.Err().Error(), 256))
 	close(c.closed)
 }

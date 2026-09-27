@@ -4,6 +4,7 @@ package collector
 
 import (
 	"context"
+	"log/slog"
 	"maps"
 	"net"
 	"net/url"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/probe"
 	"github.com/maci0/toktop/internal/procs"
 	"github.com/maci0/toktop/internal/provider"
@@ -23,6 +25,17 @@ import (
 const (
 	emaAlpha = 0.35
 )
+
+// audit builds the process logger for the engine health lines. A var so a
+// test can point it at a handler it can read.
+var audit = logcfg.Logger
+
+// downState is one engine's current outage: when it started and the reason
+// the first failed poll gave.
+type downState struct {
+	since  time.Time
+	reason string
+}
 
 type prevSample struct {
 	at       time.Time
@@ -60,6 +73,10 @@ type Collector struct {
 	probes       []core.ProbeSample
 	started      time.Time
 	baseCtx      context.Context // set by Run; bounds ad-hoc probes past shutdown
+	// down holds the endpoints that failed their last poll, with when the
+	// outage started and what it said, so the audit log records an engine
+	// going away and coming back once each instead of once per poll.
+	down map[string]downState
 
 	probeMu       sync.Mutex // guards the probe fan-out state below
 	lastProbeWave time.Time  // wave gate: see probeWaveGap
@@ -331,6 +348,12 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	byPort := procsByPort(c.procSnapshot())
 
 	c.mu.Lock()
+	// Engine health transitions, collected under the lock and logged after it:
+	// an engine that stops answering is the dependency failure an operator
+	// needs named, and the dashboard's own "down" marker is replaced a frame
+	// later. Collected, not written inline, so a slow stderr cannot stall the
+	// poll loop the snapshot depends on.
+	var recovered, failed []healthChange
 	snap.Agents = slices.Clone(c.agents)
 	snap.Probes = slices.Clone(c.probes)
 	snap.Sys = cloneSys(sys)
@@ -354,6 +377,10 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			ps.Err = "empty poll result"
 		} else {
 			ps.OK = true
+			if was, ok := c.down[key]; ok {
+				delete(c.down, key)
+				recovered = append(recovered, healthChange{p, was, now.Sub(was.since)})
+			}
 			ps.Models = r.m.Models
 			ps.Running = r.m.Running
 			ps.Waiting = r.m.Waiting
@@ -389,15 +416,55 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 		}
 		ps.OutHist, ps.OutStamps = outR.copy(), outR.times()
 		ps.InHist, ps.InStamps = inR.copy(), inR.times()
+		if ps.Err != "" {
+			if _, ok := c.down[key]; !ok {
+				if c.down == nil {
+					c.down = make(map[string]downState)
+				}
+				c.down[key] = downState{since: now, reason: ps.Err}
+				failed = append(failed, healthChange{p, downState{now, ps.Err}, 0})
+			}
+		}
 		snap.Providers = append(snap.Providers, ps)
 	}
 	c.mu.Unlock()
+	logHealth(failed, slog.LevelWarn, "toktop: engine not answering")
+	logHealth(recovered, slog.LevelInfo, "toktop: engine answering again")
 	// Send outside the critical section: a stalled consumer must neither pin
 	// emit past cancellation nor freeze RecordAgent/RecordProbe/ProbeAll
 	// behind c.mu while this send waits for buffer space.
 	select {
 	case out <- snap:
 	case <-ctx.Done():
+	}
+}
+
+// healthChange is one engine crossing into or out of the answering state.
+type healthChange struct {
+	p       provider.Provider
+	state   downState
+	downFor time.Duration
+}
+
+// logHealth writes one audit line per engine that changed state this poll. The
+// transitions are already deduplicated in emit, so a fleet of engines that is
+// down produces one line when it goes down and one when it returns however
+// many intervals passed in between.
+func logHealth(changes []healthChange, level slog.Level, msg string) {
+	if len(changes) == 0 {
+		return
+	}
+	lg := audit()
+	for _, ch := range changes {
+		attrs := []any{
+			"engine", logcfg.Field(ch.p.Label, 128),
+			"addr", logcfg.Field(ch.p.Addr, 256),
+			"reason", logcfg.Field(ch.state.reason, 256),
+		}
+		if ch.downFor > 0 {
+			attrs = append(attrs, "down_for", ch.downFor.Round(time.Millisecond))
+		}
+		lg.Log(context.Background(), level, msg, attrs...)
 	}
 }
 

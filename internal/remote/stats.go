@@ -37,6 +37,13 @@ type Stats struct {
 	// is not answering. A dropped connection would otherwise look like a host
 	// with no load, no memory and no GPU.
 	err string
+	// failedPolls counts consecutive failures, so the audit log records the
+	// outage once when it starts and once when it ends instead of one line per
+	// poll. A run lasting days would otherwise write a line every few seconds.
+	failedPolls int
+	// failedSince is when the current run of failures started, so the recovery
+	// line can say how long the host was dark.
+	failedSince time.Time
 }
 
 // SetNow overrides the clock used to stamp and age remote samples. Safe to
@@ -157,8 +164,26 @@ func (s *Stats) poll(ctx context.Context) {
 		// name the target that stopped answering instead of dropping the
 		// ssh readings and leaving local numbers to pass for the remote's.
 		s.err = core.Snippet([]byte(err.Error()))
+		s.failedPolls++
+		// The UI shows the reason on the frame it happens to be drawn on and
+		// the frame is replaced a second later. The audit log gets the start of
+		// the outage, the first failure only: every poll after it repeats a
+		// reason the recovery line will end.
+		if s.failedPolls == 1 {
+			s.failedSince = s.instant()
+			audit().Warn("toktop: remote vitals poll failed",
+				"target", logField(s.Client.Target.userHost(), 256),
+				"error", logField(err.Error(), 256))
+		}
 		return
 	}
+	if s.failedPolls > 0 {
+		audit().Info("toktop: remote vitals poll recovered",
+			"target", logField(s.Client.Target.userHost(), 256),
+			"failed_polls", s.failedPolls,
+			"outage", s.instant().Sub(s.failedSince).Round(time.Second))
+	}
+	s.failedPolls = 0
 	s.err = ""
 	s.loadsValid = parseVitals(out, &s.last)
 	s.last.RemoteHost = s.Client.Target.Host

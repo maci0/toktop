@@ -11,6 +11,7 @@ import (
 
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/provider"
 	"github.com/maci0/toktop/internal/remote"
 	"github.com/maci0/toktop/internal/sysmon"
@@ -21,6 +22,21 @@ import (
 // sysFn merges remote host readings onto the local sample, and is nil when no
 // target attached.
 
+// attachLog records what the run actually attached. Every line here has a
+// stderr twin the operator sees while the dashboard is up; the audit copy is
+// the one that outlives the alt screen and a closed terminal, which is the
+// only record of a target that silently stopped contributing.
+var attachLog = logcfg.Logger
+
+// targetLabel names an ssh target the way the operator wrote it, minus
+// anything the key path would add.
+func targetLabel(t remote.Target) string {
+	if t.User == "" {
+		return t.Host
+	}
+	return t.User + "@" + t.Host
+}
+
 // attachLocal adds one --add endpoint to providers. The bearer token rides
 // only to endpoints the operator named: discovery probes every well-known port
 // on spec, and whatever answers there must not be able to harvest the
@@ -30,11 +46,13 @@ import (
 func attachLocal(ctx context.Context, providers []provider.Provider, raw string) []provider.Provider {
 	if err := bearer.Allow(raw); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v; requests there go unauthenticated\n", err)
+		attachLog().Warn("toktop: bearer refused", "endpoint", logcfg.Field(raw, 256), "error", logcfg.Field(err.Error(), 256))
 	}
 	if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p.Poll != nil {
 		return append(providers, p)
 	}
 	fmt.Fprintf(os.Stderr, "toktop: nothing recognized at %s; polling as generic openai anyway\n", raw)
+	attachLog().Warn("toktop: nothing recognized at endpoint", "endpoint", logcfg.Field(raw, 256))
 	return append(providers, provider.NewOpenAICompat(raw, raw, core.KindOpenAI))
 }
 
@@ -55,9 +73,21 @@ func attachTarget(ctx context.Context, tgt remote.Target, sshKey string, sysFn f
 	}
 	rp, rsys, err := attachRemote(ctx, tgt)
 	if err != nil {
+		// The caller prints the same reason; this is the record of an ssh
+		// target the run went on without. The reasons are refused keys, an
+		// unreadable host-key store and unreachable hosts, none of which the
+		// dashboard says anything about once it is up.
+		attachLog().Warn("toktop: ssh target not attached",
+			"target", logcfg.Field(targetLabel(tgt), 256),
+			"port", tgt.Port,
+			"error", logcfg.Field(err.Error(), 256))
 		return nil, sysFn, err
 	}
 	fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n", len(rp), tgt.Host)
+	attachLog().Info("toktop: ssh target attached",
+		"target", logcfg.Field(targetLabel(tgt), 256),
+		"port", tgt.Port,
+		"engines", len(rp))
 	prev := sysFn
 	return rp, func() core.SysSample {
 		var s core.SysSample
@@ -131,6 +161,9 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 		if _, ok := fwd[p]; !ok {
 			fmt.Fprintf(os.Stderr, "toktop: %s:%d could not be forwarded locally; engines on that port are invisible\n",
 				tgt.Host, p)
+			attachLog().Warn("toktop: remote port not forwarded",
+				"target", logcfg.Field(targetLabel(tgt), 256),
+				"remote_port", p)
 		}
 	}
 	go func() {
@@ -175,6 +208,10 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 	for _, p := range skipped {
 		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
 			tgt.Host, p)
+		attachLog().Warn("toktop: remote port skipped",
+			"target", logcfg.Field(targetLabel(tgt), 256),
+			"remote_port", p,
+			"reason", "no recognized engine API")
 	}
 	stats := &remote.Stats{Client: cli}
 	go stats.Run(ctx, 5*time.Second)
