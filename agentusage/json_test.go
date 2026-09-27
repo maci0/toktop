@@ -385,3 +385,61 @@ func TestParseCwdWithTwoKeysIsDeterministic(t *testing.T) {
 		t.Fatal("no cwd taken from a line carrying two")
 	}
 }
+
+func TestKeyFoldIsASCIIOnly(t *testing.T) {
+	// Runes whose Unicode lowercase form is ASCII must not satisfy an ASCII
+	// key: U+0130 folds to "i" and U+212A to "k" under strings.ToLower, so
+	// a key spelled in either would forge a counter the agent never wrote.
+	line := `{"usage":{"İnput_tokens":1000,"Kelvin_output_tokens":2000,"input_tokens":3}}`
+	ev, ok := parseJSON([]byte(line))
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	if ev.Usage.Input != 3 || ev.Usage.Output != 0 {
+		t.Fatalf("lookalike key was read as a counter: %+v", ev.Usage)
+	}
+	if got := foldKey("Output_Tokens"); got != "output_tokens" {
+		t.Fatalf("foldKey(%q) = %q, want output_tokens", "Output_Tokens", got)
+	}
+	if got := foldKey("cafÉ"); got != "cafÉ" {
+		t.Fatalf("foldKey touched a non-ASCII rune: %q", got)
+	}
+}
+
+func TestCwdChoiceIsDeterministic(t *testing.T) {
+	// A record naming two directories resolves to the same one every time.
+	// Go map order is randomized per range, so an unsorted walk made
+	// ownership a coin flip that transcript.go then cached for the session.
+	line := `{"context":{"cwd":"/home/u/other"},"cwd":"/home/u/proj"}`
+	first, ok := parseJSON([]byte(line))
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	for i := range 50 {
+		ev, ok := parseJSON([]byte(line))
+		if !ok || ev != first {
+			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
+		}
+	}
+	if first.Cwd != "/home/u/proj" {
+		t.Fatalf("cwd = %q, want /home/u/proj (keys are visited in sorted order)", first.Cwd)
+	}
+}
+
+func TestSplitASCIISpaceKeepsUnicodeSpaces(t *testing.T) {
+	// A path argument may hold U+3000 or U+00A0. strings.Fields splits there
+	// and hands agentName a fragment it cannot match.
+	got := splitASCIISpace("  /opt/My\u00a0Agents/claude-code   /bin/sh ")
+	want := []string{"/opt/My\u00a0Agents/claude-code", "/bin/sh"}
+	if len(got) != len(want) {
+		t.Fatalf("splitASCIISpace = %q, want %q", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("splitASCIISpace[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+	if got := splitASCIISpace("   "); len(got) != 0 {
+		t.Fatalf("blank input produced %q", got)
+	}
+}

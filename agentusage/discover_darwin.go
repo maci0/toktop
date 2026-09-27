@@ -41,7 +41,7 @@ func Discover() []Process {
 		ucomm, cmd, _ := strings.Cut(strings.TrimLeft(rest, " "), " ")
 		var argv []string
 		if cmd != "" {
-			argv = strings.Fields(cmd)
+			argv = splitASCIISpace(cmd)
 		}
 		tool := agentName(ucomm, argv, known)
 		if tool == "" {
@@ -58,7 +58,10 @@ func Discover() []Process {
 
 // psTable returns "pid ucomm command…" for every process, one per line.
 // The space-joined command loses quoting, which is acceptable here: matching
-// scans whole path components of the first two words only.
+// scans whole path components of the first two words only. The separator is
+// the ASCII space ps wrote, and only that: a path argument may legally carry
+// any other Unicode space (U+00A0, U+3000, U+2028), and splitting on those
+// would tear one argument in two and hide the agent behind the fragment.
 func psTable() (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

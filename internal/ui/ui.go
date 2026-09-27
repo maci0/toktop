@@ -410,11 +410,10 @@ func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
 	return out + aOut, in + aIn
 }
 
-// uniqueAgents counts the agents present in the feed, for the header when no
-// agent has a rate to list. Agent names are grouped under NFC by
-// core.AgentRates, so two spellings of one name ("café" precomposed, or as
-// "cafe" plus a combining accent) are one agent there and must be one here
-// too, or the header count and the agent list disagree.
+// uniqueAgents counts distinct agent names. The key is normalized like every
+// other identity field in the UI (core.AgentRates groups under NFC), so the
+// same agent recorded as "café" both ways is one agent and the header agrees
+// with the feed below it.
 func uniqueAgents(events []core.AgentEvent) int {
 	seen := map[string]bool{}
 	for _, ev := range events {

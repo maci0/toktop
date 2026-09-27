@@ -47,6 +47,33 @@ func knownNames() map[string]bool {
 	return known
 }
 
+// splitASCIISpace splits on the ASCII space ps used to join a command into one
+// line, dropping the empty words the padding produces. strings.Fields would
+// split on every rune Unicode calls a space, and an argument may legally hold
+// one: a macOS agent launched from "/Users/me/My Agents/claude-code" arrives
+// as three words, the first two of which are the only ones agentName reads,
+// so a Unicode space in that path would hide the agent entirely.
+func splitASCIISpace(s string) []string {
+	var out []string
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == ' ' {
+			if start >= 0 {
+				out = append(out, s[start:i])
+				start = -1
+			}
+			continue
+		}
+		if start < 0 {
+			start = i
+		}
+	}
+	if start >= 0 {
+		out = append(out, s[start:])
+	}
+	return out
+}
+
 // agentName names the known agent a process is running, or "" when it is not
 // one.
 //

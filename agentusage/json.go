@@ -6,10 +6,8 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
-	"maps"
 	"math"
 	"slices"
-	"strings"
 )
 
 // Transcript JSON is walked by key rather than modeled per agent: envelopes
@@ -119,13 +117,22 @@ func walk(node any, ev *jsonEvent, depth int) {
 	}
 	switch v := node.(type) {
 	case map[string]any:
-		// Keys are visited in sorted order. Map ranges are randomized, so a
-		// record carrying two working-directory keys (or the same key at two
-		// nesting levels) would attribute a different cwd between polls of
-		// one unchanged line, and ownership is judged per record.
-		for _, k := range slices.Sorted(maps.Keys(v)) {
+		// Keys are visited in sorted order, and this level is read before
+		// any subtree. Both fix the same defect: Go randomizes map order, so
+		// a record naming two working directories used to pick a winner at
+		// random and at random depth, and transcript.go caches that winner
+		// for the life of the session. A directory named at the top of the
+		// record is the record's own; one buried in a wrapper is a fallback.
+		// Ownership is judged per record, so one unchanged line must not be
+		// attributed to a different directory on each poll.
+		keys := make([]string, 0, len(v))
+		for k := range v {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		for _, k := range keys {
 			child := v[k]
-			lower := strings.ToLower(k)
+			lower := foldKey(k)
 			if str, isString := child.(string); isString {
 				if cwdKeys[lower] && ev.Cwd == "" {
 					ev.Cwd = str
@@ -134,12 +141,17 @@ func walk(node any, ev *jsonEvent, depth int) {
 			}
 			if isNumberKey(lower) {
 				assign(ev, lower, child)
-				continue
 			}
-			if payloadKeys[lower] {
-				continue
+		}
+		for _, k := range keys {
+			switch child := v[k].(type) {
+			case string, float64: // read above, and neither holds a subtree
+			case nil, bool:
+			default:
+				if !payloadKeys[foldKey(k)] {
+					walk(child, ev, depth+1)
+				}
 			}
-			walk(child, ev, depth+1)
 		}
 	case []any:
 		for _, child := range v {
@@ -150,6 +162,22 @@ func walk(node any, ev *jsonEvent, depth int) {
 
 func isNumberKey(lower string) bool {
 	return outputKeys[lower] || thinkingKeys[lower] || totalKeys[lower] || inputKeys[lower]
+}
+
+// foldKey lowercases a JSON key for the tables above, which hold ASCII names
+// only. Folding with strings.ToLower would also fold runes whose lowercase
+// form is ASCII: U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE) becomes "i"
+// and U+212A (KELVIN SIGN) becomes "k", so a key spelled in either would
+// satisfy an entry like "input_tokens" that its producer never wrote. Only
+// the ASCII letters move; every byte of a multi-byte rune is left alone.
+func foldKey(k string) string {
+	b := []byte(k)
+	for i, c := range b {
+		if c >= 'A' && c <= 'Z' {
+			b[i] = c + ('a' - 'A')
+		}
+	}
+	return string(b)
 }
 
 // assign records a counter, keeping the largest value seen for that field on

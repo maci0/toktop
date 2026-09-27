@@ -227,3 +227,32 @@ func TestPlainFrameMarksDemo(t *testing.T) {
 		t.Errorf("demo plain frame lacks its seed marker:\n%s", out)
 	}
 }
+
+// A sensor label is whatever the driver wrote into hwmon, and --plain is the
+// path a screen reader or a log file consumes. It goes out sanitized like
+// every other externally sourced field, so a driver cannot put a live escape
+// sequence on a terminal that trusts this output.
+func TestPlainTempLabelIsSanitized(t *testing.T) {
+	for _, tc := range []struct {
+		name, label, want string
+	}{
+		{"plain", "package", "temp package 64"},
+		{"title set", "\x1b]0;spoofed\x07core", "temp core 64"},
+		{"csi", "\x1b[31mcore\x1b[0m", "temp core 64"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			snap := busySnap()
+			snap.Sys = &core.SysSample{
+				MemTotal: 32 << 30, MemUsed: 16 << 30,
+				Temps: []core.TempReading{{Label: tc.label, MilliC: 64000}},
+			}
+			out := PlainTextFrame(Config{Version: "t"}, snap)
+			if strings.ContainsRune(out, 0x1b) {
+				t.Fatalf("escape sequence reached the plain frame:\n%s", out)
+			}
+			if !strings.Contains(out, tc.want) {
+				t.Fatalf("plain frame missing %q in:\n%s", tc.want, out)
+			}
+		})
+	}
+}
