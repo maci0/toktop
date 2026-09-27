@@ -471,13 +471,14 @@ func (c *Collector) ring(m map[string]*timedRing, key string) *timedRing {
 	return r
 }
 
-// RecordAgent stores an agent event (called from the ingest server).
+// RecordAgent stores an agent event (called from the ingest server) and
+// reports whether it was retained.
 // Events come from many senders whose clocks disagree (the ingest endpoint
 // can face a LAN), so arrival order is not time order; every consumer reads
 // Agents newest-last (see core.Snapshot), so keep them sorted by timestamp
 // the way the probe ring is. A non-empty ID that is already in the retained
 // window is ignored, so a retried POST of the same event does not double-count.
-func (c *Collector) RecordAgent(ev core.AgentEvent) {
+func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	if ev.At.IsZero() {
 		ev.At = c.instant()
 	}
@@ -490,7 +491,7 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) {
 	if ev.ID != "" {
 		id = norm.NFC.String(ev.ID)
 		if _, dup := c.agentIDs[id]; dup {
-			return
+			return false
 		}
 	}
 	c.agents = core.InsertSorted(append(c.agents, ev), core.AgentCmp)
@@ -506,6 +507,7 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) {
 		}
 		c.agents = c.agents[len(c.agents)-core.AgentHistoryLen:]
 	}
+	return true
 }
 
 // RecordProbe stores a probe sample. Probes complete concurrently and can

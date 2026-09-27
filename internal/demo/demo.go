@@ -253,17 +253,19 @@ func (s *Source) addAgent(ev core.AgentEvent) {
 	}
 }
 
-// RecordAgent lets external scripts push events into the demo feed too.
-func (s *Source) RecordAgent(ev core.AgentEvent) {
+// RecordAgent lets external scripts push events into the demo feed too. It
+// reports whether the event was retained, like a live collector.
+func (s *Source) RecordAgent(ev core.AgentEvent) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if core.HasAgentID(s.agents, ev.ID) {
-		return
+		return false
 	}
 	if ev.At.IsZero() {
 		ev.At = s.stamp()
 	}
 	s.addAgent(ev)
+	return true
 }
 
 func (s *Source) addProbe(p core.ProbeSample) {

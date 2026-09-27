@@ -296,14 +296,15 @@ ports that are then exposed on local loopback (client.go).
   time beyond a 2-minute skew (server.go), so the "live" marker
   cannot be pinned by a claimed far-future stamp. Mixed Latin+Cyrillic/Greek
   agent names collapse to `anonymous` (server.go).
-- *Repudiation*: POST handlers emit remote, request id, status, and accepted
-  count at info on success, warn for rejection/write errors, and error for
+- *Repudiation*: POST handlers emit remote, request id, status, accepted
+  count, and stored count at info on success, warn for rejection/write
+  errors, and error for
   5xx (internal/ingest/server.go). A warn/error log
   floor suppresses successes; error also suppresses 4xx rejections. Request
   ids are caller-supplied correlation labels, not evidence of identity
-  (server.go). Event bodies are excluded, non-loopback IPs are
-  redacted, and the accepted count describes decoded submissions rather
-  than unique retained events (server.go;
+  (server.go). Event bodies are excluded and non-loopback IPs are
+  redacted. The stored count is what the retained feed took, so a replayed
+  id is visible as `accepted` above `stored` (server.go;
   internal/collector/collector.go).
 - *Information disclosure*: none beyond presence (`/healthz` answers any
   requester, server.go). Residual: a routable bind would otherwise have

@@ -52,6 +52,13 @@ func New(addr string, rec core.AgentRecorder) (*Server, error) {
 }
 
 func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, error) {
+	// A server with no recorder answers 202 for every event and shows none of
+	// them, and /healthz still says ok. Refuse the construction instead, so
+	// the caller reports it at startup rather than the endpoint looking fine
+	// while every POST is discarded.
+	if rec == nil {
+		return nil, errors.New("ingest needs a recorder")
+	}
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return nil, err
@@ -82,9 +89,12 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 
 type ctxRequest struct{}
 
+// requestState carries the counts a request accumulated, so a panic after
+// some events were recorded still reports how many the feed actually took.
 type requestState struct {
 	id       string
 	accepted int
+	stored   int
 }
 
 func setSecurityHeaders(h http.Header) {
@@ -116,7 +126,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			if recov == http.ErrAbortHandler {
 				panic(recov)
 			}
-			s.logRequest(r, state.id, http.StatusInternalServerError, state.accepted, time.Since(start),
+			s.logRequest(r, state.id, http.StatusInternalServerError, state.accepted, state.stored, time.Since(start),
 				fmt.Sprintf("panic: %v", recov),
 				"stack", logField(string(debug.Stack()), 2048))
 			http.Error(w, "internal error", http.StatusInternalServerError)
@@ -124,7 +134,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 
 		if r.URL == nil || !knownIngestPath(r.URL.Path) {
 			http.Error(w, "not found; endpoints: POST /v1/events, GET /healthz", http.StatusNotFound)
-			s.logRequest(r, id, http.StatusNotFound, 0, time.Since(start), "not found")
+			s.logRequest(r, id, http.StatusNotFound, 0, 0, time.Since(start), "not found")
 			return
 		}
 		if skipUnhandledLog(r) {
@@ -147,7 +157,7 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 				msg = strings.ToLower(http.StatusText(status))
 			}
 		}
-		s.logRequest(r, id, status, 0, time.Since(start), msg)
+		s.logRequest(r, id, status, 0, 0, time.Since(start), msg)
 	})
 }
 
@@ -283,7 +293,11 @@ func (h addrRedactHandler) WithGroup(name string) slog.Handler {
 	return addrRedactHandler{h.Handler.WithGroup(name)}
 }
 
-func (s *Server) logRequest(r *http.Request, reqID string, status, accepted int, d time.Duration, errMsg string, extra ...any) {
+// logRequest writes the one audit line a finished request produces, success
+// and rejection alike. accepted counts events decoded off the wire, stored how
+// many the feed took: a replayed POST after a lost 202 differs from a first
+// send only in stored.
+func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, stored int, d time.Duration, errMsg string, extra ...any) {
 	if s.log == nil {
 		return
 	}
@@ -298,6 +312,7 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted int,
 		"remote", logRemote(r.RemoteAddr),
 		"status", status,
 		"accepted", accepted,
+		"stored", stored,
 		"duration", d.Round(time.Microsecond),
 	}
 	if errMsg != "" {
@@ -455,16 +470,19 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	if w.Header().Get("X-Request-Id") == "" {
 		w.Header().Set("X-Request-Id", reqID)
 	}
-	done := func(status, accepted int, errMsg string, extra ...any) {
-		s.logRequest(r, reqID, status, accepted, time.Since(start), errMsg, extra...)
+	done := func(status, accepted, stored int, errMsg string, extra ...any) {
+		s.logRequest(r, reqID, status, accepted, stored, time.Since(start), errMsg, extra...)
 	}
-	reject := func(status, accepted int, msg string, extra ...any) {
+	// n counts events decoded off the wire, stored how many the feed took.
+	// A replay of an already-retained id decodes fine and stores nothing.
+	n, stored := 0, 0
+	reject := func(status int, msg string, extra ...any) {
 		sw := &statusWriter{ResponseWriter: w}
 		http.Error(sw, msg, status)
 		if sw.err != nil {
 			extra = append(extra, "response_error", logField(redactLogAddrs(sw.err.Error()), 256))
 		}
-		done(status, accepted, msg, extra...)
+		done(status, n, stored, msg, extra...)
 	}
 
 	// A POST carrying an Origin header is browser-driven: every browser
@@ -480,7 +498,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("Origin") != "" {
 		msg := "browser-originated requests are not accepted; post from a script or agent without an Origin header"
 		armWrite()
-		reject(http.StatusForbidden, 0, msg)
+		reject(http.StatusForbidden, msg)
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)
@@ -492,7 +510,6 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	dec := json.NewDecoder(br)
 	defer r.Body.Close()
-	n := 0
 	replayKey := clientEventKey(r)
 	// fail reports a stream-level error. Events decode-and-record one by one,
 	// so everything before the failing line is already in the feed; saying so
@@ -507,7 +524,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		armWrite()
-		reject(status, n, msg, extra...)
+		reject(status, msg, extra...)
 	}
 	for {
 		var raw json.RawMessage
@@ -569,24 +586,29 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		if ev.ID == "" {
 			ev.ID = derivedEventID(replayKey, n+1)
 		}
-		s.rec.RecordAgent(ev)
+		if s.rec.RecordAgent(ev) {
+			stored++
+		}
 		n++
 		if state != nil {
 			state.accepted = n
+			state.stored = stored
 		}
 	}
 	armWrite()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusAccepted)
-	if _, err := fmt.Fprintf(w, `{"accepted":%d}`+"\n", n); err != nil {
+	// stored is what the feed took, accepted what the wire carried: a sender
+	// retrying after a lost 202 reads the gap here and on its own audit line.
+	if _, err := fmt.Fprintf(w, `{"accepted":%d,"stored":%d}`+"\n", n, stored); err != nil {
 		// The events are already recorded, so the status stands. The reason
 		// still belongs in the audit line: without it a vanished sender and a
 		// timeout mid-body are indistinguishable from success.
-		done(http.StatusAccepted, n, "response write failed: "+redactLogAddrs(err.Error()))
+		done(http.StatusAccepted, n, stored, "response write failed: "+redactLogAddrs(err.Error()))
 		return
 	}
 	_ = rc.SetWriteDeadline(time.Time{}) // keep-alive must not inherit the write cap
-	done(http.StatusAccepted, n, "")
+	done(http.StatusAccepted, n, stored, "")
 }
 
 // clientJSONError turns an encoding/json decode failure into a sender-facing

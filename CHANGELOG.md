@@ -20,6 +20,9 @@ support channel (see SECURITY.md).
 
 ### Changed
 
+- A successful `POST /v1/events` answers `{"accepted":N,"stored":M}` and its
+  log line carries `stored` too, so a sender (or an operator reading stderr)
+  can see that a replayed id decoded and stored nothing.
 - toktop.ai's section nav links `Run`, the first-run command block that had an
   anchor but no link.
 - The `ssh://` discovery sweep sends at most the first 4096 bytes of each

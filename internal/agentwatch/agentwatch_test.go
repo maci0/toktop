@@ -28,10 +28,11 @@ type recorder struct {
 	events []core.AgentEvent
 }
 
-func (r *recorder) RecordAgent(ev core.AgentEvent) {
+func (r *recorder) RecordAgent(ev core.AgentEvent) bool {
 	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.events = append(r.events, ev)
-	r.mu.Unlock()
+	return true
 }
 
 func (r *recorder) all() []core.AgentEvent {
@@ -592,13 +593,14 @@ type idRecorder struct {
 	events []core.AgentEvent
 }
 
-func (r *idRecorder) RecordAgent(ev core.AgentEvent) {
+func (r *idRecorder) RecordAgent(ev core.AgentEvent) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if core.HasAgentID(r.events, ev.ID) {
-		return
+		return false
 	}
 	r.events = append(r.events, ev)
+	return true
 }
 
 func (r *idRecorder) all() []core.AgentEvent {

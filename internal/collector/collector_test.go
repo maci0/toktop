@@ -745,6 +745,21 @@ func TestRecordAgentSameIDKeptOnce(t *testing.T) {
 	}
 }
 
+// The ingest server reports what the feed took in its 202 body and its audit
+// line, so the recorder has to say which of the two happened.
+func TestRecordAgentReportsStored(t *testing.T) {
+	c := New(nil, time.Second)
+	if !c.RecordAgent(core.AgentEvent{At: time.Now(), ID: "turn-1", Agent: "coder"}) {
+		t.Fatal("first store reported a duplicate")
+	}
+	if c.RecordAgent(core.AgentEvent{At: time.Now(), ID: "turn-1", Agent: "coder"}) {
+		t.Fatal("replayed id reported as stored")
+	}
+	if !c.RecordAgent(core.AgentEvent{At: time.Now(), ID: "turn-2", Agent: "coder"}) {
+		t.Fatal("distinct id reported as a duplicate")
+	}
+}
+
 // emit launches one goroutine per provider and waits; they must all return
 // so the leak profile stays empty. A leaked poll goroutine would show up
 // here after GC, the same way a production dashboard would accumulate them.

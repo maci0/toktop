@@ -227,8 +227,12 @@ Event fields are all optional; anything omitted gets the default:
 | `via_engine` | string | - | monitored engine already counting this output; aggregates skip the event; capped at 128 characters |
 | `note` | string | - | free-form, capped at 512 characters |
 
-One POST answers `202` with `{"accepted":N}` once every event in the stream
-is recorded, `400` for malformed JSON or a bad `ts`, `408` when a stream
+One POST answers `202` with `{"accepted":N,"stored":M}` once every event in
+the stream is decoded, where `accepted` is what the wire carried and
+`stored` is what the retained feed took. A replayed event (an id already
+in the window) decodes fine and stores nothing, so the two counts differ
+on a retry after a lost 202. The same pair is on the POST's log line.
+Other statuses: `400` for malformed JSON or a bad `ts`, `408` when a stream
 stalls mid-body, and `413` past the 1 MiB body cap. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
 refused with `403`, so a web page cannot forge rows into a running
@@ -240,7 +244,8 @@ harnesses can include their own. The request `Content-Type` header is not
 checked: the body is always read as JSON/NDJSON, so plain `curl -d` works
 unmodified.
 Every POST is logged to stderr as one structured line (`req`, `method`,
-`path`, `status`, `accepted`, `duration`, `remote`; failures add `error`).
+`path`, `status`, `accepted`, `stored`, `duration`, `remote`; failures add
+`error`).
 Wrong-method and unknown-path requests log the same way, so a harness
 posting to `/events` is not silent. `GET /healthz` is not logged. Event
 bodies are not logged. A handler panic is one ERROR
@@ -252,6 +257,8 @@ stay recorded and the error states how many. Retrying a stream (or a
 successful POST whose 202 was lost) is safe when each event carries a stable
 `id`, or when the POST carries `Idempotency-Key` (filled in for events that
 omit `id`). Without either, replaying the kept lines would duplicate them.
+Such a replay answers `202` with `stored` below `accepted` and logs the
+same pair, so a sender can tell the two apart.
 
 ## Zero vendor libraries
 

@@ -94,8 +94,11 @@ const (
 )
 
 // AgentRecorder is the sink for agent events (ingest HTTP and --agents).
+// RecordAgent reports whether the event reached the retained feed: false
+// means the id was already there, so a sender retrying a POST whose response
+// was lost is told its replay stored nothing.
 type AgentRecorder interface {
-	RecordAgent(ev AgentEvent)
+	RecordAgent(ev AgentEvent) bool
 }
 
 // AgentEvent is a token-usage event pushed by an agent or harness. The HTTP

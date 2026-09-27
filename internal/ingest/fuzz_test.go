@@ -75,8 +75,8 @@ func FuzzHandlePost(f *testing.F) {
 				t.Fatal("202 accepted but no event recorded")
 			}
 			// Events written to the wire must match those actually recorded.
-			var ack int
-			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d}`, &ack); n != 1 || ack != len(rec.evs) {
+			var ack, stored int
+			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 || ack != len(rec.evs) || stored != len(rec.evs) {
 				t.Fatalf("ack %q vs %d recorded events", respBody, len(rec.evs))
 			}
 		case http.StatusBadRequest, http.StatusRequestEntityTooLarge:

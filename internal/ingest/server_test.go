@@ -22,7 +22,10 @@ import (
 
 type memRecorder struct{ evs []core.AgentEvent }
 
-func (m *memRecorder) RecordAgent(ev core.AgentEvent) { m.evs = append(m.evs, ev) }
+func (m *memRecorder) RecordAgent(ev core.AgentEvent) bool {
+	m.evs = append(m.evs, ev)
+	return true
+}
 
 // post sends body and returns the status code, draining the response so
 // keep-alive connections are reusable.
@@ -116,11 +119,12 @@ func TestIngestForwardsId(t *testing.T) {
 // a no-op the way a body id already does.
 type onceRecorder struct{ evs []core.AgentEvent }
 
-func (m *onceRecorder) RecordAgent(ev core.AgentEvent) {
+func (m *onceRecorder) RecordAgent(ev core.AgentEvent) bool {
 	if core.HasAgentID(m.evs, ev.ID) {
-		return
+		return false
 	}
 	m.evs = append(m.evs, ev)
+	return true
 }
 
 func postWithHeader(t *testing.T, url, body, header, value string) int {
@@ -1149,6 +1153,7 @@ func TestIngestLogsPostOutcome(t *testing.T) {
 		"path=/v1/events",
 		"status=202",
 		"accepted=1",
+		"stored=1",
 		"duration=",
 		"remote=",
 	} {
@@ -1182,6 +1187,44 @@ func TestIngestLogsPostOutcome(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("failure log missing %q: %s", want, got)
 		}
+	}
+}
+
+// A sender retrying after a lost 202 gets 202 again, so the status and the
+// accepted count alone cannot tell a first send from a replay. The stored
+// count is what says the feed kept nothing: without it a duplicated row looks
+// exactly like a working one.
+func TestIngestReportsReplayStoredNothing(t *testing.T) {
+	lg, buf := captureLogger()
+	rec := &onceRecorder{}
+	s := startIngestLog(t, rec, lg)
+	url := "http://" + s.Addr() + "/v1/events"
+	body := `{"id":"turn-1","agent":"coder","output_tokens":7}`
+
+	code, got := postBody(t, url, body)
+	if code != http.StatusAccepted || !strings.Contains(got, `"stored":1`) {
+		t.Fatalf("first send: status = %d, body = %q", code, got)
+	}
+
+	buf.Reset()
+	code, got = postBody(t, url, body)
+	if code != http.StatusAccepted || !strings.Contains(got, `"stored":0`) {
+		t.Fatalf("replay: status = %d, body = %q", code, got)
+	}
+	for _, want := range []string{"status=202", "accepted=1", "stored=0"} {
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("replay audit line missing %q: %s", want, buf.String())
+		}
+	}
+}
+
+// A server with no recorder would answer 202 for every event and show none,
+// with /healthz still reporting ok. Refuse it instead of binding.
+func TestNewServerNeedsRecorder(t *testing.T) {
+	s, err := newServer("127.0.0.1:0", nil, slog.New(slog.DiscardHandler))
+	if err == nil {
+		s.Close()
+		t.Fatal("nil recorder accepted")
 	}
 }
 
@@ -1504,7 +1547,7 @@ func TestIngestLogsWrongMethod(t *testing.T) {
 
 type panicRecorder struct{}
 
-func (panicRecorder) RecordAgent(core.AgentEvent) { panic("recorder boom") }
+func (panicRecorder) RecordAgent(core.AgentEvent) bool { panic("recorder boom") }
 
 func TestIngestLogsHandlerPanic(t *testing.T) {
 	lg, buf := captureLogger()
@@ -1552,11 +1595,11 @@ func TestIngestLogsHandlerPanic(t *testing.T) {
 
 type partialPanicRecorder struct{ memRecorder }
 
-func (m *partialPanicRecorder) RecordAgent(ev core.AgentEvent) {
+func (m *partialPanicRecorder) RecordAgent(ev core.AgentEvent) bool {
 	if len(m.evs) == 1 {
 		panic("recorder boom")
 	}
-	m.memRecorder.RecordAgent(ev)
+	return m.memRecorder.RecordAgent(ev)
 }
 
 func TestIngestPanicLogsPartialProgress(t *testing.T) {
