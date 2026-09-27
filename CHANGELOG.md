@@ -13,6 +13,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- On Windows, a process's CPU time is converted from the 100-nanosecond units
+  Win32 reports into the same jiffies the other platforms count. The divisor
+  was 100 of those units per jiffy instead of 100,000, so a process using half
+  a core was reported as using five hundred, and anything busier than that
+  sat at the panel's ceiling.
+
 ## [0.16.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on
