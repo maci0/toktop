@@ -201,36 +201,11 @@ func (c *Collector) SetSysFn(fn func() core.SysSample) {
 	c.sysMu.Unlock()
 }
 
-// startPoller runs one background refresh loop until ctx is done, calling
-// warm once up front and refresh on every tick. The two pollers differ only
-// in what a refresh does.
-func startPoller(ctx context.Context, every time.Duration, warm, refresh func()) <-chan struct{} {
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		t := time.NewTicker(every)
-		defer t.Stop()
-		warm()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if ctx.Err() != nil {
-					return
-				}
-				refresh()
-			}
-		}
-	}()
-	return done
-}
-
 // startSysPoller refreshes host vitals in the background; emit never blocks
 // on it (GPU vendor CLIs can take seconds and would stall every frame). Run
 // warms the cache before emitting, so this first pass is a cache hit.
 func (c *Collector) startSysPoller(ctx context.Context) <-chan struct{} {
-	return startPoller(ctx, c.interval,
+	return core.Tick(ctx, c.interval,
 		func() { c.sampleSys(false) },
 		func() { c.sampleSys(true) })
 }
@@ -280,7 +255,7 @@ func (c *Collector) startProcPoller(ctx context.Context) <-chan struct{} {
 			c.procMu.Unlock()
 		}
 	}
-	return startPoller(ctx, c.interval, refresh, refresh)
+	return core.Tick(ctx, c.interval, refresh, refresh)
 }
 
 // procSnapshot returns the latest cached engine processes, detached from the
@@ -304,20 +279,10 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
 	c.sampleSys(false)
 	sysDone := c.startSysPoller(ctx)
 	defer func() { <-sysDone }()
-	t := time.NewTicker(c.interval)
-	defer t.Stop()
-	c.emit(ctx, out) // immediate first frame
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-			if ctx.Err() != nil {
-				return
-			}
-			c.emit(ctx, out)
-		}
-	}
+	// The emit loop is joined, not raced: Run must not return while a frame
+	// is still being written to out.
+	emit := func() { c.emit(ctx, out) }
+	<-core.Tick(ctx, c.interval, emit, emit)
 }
 
 // result is one engine's poll outcome, paired so the fan-out can write each

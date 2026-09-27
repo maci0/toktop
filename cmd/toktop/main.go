@@ -275,7 +275,11 @@ func main() {
 		recorder = col
 
 		if f.probeSecs > 0 {
-			startProbeTicker(ctx, prober, time.Duration(f.probeSecs)*time.Second)
+			// Fire one probe at startup rather than waiting out the first
+			// interval: --probe should put a request on the wire when the
+			// dashboard comes up. Nothing joins the returned channel, so the
+			// loop ends with ctx.
+			core.Tick(ctx, time.Duration(f.probeSecs)*time.Second, prober, prober)
 		}
 	}
 
@@ -385,29 +389,6 @@ func main() {
 	}
 
 	os.Exit(runTUI(ctx, cfg, ch, !f.noReload))
-}
-
-// startProbeTicker fires prober once straight away and then every d, until
-// the context is canceled. The first call is not deferred to the first tick:
-// --probe should put a request on the wire when the dashboard comes up, not
-// one interval later.
-func startProbeTicker(ctx context.Context, prober func(), d time.Duration) {
-	go func() {
-		t := time.NewTicker(d)
-		defer t.Stop()
-		prober()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-t.C:
-				if ctx.Err() != nil {
-					return
-				}
-				prober()
-			}
-		}
-	}()
 }
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the
