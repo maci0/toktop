@@ -151,6 +151,10 @@ func getText(ctx context.Context, c *http.Client, url string) (string, error) {
 // never publishes a version is not probed on every scrape, and resolved
 // ones are re-asked after versionRefresh so an engine replaced under a
 // running dashboard does not report its old version until the next start.
+//
+// The mutex guards the three fields and nothing else: the probe runs with it
+// released, so a stalled endpoint costs the fetch that asked it and not every
+// other reader of the cache.
 type versionCache struct {
 	mu       sync.Mutex
 	resolved bool
@@ -220,25 +224,64 @@ func versionWindow(resolved bool) time.Duration {
 // fetch probes common engine version endpoints and caches the first success.
 // Engines differ wildly here: /api/version (Ollama-style), /version (vLLM,
 // llama.cpp), /get_server_info (SGLang embeds one).
+//
+// The probe runs with c.mu released. It is up to three HTTP round trips under
+// the caller's context, and holding the cache mutex across them pins every
+// other reader of this cache for the whole chain: a version cache is shared by
+// a provider's poll and by an ad-hoc Identify, and one engine that stalls on
+// /api/version would then block the /version answer behind it as well.
+// versionInstant is called with no lock held for the same reason it is
+// documented that way: it is caller-supplied, and a simulated clock takes the
+// demo source's own mutex.
 func (c *versionCache) fetch(ctx context.Context, base string) string {
+	now := versionInstant()
+	if v, fresh := c.fresh(now); fresh {
+		return v
+	}
+	val, resolved := c.probe(ctx, base)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	now := versionInstant()
-	if !c.at.IsZero() && core.Age(now, c.at) < versionWindow(c.resolved) {
+	// A probe that finished behind a newer one stores nothing: the later
+	// stamp is the one the window has to be measured from, and overwriting it
+	// with an older one would age the entry by a whole extra refresh. Both
+	// probes read the same endpoints, so the value is the same either way.
+	if c.at.After(now) {
 		return c.val
 	}
+	c.at = now
+	if resolved {
+		c.val, c.resolved = val, true
+	}
+	return c.val
+}
+
+// fresh reports the cached version when the window it was recorded in still
+// stands, and whether the caller should probe instead. A cache that has never
+// been written is not fresh, and neither is one whose last probe has aged out
+// of versionWindow.
+func (c *versionCache) fresh(now time.Time) (string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.at.IsZero() || core.Age(now, c.at) >= versionWindow(c.resolved) {
+		return "", false
+	}
+	return c.val, true
+}
+
+// probe asks the engine's known version endpoints in turn and reports the
+// first usable answer. Every request is bounded by ctx, so a chain against a
+// wedged engine costs the caller's budget and not more.
+func (c *versionCache) probe(ctx context.Context, base string) (string, bool) {
 	for _, path := range []string{"/api/version", "/version", "/get_server_info"} {
 		text, err := getText(ctx, httpClient, base+path)
 		if err != nil {
 			continue
 		}
 		if val := extractVersionField(text); val != "" {
-			c.val, c.resolved, c.at = val, true, now
-			return c.val
+			return val, true
 		}
 	}
-	c.at = now
-	return c.val
+	return "", false
 }
 
 // versionCap is the bound capVersion applies, so every branch of

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -818,6 +819,65 @@ func fakeClock(t *testing.T) func(time.Duration) {
 	SetNow(func() time.Time { return cur })
 	t.Cleanup(func() { SetNow(nil) })
 	return func(d time.Duration) { cur = cur.Add(d) }
+}
+
+// The version chain is up to three HTTP round trips under the caller's
+// context, and a cache shared by a poll and an ad-hoc identify must not pin
+// one behind the other for the whole of it. A second fetch reaches the engine
+// and answers while the first is still sitting on /api/version, so a wedged
+// endpoint costs the fetch that asked for it and nobody else.
+func TestVersionCacheProbeDoesNotHoldTheCacheLock(t *testing.T) {
+	entered := make(chan struct{}, 1)
+	gate := make(chan struct{})
+	var reqs atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if reqs.Add(1) == 1 { // the first probe stalls until the test releases it
+			entered <- struct{}{}
+			<-gate
+		}
+		fmt.Fprint(w, `{"version":"4.5.0"}`)
+	}))
+	release := sync.OnceFunc(func() { close(gate) })
+	defer srv.Close()
+	defer release() // runs before srv.Close, which waits for the handler
+
+	fakeClock(t)
+	var vc versionCache
+	first := make(chan string, 1)
+	go func() { first <- vc.fetch(context.Background(), srv.URL) }()
+	select {
+	case <-entered:
+	case <-time.After(10 * time.Second):
+		t.Fatal("first fetch never reached the engine")
+	}
+
+	// The stalled probe is holding no cache lock. A fetch that took c.mu
+	// around the whole chain would fail this the moment the engine answered
+	// /api/version, and would pin every other reader of the cache for three
+	// round trips a time.
+	if !vc.mu.TryLock() {
+		t.Error("an in-flight version probe holds the cache lock")
+	} else {
+		vc.mu.Unlock()
+	}
+
+	// And the second fetch gets there on its own, rather than waiting for the
+	// gate the first one is parked on.
+	second := make(chan string, 1)
+	go func() { second <- vc.fetch(context.Background(), srv.URL) }()
+	select {
+	case got := <-second:
+		if got != "4.5.0" {
+			t.Fatalf("concurrent fetch = %q, want 4.5.0", got)
+		}
+	case <-time.After(10 * time.Second):
+		t.Error("concurrent fetch blocked behind an in-flight probe")
+	}
+
+	release()
+	if got := <-first; got != "4.5.0" {
+		t.Fatalf("stalled fetch = %q, want 4.5.0", got)
+	}
 }
 
 // Engines explain rejections in the error body (OOM, bad api key, model
