@@ -16,6 +16,17 @@ Deploy credentials come from the environment (`CLOUDFLARE_API_TOKEN`, or a
 `wrangler` login already on the machine); nothing about them is written to
 this repo.
 
+`make site-rollback` runs once. `wrangler rollback` with no version undoes
+whichever deployment is most recent, whoever shipped it, so running the undo
+twice rolls back a rollback and puts the version that broke back on the site.
+A deploy that reported success leaves `dist/site.deployed` behind, and a
+rollback moves it to `dist/site.rolled-back`: a second rollback finds nothing
+of this tree's to undo, says so, and exits 0 without calling wrangler at all.
+The markers are directories under `dist/`, so `make dist-clean` leaves them
+alone and `make clean` takes them with the rest of `dist/`. They record what
+this tree did, not what the site is serving, so on a machine that never ran
+`make site-deploy` a rollback is a no-op rather than a guess.
+
 `worker.js` holds the HTML: it is a template literal, so there is nothing to
 bundle. The palette lives in the `DARK` and `LIGHT` objects at the top of that
 file, and the CSS, the light scheme and the favicon all interpolate from them:

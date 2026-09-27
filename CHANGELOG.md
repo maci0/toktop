@@ -110,6 +110,12 @@ support channel (see SECURITY.md).
 
 ### Fixed
 
+- `make site-rollback` runs once. `wrangler rollback` with no version undoes
+  the most recent deployment whoever shipped it, so a second run rolled back a
+  rollback and put the version that broke back on the site. A deploy that
+  reported success now records `dist/site.deployed` and a rollback moves it to
+  `dist/site.rolled-back`, so a second rollback finds nothing of this tree's
+  to undo, says so, and exits 0 without calling wrangler.
 - `make site-rollback` waits for `/health` before it reports success, the way
   `make site-deploy` already did. A rollback that restored a Worker which
   never came up exited 0, so the only signal that the site was down was a

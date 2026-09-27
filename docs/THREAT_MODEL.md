@@ -205,8 +205,13 @@ Every externally reachable input, with its code location:
     `https://toktop.ai/health` 6 times, 10s apart, and exit non-zero when
     the site never answers `ok`; a failed deploy names
     `make site-rollback` as the next step (Makefile site-deploy /
-    site-rollback, SITE_GUARD, WRANGLER, SITE_LOCK, SITE_HEALTH_URL,
-    SITE_HEALTH_TRIES, SITE_HEALTH_WAIT). The poll is an
+    site-rollback, SITE_GUARD, WRANGLER, SITE_LOCK, SITE_DEPLOYED,
+    SITE_ROLLED_BACK, SITE_HEALTH_URL,
+    SITE_HEALTH_TRIES, SITE_HEALTH_WAIT). A rollback undoes the most recent
+    deployment whoever shipped it, so a deploy that reported success records
+    `dist/site.deployed` and a rollback moves it to `dist/site.rolled-back`:
+    a second rollback has nothing of this tree's to undo and exits 0 without
+    calling wrangler. The poll is an
     availability check: an upload that never took effect still answers `ok`
     from the version already live. The deploy tool is fetched from the
     npm registry at run time by version tag rather than from a lockfile, and
@@ -254,11 +259,13 @@ Deployment surface:
   the HTML is a compile-time string.
   Deployment is a local make target, not a CI job: `make site-deploy`
   takes `dist/site.lock`, runs `bunx wrangler@4.126.0 deploy` with ambient
-  Cloudflare credentials, polls `https://toktop.ai/health` 6 times at 10s,
+  Cloudflare credentials, records `dist/site.deployed`, polls
+  `https://toktop.ai/health` 6 times at 10s,
   and points at `make site-rollback` on failure. The lock, the poll and
   the failure exit are shared with `make site-rollback`, so a rollback
   cannot race a deploy and cannot report success over a site that is not
-  answering (Makefile, 263-310).
+  answering, and the recorded marker makes the rollback itself run once
+  (Makefile, 290-330).
 
 ## Trust boundaries and data flow
 
@@ -686,7 +693,9 @@ Recorded as threats with locations; fixes do not happen in this document:
    site. The `/health` poll and `site-rollback` are the only recovery
    controls: the poll proves the site answers, not that this tree is what
    answers, and `dist/site.lock` serializes the two make targets against
-   each other but not against a deploy run outside them.
+   each other but not against a deploy run outside them. A rollback run
+   twice is the one repeat that does damage here, which is why it needs
+   `dist/site.deployed`: it is a no-op rather than a second undo.
 9. **Discovery port bound missing on the shell-probe fallback** (Low, new
    this pass): when the `/proc/net/tcp` sweep returns nothing, `Discover`
    falls back to probing well-known ports through the remote shell and

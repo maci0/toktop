@@ -58,6 +58,17 @@ SITE_HEALTH_WAIT  := 10
 # Serializes site-deploy against site-deploy and site-rollback. Under dist/,
 # which .gitignore already covers, so a released lock is never committed.
 SITE_LOCK         := $(DIST)/site.lock
+# `wrangler rollback` with no argument undoes whichever deployment is most
+# recent, whoever shipped it. That is the one operation here whose second run
+# does damage: a rollback of a rollback puts the version that broke back on
+# the site, at the exact moment somebody is trying to get away from it. These
+# two record whether a deploy from this tree is still waiting to be undone, so
+# the second rollback finds nothing of this tree's to undo and says so.
+# Directories, like the lock: dist-clean deletes the top-level files a release
+# must not ship and leaves these alone, and `make clean` takes them with
+# dist/.
+SITE_DEPLOYED     := $(DIST)/site.deployed
+SITE_ROLLED_BACK  := $(DIST)/site.rolled-back
 LDFLAGS     := -s -w -buildid= -X main.version=$(VERSION)
 # gofmt from the selected toolchain, not a different major on PATH.
 GOFMT = $$($(GO) env GOROOT)/bin/gofmt
@@ -301,12 +312,21 @@ endef
 site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wait for /health
 	@$(SITE_GUARD) \
 	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
+	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
+	mkdir -p $(SITE_DEPLOYED) || { echo "deployed, but cannot record $(SITE_DEPLOYED); the next 'make site-rollback' would find nothing to undo" >&2; exit 1; }; \
 	wait_for_site || { echo "deploy finished but the site is not serving; roll back with 'make site-rollback'" >&2; exit 1; }
 
 .PHONY: site-rollback
 site-rollback: require-bun ## roll the site Worker back to the version before the last deploy, then wait for /health
 	@$(SITE_GUARD) \
+	if [ ! -d $(SITE_DEPLOYED) ]; then \
+		echo "nothing to roll back: no deploy from this tree is waiting to be undone ($(SITE_DEPLOYED) is absent)"; \
+		echo "'wrangler rollback' with no version undoes the most recent deployment whoever shipped it, so a second run here would roll back a rollback and put the version you just undid back on the site"; \
+		exit 0; \
+	fi; \
 	(cd site && bunx wrangler@$(WRANGLER) rollback) || exit 1; \
+	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
+	mv $(SITE_DEPLOYED) $(SITE_ROLLED_BACK) || { echo "rolled back, but cannot move $(SITE_DEPLOYED) aside; the next 'make site-rollback' would undo this one as well" >&2; exit 1; }; \
 	wait_for_site || { echo "rollback finished but the site is not serving; retry, or read the deployment log in the Cloudflare dashboard" >&2; exit 1; }
 
 .PHONY: fmt
