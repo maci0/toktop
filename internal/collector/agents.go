@@ -58,7 +58,9 @@ func (c *Collector) forgetAgedAgentIDs(cutoff time.Time) {
 // Agents newest-last (see core.Snapshot), so keep them sorted by timestamp
 // the way the probe ring is. A non-empty ID already recorded within
 // agentIDHorizon is ignored, so a retried POST of the same event does not
-// double-count, however long after the first send it arrives.
+// double-count, however long after the first send it arrives. An event that
+// sorts behind the whole retained window is refused too, so the answer stays
+// what a sender is told: the feed took this, or it did not.
 func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	now := c.instant()
 	if ev.At.IsZero() {
@@ -80,10 +82,24 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 			return false
 		}
 	}
-	// Sorted insert and the window trim are one call: AppendSorted drops
-	// whatever falls outside the newest AgentHistoryLen as it inserts, so a
-	// caller cannot keep one event too many or one too few.
-	c.agents = core.AppendSorted(c.agents, ev, core.AgentHistoryLen, core.AgentCmp)
+	// Sorted insert and the window trim are one call, and the trim reports
+	// itself: AppendRetained drops whatever falls outside the newest
+	// AgentHistoryLen as it inserts, so a caller cannot keep one event too
+	// many or one too few, and an event that would be trimmed on arrival is
+	// refused instead of silently discarded.
+	agents, kept := core.AppendRetained(c.agents, ev, core.AgentHistoryLen, core.AgentCmp)
+	if !kept {
+		// The event sorts behind every entry the feed retains, so the window
+		// would trim it the moment it landed: nothing downstream would read it,
+		// and its tokens would be missing from every total. Answering stored
+		// would report it on the 202 body and the audit line anyway, where a
+		// gap below accepted is documented as a replay. A sender whose clock
+		// runs behind sees the same honest "kept nothing" it already gets for
+		// a duplicate. Its id is not ledgered: no entry was retained, so there
+		// is no duplicate for the ledger to suppress.
+		return false
+	}
+	c.agents = agents
 	if id != "" {
 		// The ledger is keyed on the recording instant, not the event's own
 		// timestamp: a replay carries the sender's clock, and a forged or

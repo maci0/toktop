@@ -296,7 +296,9 @@ func (s *Source) addAgent(ev core.AgentEvent) {
 }
 
 // RecordAgent lets external scripts push events into the demo feed too. It
-// reports whether the event was retained, like a live collector.
+// reports whether the event was retained, like a live collector: false for an
+// id the feed already holds, and for an event that sorts behind the retained
+// window, which the feed would trim on arrival.
 func (s *Source) RecordAgent(ev core.AgentEvent) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -306,7 +308,11 @@ func (s *Source) RecordAgent(ev core.AgentEvent) bool {
 	if ev.At.IsZero() {
 		ev.At = s.stamp()
 	}
-	s.addAgent(ev)
+	agents, kept := core.AppendRetained(s.agents, ev, core.AgentHistoryLen, core.AgentCmp)
+	if !kept {
+		return false
+	}
+	s.agents = agents
 	return true
 }
 

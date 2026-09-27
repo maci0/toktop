@@ -122,9 +122,11 @@ const (
 
 // AgentRecorder is the sink for agent events (ingest HTTP and --agents).
 // RecordAgent reports whether the event reached the retained feed: false
-// means the id was already recorded inside the recorder's dedup window, so a
-// sender retrying a POST whose response was lost is told its replay stored
-// nothing.
+// means it was not kept, either because the id was already recorded inside
+// the recorder's dedup window or because it sorted behind the whole retained
+// window, so a sender retrying a POST whose response was lost is told its
+// replay stored nothing and an event too old to display is not counted as
+// stored either.
 type AgentRecorder interface {
 	RecordAgent(ev AgentEvent) bool
 }
@@ -232,6 +234,22 @@ func InsertSorted[T any](s []T, cmp func(a, b T) int) []T {
 	copy(s[i+1:], s[i:])
 	s[i] = item
 	return s
+}
+
+// AppendRetained appends item to a newest-last feed of at most max entries
+// and reports whether it was retained.
+//
+// An item sorting at or ahead of the oldest entry the feed already holds is
+// what [AppendSorted] would trim away on the same call: it would be dropped
+// the instant it landed, and no consumer would ever read it. Refusing it
+// instead keeps "did the feed take it" a truthful answer for a caller that
+// reports the count back to a sender, and keeps the id a caller ledgers for
+// suppressed replays off entries nothing holds.
+func AppendRetained[T any](s []T, item T, max int, cmp func(a, b T) int) ([]T, bool) {
+	if len(s) == max && cmp(item, s[0]) <= 0 {
+		return s, false
+	}
+	return AppendSorted(s, item, max, cmp), true
 }
 
 // TempReading is one thermal sensor value in millidegrees Celsius.

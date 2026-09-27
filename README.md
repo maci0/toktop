@@ -286,7 +286,11 @@ the stream is decoded, where `accepted` is what the wire carried and
 `stored` is what the retained feed took. A replayed event (an id already
 recorded within the last 15 minutes) decodes fine and stores nothing, so the
 two counts differ
-on a retry after a lost 202. The same pair is on the POST's log line.
+on a retry after a lost 202. So does an event stamped behind the whole
+retained window: the feed holds the newest 512 events, and one older than all
+of them would be dropped before any consumer read it. `ts` is not clamped
+backwards, so a sender whose clock runs behind sees the gap on the same
+count. The same pair is on the POST's log line.
 Other statuses: `400` for malformed JSON or a bad `ts`, `408` when a stream
 stalls mid-body (the body names which bound broke: no bytes for a minute, or
 the 10 minute lifetime), and `413` past the 1 MiB body cap. `503` with

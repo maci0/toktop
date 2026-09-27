@@ -817,6 +817,47 @@ func TestRecordAgentReportsStored(t *testing.T) {
 	}
 }
 
+// The feed retains the newest AgentHistoryLen events. An event stamped behind
+// every one of them is what the window trims on arrival, so reporting it
+// stored would put a kept-nothing event on the 202 body and the audit line,
+// where the gap below accepted is documented as a replay. It must be refused,
+// and its id left out of the ledger: no entry was retained, so there is no
+// duplicate for the ledger to suppress.
+func TestRecordAgentRefusesEventBehindRetainedWindow(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
+	c := New(nil, time.Second)
+	c.SetNow(func() time.Time { return now })
+	for i := range core.AgentHistoryLen {
+		now = base.Add(time.Duration(i) * time.Second)
+		c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("n%d", i), Agent: "a"})
+	}
+	if len(c.agents) != core.AgentHistoryLen {
+		t.Fatalf("feed holds %d events, want %d", len(c.agents), core.AgentHistoryLen)
+	}
+	oldest := c.agents[0].At
+	if c.RecordAgent(core.AgentEvent{At: oldest.Add(-time.Second), ID: "stale", Agent: "a", OutputTokens: 9}) {
+		t.Fatal("an event older than the retained window reported as stored")
+	}
+	if len(c.agents) != core.AgentHistoryLen {
+		t.Fatalf("feed holds %d events after the refusal, want %d", len(c.agents), core.AgentHistoryLen)
+	}
+	if !c.agents[0].At.Equal(oldest) {
+		t.Fatal("the refused event displaced the oldest retained one")
+	}
+	if core.HasAgentID(c.agents, "stale") {
+		t.Fatal("the refused event is in the feed")
+	}
+	if _, ok := c.agentIDs["stale"]; ok {
+		t.Fatal("the refused event's id is ledgered")
+	}
+	// The newest event still lands: only what cannot be retained is refused.
+	now = base.Add((core.AgentHistoryLen + 1) * time.Second)
+	if !c.RecordAgent(core.AgentEvent{At: now, ID: "fresh", Agent: "a", OutputTokens: 1}) {
+		t.Fatal("a newer event was refused")
+	}
+}
+
 // emit launches one goroutine per provider and waits; they must all return
 // so a second frame draws no more goroutines than the first. A leaked poll
 // goroutine would stay live for the rest of the run, the same way a
