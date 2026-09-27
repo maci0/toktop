@@ -16,7 +16,8 @@ function htmlForWire(source) {
 // 1280w capture, 39,708 bytes for 722 pixels of it. 1920w is the 2x desktop
 // slot.
 // The img omits decoding=async so the browser does not postpone the LCP decode.
-const HERO_SIZES = "(max-width: 640px) calc(100vw - 1.7rem - 2px), calc(min(76rem, 100vw - 2.5rem) - 2px)";
+const HERO_SIZES =
+  "(max-width: 640px) calc(100vw - 1.7rem - 2px), calc(min(76rem, 100vw - 2.5rem) - 2px)";
 const HERO_AVIF_SRCSET =
   "/dashboard-768.avif 768w, /dashboard-1280.avif 1280w, /dashboard.avif 1920w";
 const HERO_WEBP_SRCSET =
@@ -634,14 +635,9 @@ async function handle(request, env, started) {
     if (!env?.ASSETS) {
       // Every image on the page is now a 404 and /health reports the missing
       // binding, so this is the line that names the request behind it.
-      return failRequest(
-        request,
-        started,
-        404,
-        "assets-unbound",
-        "not found",
-        { path: url.pathname },
-      );
+      return failRequest(request, started, 404, "assets-unbound", "not found", {
+        path: url.pathname,
+      });
     }
     // Images are already compressed. Clone-with-headers keeps
     // Accept-Encoding (a forbidden header), so this is a new request
@@ -727,10 +723,7 @@ async function handle(request, env, started) {
   }
   // One page: anything else is that page too, rather than a 404 nobody
   // learns anything from.
-  const chosen = await representationFor(
-    request.headers.get("accept-encoding"),
-    request,
-  );
+  const chosen = await representationFor(request.headers.get("accept-encoding"), request);
   if (chosen === null) {
     return errorResponse(started, 406, request.method === "HEAD" ? null : "not acceptable", {
       vary: VARY,

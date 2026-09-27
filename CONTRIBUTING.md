@@ -157,7 +157,8 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
 | `make govulncheck` | `govulncheck` over both sqlite tag halves at the Makefile pin (same pin as CI) |
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
-| `make site-lint` | biome over `site/` at the Makefile `BIOME` pin (CI parity) |
+| `make site-lint` | biome format-check and lint over `site/` at the Makefile `BIOME` pin (CI parity) |
+| `make site-fmt` | rewrite `site/` with the biome formatter, then re-lint |
 | `make site-check` | `bun test site/` |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
@@ -187,8 +188,9 @@ make pr
 ```
 
 That is `make ci` (gofmt, tidy, staticcheck, vet, govulncheck, race tests for
-both sqlite tag halves), `make site-lint` (biome over the Worker, at the
-`BIOME` pin in the Makefile, config in `biome.jsonc`), `make site-check`
+both sqlite tag halves), `make site-lint` (biome formatter and linter over the
+Worker, at the `BIOME` pin in the Makefile, config in `biome.jsonc`; run
+`make site-fmt` to apply the formatter), `make site-check`
 (`bun test site/`), `make scripts-check`, and `make repro-check-pair`.
 `scripts-check` installs the exact versions in
 `scripts/requirements-dev.txt` into an isolated env under `dist/`

@@ -163,9 +163,10 @@ re-measurable with it:
 bun test site/    # or `make site-check` from the repo root
 ```
 
-The Worker and its tests are linted by biome (`biome.jsonc` at the repo root,
-run by `make site-lint`; the version pin is the Makefile's `BIOME`, which CI
-reads). The bun version is pinned in `.bun-version`; CI reads the same file.
+The Worker and its tests are formatted and linted by biome (`biome.jsonc` at the
+repo root, run by `make site-lint`, applied by `make site-fmt`; the version pin
+is the Makefile's `BIOME`, which CI reads). The bun version is pinned in
+`.bun-version`; CI reads the same file.
 
 Routing is by custom domain (`toktop.ai`, `www.toktop.ai`) rather than a
 route pattern, so Cloudflare manages the DNS record for both names. The zone's

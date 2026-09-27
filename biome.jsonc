@@ -6,10 +6,12 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
   "files": { "includes": ["site/**/*.js"] },
-  // Hand-formatted at two spaces. No formatter has ever rewritten these files,
-  // so turning one on now would be a whole-tree reformat, not a gate. Lint is
-  // the part that catches defects; formatting stays a reviewer's eye.
-  "formatter": { "enabled": false },
+  // Two-space indent, as the worker has always been written. lineWidth 100 is
+  // the width the tree already lives at: every line past it is embedded markup,
+  // a long literal, or a biome-ignore comment, none of which a formatter
+  // breaks. `make site-lint` runs `biome check`, so this is a gate, not a
+  // suggestion.
+  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
   "linter": {
     "enabled": true,
     "rules": {

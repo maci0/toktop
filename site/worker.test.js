@@ -43,9 +43,10 @@ test("compression starts in a request and only completed bytes are reused", asyn
     const { default: freshWorker } = await import("./worker.js?request-context");
     expect(constructions).toBe(0);
     inRequest = true;
-    const request = () => new Request(ORIGIN, {
-      headers: { "accept-encoding": "gzip" },
-    });
+    const request = () =>
+      new Request(ORIGIN, {
+        headers: { "accept-encoding": "gzip" },
+      });
     const [first, concurrent] = await Promise.all([
       freshWorker.fetch(request()),
       freshWorker.fetch(request()),
@@ -114,7 +115,9 @@ test("page responses disable Workers automatic body encoding", async () => {
           expect(bytes.byteLength).toBe(0);
         } else {
           expect(Number(res.headers.get("content-length"))).toBe(bytes.byteLength);
-          expect(format ? await decompress(bytes, format) : new TextDecoder().decode(bytes)).toBe(identityBody);
+          expect(format ? await decompress(bytes, format) : new TextDecoder().decode(bytes)).toBe(
+            identityBody,
+          );
         }
       }
     }
@@ -332,10 +335,7 @@ test("dashboard images take cache and security headers from the worker", async (
 test("dashboard image HEAD is bodyless with the same headers as GET", async () => {
   const env = staticAssets();
   const get = await worker.fetch(new Request(`${ORIGIN}/dashboard.png`), env);
-  const head = await worker.fetch(
-    new Request(`${ORIGIN}/dashboard.png`, { method: "HEAD" }),
-    env,
-  );
+  const head = await worker.fetch(new Request(`${ORIGIN}/dashboard.png`, { method: "HEAD" }), env);
   expect(head.status).toBe(200);
   expect(head.headers.get("cache-control")).toBe(get.headers.get("cache-control"));
   expect((await head.arrayBuffer()).byteLength).toBe(0);
@@ -354,10 +354,7 @@ test("dashboard images reject non-GET/HEAD without fetching assets", async () =>
       },
     },
   };
-  const res = await worker.fetch(
-    new Request(`${ORIGIN}/dashboard.png`, { method: "POST" }),
-    env,
-  );
+  const res = await worker.fetch(new Request(`${ORIGIN}/dashboard.png`, { method: "POST" }), env);
   expect(res.status).toBe(405);
   expect(res.headers.get("allow")).toBe("GET, HEAD");
   expect(fetched).toBe(false);
@@ -521,11 +518,7 @@ test("no purple or violet in the palette of any of the three files", () => {
     if (delta / max < 0.25) return false; // a neutral or a near-neutral has no hue to get wrong
     const hue =
       60 *
-      (max === r
-        ? ((g - b) / delta) % 6
-        : max === g
-          ? (b - r) / delta + 2
-          : (r - g) / delta + 4);
+      (max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4);
     // 230-315 degrees covers indigo (239-245) through violet, which is the
     // band Tailwind's indigo-500 and violet-600 sit in. cBlue sits at 217 and
     // the sand ANSI16[5] the renderer uses at 26, so both stay clean.
@@ -549,12 +542,10 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
 test("recorded transfer sizes stay inside the initial congestion window", async () => {
   const budget = 10 * 1460;
   const identity = new Uint8Array(await (await call()).arrayBuffer()).byteLength;
-  const gzipped = new Uint8Array(
-    await (await call({ "accept-encoding": "gzip" })).arrayBuffer(),
-  ).byteLength;
-  const brotli = new Uint8Array(
-    await (await call({ "accept-encoding": "br" })).arrayBuffer(),
-  ).byteLength;
+  const gzipped = new Uint8Array(await (await call({ "accept-encoding": "gzip" })).arrayBuffer())
+    .byteLength;
+  const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
+    .byteLength;
   expect(identity).toBe(11869);
   expect(gzipped).toBe(4126);
   expect(brotli).toBe(3454);
@@ -610,9 +601,8 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   expect(links[0][0]).toContain('rel="icon"');
   expect(links[0][0]).toContain("data:image/svg+xml,");
 
-  const brotli = new Uint8Array(
-    await (await call({ "accept-encoding": "br" })).arrayBuffer(),
-  ).byteLength;
+  const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
+    .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
   expect(visit).toBe(23_685);
   expect(visit).toBeLessThan(25_000);
@@ -661,12 +651,8 @@ test("hero AVIF is smaller than WebP at every width, and each width beats the ne
 // drops or fattened the phone candidate fails here instead of quietly
 // doubling the weight of the visit that matters most.
 test("the phone slot is served by the 768w capture, not the 1280w one", () => {
-  expect(assetBytes("dashboard-768.avif")).toBeLessThan(
-    assetBytes("dashboard-1280.avif") * 0.6,
-  );
-  expect(assetBytes("dashboard-768.webp")).toBeLessThan(
-    assetBytes("dashboard-1280.webp") * 0.6,
-  );
+  expect(assetBytes("dashboard-768.avif")).toBeLessThan(assetBytes("dashboard-1280.avif") * 0.6);
+  expect(assetBytes("dashboard-768.webp")).toBeLessThan(assetBytes("dashboard-1280.webp") * 0.6);
 });
 
 // The <img src> fallback and the og:image both point at the PNG original, so
@@ -803,11 +789,7 @@ test("image paths are served from ASSETS with cache and security headers", async
 });
 
 test("every dashboard URL in the HTML is served as an image asset", async () => {
-  const paths = [
-    ...new Set(
-      [...identityBody.matchAll(/\/dashboard[-.\w]+/g)].map((m) => m[0]),
-    ),
-  ];
+  const paths = [...new Set([...identityBody.matchAll(/\/dashboard[-.\w]+/g)].map((m) => m[0]))];
   expect(paths.length).toBeGreaterThanOrEqual(5);
   const env = assetsEnv(Object.fromEntries(paths.map((p) => [p, p])));
   for (const path of paths) {
@@ -825,13 +807,9 @@ test("image revalidation forwards If-None-Match without Accept-Encoding", async 
           return Promise.resolve(new Response("compressed-by-mistake", { status: 500 }));
         }
         if (request.headers.get("if-none-match") === '"abc"') {
-          return Promise.resolve(
-            new Response(null, { status: 304, headers: { etag: '"abc"' } }),
-          );
+          return Promise.resolve(new Response(null, { status: 304, headers: { etag: '"abc"' } }));
         }
-        return Promise.resolve(
-          new Response("full", { status: 200, headers: { etag: '"abc"' } }),
-        );
+        return Promise.resolve(new Response("full", { status: 200, headers: { etag: '"abc"' } }));
       },
     },
   };

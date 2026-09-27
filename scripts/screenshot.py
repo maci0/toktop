@@ -15,11 +15,11 @@ Set TOKTOP_SCREENSHOT_FONT to a regular-weight .ttf when no Meslo build
 is installed where the script looks.
 """
 
-import glob
 import os
 import re
 import string
 import sys
+from pathlib import Path
 from typing import TextIO
 
 RGB = tuple[int, int, int]
@@ -35,11 +35,11 @@ FG_DEFAULT: RGB = (215, 221, 229)  # #d7dde5
 FONT_ROOTS: tuple[str, ...] = (
     "/usr/share/fonts",
     "/usr/local/share/fonts",
-    os.path.expanduser("~/.local/share/fonts"),
+    str(Path.home() / ".local/share/fonts"),
     "/Library/Fonts",
-    os.path.expanduser("~/Library/Fonts"),
-    os.path.join(os.environ.get("WINDIR", "C:\\Windows"), "Fonts"),
-    os.path.expanduser("~/AppData/Local/Microsoft/Windows/Fonts"),
+    str(Path.home() / "Library/Fonts"),
+    str(Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts"),
+    str(Path.home() / "AppData/Local/Microsoft/Windows/Fonts"),
 )
 
 # The 16 ANSI colors as SGR 30-37/90-97, tuned to the dashboard's palette.
@@ -69,9 +69,7 @@ def sgr_rgb(color: RGB | None) -> RGB | None:
 def _search(pattern: str) -> list[str]:
     hits: list[str] = []
     for root in FONT_ROOTS:
-        hits.extend(
-            sorted(glob.glob(os.path.join(root, "**", pattern), recursive=True))
-        )
+        hits.extend(str(p) for p in sorted(Path(root).glob(f"**/{pattern}")))
     return hits
 
 
@@ -86,14 +84,14 @@ def resolve_fonts() -> tuple[str, str]:
         SystemExit: no usable regular-weight face was found.
     """
     if override := os.environ.get("TOKTOP_SCREENSHOT_FONT"):
-        if not os.path.isfile(override):
+        if not Path(override).is_file():
             print(
                 f"screenshot.py: TOKTOP_SCREENSHOT_FONT: no such file: {override}",
                 file=sys.stderr,
             )
             raise SystemExit(1)
         sibling = override.replace("Regular", "Bold")
-        bold_path = sibling if os.path.isfile(sibling) else override
+        bold_path = sibling if Path(sibling).is_file() else override
         return override, bold_path
     regular = _search("Meslo*Nerd*[Rr]egular*.ttf") or _search("Meslo*.ttf")
     if not regular:
@@ -174,7 +172,7 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
         raise SystemExit(1) from e
 
     try:
-        with open(src, "rb") as f:
+        with Path(src).open("rb") as f:
             data = f.read().rstrip(b"\r\n")
     except OSError as e:
         print(f"screenshot.py: {src}: {e}", file=sys.stderr)
