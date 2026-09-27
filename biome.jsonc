@@ -1,0 +1,14 @@
+// Linter for the Cloudflare Worker in site/. That is the only JavaScript in
+// the repo, and it shipped with no analyzer at all, so the edge code that sets
+// every response header ran unchecked. The version pin lives in the Makefile
+// (BIOME), which CI and `make site-lint` both read, so a local run and a remote
+// run cannot pick different rule sets.
+{
+  "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
+  "files": { "includes": ["site/**/*.js"] },
+  // Hand-formatted at two spaces. No formatter has ever rewritten these files,
+  // so turning one on now would be a whole-tree reformat, not a gate. Lint is
+  // the part that catches defects; formatting stays a reviewer's eye.
+  "formatter": { "enabled": false },
+  "linter": { "enabled": true, "rules": { "preset": "recommended" } }
+}

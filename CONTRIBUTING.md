@@ -13,8 +13,9 @@
   `make lint`, cross-compiles) keeps cgo off so analysis matches the
   released artifacts. Plain builds and cross-compiles are pure Go and need
   nothing else.
-- `bun` at the version in `.bun-version` for `make site-check`. The target
-  refuses a different version on PATH, matching CI's `bun-version-file`.
+- `bun` at the version in `.bun-version` for `make site-check` and
+  `make site-lint`. The targets refuse a different version on PATH, matching
+  CI's `bun-version-file`.
 - `uv` >= 0.12.6 for `make scripts-check` (CI installs 0.12.6; black/ruff
   pins in `scripts/requirements-dev.txt`). The target names a too-old uv
   rather than failing on an unknown flag.
@@ -119,13 +120,14 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make cover` | coverage summary per package into `dist/` |
 | `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
-| `make pr` | every PR merge gate except the OS matrix: `ci` + `site-check` + `scripts-check` |
+| `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `scripts-check` |
 | `make fmt` / `make format` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
 | `make tidy` | run `go mod tidy` to clean up go.mod and go.sum |
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
 | `make govulncheck` | `govulncheck` over both sqlite tag halves at the Makefile pin (same pin as CI) |
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
+| `make site-lint` | biome over `site/` at the Makefile `BIOME` pin (CI parity) |
 | `make site-check` | `bun test site/` |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
@@ -150,8 +152,9 @@ make pr
 ```
 
 That is `make ci` (gofmt, tidy, staticcheck, vet, govulncheck, race tests for
-both sqlite tag halves), `make site-check` (`bun test site/`), and
-`make scripts-check`. `scripts-check` installs the exact versions in
+both sqlite tag halves), `make site-lint` (biome over the Worker, at the
+`BIOME` pin in the Makefile, config in `biome.jsonc`), `make site-check`
+(`bun test site/`), and `make scripts-check`. `scripts-check` installs the exact versions in
 `scripts/requirements-dev.txt` into an isolated env (black, ruff, plus the
 renderer deps). Pure-Python pins carry a wheel sha256; bumping one of those
 lines means updating the hash too. Do not run unpinned `uvx black` /

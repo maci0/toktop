@@ -311,9 +311,9 @@ test("dashboard images take cache and security headers from the worker", async (
 
 test("dashboard image HEAD is bodyless with the same headers as GET", async () => {
   const env = staticAssets();
-  const get = await worker.fetch(new Request(ORIGIN + "/dashboard.png"), env);
+  const get = await worker.fetch(new Request(`${ORIGIN}/dashboard.png`), env);
   const head = await worker.fetch(
-    new Request(ORIGIN + "/dashboard.png", { method: "HEAD" }),
+    new Request(`${ORIGIN}/dashboard.png`, { method: "HEAD" }),
     env,
   );
   expect(head.status).toBe(200);
@@ -335,7 +335,7 @@ test("dashboard images reject non-GET/HEAD without fetching assets", async () =>
     },
   };
   const res = await worker.fetch(
-    new Request(ORIGIN + "/dashboard.png", { method: "POST" }),
+    new Request(`${ORIGIN}/dashboard.png`, { method: "POST" }),
     env,
   );
   expect(res.status).toBe(405);

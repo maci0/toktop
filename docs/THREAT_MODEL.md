@@ -181,9 +181,10 @@ Every externally reachable input, with its code location:
 Deployment surface:
 
 - GitHub Actions CI runs gofmt/vet/`go mod tidy -diff`/govulncheck/staticcheck/
-  race tests on pushes and PRs, plus `bun test site/` and screenshot-script
-  lint (.github/workflows/ci.yml, actions pinned by SHA, bun from
-  `.bun-version`, uv 0.12.6, Python tools from `scripts/requirements-dev.txt`);
+  race tests on pushes and PRs, plus biome over `site/`, `bun test site/` and
+  screenshot-script lint (.github/workflows/ci.yml, actions pinned by SHA, bun
+  from `.bun-version`, biome at the Makefile `BIOME` pin, uv 0.12.6, Python
+  tools from `scripts/requirements-dev.txt`);
   Dependabot updates modules, actions, and `scripts/` pip deps
   (.github/dependabot.yml); tag pushes build release binaries for six
   platforms plus a CycloneDX SBOM (.github/workflows/release.yml, Makefile

@@ -41,6 +41,9 @@ STATICCHECK := $(GO) tool staticcheck
 # tool block. One string so Makefile and CI cannot drift.
 GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.7.0
 SBOM_TOOL   := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
+# bunx, not a package.json: the Worker ships with no npm dependencies, and a
+# manifest plus lockfile would exist only to pin this one linter.
+BIOME       := @biomejs/biome@2.5.14
 LDFLAGS     := -s -w -buildid= -X main.version=$(VERSION)
 # gofmt from the selected toolchain, not a different major on PATH.
 GOFMT = $$($(GO) env GOROOT)/bin/gofmt
@@ -226,6 +229,19 @@ site-check: ## bun test the Cloudflare Worker in site/ (CI parity)
 		fi
 	bun test site/
 
+.PHONY: site-lint
+site-lint: ## biome-lint site/ at the BIOME pin (CI parity)
+	@command -v bun >/dev/null 2>&1 || { \
+		echo "make site-lint: bun is not on PATH (see .bun-version)" >&2; \
+		exit 1; \
+	}
+	@want=$$(tr -d ' \t\r\n' < .bun-version); have=$$(bun --version); \
+		if [ "$$have" != "$$want" ]; then \
+			echo "make site-lint: bun $$have on PATH, .bun-version pins $$want" >&2; \
+			exit 1; \
+		fi
+	bunx $(BIOME) lint site/
+
 .PHONY: fmt
 fmt: ## rewrite all Go files with gofmt (including simplifications)
 	$(GOFMT) -s -w .
@@ -279,8 +295,9 @@ ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests
 	@$(MAKE) test RACE=1
 
 .PHONY: pr
-pr: ## every PR merge gate except the OS matrix: ci + site-check + scripts-check
+pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + scripts-check
 	@$(MAKE) ci
+	@$(MAKE) site-lint
 	@$(MAKE) site-check
 	@$(MAKE) scripts-check
 
