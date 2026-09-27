@@ -131,6 +131,18 @@ func TestIdentifyMLXModels(t *testing.T) {
 	}
 }
 
+// An engine serving no model yet still speaks the API: the empty listing is
+// an answer, and dropping it as a silence loses the engine from discovery
+// while the poll layer reports it up.
+func TestIdentifyEmptyModelListing(t *testing.T) {
+	kind := httptestKind(t, map[string]fakeRoute{
+		"/v1/models": {200, `{"object":"list","data":[]}`},
+	})
+	if kind != core.KindOpenAI {
+		t.Errorf("kind = %q", kind)
+	}
+}
+
 func TestIdentifyLlamaCppStillWinsWithPlainHealth(t *testing.T) {
 	kind := httptestKind(t, map[string]fakeRoute{
 		"/health":    {200, `{"status":"ok"}`},

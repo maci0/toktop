@@ -317,7 +317,11 @@ func getOpenAIModels(ctx context.Context, base string) *modelsResp {
 	}
 	defer resp.Body.Close()
 	var mr modelsResp
-	if json.NewDecoder(resp.Body).Decode(&mr) != nil || len(mr.Data) == 0 {
+	// A well-formed empty listing is an answer, not a silence: an engine
+	// serving no model yet still speaks the API, and the switch in identify
+	// reaches every kind only on this branch. Absent "data" leaves the slice
+	// nil, which is the shape of an endpoint that is not a listing.
+	if json.NewDecoder(resp.Body).Decode(&mr) != nil || mr.Data == nil {
 		return nil
 	}
 	return &mr

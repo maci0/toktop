@@ -395,7 +395,7 @@ func classify(fam map[string]float64, m *Metrics) {
 		if !classifiable(k) {
 			continue
 		}
-		matched = append(matched, strings.ToLower(k))
+		matched = append(matched, core.FoldASCII(k))
 		values = append(values, v)
 	}
 	lower := make(map[string]float64, len(matched))

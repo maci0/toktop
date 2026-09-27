@@ -77,6 +77,30 @@ func (w *Watcher) following(pid int) bool {
 	return ok
 }
 
+// watching reports whether the tracker for pid has a watcher of its own, the
+// difference between following a store and merely being on the dashboard.
+func (w *Watcher) watching(pid int) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	t, ok := w.tracked[pid]
+	return ok && t.watch != nil
+}
+
+// watchedPIDs returns the PIDs currently holding a store, in PID order so the
+// choice of holder does not depend on map iteration.
+func (w *Watcher) watchedPIDs() []int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	var out []int
+	for pid, t := range w.tracked {
+		if t.watch != nil {
+			out = append(out, pid)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
 func claudeHome(t *testing.T) (work, transcript string) {
 	t.Helper()
 	home := t.TempDir()
@@ -167,6 +191,83 @@ func TestWatchesARunningAgent(t *testing.T) {
 	if total != 360 {
 		t.Fatalf("reported %d output tokens, want 360", total)
 	}
+}
+
+// TestSurvivorTakesOverTheStore is the handover: two agents share one
+// transcript store, only the first watches it, and when that one exits the
+// survivor must pick the store up rather than stay on the dashboard with no
+// watcher and no tokens.
+func TestSurvivorTakesOverTheStore(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("discovery reads /proc")
+	}
+	work, transcript := claudeHome(t)
+
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep "+strconv.Itoa(stubSleep)+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var cmds []*exec.Cmd
+	pids := make([]int, 0, 2)
+	for range 2 {
+		cmd := exec.Command(bin)
+		cmd.Dir = work
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		cmds = append(cmds, cmd)
+		pids = append(pids, cmd.Process.Pid)
+		defer func() {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}()
+	}
+
+	rec := &recorder{}
+	w := New(rec, nil)
+	w.discoverEvery, w.readEvery = 100*time.Millisecond, 50*time.Millisecond
+	ctx := t.Context()
+	go w.Run(ctx)
+
+	// Exactly one of them watches the shared store; the other is tracked with
+	// no watcher of its own. Scoped to these two PIDs: discovery reads the
+	// real /proc, so the developer's own agents are followed alongside.
+	holder := func() int {
+		for _, p := range w.watchedPIDs() {
+			if p == pids[0] || p == pids[1] {
+				return p
+			}
+		}
+		return 0
+	}
+	waitFor(t, waitCeiling, func() bool {
+		return holder() != 0 && w.following(pids[0]) && w.following(pids[1])
+	})
+	holderPID, survivor := holder(), pids[0]
+	if holderPID == survivor {
+		survivor = pids[1]
+	}
+	holderCmd := cmds[0]
+	if cmds[0].Process.Pid != holderPID {
+		holderCmd = cmds[1]
+	}
+	if err := holderCmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = holderCmd.Process.Wait()
+
+	// Written after the promotion, so only a watcher that attached after the
+	// follower exited can report it.
+	waitFor(t, waitCeiling, func() bool { return w.watching(survivor) })
+	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 700))
+	waitFor(t, waitCeiling, func() bool {
+		for _, ev := range rec.forPID(survivor) {
+			if ev.OutputTokens >= 700 {
+				return true
+			}
+		}
+		return false
+	})
 }
 
 func TestSameProcess(t *testing.T) {

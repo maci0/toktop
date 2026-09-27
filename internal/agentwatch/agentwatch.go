@@ -254,13 +254,21 @@ func (w *Watcher) discover(ctx context.Context) {
 		tctx, cancel := context.WithCancel(ctx)
 		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()
-		if _, seen := w.tracked[p.PID]; seen {
+		prev, seen := w.tracked[p.PID]
+		// A follower (watch == nil) holds the PID with no watcher of its own;
+		// taking the store over replaces it, so the handover below can make
+		// progress. A watched tracker keeps its PID: two watchers tailing the
+		// same transcripts would double-count growth.
+		if seen && prev.watch != nil {
 			w.mu.Unlock()
 			cancel()
 			return
 		}
 		w.tracked[p.PID] = t
 		w.mu.Unlock()
+		if seen {
+			w.stopOne(prev)
+		}
 		started = append(started, t)
 		startCtx = append(startCtx, tctx)
 	}
