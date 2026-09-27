@@ -16,10 +16,10 @@
 - `bun` at the version in `.bun-version` for `make site-check` and
   `make site-lint`. The targets refuse a different version on PATH, matching
   CI's `bun-version-file`.
-- `uv` at or above the version in `.uv-version` for `make scripts-check`
-  (CI installs that file's version via `version-file`; black/ruff pins in
-  `scripts/requirements-dev.txt`). The target names a too-old uv
-  rather than failing on an unknown flag.
+- `uv` at or above the version in the `uv` line of `.tool-versions` for
+  `make scripts-check` (CI installs that file's version via `version-file`;
+  black/ruff pins in `scripts/requirements-dev.txt`). The target names a
+  too-old uv rather than failing on an unknown flag.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
 - Only to regenerate the README screenshot (below), and never for the

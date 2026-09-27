@@ -98,12 +98,14 @@ GOTAGS  := $(if $(TAGS),-tags $(TAGS),)
 # RACE=0 skips it (and the C compiler) for a faster edit cycle.
 RACE    ?= 1
 race_flag = $(if $(filter 0,$(RACE)),,-race )
-# Lower bound for `make scripts-check`, read from .uv-version. That file is
-# what CI installs (setup-uv version-file), so one string covers both; a newer
-# uv on PATH is fine.
-UV_MIN := $(shell tr -d ' \t\r\n' < .uv-version 2>/dev/null)
+# Lower bound for `make scripts-check`, read from the uv line of
+# .tool-versions. That file is what CI installs (setup-uv version-file), so one
+# string covers both; a newer uv on PATH is fine. setup-uv v10 parses only the
+# formats it documents (uv.toml, pyproject.toml, .tool-versions, requirements
+# files, uv.lock), and .tool-versions is the one that carries a bare version.
+UV_MIN := $(shell awk '$$1 == "uv" { print $$2; exit }' .tool-versions 2>/dev/null)
 ifeq ($(UV_MIN),)
-$(error .uv-version missing or empty; scripts-check and CI need a uv version)
+$(error .tool-versions has no uv line; scripts-check and CI need a uv version)
 endif
 # The Python tool env, built under dist/ (gitignored) by `uv pip install`.
 # Not `uv run --with-requirements`: that resolves and installs the same pins
