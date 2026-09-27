@@ -1427,48 +1427,6 @@ func TestInterpretArgs(t *testing.T) {
 	}
 }
 
-func TestParseTargets(t *testing.T) {
-	if got, err := parseTargets(nil); err != nil || len(got) != 0 {
-		t.Fatalf("parseTargets(nil) = %v, %v; want no targets and no error", got, err)
-	}
-	got, err := parseTargets([]string{"ssh://user@box:2222", "ssh://other"})
-	if err != nil {
-		t.Fatalf("parseTargets(valid) = %v, want nil", err)
-	}
-	if len(got) != 2 || got[0].Host != "box" || got[0].Port != 2222 {
-		t.Fatalf("parseTargets(valid) = %+v, want box:2222 and other", got)
-	}
-	// A bad target must be refused here, before anything asks whether stdout
-	// is a terminal: a redirected run would otherwise blame the terminal.
-	for _, bad := range []string{"ssh://", "ssh://user:secret@box", "ssh://a b"} {
-		if _, err := parseTargets([]string{bad}); err == nil {
-			t.Fatalf("parseTargets(%q) = nil error, want rejection", bad)
-		}
-	}
-}
-
-// A target named twice must attach once. Attaching it twice opens a second
-// ssh connection, forwards the same remote ports onto a second set of local
-// listeners, and lists that host's engines again under different local
-// addresses, so its tokens land in the totals twice.
-func TestParseTargetsCollapsesRepeats(t *testing.T) {
-	got, err := parseTargets([]string{"ssh://user@dupbox:2222", "ssh://user@dupbox:2222", "ssh://user@DUPBOX:2222"})
-	if err != nil {
-		t.Fatalf("parseTargets(repeat) = %v, want nil", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("parseTargets(repeat) = %+v, want one target", got)
-	}
-	// A different port or account on the same host is a different target.
-	got, err = parseTargets([]string{"ssh://user@dupbox:2222", "ssh://user@dupbox:2223", "ssh://other@dupbox:2222"})
-	if err != nil {
-		t.Fatalf("parseTargets(distinct) = %v, want nil", err)
-	}
-	if len(got) != 3 {
-		t.Fatalf("parseTargets(distinct) = %+v, want three targets", got)
-	}
-}
-
 func TestFlagAddRejectsEmpty(t *testing.T) {
 	var adds []string
 	if err := parseAdd("", &adds); err == nil {

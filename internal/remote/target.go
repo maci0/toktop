@@ -70,6 +70,33 @@ func ParseTarget(raw string) (Target, error) {
 	return t, nil
 }
 
+// ParseTargets resolves every raw target, in order, keeping the first of any
+// host named more than once and reporting the rest as duplicates. Attaching a
+// host twice opens a second ssh connection, forwards the same remote ports
+// onto a second set of local listeners, and lists that host's engines a second
+// time under different local addresses: the UI keys rates by endpoint, so the
+// header and chart totals would add one engine's tokens to themselves. Host
+// case is folded for the same reason the host-key store folds it; the user and
+// port are compared as written, so two accounts or two ports on one host stay
+// two targets.
+func ParseTargets(raws []string) (targets, duplicates []Target, err error) {
+	seen := make(map[string]bool, len(raws))
+	for _, raw := range raws {
+		t, err := ParseTarget(raw)
+		if err != nil {
+			return nil, nil, err
+		}
+		key := core.FoldASCII(t.Host) + "\x00" + t.User + "\x00" + strconv.Itoa(t.Port) + "\x00" + t.KeyFile
+		if seen[key] {
+			duplicates = append(duplicates, t)
+			continue
+		}
+		seen[key] = true
+		targets = append(targets, t)
+	}
+	return targets, duplicates, nil
+}
+
 func parseURLTarget(raw string) (Target, error) {
 	if !strings.HasPrefix(raw, "ssh://") {
 		return Target{}, fmt.Errorf("target %q must start with ssh://", raw)
