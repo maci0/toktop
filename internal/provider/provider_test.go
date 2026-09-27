@@ -152,6 +152,13 @@ func TestClassifyRatioVsPercentCache(t *testing.T) {
 	if pct.KVPct != 40 {
 		t.Errorf("percent passthrough = %v", pct.KVPct)
 	}
+	// vLLM's gpu_cache_usage_perc publishes a 0..1 fraction despite the
+	// suffix, so the rescale keys on the value and not on the name.
+	var frac Metrics
+	classify(map[string]float64{"vllm:gpu_cache_usage_perc": 0.62}, &frac)
+	if frac.KVPct != 62 {
+		t.Errorf("fraction under a _perc name = %v, want 62", frac.KVPct)
+	}
 }
 
 // A broken or lying /metrics endpoint may publish any finite float. The

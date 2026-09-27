@@ -388,6 +388,10 @@ func classify(fam map[string]float64, m *Metrics) {
 			m.Waiting = core.SatInt(v) // covers vLLM requests_waiting and SGLang num_queue_reqs
 		case strings.Contains(n, "cache") && core.ContainsAny(n, "usage", "util", "ratio", "perc"):
 			pct := v
+			// A 0..1 fraction is rescaled to a percentage; a family that
+			// publishes 0..100 passes through. The value is the only
+			// evidence here: vLLM's own gpu_cache_usage_perc carries a
+			// fraction, so a name test would misread it.
 			if pct <= 1.0 {
 				pct *= 100
 			}
