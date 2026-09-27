@@ -35,6 +35,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - An engine answering a version endpoint with a bare invalid byte, an escape
   sequence, or a quoted line break no longer has that text cached as its
   version and re-rendered every frame.
+- `agentusage.LoadDefinitions` skips a `usage` entry naming an agent a
+  compiled-in adapter already reads (claude, codex, dsh). Registering it left
+  `SpecFor` reporting transcript roots that no watcher read, since the adapter
+  outranks every definition. A definition still replaces a compiled-in
+  *definition*, which is what pi, prime-agent and feynman are.
 - `toktop` exits 2 when every ssh target it was given fails to attach,
   instead of starting a dashboard showing only local engines with the reason
   on a stderr line the alternate screen hides.

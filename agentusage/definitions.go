@@ -29,7 +29,9 @@ var knownAgents = []string{
 	"prime-agent", "qwen",
 }
 
-// Agents lists every agent name this package knows, built in and defined.
+// Agents lists every agent name this package knows: the ones compiled in, the
+// ones [LoadDefinitions] registered, and the ones [RegisterSpec] added. Sorted
+// and deduplicated, so an agent several of those name appears once.
 func Agents() []string {
 	out := slices.Clone(knownAgents)
 	defsMu.RLock()
@@ -148,7 +150,9 @@ func ResetDefinitions() {
 //
 // An agent this package was compiled to read (claude, codex, dsh, …) is
 // described by a built-in adapter rather than a definition, so SpecFor reports
-// false for it; [Supported] is the question that covers every agent.
+// false for it; [Supported] is the question that covers every agent. That holds
+// for one a definitions file tried to define as well, since LoadDefinitions
+// skips an entry an adapter outranks.
 func SpecFor(tool string) (Spec, bool) { return definedSpec(tool) }
 
 // definedSpec returns an agent's transcript location, whether compiled in
@@ -202,6 +206,15 @@ var ErrCollidingDefinitions = errors.New("agent names collide after NFC normaliz
 // refusing. The error names the file; errors.Is matches ErrInvalidDefinitions
 // for invalid JSON or colliding agent names after normalization.
 //
+// A definition may replace another definition, including one compiled into
+// this build: the pi family is defined rather than adapted, so a file naming
+// feynman with different roots redirects it. What it cannot displace is a
+// compiled-in adapter, so a usage entry for an agent this build reads that way
+// (claude, codex, dsh, ...) is skipped rather than registered, the same as one
+// naming no roots. Registering it would leave SpecFor reporting roots no
+// watcher reads. Use [RegisterSpec] to read such an agent elsewhere; it
+// displaces the built-in for as long as it is held.
+//
 // Names are canonicalized before registration, so two spellings that NFC
 // reduces to one key (NFD "café" beside precomposed "café") would silently
 // overwrite each other in defs. That overlap is refused instead: the file is
@@ -243,6 +256,14 @@ func LoadDefinitions(path string) error {
 		canonical := canonicalTool(name)
 		if canonical == "" || def.Usage == nil {
 			continue // a launch-only definition says nothing about tokens
+		}
+		if _, builtin := registeredAdapter(canonical); builtin {
+			// A compiled-in adapter outranks every definition, so registering
+			// this entry would leave SpecFor reporting transcript roots that
+			// Watch never reads. Skipping keeps the registry the answer to
+			// "what did this file register", which is how a program finds the
+			// entries a file failed to apply.
+			continue
 		}
 		if prev, dup := seen[canonical]; dup {
 			return fmt.Errorf("%w: %s: %w: %q and %q both reduce to %q",

@@ -437,6 +437,36 @@ func TestSpecForSeesLoadedDefinitions(t *testing.T) {
 	}
 }
 
+// A usage entry for an agent a compiled-in adapter reads cannot take effect:
+// adapterFor prefers the adapter, so registering the spec would leave SpecFor
+// reporting roots that Watch ignores. The entry is skipped, which is what makes
+// SpecFor the answer to "what did this file register", and the rest of the
+// file loads as usual.
+func TestLoadDefinitionsSkipsBuiltinAgent(t *testing.T) {
+	path := writeDefs(t, `{
+		"zz-fine": {"usage": {"roots": ["~/.zz/sessions"]}},
+		"claude":  {"usage": {"roots": ["/somewhere/else"]}}
+	}`)
+	dropDefs(t, "zz-fine")
+
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := SpecFor("zz-fine"); !ok {
+		t.Error("the entry the file could apply was not registered")
+	}
+	if _, ok := SpecFor("claude"); ok {
+		t.Error("SpecFor registered a spec no watcher would read")
+	}
+	ad, ok := adapterFor("claude")
+	if !ok || !slices.Equal(ad.roots("/tmp"), []string{home(".claude", "projects")}) {
+		t.Errorf("the compiled-in claude adapter changed: %v %t", ad.roots("/tmp"), ok)
+	}
+	if !Supported("claude") {
+		t.Error("claude stopped being readable")
+	}
+}
+
 // ResetDefinitions is the undo LoadDefinitions has no other way to get: the
 // loaded agents go, a built-in a file overwrote comes back as compiled, and a
 // RegisterSpec adapter is left to UnregisterSpec.
