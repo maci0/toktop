@@ -11,10 +11,11 @@ import (
 	"testing"
 )
 
-// The envelopes below follow the three API dialects the supported agents emit:
-// Anthropic-shaped (claude, cursor-agent, kimi), Gemini-shaped (gemini, qwen),
-// and OpenAI-shaped. The parser is deliberately envelope-agnostic, so these
-// double as a statement of what it must survive.
+// The envelopes below follow the dialects the supported agents emit:
+// Anthropic-shaped (claude, cursor-agent), Gemini-shaped (gemini, qwen),
+// OpenAI-shaped, and Kimi Code CLI's own canonical usage fields. The parser is
+// deliberately envelope-agnostic, so these double as a statement of what it
+// must survive.
 
 func TestAnthropicShapedLine(t *testing.T) {
 	line := `{"type":"assistant","message":{"role":"assistant","content":[
@@ -51,6 +52,22 @@ func TestOpenAIShapedLine(t *testing.T) {
 		t.Fatal("valid JSON was rejected")
 	}
 	if ev.Usage.Output != 5 || ev.Usage.Total != 15 {
+		t.Fatalf("usage: %+v", ev.Usage)
+	}
+}
+
+// Kimi Code CLI records usage in its own canonical form: the uncached prompt
+// under inputOther, the cached shares beside it, and everything generated under
+// output. The generic walker reads it by key like any other envelope.
+func TestKimiShapedLine(t *testing.T) {
+	line := `{"type":"usage.record","agentId":"main","model":"kimi/k2",
+		"usage":{"inputOther":900,"output":120,"inputCacheRead":300,"inputCacheCreation":40},
+		"usageScope":"turn"}`
+	ev, ok := parseJSON([]byte(line))
+	if !ok {
+		t.Fatal("valid JSON was rejected")
+	}
+	if ev.Usage.Output != 120 || ev.Usage.Input != 900 {
 		t.Fatalf("usage: %+v", ev.Usage)
 	}
 }

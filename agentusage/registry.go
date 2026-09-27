@@ -34,17 +34,6 @@ type adapter struct {
 	// agents whose usage records do not repeat it. nil when every usage line
 	// carries its own cwd.
 	sessionCwd func(line []byte) (string, bool)
-	// sessionCwdFile reads the working directory from a file beside the
-	// transcript, for an agent that records it there rather than in the
-	// transcript itself (kimi keeps it in state.json next to the session's
-	// agents/ directory). nil when the transcript or its header names it.
-	sessionCwdFile func(path string) (string, bool)
-}
-
-// perFileOwner reports whether ownership is decided per transcript file
-// rather than per usage line, from the header line or from a file beside it.
-func (a adapter) perFileOwner() bool {
-	return a.sessionCwd != nil || a.sessionCwdFile != nil
 }
 
 var adaptersMu sync.RWMutex
@@ -112,17 +101,16 @@ var adapters = map[string]adapter{
 	},
 	// Kimi Code CLI writes one event log per session and agent under
 	// ~/.kimi-code/sessions/<workDirKey>/<session>/agents/<id>/wire.jsonl,
-	// with a usage.record event per model call (see kimi.go). The store is
-	// machine-wide and names no directory in the log itself, so ownership
-	// follows the cwd the session's state.json records; a subagent's log sits
-	// under the same session directory and counts too, its tokens being its
-	// own.
+	// with a usage.record event per model call (see kimi.go). Its store holds
+	// one directory per project and hundreds of thousands of files, so the
+	// roots are the project directories this working directory owns rather
+	// than the store: kimiRoots derives them. A subagent's log sits under the
+	// same session directory and counts too, its tokens being its own.
 	"kimi": {
-		roots:          func(string) []string { return []string{kimiStore()} },
-		suffix:         "wire.jsonl",
-		kind:           perMessage,
-		parse:          parseKimi,
-		sessionCwdFile: kimiSessionCwd,
+		roots:  kimiRoots,
+		suffix: "wire.jsonl",
+		kind:   perMessage,
+		parse:  parseKimi,
 	},
 }
 

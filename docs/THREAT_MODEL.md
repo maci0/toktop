@@ -98,7 +98,9 @@ What is worth stealing, corrupting, or denying:
   agent home dirs. The default set is wider than this file previously named:
   claude (`~/.claude/projects`, agentusage/claude.go, 15), codex
   (`~/.codex/sessions`, agentusage/codex.go, 31), qwen
-  (`~/.qwen/projects`), copilot (`~/.copilot/session-state`), clanker
+  (`~/.qwen/projects`), copilot (`~/.copilot/session-state`), kimi
+  (`~/.kimi-code/sessions`, one directory per working directory, derived from
+  the SHA-256 of its path rather than walked, agentusage/kimi.go), clanker
   (its token log inside the repository it runs in, registry.go, 126-133), and
   the built-in pi, prime-agent, and feynman definitions
   (agentusage/definitions.go, 115-121). Beyond plain JSONL, dsh's default
@@ -843,8 +845,8 @@ Other claims checked against code on this pass, all of which hold as written:
   .github/workflows/ci.yml, 66-74) are what keeps a shipped platform and a
   vetted one the same set.
 - The agent-store asset names dsh, crush, and opencode, and the default
-  `--agents` path also tails claude, codex, qwen, copilot, clanker, and the
-  built-in pi, prime-agent, and feynman definitions
+  `--agents` path also tails claude, codex, qwen, copilot, kimi, clanker, and
+  the built-in pi, prime-agent, and feynman definitions
   (agentusage/registry.go, 93-121; agentusage/claude.go, 15; codex.go, 31).
 - The ingest route registers GET and HEAD on `/healthz`
   (internal/ingest/server.go, `ingestEndpoints`, 260-263, and the 405 `Allow`

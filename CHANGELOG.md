@@ -37,6 +37,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- Kimi Code CLI sessions are read under `--agents`, so one shows a live rate
+  beside the other agents. It keeps an event log per session and per agent
+  under `~/.kimi-code/sessions/<workDirKey>/<session>/agents/<id>/wire.jsonl`,
+  where each model call appends a `usage.record` carrying that call's own
+  prompt and output counts; `token_counting.measured` records the context size
+  instead and is not read as usage. The store holds one directory per project
+  and hundreds of thousands of files, so it is never walked whole: a directory
+  is named for a slug and the SHA-256 of the working directory it belongs to,
+  and only the directories naming this run's working directory are read.
 - A `--demo` run names its seed, and the `--origin` it was pinned to, on the
   startup line and in the audit record. The report that carried both was never
   written for a run that ended early, so a demo run that crashed left the log

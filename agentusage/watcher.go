@@ -328,8 +328,9 @@ func (w *Watcher) openTranscript(path string) (*os.File, error) {
 // rootsLocked returns this watcher's expanded roots, deriving them the first
 // time. openTranscript runs once per changed transcript per poll, and
 // ad.roots re-expands ~ and substitutes {dir} on every call; the roots of a
-// fixed adapter and directory do not move, so they are computed once and
-// dropped again when refreshAdapter swaps the adapter.
+// fixed adapter and directory do not move between walks, so they are computed
+// once per walk (walkCandidates drops them), and once more when refreshAdapter
+// swaps the adapter.
 //
 // Caller holds pollMu.
 func (w *Watcher) rootsLocked() []string {

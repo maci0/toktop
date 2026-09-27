@@ -267,19 +267,10 @@ const ownerScanLines = 20
 // refusal there would blackhole a session that in fact belongs here, so the
 // decision is retried on a later poll instead.
 func (w *Watcher) owns(path string) (mine, decided bool) {
-	if !w.ad.perFileOwner() {
+	if w.ad.sessionCwd == nil {
 		return true, true // decided per line instead
 	}
 	if mine, known := w.owner[path]; known {
-		return mine, true
-	}
-	if w.ad.sessionCwdFile != nil {
-		cwd, ok := w.ad.sessionCwdFile(path)
-		if !ok {
-			return false, false // transient: retry next poll
-		}
-		mine := w.sameDir(cwd)
-		w.owner[path] = mine
 		return mine, true
 	}
 	f, err := w.openTranscript(path)
