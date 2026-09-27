@@ -39,17 +39,21 @@ type Stats struct {
 	err string
 }
 
-// SetNow overrides the clock used to stamp and age remote samples. Call
-// before Run.
+// SetNow overrides the clock used to stamp and age remote samples. Safe to
+// call while polling is under way: instant is read by the poll goroutine under
+// s.mu, so the write is taken under the same lock. Call before Run to keep the
+// samples it stamps on one timeline.
 func (s *Stats) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.now = fn
 }
 
 // instant reads s.now, falling back to the wall clock for a Stats built as a
-// literal (tests, and any caller that never called SetNow).
+// literal (tests, and any caller that never called SetNow). Callers hold s.mu.
 func (s *Stats) instant() time.Time {
 	if s.now == nil {
 		return time.Now()

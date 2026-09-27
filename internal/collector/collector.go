@@ -67,7 +67,14 @@ type Collector struct {
 	probeInflight map[string]bool
 	probeBackoff  map[string]time.Time
 
-	now func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
+	// clockMu guards the two fields SetNow writes together. Reads are not
+	// confined to the collector's own goroutines: the proc poller calls procFn,
+	// which reads now, with no collector lock held. Guarding only the write side
+	// would leave that read racing it, and reading now and started separately
+	// lets a SetNow land between them, so an uptime is measured from a
+	// different clock than the timestamp it is subtracted from.
+	clockMu sync.Mutex
+	now     func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
 }
 
 // New polls providers every interval. Host vitals come from sysmon; call
@@ -112,23 +119,39 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 	// CPU tick deltas use this clock, not a second wall-clock read inside
 	// the sampler: a frozen or stepped now must move dt the same way emit's
 	// snapshot stamp does.
-	c.procFn = func() []procs.Info { return procSampler.SnapshotAt(c.now()) }
+	c.procFn = func() []procs.Info { return procSampler.SnapshotAt(c.instant()) }
 	return c
 }
 
 // SetNow overrides the clock used to stamp snapshots, probe-wave gating,
-// and agent events that arrive without a timestamp. Call before Run.
+// and agent events that arrive without a timestamp. Safe to call while Run is
+// going: the poller and the probe fan-out read the clock from their own
+// goroutines, and the write is taken under the same lock they read it under.
 func (c *Collector) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
 	}
+	c.clockMu.Lock()
+	defer c.clockMu.Unlock()
 	c.now = fn
 	c.started = fn()
 }
 
 // instant is the collector clock, so a SetNow override reaches every call
-// site.
-func (c *Collector) instant() time.Time { return c.now() }
+// site. Never call it with clockMu held.
+func (c *Collector) instant() time.Time {
+	c.clockMu.Lock()
+	defer c.clockMu.Unlock()
+	return c.now()
+}
+
+// clock returns the current instant and the origin it is aged from as one
+// pair, for the snapshot header that subtracts one from the other.
+func (c *Collector) clock() (time.Time, time.Time) {
+	c.clockMu.Lock()
+	defer c.clockMu.Unlock()
+	return c.now(), c.started
+}
 
 // procSampler is the shared engine-process sampler; nil-safe when the
 // platform has no process table access.
@@ -293,8 +316,8 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 		return
 	}
 
-	now := c.instant()
-	snap := core.Snapshot{At: now, Uptime: now.Sub(c.started)}
+	now, started := c.clock()
+	snap := core.Snapshot{At: now, Uptime: now.Sub(started)}
 	// Vitals and the process table are independent of c.mu. Sampling them
 	// inside the critical section would stall RecordAgent/ProbeAll for the
 	// whole vendor-CLI sweep on a cold cache.

@@ -34,10 +34,10 @@ func listDarwin() ([]raw, error) {
 	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,%cpu=,rss=,command=")
 	cmd.WaitDelay = listPipeGrace
 	// ps is spawned by a fresh process group so a deadline kill reaches the
-	// whole tree: the listing runs under the Sampler lock on every poll, so
-	// a child surviving the kill would pile up one per poll for the life of
-	// the dashboard. The group Cancel also runs when listPipeGrace fires
-	// because a survivor still holds the output pipe.
+	// whole tree: the listing runs on every poll, so a child surviving the
+	// kill would pile up one per poll for the life of the dashboard. The
+	// group Cancel also runs when listPipeGrace fires because a survivor
+	// still holds the output pipe.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error {
 		if cmd.Process == nil {

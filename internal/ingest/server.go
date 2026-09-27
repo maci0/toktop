@@ -463,13 +463,14 @@ func (b *progressBody) stallReason() string {
 // ok describes a service that accepts nothing.
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	if in := len(eventSlots); in >= cap(eventSlots) {
+	slots := eventSlots
+	if in := len(slots); in >= cap(slots) {
 		// The same Retry-After the refused POSTs carry: a 503 that names no
 		// delay leaves a client to invent one, and the slot frees as soon as a
 		// stalled body gives up.
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, "degraded: %d/%d event streams in flight; events are being refused\n", in, cap(eventSlots))
+		fmt.Fprintf(w, "degraded: %d/%d event streams in flight; events are being refused\n", in, cap(slots))
 		return
 	}
 	w.WriteHeader(http.StatusOK)
@@ -478,6 +479,13 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
+	// Bound once. The acquire below and the deferred release must name the same
+	// channel: re-reading the var at release time would hand the permit back to
+	// whatever the var holds by then, and a receive on a channel this request
+	// never sent to blocks forever, so a handler would never return and a slot
+	// would never come back. Same reason handleHealth binds it, to read len and
+	// cap of one channel.
+	slots := eventSlots
 	reqID := requestID(r)
 	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
 	done := func(status, accepted, stored int, errMsg string, extra ...any) {
@@ -515,8 +523,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// goroutine and a descriptor for a body nobody finishes sending. Acquired
 	// after the Origin guard, which answers without reading anything.
 	select {
-	case eventSlots <- struct{}{}:
-		defer func() { <-eventSlots }()
+	case slots <- struct{}{}:
+		defer func() { <-slots }()
 	default:
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 		armWrite()
@@ -524,8 +532,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		// endpoint is to refusing everything rather than only that it did:
 		// the same number /healthz reports, on the same refusals.
 		reject(http.StatusServiceUnavailable,
-			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(eventSlots)),
-			"in_flight", len(eventSlots), "slot_cap", cap(eventSlots))
+			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(slots)),
+			"in_flight", len(slots), "slot_cap", cap(slots))
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)

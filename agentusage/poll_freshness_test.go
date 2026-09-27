@@ -148,6 +148,59 @@ func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 	}
 }
 
+// A walk older than the rescan interval is still in flight, and its claim is
+// the only thing keeping a second goroutine off the same tree. Age alone
+// cannot tell it from a stale result: the placeholder carries the walk's start
+// instant, so a store slow enough to walk for longer than rescanEvery looks
+// expired. Dropping it drops the claim with it, and the two walks then race to
+// publish, so whichever started earlier can overwrite the newer listing and
+// stamp a later at, suppressing a real refresh for a whole interval.
+func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.T) {
+	dir := t.TempDir()
+	walk := make(chan struct{})
+	rootListMu.Lock()
+	rootLists = map[string]rootListing{
+		rootListKey(dir, ".jsonl"): {at: time.Now().Add(-rescanEvery - time.Second), walk: walk},
+	}
+	rootListMu.Unlock()
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		rootLists = map[string]rootListing{}
+		rootListMu.Unlock()
+	})
+
+	done := make(chan []string, 1)
+	go func() {
+		now := time.Now()
+		done <- listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+	}()
+
+	// The claim is the wait branch: a second walk would answer at once.
+	select {
+	case got := <-done:
+		t.Fatalf("walked the same tree a second time while one was in flight, returned %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Publish the way the walker holding the claim does, then release it, so
+	// the waiter re-checks and finds the listing the walk it waited for left.
+	// Ordering matters: the entry has to stop claiming a walk before the
+	// waiter can leave the wait branch.
+	rootListMu.Lock()
+	rootLists[rootListKey(dir, ".jsonl")] = rootListing{files: []string{"late.jsonl"}, at: time.Now()}
+	rootListMu.Unlock()
+	close(walk)
+
+	select {
+	case got := <-done:
+		if len(got) != 1 || got[0] != "late.jsonl" {
+			t.Fatalf("waiter got %+v, want the listing the in-flight walk published", got)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("waiter never returned after the walk it was waiting on finished")
+	}
+}
+
 // The recency window belongs to the watcher's own clock. A caller that
 // injects one has to be able to age a transcript out by stepping time, not by
 // waiting it out: on the wall clock a replay that reaches this point within a

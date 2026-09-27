@@ -59,11 +59,16 @@ func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 // pruneRootListsLocked drops listings older than maxAge. A clanker (or a
 // {dir} spec) keys this map on the project path; without a bound, every tree
 // an agent ever visited during a long --agents run stays pinned after the
-// process is gone. A key with a walk in flight is never pruned: the claim
-// outlives maxAge whenever the walk does (a store with tens of thousands of
-// files), and dropping it would let a second caller claim the same root, walk
-// it, and let the slower walk overwrite the newer listing. Caller holds
-// rootListMu.
+// process is gone. Caller holds rootListMu.
+//
+// An entry with a walk in flight is never dropped, however old its placeholder
+// looks. The placeholder is stamped at the start of the walk, so a walk slower
+// than maxAge (a store with tens of thousands of files) is indistinguishable
+// from a stale result by age alone. Dropping it would drop the claim too, and
+// a second goroutine would walk the same tree concurrently; whichever finished
+// last would publish, so a walk that started earlier could overwrite a newer
+// listing and stamp a later at, suppressing a real refresh for a full maxAge.
+// A walk that outlives every watcher is released by the walk itself, not here.
 func pruneRootListsLocked(now time.Time, maxAge time.Duration) {
 	for k, c := range rootLists {
 		if c.walk == nil && now.Sub(c.at) >= maxAge {
@@ -128,9 +133,9 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			}
 		}
 		// This call owns the walk for key. The placeholder carries the current
-		// instant and the in-flight channel, so the prune pass leaves it alone
-		// however long the walk runs, and no files so a reader that arrives now
-		// takes the wait branch above rather than reading an absent result as an
+		// instant and an open walk, so the prune pass leaves it alone however
+		// long the walk runs, and no files, so a reader that arrives now takes
+		// the wait branch above rather than reading an absent result as an
 		// empty store.
 		done := make(chan struct{})
 		rootLists[key] = rootListing{at: now, walk: done}
