@@ -80,7 +80,7 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 			return false
 		}
 	}
-	c.agents = core.InsertSorted(append(c.agents, ev), core.AgentCmp)
+	c.agents = core.AppendSorted(c.agents, ev, core.AgentHistoryLen, core.AgentCmp)
 	if id != "" {
 		// The ledger is keyed on the recording instant, not the event's own
 		// timestamp: a replay carries the sender's clock, and a forged or
@@ -88,9 +88,6 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 		c.agentIDs[id] = now
 		c.agentIDOrder = append(c.agentIDOrder, agentIDEntry{id: id, at: now})
 		c.forgetAgedAgentIDs(now.Add(-agentIDHorizon))
-	}
-	if len(c.agents) > core.AgentHistoryLen {
-		c.agents = c.agents[len(c.agents)-core.AgentHistoryLen:]
 	}
 	return true
 }
