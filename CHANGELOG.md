@@ -64,6 +64,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - `toktop update` on Windows restores an installed binary left under
   `toktop.exe.old` by a killed update before replacing it. The gap left a host
   with no binary to run the update that would have fixed it.
+- The audit log folds the home directory to `~` in every line, in the message
+  and in every attribute, not only where a call site remembered to. A request
+  path, a rejected `X-Request-Id` or an error text carrying a path under
+  `$HOME` names the account in a log that gets pasted into issues, and each of
+  those was written by code that never thought about it.
 - `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
   windows, instead of leaving them on the wall clock. A program driving a
   simulated timeline stepped time forward and still read the file set a

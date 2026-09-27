@@ -70,7 +70,11 @@ verified out of band, as any first contact is.
 
 The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or
-`remote`. Event fields are not logged.
+`remote`. Event fields are not logged. Every line has the home directory
+folded to `~`, in the message and in every attribute, so a request path or an
+error text carrying a path under `$HOME` cannot name the account: a logger
+built outside `logcfg` is the only way to write a line that has not been
+through that fold.
 
 Diagnostics name the file that failed, but the home directory is rewritten to
 `~` first: an absolute path under `$HOME` names the account, and these lines

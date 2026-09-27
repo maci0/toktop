@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -259,5 +261,49 @@ func TestFieldCapsAfterSanitizing(t *testing.T) {
 	got := Field("\x1b[31mabcdefghij\x1b[0m", 4)
 	if got != "abcd" {
 		t.Errorf("Field with escapes = %q, want the first 4 clean characters", got)
+	}
+}
+
+// The audit log is pasted into issues, so no line may carry a path under
+// $HOME: it names the account. The fold lives in the handler, so it covers a
+// value a call site never thought about (a request path, a rejected header).
+func TestHomeHandlerFoldsHomeInMessageAndAttrs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)})
+	lg.Error("cannot read "+filepath.Join(home, "toktop", "agents.json"),
+		"path", filepath.Join(home, "toktop"),
+		"status", http.StatusNotFound,
+		"remote", "loopback:1234")
+	got := buf.String()
+	if strings.Contains(got, home) {
+		t.Fatalf("line kept the home directory: %s", got)
+	}
+	for _, want := range []string{
+		`path=~/toktop`,
+		"cannot read ~/toktop/agents.json",
+		`status=404`,
+		`remote=loopback:1234`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("line lost %q: %s", want, got)
+		}
+	}
+}
+
+// A record whose attributes carry no path keeps every other value as it was:
+// the fold rewrites a home directory and nothing else.
+func TestHomeHandlerLeavesOtherValuesAlone(t *testing.T) {
+	t.Setenv("HOME", filepath.Join(string(filepath.Separator), "home", "someone"))
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)})
+	lg.Warn("ingest", "accepted", 3, "stored", 2, "note", "/srv/models")
+	got := buf.String()
+	for _, want := range []string{"accepted=3", "stored=2", "note=/srv/models"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("line lost %q: %s", want, got)
+		}
 	}
 }

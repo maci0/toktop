@@ -63,16 +63,77 @@ func LogLevelName(l slog.Level) string {
 
 // Logger returns the process logger: a text handler on stderr at the floor
 // TOKTOP_LOG_LEVEL names, stamping every record in UTC so lines from several
-// machines sort against each other.
+// machines sort against each other, and folding the home directory out of
+// every line through [HomeHandler].
 func Logger() *slog.Logger {
 	lvl, err := ParseLogLevel(os.Getenv(LevelEnv))
 	if err != nil {
 		lvl = slog.LevelInfo // main already rejected this; stay quiet if constructed in tests
 	}
-	return slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	return slog.New(HomeHandler{Handler: slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level:       lvl,
 		ReplaceAttr: utcTime,
-	}))
+	})})
+}
+
+// HomeHandler rewrites the home directory to "~" in the message and in every
+// string attribute of a record. A path under $HOME names the account, and
+// these lines are the ones pasted into issues, so the fold belongs here
+// rather than in each call site: an attribute that reaches the audit log
+// without it is a path leak, and every one of them is written by code that
+// did not think about it (a request path, a rejected header, an error text
+// from a library).
+//
+// Only the top level is folded. A group attribute's members are not walked:
+// nothing in this tree logs one, and a fold that missed a nested value would
+// be worse than one documented as covering the top level. Attributes bound
+// with WithAttrs before the wrap are likewise not reached, since the inner
+// handler owns them by then.
+type HomeHandler struct {
+	slog.Handler
+}
+
+// Handle implements slog.Handler.
+func (h HomeHandler) Handle(ctx context.Context, r slog.Record) error {
+	msg := core.RedactHome(r.Message)
+	var folded []slog.Attr
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Value.Kind() == slog.KindString {
+			if s := core.RedactHome(a.Value.String()); s != a.Value.String() {
+				a.Value = slog.StringValue(s)
+				if folded == nil {
+					folded = make([]slog.Attr, 0, 8)
+				}
+				folded = append(folded, a)
+				return true
+			}
+		}
+		if folded != nil {
+			folded = append(folded, a)
+		}
+		return true
+	})
+	if folded == nil {
+		r.Message = msg
+		return h.Handler.Handle(ctx, r)
+	}
+	// slog.Record hands out its attributes one at a time and offers no way to
+	// put a rewritten one back, so a record that changed is rebuilt: the
+	// message, the time, the level and the call site all carry over, and the
+	// inner handler never sees the home directory.
+	out := slog.NewRecord(r.Time, r.Level, msg, r.PC)
+	out.AddAttrs(folded...)
+	return h.Handler.Handle(ctx, out)
+}
+
+// WithAttrs implements slog.Handler.
+func (h HomeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return HomeHandler{Handler: h.Handler.WithAttrs(attrs)}
+}
+
+// WithGroup implements slog.Handler.
+func (h HomeHandler) WithGroup(name string) slog.Handler {
+	return HomeHandler{Handler: h.Handler.WithGroup(name)}
 }
 
 func utcTime(_ []string, a slog.Attr) slog.Attr {
