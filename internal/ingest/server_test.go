@@ -458,10 +458,16 @@ func TestIngestMethodNotAllowedSetsAllow(t *testing.T) {
 			}
 		}
 		// The body carries the same information as the header: a caller
-		// reading only the reason line can see what the path takes.
-		e, _ := lookupEndpoint(tc.path)
-		if got, want := string(body), methodNotAllowedMessage(e, tc.method); !strings.Contains(got, want) {
-			t.Errorf("%s %s body = %q, want %q", tc.method, tc.path, got, want)
+		// reading only the reason line can see what the path takes. The
+		// words are spelled out here rather than formatted by the handler,
+		// so a message that stops naming the path or the refused method
+		// fails instead of moving with the handler.
+		got := string(body)
+		if !strings.Contains(got, tc.path) {
+			t.Errorf("%s %s body = %q, want it to name the path", tc.method, tc.path, got)
+		}
+		if !strings.Contains(got, tc.method) {
+			t.Errorf("%s %s body = %q, want it to name the refused method", tc.method, tc.path, got)
 		}
 	}
 }
@@ -1538,10 +1544,27 @@ func TestUnkeyedStreamFailureAsksForResume(t *testing.T) {
 
 // with /healthz still reporting ok. Refuse it instead of binding.
 func TestNewServerNeedsRecorder(t *testing.T) {
+	// The recorder is refused before the address is bound, so the message
+	// has to be the one about the recorder: a bare non-nil error would be
+	// satisfied by an unrelated listen failure.
 	s, err := newServer("127.0.0.1:0", nil, slog.New(slog.DiscardHandler))
 	if err == nil {
 		s.Close()
 		t.Fatal("nil recorder accepted")
+	}
+	if !strings.Contains(err.Error(), "needs a recorder") {
+		t.Fatalf("newServer err = %v, want it to name the missing recorder", err)
+	}
+	// The other construction failure is a bad address. It must not be
+	// reported as the recorder's, or a caller reading the message fixes
+	// the wrong thing.
+	s, err = newServer("127.0.0.1:not-a-port", &memRecorder{}, slog.New(slog.DiscardHandler))
+	if err == nil {
+		s.Close()
+		t.Fatal("unusable address accepted")
+	}
+	if strings.Contains(err.Error(), "needs a recorder") {
+		t.Errorf("newServer err = %v, want the address failure", err)
 	}
 }
 

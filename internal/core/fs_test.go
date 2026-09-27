@@ -15,9 +15,23 @@ import (
 // be flushed, or the caller would trade a durable write for none. A directory
 // that cannot be opened at all has to be a no-op rather than a panic.
 func TestSyncDirNeverFails(t *testing.T) {
-	SyncDir(t.TempDir())
+	dir := t.TempDir()
+	// The caller's write is what the sync protects, so a directory whose
+	// entry is flushed still has to hold the file, byte for byte.
+	name := filepath.Join(dir, "state.json")
+	if err := os.WriteFile(name, []byte(`{"ok":true}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	SyncDir(dir)
+	if b, err := os.ReadFile(name); err != nil || string(b) != `{"ok":true}` {
+		t.Fatalf("after SyncDir: %q, %v; want the file unchanged", b, err)
+	}
+	// Every shape that cannot be opened has to come back rather than panic,
+	// including a path whose parent does not exist and a file used as a
+	// directory.
 	SyncDir("")
-	SyncDir(t.TempDir() + "/absent")
+	SyncDir(filepath.Join(dir, "absent"))
+	SyncDir(name)
 }
 
 // ExpandHome is the shared tilde expansion for an ssh_config IdentityFile and

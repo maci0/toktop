@@ -26,11 +26,22 @@ func TestRunReclaimsPipesHeldByGrandchild(t *testing.T) {
 	if _, err := exec.LookPath("sh"); err != nil {
 		t.Skip("sh unavailable")
 	}
+	// A control run first. Without it a sh that cannot execute at all would
+	// make the timed run below return instantly and pass, measuring an exec
+	// failure rather than the pipe reclaim.
+	if out, ok := run(context.Background(), "sh", "-c", "echo hello"); !ok || !strings.Contains(string(out), "hello") {
+		t.Fatalf("control run = %q, %v; want hello, true", out, ok)
+	}
 	start := time.Now()
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	const deadline = 200 * time.Millisecond
+	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	run(ctx, "sh", "-c", "sleep 5 & echo hello")
-	if elapsed := time.Since(start); elapsed > 4*time.Second {
+	elapsed := time.Since(start)
+	if elapsed < deadline {
+		t.Fatalf("run returned after %s: the command was not run to its deadline", elapsed)
+	}
+	if elapsed > 4*time.Second {
 		t.Fatalf("run returned after %s: pipes held by the backgrounded child were not reclaimed at the deadline", elapsed)
 	}
 }
@@ -52,12 +63,21 @@ func TestRunKillsGrandchildOnDeadline(t *testing.T) {
 		t.Skip("sh unavailable")
 	}
 	pidFile := filepath.Join(t.TempDir(), "grandchild.pid")
-	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	// The deadline has to outlast the shell's own startup: it writes the
+	// grandchild's pid as its first act, and a deadline landing before that
+	// leaves nothing to check. A surviving grandchild sleeps 30s, so a
+	// generous deadline still tells a killed group from an unkilled one.
+	const runDeadline = 2 * time.Second
+	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
 	run(ctx, "sh", "-c", "sleep 30 & echo $! > "+pidFile+"; sleep 30")
 	pid, err := readPIDFile(pidFile)
 	if err != nil {
-		t.Skipf("sh did not report a grandchild pid: %v", err)
+		// sh was found and the script always writes the pid before it
+		// sleeps, so a missing file is a failure. Skipping here would turn
+		// a regression that kills the shell before its first write into a
+		// green run.
+		t.Fatalf("sh did not report a grandchild pid: %v", err)
 	}
 	// The kill is asynchronous, so poll briefly rather than asserting on the
 	// first syscall. A surviving sleep 30 would still be alive here.

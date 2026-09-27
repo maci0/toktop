@@ -17,6 +17,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/maci0/toktop/agentusage"
@@ -1813,26 +1814,38 @@ func TestStartProbeTicker(t *testing.T) {
 	})
 
 	t.Run("stops on cancel", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		var mu sync.Mutex
-		count := 0
-		startProbeTicker(ctx, func() {
+		// Inside a synctest bubble the ticker, the callback and the waits
+		// share one clock, and the clock only moves once every goroutine is
+		// durably blocked. A tick that was already in flight when cancel
+		// landed therefore completes before the wait below returns, so a
+		// correct ticker cannot be caught mid-call and counted as one that
+		// ran again. Sampled against the wall clock the same test fails
+		// whenever a probe overruns its interval.
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var mu sync.Mutex
+			count := 0
+			startProbeTicker(ctx, func() {
+				mu.Lock()
+				defer mu.Unlock()
+				count++
+			}, 5*time.Millisecond)
+			<-time.After(30 * time.Millisecond) // several ticks
+			mu.Lock()
+			before := count
+			mu.Unlock()
+			if before == 0 {
+				t.Fatal("the ticker never fired, so stopping it proves nothing")
+			}
+			cancel()
+			<-time.After(20 * time.Millisecond) // past several ticks
 			mu.Lock()
 			defer mu.Unlock()
-			count++
-		}, 5*time.Millisecond)
-		<-time.After(30 * time.Millisecond)
-		cancel()
-		time.Sleep(20 * time.Millisecond) // past several ticks
-		mu.Lock()
-		at := count
-		mu.Unlock()
-		time.Sleep(30 * time.Millisecond)
-		mu.Lock()
-		defer mu.Unlock()
-		if count != at {
-			t.Fatalf("prober ran %d more times after cancel", count-at)
-		}
+			if count != before {
+				t.Fatalf("prober ran %d more times after cancel", count-before)
+			}
+		})
 	})
 }
 

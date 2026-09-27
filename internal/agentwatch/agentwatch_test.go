@@ -799,18 +799,19 @@ func TestParseEngineAddrDefaultPorts(t *testing.T) {
 		want  netip.AddrPort
 		label string
 		ok    bool
+		err   bool
 	}{
 		{in: "http://127.0.0.1:11434", want: must("127.0.0.1:11434"), label: "127.0.0.1:11434", ok: true},
 		{in: "http://127.0.0.1", want: must("127.0.0.1:80"), label: "127.0.0.1:80", ok: true},
 		{in: "https://127.0.0.1", want: must("127.0.0.1:443"), label: "127.0.0.1:443", ok: true},
 		{in: "http://[::1]", want: must("[::1]:80"), label: "[::1]:80", ok: true},
 		{in: "127.0.0.1:8080", want: must("127.0.0.1:8080"), label: "127.0.0.1:8080", ok: true},
-		{in: "http://localhost:11434"}, // hostname: skip rather than DNS
-		{in: "http://[::1"},            // malformed: reported, not skipped
+		{in: "http://localhost:11434", label: "", ok: false}, // hostname: skip rather than DNS
+		{in: "http://[::1", err: true}, // malformed: reported, not skipped
 	}
 	for _, tt := range tests {
 		ap, label, err := parseEngineAddr(tt.in)
-		if tt.in == "http://[::1" {
+		if tt.err {
 			if err == nil {
 				t.Errorf("parseEngineAddr(%q) err=nil, want a parse error", tt.in)
 			}
@@ -820,11 +821,18 @@ func TestParseEngineAddrDefaultPorts(t *testing.T) {
 			t.Errorf("parseEngineAddr(%q) err=%v, want nil", tt.in, err)
 			continue
 		}
-		if ap == (netip.AddrPort{}) {
+		if tt.ok {
+			if ap != tt.want || label != tt.label {
+				t.Errorf("parseEngineAddr(%q) = %v %q, want %v %q", tt.in, ap, label, tt.want, tt.label)
+			}
 			continue
 		}
-		if ap != tt.want || label != tt.label {
-			t.Errorf("parseEngineAddr(%q) = %v %q, want %v %q", tt.in, ap, label, tt.want, tt.label)
+		// A host that is not a literal IP has no address to match on, and
+		// resolving it here would turn an attribution lookup into a DNS
+		// query. It must come back empty, and saying so keeps a regression
+		// to a zero parse from passing as this case.
+		if ap != (netip.AddrPort{}) || label != "" {
+			t.Errorf("parseEngineAddr(%q) = %v %q, want an empty result", tt.in, ap, label)
 		}
 	}
 }

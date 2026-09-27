@@ -330,6 +330,12 @@ func TestLookupRetriesExpiredHit(t *testing.T) {
 	}
 }
 
+// Sample on the host running the test. The ordering property is asserted
+// against a known device set in TestSampleOrdersVendorsAndIndices, which
+// needs no real accelerator; a CI runner has none, so the loop below proves
+// nothing there and is kept for a host that has one. What holds everywhere
+// is that every device names a vendor Sample knows how to order and label:
+// an unknown key sorts as zero and renders as nothing.
 func TestSample(t *testing.T) {
 	ctx := t.Context()
 	devs := Sample(ctx)
@@ -339,6 +345,11 @@ func TestSample(t *testing.T) {
 			t.Errorf("devices not sorted by vendorOrder: %s > %s", prev.Vendor, cur.Vendor)
 		} else if vendorOrder[prev.Vendor] == vendorOrder[cur.Vendor] && prev.Index > cur.Index {
 			t.Errorf("devices not sorted by index for vendor %s: %d > %d", prev.Vendor, prev.Index, cur.Index)
+		}
+	}
+	for _, d := range devs {
+		if _, ok := vendorOrder[d.Vendor]; !ok {
+			t.Errorf("device %d reports vendor %q, which Sample has no order for", d.Index, d.Vendor)
 		}
 	}
 }

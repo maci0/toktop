@@ -95,9 +95,14 @@ func TestNorm(t *testing.T) {
 }
 
 // widthOf takes the plainWidth fast path for single-cell runes. When it
-// does, the answer must equal lipgloss.Width; anything that disagrees
-// silently misaligns every panel it touches.
+// does, the answer is the fast path's own; anything that disagrees
+// silently misaligns every panel it touches. A string the fast path
+// declines resolves to lipgloss.Width inside widthOf, so comparing the two
+// there compares lipgloss with itself and passes for any implementation:
+// those rows are the fallback branch, and the count below proves both
+// branches were reached.
 func TestWidthOfFastPathMatchesLipgloss(t *testing.T) {
+	accepted, declined := 0, 0
 	for _, s := range []string{
 		"",
 		"TOKTOP",
@@ -111,10 +116,22 @@ func TestWidthOfFastPathMatchesLipgloss(t *testing.T) {
 		"caf\u00e9",                // combining-capable: must fall back
 		"\t tab",                   // control: must fall back
 	} {
+		pw := plainWidth(s)
 		w := widthOf(s)
-		if want := lipgloss.Width(s); w != want {
-			t.Errorf("widthOf(%q) = %d, want %d", s, w, want)
+		if pw >= 0 {
+			accepted++
+			if w != pw {
+				t.Errorf("widthOf(%q) = %d, want the fast path's %d", s, w, pw)
+			}
+			continue
 		}
+		declined++
+		if want := lipgloss.Width(s); w != want {
+			t.Errorf("widthOf(%q) = %d, want the fallback %d", s, w, want)
+		}
+	}
+	if accepted == 0 || declined == 0 {
+		t.Fatalf("fast path taken for %d inputs and declined for %d, want both branches exercised", accepted, declined)
 	}
 }
 

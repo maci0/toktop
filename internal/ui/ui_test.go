@@ -943,10 +943,21 @@ func TestFrameAccountsAgentsOnce(t *testing.T) {
 	if m.sum != nil {
 		t.Fatal("a model built for a frame already holds a summary")
 	}
-	_ = m.View()
+	frame := strip(m.View())
+	// The frame's own summary is what its consumers read, so the agents
+	// from the snapshot have to reach the output. The rate is the proof:
+	// the events carry token counts but no tok/s, so the figure can only
+	// come from the summary the frame computed.
+	for _, want := range []string{"claude", "codex", "22.2 tok/s"} {
+		if !strings.Contains(frame, want) {
+			t.Errorf("frame is missing %q; View did not account the feed:\n%s", want, frame)
+		}
+	}
 	// View takes the model by value, so the summary it fills belongs to
 	// that frame alone: the model the caller kept must not carry it into
-	// the next one, where the feed and the clock have both moved on.
+	// the next one, where the feed and the clock have both moved on. A
+	// pointer receiver would leave it there and the next frame would draw
+	// rates computed against the previous snapshot.
 	if m.sum != nil {
 		t.Error("the frame's summary escaped onto the caller's model; the next frame would draw stale rates")
 	}

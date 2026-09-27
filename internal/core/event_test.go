@@ -127,3 +127,78 @@ func TestAppendSortedKeepsEqualElementsInArrivalOrder(t *testing.T) {
 		t.Fatalf("AppendSorted got %v, want []int{1 1 2 2 2 5 5 5 5}", s)
 	}
 }
+
+// InsertSorted is the ordering half of AppendSorted for a caller that has
+// already appended: the last element moves to its stable position. The
+// binary search never lands on the final index, so the shift has to move
+// what follows it, and a caller handing over fewer than two elements gets
+// that slice back untouched.
+func TestInsertSortedMovesOnlyTheLastElement(t *testing.T) {
+	intCmp := cmp.Compare[int]
+	fill := func(s []int, v int) []int {
+		return append(s[:len(s):len(s)], v)
+	}
+	// Only the last element moves. 0 arrives last and belongs at the front;
+	// 9, 5 and the 3 already in place must not shift.
+	s := InsertSorted(fill(fill([]int{9, 5}, 3), 0), intCmp)
+	if !slices.Equal(s, []int{0, 9, 5, 3}) {
+		t.Fatalf("InsertSorted got %v, want [0 9 5 3]", s)
+	}
+	// A last element in the middle: the search has to stop at the first
+	// entry above it and the shift has to carry the rest along.
+	s = InsertSorted(fill([]int{1, 4, 5}, 3), intCmp)
+	if !slices.Equal(s, []int{1, 3, 4, 5}) {
+		t.Fatalf("InsertSorted got %v, want [1 3 4 5]", s)
+	}
+	// A last element already at the end leaves the slice alone.
+	s = InsertSorted(fill([]int{1, 2, 3}, 4), intCmp)
+	if !slices.Equal(s, []int{1, 2, 3, 4}) {
+		t.Fatalf("InsertSorted got %v, want [1 2 3 4]", s)
+	}
+	for _, in := range [][]int{nil, {4}} {
+		got := InsertSorted(append([]int(nil), in...), intCmp)
+		if !slices.Equal(got, in) {
+			t.Errorf("InsertSorted(%v) = %v, want it unchanged", in, got)
+		}
+	}
+}
+
+// "Did the feed take it" is reported back to the sender and to the id
+// ledger, so it has to be true: a refused event is one the window would
+// have trimmed on the same call, and a retained one has to be readable
+// afterwards. Arrival order is not time order, so the newest is not always
+// the last arrival.
+func TestAppendRetainedReportsWhatTheFeedHolds(t *testing.T) {
+	intCmp := cmp.Compare[int]
+	var s []int
+	for _, v := range []int{1, 2, 3} {
+		var kept bool
+		s, kept = AppendRetained(s, v, 3, intCmp)
+		if !kept {
+			t.Fatalf("AppendRetained(%d) on a feed of %d = false, want true", v, len(s))
+		}
+	}
+	// A full feed keeps an arrival newer than everything it holds: the
+	// oldest entry is the one trimmed.
+	s, kept := AppendRetained(s, 4, 3, intCmp)
+	if !kept || !slices.Equal(s, []int{2, 3, 4}) {
+		t.Fatalf("AppendRetained(4) = %v, %v; want [2 3 4], true", s, kept)
+	}
+	// An arrival at or ahead of the oldest entry is refused, and refusing
+	// must not disturb the feed.
+	for _, v := range []int{1, 2} {
+		s, kept = AppendRetained(s, v, 3, intCmp)
+		if kept {
+			t.Errorf("AppendRetained(%d) on a full feed = true, want false", v)
+		}
+		if !slices.Equal(s, []int{2, 3, 4}) {
+			t.Fatalf("a refused arrival changed the feed: %v, want [2 3 4]", s)
+		}
+	}
+	// An arrival that is not the newest is still retained: the window is
+	// ordered by value, not by arrival.
+	s, kept = AppendRetained(s, 3, 3, intCmp)
+	if !kept || !slices.Equal(s, []int{3, 3, 4}) {
+		t.Fatalf("AppendRetained(3) = %v, %v; want [3 3 4], true", s, kept)
+	}
+}

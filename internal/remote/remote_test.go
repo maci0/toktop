@@ -493,13 +493,18 @@ func TestTOFUStoresDoNotBlockEachOther(t *testing.T) {
 	}
 
 	stalled := make(chan struct{})
+	started := make(chan struct{})
 	go func() {
 		defer close(stalled)
+		// Signalled before the call, so the head start below waits for the
+		// goroutine to be scheduled rather than for a guessed instant.
+		close(started)
 		// Fails with the give-up error once the peer lock ages out of
 		// storeLockStale, or succeeds early if this test releases it first.
 		// Either way the wait is the thing under test.
 		_ = blockedCB("blocked:22", nil, fakePublicKey("blocked"))
 	}()
+	<-started
 	// Let the writer reach the peer-lock wait before the second store's
 	// writer runs, or the test proves nothing. Head start is short and the
 	// budget below is far under storeLockWait, so the gap between the two

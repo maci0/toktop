@@ -73,6 +73,75 @@ func TestURLPort(t *testing.T) {
 	}
 }
 
+// Whether a provider's process stats and per-process GPU numbers attach at
+// all is this one predicate. A remote engine that passes it has another
+// machine's PIDs and RSS attributed to it, so the loopback spellings that
+// name the same host all have to agree, and nothing that only looks like one
+// may pass.
+func TestIsLoopbackURL(t *testing.T) {
+	cases := []struct {
+		addr string
+		want bool
+	}{
+		{"http://localhost:11434", true},
+		{"http://LOCALHOST:11434", true},
+		{"https://LocalHost", true},
+		{"http://127.0.0.1:8000", true},
+		{"http://127.0.0.5:8000", true},
+		{"http://[::1]:8000", true},
+		{"http://example.com:8000", false},
+		{"http://10.0.0.5:8000", false},
+		{"http://169.254.169.254:80", false},
+		{"http://notlocalhost:8000", false},
+		{"http://localhost.evil.com:8000", false},
+		{"http://:8000", false},
+		{"http://127.0.0.1:8000/%zz", false},
+		{"", false},
+		{"localhost:8000", false},
+		{"http://[::1", false},
+	}
+	for _, tc := range cases {
+		if got := isLoopbackURL(tc.addr); got != tc.want {
+			t.Errorf("isLoopbackURL(%q) = %v, want %v", tc.addr, got, tc.want)
+		}
+	}
+}
+
+// Two processes can share a listen port (a supervisor and the child it
+// forked, both holding the socket across a reload). The first one the walk
+// found is the one whose stats get attached, and it has to be the same one
+// every time, or a frame's per-process numbers come from whichever process
+// the table happened to list first.
+func TestProcsByPortKeepsTheFirstProcess(t *testing.T) {
+	infos := []procs.Info{
+		{PID: 10, Name: "supervisor", DefPort: 8000},
+		{PID: 11, Name: "child", PortHint: 8000},
+		{PID: 12, Name: "other", PortHint: 9000},
+		{PID: 13, Name: "no-port"},
+	}
+	got := procsByPort(infos)
+	if len(got) != 2 {
+		t.Fatalf("procsByPort holds %d ports, want 2: %v", len(got), got)
+	}
+	for port, want := range map[int]procs.Info{8000: infos[0], 9000: infos[2]} {
+		p, ok := got[port]
+		if !ok {
+			t.Errorf("port %d missing", port)
+			continue
+		}
+		if p.PID != want.PID {
+			t.Errorf("port %d = pid %d, want %d", port, p.PID, want.PID)
+		}
+	}
+	// Repeating the walk has to give the same answer.
+	if again := procsByPort(infos); again[8000].PID != got[8000].PID {
+		t.Errorf("port 8000 changed between walks: %d then %d", got[8000].PID, again[8000].PID)
+	}
+	if len(procsByPort(nil)) != 0 {
+		t.Error("an empty process list must produce no ports")
+	}
+}
+
 func TestRatesDeriveAndSmooth(t *testing.T) {
 	c := New(nil, time.Second)
 	now := time.Now()
@@ -125,13 +194,28 @@ func TestRatesZeroElapsedHoldsPriorRate(t *testing.T) {
 }
 
 // Engines that publish instantaneous tok/s gauges (SGLang, TRT-LLM) must feed
-// the rate directly instead of counter deltas.
+// the rate directly instead of counter deltas. The expected values are
+// literals, not ema() calls: an expectation built from the same helper as the
+// code moves with any change to the smoothing and proves nothing.
 func TestRatesHonorDirectThroughput(t *testing.T) {
+	const emaAlpha = 0.35
 	c := New(nil, time.Second)
 	c.rates("p", &provider.Metrics{OutTotal: 10}, time.Now())
+	// The first gauge seeds the EMA at its own alpha: 0*0.65 + 300*0.35.
 	out, _ := c.rates("p", &provider.Metrics{OutTotal: 10, DirectOutPS: 300, HasDirectOutPS: true}, time.Now().Add(time.Second))
-	if want := ema(0, 300); out != want { // the gauge seeds the EMA at its own alpha
-		t.Fatalf("direct rate = %v, want %v", out, want)
+	if out != 105 {
+		t.Fatalf("direct rate = %v, want 105", out)
+	}
+	// The next one smooths: 105*0.65 + 200*0.35.
+	out, _ = c.rates("p", &provider.Metrics{OutTotal: 10, DirectOutPS: 200, HasDirectOutPS: true}, time.Now().Add(2*time.Second))
+	if want := 105*(1-emaAlpha) + 200*emaAlpha; out != want {
+		t.Fatalf("smoothed direct rate = %v, want %v", out, want)
+	}
+	// Without the flag the counter delta path runs instead, and a flat
+	// OutTotal over one window means no output rate at all.
+	out, _ = c.rates("q", &provider.Metrics{OutTotal: 10, DirectOutPS: 200}, time.Now())
+	if out != 0 {
+		t.Fatalf("rate without the direct flag = %v, want 0", out)
 	}
 }
 
@@ -391,6 +475,55 @@ func TestEmitUsesCachedSysSample(t *testing.T) {
 	}
 	if got := calls.Load(); got != before {
 		t.Fatalf("emit invoked the sampler inline (%d -> %d calls)", before, got)
+	}
+}
+
+// The published snapshot must not alias the poller's cache. Drivers, Temps,
+// GPUs and NPUs are reference fields, and a remote merge (remote.Merge) or
+// a frame's own overlay writes into them in place, so a snapshot that shares
+// the backing arrays would show another writer's values on a frame already
+// handed out.
+func TestSnapshotDoesNotAliasTheCachedSysSample(t *testing.T) {
+	c := New(nil, time.Hour)
+	sample := &core.SysSample{
+		MemTotal: 100,
+		Drivers:  map[string]string{"nvidia": "550.1"},
+		Temps:    []core.TempReading{{Label: "Tctl", MilliC: 64000}},
+		GPUs:     []core.GPUDevice{{Vendor: "nvidia", Index: 0, Name: "RTX 4090"}},
+		NPUs:     []string{"amd"},
+	}
+	c.sysMu.Lock()
+	c.sysCache = sample
+	c.sysMu.Unlock()
+	if cloneSys(nil) != nil {
+		t.Fatal("a missing sample must stay missing")
+	}
+
+	clone := cloneSys(sample)
+	sample.Drivers["nvidia"] = "999.9"
+	sample.Temps[0].MilliC = 1
+	sample.GPUs[0].Name = "mutated"
+	sample.NPUs[0] = "mutated"
+	if clone.Drivers["nvidia"] != "550.1" {
+		t.Errorf("snapshot driver = %q, want the value at clone time", clone.Drivers["nvidia"])
+	}
+	if clone.Temps[0].MilliC != 64000 {
+		t.Errorf("snapshot temp = %d, want the value at clone time", clone.Temps[0].MilliC)
+	}
+	if clone.GPUs[0].Name != "RTX 4090" {
+		t.Errorf("snapshot GPU = %q, want the value at clone time", clone.GPUs[0].Name)
+	}
+	if clone.NPUs[0] != "amd" {
+		t.Errorf("snapshot NPU = %q, want the value at clone time", clone.NPUs[0])
+	}
+	// The other direction matters too: writing the snapshot must not reach
+	// back into the cache the next frame is taken from.
+	clone.Drivers["amdgpu"] = "6.11"
+	if _, leaked := sample.Drivers["amdgpu"]; leaked {
+		t.Error("writing the snapshot's driver map reached the cached sample")
+	}
+	if clone.MemTotal != 100 {
+		t.Errorf("MemTotal = %d, want 100", clone.MemTotal)
 	}
 }
 

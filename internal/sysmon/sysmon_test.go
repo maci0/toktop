@@ -151,16 +151,23 @@ func TestParseSwapUsage(t *testing.T) {
 	}
 }
 
+// Sample on the host running the test. A CI runner has no accelerator, so
+// the driver-copy loop below has nothing to walk there; the two checks that
+// hold on every host are that the map is initialized (a nil map writes into
+// silently and the panel then shows no driver at all) and that every device
+// names the vendor its driver is keyed by.
 func TestSample(t *testing.T) {
 	s := Sample()
 	if s.Drivers == nil {
 		t.Fatal("Sample() must initialize Drivers map")
 	}
 	for _, g := range s.GPUs {
-		if g.Vendor != "" && g.Driver != "" {
-			if s.Drivers[g.Vendor] == "" {
-				t.Errorf("Driver for vendor %q not copied to Drivers map", g.Vendor)
-			}
+		if g.Vendor == "" {
+			t.Errorf("device %q reports no vendor; its driver cannot be keyed", g.Name)
+			continue
+		}
+		if g.Driver != "" && s.Drivers[g.Vendor] == "" {
+			t.Errorf("Driver for vendor %q not copied to Drivers map", g.Vendor)
 		}
 	}
 }
