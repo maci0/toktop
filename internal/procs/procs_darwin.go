@@ -45,13 +45,15 @@ func parseDarwinProcesses(out string) []raw {
 		cpu, _ := strconv.ParseFloat(fields[1], 64)
 		rssKB, _ := strconv.ParseUint(fields[2], 10, 64)
 
-		list = append(list, raw{
+		r := raw{
 			pid:        pid,
 			name:       fields[3],
 			args:       fields[3:],
 			rss:        rssKB << 10,
 			cpuPercent: cpu,
-		})
+		}
+		annotate(&r)
+		list = append(list, r)
 	}
 	return list
 }

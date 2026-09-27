@@ -82,6 +82,10 @@ func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
 
 var vendorOrder = map[string]int{"nvidia": 0, "amd": 1, "intel": 2, "apple": 3}
 
+// maxXpuDevices caps how many Intel devices one tick spawns a metrics
+// process for.
+const maxXpuDevices = 4
+
 // Sample collects devices from every vendor present on the host.
 // Vendor CLIs are independent and each can take up to runTimeout, so they
 // run concurrently: a 1s nvidia-smi plus a 1s rocm-smi finishes in ~1s
@@ -150,22 +154,36 @@ func sampleXPU(ctx context.Context, xpu string) []core.GPUDevice {
 		return nil
 	}
 	discs := parseXpuDiscovery(out)
-	var devs []core.GPUDevice
-	for _, d := range discs {
-		if len(devs) >= 4 { // bound process spawns on multi-GPU nodes
-			break
-		}
-		mo, ok2 := run(ctx, xpu, "metrics", "-d", strconv.Itoa(d.ID), "-j")
-		if !ok2 {
-			continue
-		}
-		if dev, ok3 := parseXpuMetrics(mo, d.ID); ok3 {
-			dev.Vendor = "intel"
-			dev.Name = d.Name
-			devs = append(devs, dev)
+	if len(discs) > maxXpuDevices { // bound process spawns on multi-GPU nodes
+		discs = discs[:maxXpuDevices]
+	}
+	// One spawn per device, each with its own runTimeout. Run them
+	// concurrently: sequential calls stack, so on a four-device node the
+	// last one starts after three runTimeout windows and the shared
+	// sysmon budget has already cancelled it.
+	devs := make([]*core.GPUDevice, len(discs))
+	var wg sync.WaitGroup
+	for i, d := range discs {
+		wg.Go(func() {
+			mo, ok := run(ctx, xpu, "metrics", "-d", strconv.Itoa(d.ID), "-j")
+			if !ok {
+				return
+			}
+			if dev, ok := parseXpuMetrics(mo, d.ID); ok {
+				dev.Vendor = "intel"
+				dev.Name = d.Name
+				devs[i] = &dev
+			}
+		})
+	}
+	wg.Wait()
+	out2 := make([]core.GPUDevice, 0, len(devs))
+	for _, d := range devs {
+		if d != nil {
+			out2 = append(out2, *d)
 		}
 	}
-	return devs
+	return out2
 }
 
 // ParseNvidiaSMI reads CSV rows of

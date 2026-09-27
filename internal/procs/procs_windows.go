@@ -51,12 +51,14 @@ func listWindows() ([]raw, error) {
 		}
 		args := splitWindowsArgs(p.CommandLine)
 		name := p.Name
-		list = append(list, raw{
+		r := raw{
 			pid:  p.ProcessID,
 			name: name,
 			args: append([]string{name}, args...),
 			rss:  p.WorkingSetSize,
-		})
+		}
+		annotate(&r)
+		list = append(list, r)
 	}
 	return list, nil
 }

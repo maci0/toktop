@@ -35,7 +35,8 @@ func listLinux() ([]raw, error) {
 		}
 
 		r := raw{pid: pid, name: baseName(args[0]), args: args}
-		if !keepProcess(r.name, args) {
+		annotate(&r)
+		if r.engine == "" && r.port == 0 {
 			continue // skip /proc/PID/stat for firefox and friends
 		}
 
@@ -101,16 +102,4 @@ func pagesToBytes(pages uint64) uint64 {
 		return ^uint64(0)
 	}
 	return pages * ps
-}
-
-// keepProcess reports whether a process is relevant to engine discovery or
-// accounting: a known engine, or any process that names a listen port. Only
-// the /proc walk needs it; ps and the CIM query hand back one batch, so
-// filtering per process there saves nothing.
-func keepProcess(name string, args []string) bool {
-	if ExtractPort(args) != 0 {
-		return true
-	}
-	_, _, ok := MatchEngine(Info{Name: name, Args: args})
-	return ok
 }

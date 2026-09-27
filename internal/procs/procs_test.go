@@ -10,6 +10,13 @@ import (
 	"unicode/utf8"
 )
 
+// annotateRaw applies the derivation a platform lister performs, so a
+// stubbed listing hands SnapshotAt the same shape a real one does.
+func annotateRaw(r raw) raw {
+	annotate(&r)
+	return r
+}
+
 func TestExtractPort(t *testing.T) {
 	cases := []struct {
 		args []string
@@ -151,11 +158,15 @@ func TestSnapshotDropsUnrelatedProcesses(t *testing.T) {
 	t.Cleanup(func() { platformList = orig })
 
 	platformList = func() ([]raw, error) {
-		return []raw{
+		list := []raw{
 			{pid: 1, name: "ollama", args: []string{"ollama", "serve"}},
 			{pid: 2, name: "firefox", args: []string{"firefox"}},
 			{pid: 3, name: "python3", args: []string{"python3", "--port", "9000"}},
-		}, nil
+		}
+		for i := range list {
+			annotate(&list[i])
+		}
+		return list, nil
 	}
 	list := NewSampler().Snapshot()
 	got := map[string]Info{}
@@ -188,7 +199,7 @@ func TestSnapshotAtUsesGivenTime(t *testing.T) {
 	var ticks uint64 = 100
 	platformList = func() ([]raw, error) {
 		calls++
-		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks}}, nil
+		return []raw{annotateRaw(raw{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks})}, nil
 	}
 	s := NewSampler()
 	s.refreshMin = time.Second
@@ -223,7 +234,7 @@ func TestSnapshotAtZeroTickBaseline(t *testing.T) {
 
 	var ticks uint64
 	platformList = func() ([]raw, error) {
-		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks}}, nil
+		return []raw{annotateRaw(raw{pid: 1, name: "ollama", args: []string{"ollama", "serve"}, ticks: ticks})}, nil
 	}
 	s := NewSampler()
 	s.refreshMin = 0
@@ -245,7 +256,7 @@ func TestSnapshotKeepsLastGoodOnError(t *testing.T) {
 	t.Cleanup(func() { platformList = orig })
 
 	platformList = func() ([]raw, error) {
-		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}}}, nil
+		return []raw{annotateRaw(raw{pid: 1, name: "ollama", args: []string{"ollama", "serve"}})}, nil
 	}
 	s := NewSampler()
 	first := s.Snapshot()
@@ -286,7 +297,7 @@ func TestSnapshotDetachedFromCache(t *testing.T) {
 	t.Cleanup(func() { platformList = orig })
 
 	platformList = func() ([]raw, error) {
-		return []raw{{pid: 1, name: "ollama", args: []string{"ollama", "serve"}}}, nil
+		return []raw{annotateRaw(raw{pid: 1, name: "ollama", args: []string{"ollama", "serve"}})}, nil
 	}
 	s := NewSampler()
 	first := s.Snapshot()

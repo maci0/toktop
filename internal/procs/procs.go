@@ -33,6 +33,24 @@ type raw struct {
 	rss        uint64
 	cpuPercent float64 // provided directly by the OS tooling when available
 	ticks      uint64  // cumulative CPU jiffies (linux path)
+
+	// port/engine/defPort are derived from name and args by annotate,
+	// which every platform lister calls. The /proc walk needs them to
+	// filter before reading /proc/PID/stat, and deriving them again in
+	// SnapshotAt rebuilt the joined command line and walked every matcher
+	// a second time for each process it kept.
+	port    int
+	engine  string
+	defPort int
+}
+
+// annotate derives the listen-port hint and engine match from the command
+// line the lister already read.
+func annotate(r *raw) {
+	r.port = ExtractPort(r.args)
+	if eng, defPort, ok := MatchEngine(Info{Name: r.name, Args: r.args}); ok {
+		r.engine, r.defPort = eng, defPort
+	}
 }
 
 // platformList is implemented per GOOS.
@@ -112,11 +130,11 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 			Name:     r.name,
 			Args:     r.args,
 			RSS:      r.rss,
-			PortHint: ExtractPort(r.args),
+			PortHint: r.port,
+			Engine:   r.engine,
+			DefPort:  r.defPort,
 		}
-		if eng, defPort, ok := MatchEngine(info); ok {
-			info.Engine, info.DefPort = eng, defPort
-		} else if info.PortHint == 0 {
+		if info.Engine == "" && info.PortHint == 0 {
 			continue // not an engine and no listen-port flag: drop it
 		}
 		switch {

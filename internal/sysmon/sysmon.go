@@ -60,19 +60,32 @@ func Sample() core.SysSample {
 }
 
 // ParseMeminfo fills memory fields from the Linux /proc/meminfo format.
+// Only the four keys the sample reads are kept: a map of all ~54 lines
+// allocated per poll for a file whose interesting values never change.
 func ParseMeminfo(b []byte, s *core.SysSample) {
-	vals := map[string]uint64{}
-	for line := range strings.SplitSeq(string(b), "\n") {
+	var vals struct {
+		total, avail, swapTotal, swapFree uint64
+	}
+	for line := range strings.Lines(string(b)) {
 		k, v, ok := cutMeminfoLine(line)
-		if ok {
-			vals[k] = v
+		if !ok {
+			continue
+		}
+		switch k {
+		case "MemTotal":
+			vals.total = v
+		case "MemAvailable":
+			vals.avail = v
+		case "SwapTotal":
+			vals.swapTotal = v
+		case "SwapFree":
+			vals.swapFree = v
 		}
 	}
-	total := vals["MemTotal"]
-	s.MemTotal = kibBytes(total)
-	s.MemUsed = kibBytes(satSub(total, vals["MemAvailable"]))
-	s.SwapTotal = kibBytes(vals["SwapTotal"])
-	s.SwapUsed = kibBytes(satSub(vals["SwapTotal"], vals["SwapFree"]))
+	s.MemTotal = kibBytes(vals.total)
+	s.MemUsed = kibBytes(satSub(vals.total, vals.avail))
+	s.SwapTotal = kibBytes(vals.swapTotal)
+	s.SwapUsed = kibBytes(satSub(vals.swapTotal, vals.swapFree))
 }
 
 // kibBytes converts a meminfo KiB count to bytes. The remote vitals path

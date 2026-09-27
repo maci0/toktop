@@ -18,6 +18,7 @@ import (
 	"github.com/maci0/toktop/internal/procs"
 	"github.com/maci0/toktop/internal/provider"
 	"github.com/maci0/toktop/internal/sysmon"
+	"golang.org/x/text/unicode/norm"
 )
 
 const (
@@ -51,6 +52,7 @@ type Collector struct {
 	lastModel map[string]string // endpoint -> model to probe
 	kvPct     map[string]float64
 	agents    []core.AgentEvent
+	agentIDs  map[string]struct{} // NFC ids of the retained agents, mirroring c.agents
 	probes    []core.ProbeSample
 	started   time.Time
 	baseCtx   context.Context // set by Run; bounds ad-hoc probes past shutdown
@@ -92,6 +94,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		prev:          map[string]prevSample{},
 		lastModel:     map[string]string{},
 		kvPct:         map[string]float64{},
+		agentIDs:      map[string]struct{}{},
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
 		now:           time.Now,
@@ -305,6 +308,9 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 		// providerKey): labels repeat across instances of the same engine
 		// kind, and shared baselines or histories would mix their counters.
 		key := providerKey(p)
+		// ring() (not a bare map index): a provider whose first poll failed
+		// has no history yet, and indexing the map there would deref nil.
+		outR, inR := c.ring(c.histOut, key), c.ring(c.histIn, key)
 		if r.err != nil {
 			ps.Err = r.err.Error()
 		} else if r.m == nil {
@@ -341,12 +347,9 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			outPS, inPS := c.rates(key, r.m, now)
 			ps.OutTokPS = outPS
 			ps.InTokPS = inPS
-			c.ring(c.histOut, key).push(outPS, now, c.interval)
-			c.ring(c.histIn, key).push(inPS, now, c.interval)
+			outR.push(outPS, now, c.interval)
+			inR.push(inPS, now, c.interval)
 		}
-		// ring() (not a bare map index): a provider whose first poll failed
-		// has no history yet, and indexing the map there would deref nil.
-		outR, inR := c.ring(c.histOut, key), c.ring(c.histIn, key)
 		ps.OutHist, ps.OutT0 = outR.copy(), outR.t0
 		ps.InHist, ps.InT0 = inR.copy(), inR.t0
 		snap.Providers = append(snap.Providers, ps)
@@ -480,11 +483,27 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if core.HasAgentID(c.agents, ev.ID) {
-		return
+	// The id index answers the dedup check in one map probe. Scanning the
+	// window instead cost a full slice walk plus an NFC normalization per
+	// retained event, under the mutex emit needs, for every ingested line.
+	id := ""
+	if ev.ID != "" {
+		id = norm.NFC.String(ev.ID)
+		if _, dup := c.agentIDs[id]; dup {
+			return
+		}
 	}
 	c.agents = core.InsertSorted(append(c.agents, ev), core.AgentCmp)
+	if id != "" {
+		c.agentIDs[id] = struct{}{}
+	}
 	if len(c.agents) > core.AgentHistoryLen {
+		drop := c.agents[:len(c.agents)-core.AgentHistoryLen]
+		for _, e := range drop {
+			if e.ID != "" {
+				delete(c.agentIDs, norm.NFC.String(e.ID))
+			}
+		}
 		c.agents = c.agents[len(c.agents)-core.AgentHistoryLen:]
 	}
 }

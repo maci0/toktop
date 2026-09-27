@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/rivo/uniseg"
@@ -115,22 +116,35 @@ func humanBytesShort(b uint64) string {
 // The cut also only ever lands between grapheme clusters (user-perceived
 // characters): slicing a flag emoji into lone regional indicators or an
 // accented letter off its combining mark would print garbage in the pane.
-// asciiWidth returns the visible width of s when s is plain ASCII without
-// ANSI escapes, else -1. The Width fast path: every frame calls Width on
-// dozens of short ASCII labels ("TOKTOP", "engine-0", "v0.12.0"), and Width
-// splits on "\n" (genSplit alloc) then walks graphemes. Printable ASCII is
-// one cell per byte, so len(s) is exact.
-func asciiWidth(s string) int {
-	for i := 0; i < len(s); i++ {
-		if c := s[i]; c < 0x20 || c >= 0x7f {
-			return -1
+// plainWidth returns the visible width of s when every rune is single-cell,
+// else -1. The Width fast path: every frame calls Width on dozens of short
+// labels ("TOKTOP", "engine-0", "v0.12.0") and on whole chart and border
+// lines, and Width splits on "\n" (genSplit alloc) then walks graphemes.
+// Printable ASCII is one cell per byte; box drawing (U+2500..U+257F) and
+// braille dots (U+2800..U+28FF) are one cell per rune, never wide, never
+// combining, so a rune count is exact for those too. Everything else falls
+// back to Width, which knows about wide runes and combining marks.
+func plainWidth(s string) int {
+	w := 0
+	for i := 0; i < len(s); {
+		c := s[i]
+		if c < 0x20 || c >= 0x7f {
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if !((r >= 0x2500 && r <= 0x257f) || (r >= 0x2800 && r <= 0x28ff)) {
+				return -1
+			}
+			i += size
+			w++
+			continue
 		}
+		i++
+		w++
 	}
-	return len(s)
+	return w
 }
 
 func widthOf(s string) int {
-	if w := asciiWidth(s); w >= 0 {
+	if w := plainWidth(s); w >= 0 {
 		return w
 	}
 	return lipgloss.Width(s)

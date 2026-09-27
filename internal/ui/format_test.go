@@ -93,3 +93,27 @@ func TestNorm(t *testing.T) {
 		t.Errorf("norm(50, NaN) = %v, want 0", got)
 	}
 }
+
+// widthOf takes the plainWidth fast path for single-cell runes. When it
+// does, the answer must equal lipgloss.Width; anything that disagrees
+// silently misaligns every panel it touches.
+func TestWidthOfFastPathMatchesLipgloss(t *testing.T) {
+	for _, s := range []string{
+		"",
+		"TOKTOP",
+		"engine-0 v0.12.0",
+		"  spaced  ",
+		"\u250c\u2500\u2500\u2510", // box drawing
+		"\u2800\u2801\u28ff",       // braille dots
+		"cpu \u2588\u2584 42%",     // partial blocks
+		"\u2801\u2800 \u2502 x",    // mixed
+		"\u4f60\u597d",             // wide: must fall back
+		"caf\u00e9",                // combining-capable: must fall back
+		"\t tab",                   // control: must fall back
+	} {
+		w := widthOf(s)
+		if want := lipgloss.Width(s); w != want {
+			t.Errorf("widthOf(%q) = %d, want %d", s, w, want)
+		}
+	}
+}
