@@ -104,7 +104,7 @@ func TestEngineModelLabels(t *testing.T) {
 				Label: "engine", Kind: core.KindOllama, Models: tc.models,
 			}}}
 			m := Model{snap: snap}
-			row, _, _ := strings.Cut(strip(m.providersBody(80)), "\n")
+			row, _, _ := strings.Cut(strip(func() string { b, _ := m.providersBody(80, 4); return b }()), "\n")
 			fields := strings.Fields(row)
 			wantFields := 2
 			if tc.label != "" {
@@ -254,5 +254,32 @@ func TestPlainTempLabelIsSanitized(t *testing.T) {
 				t.Fatalf("plain frame missing %q in:\n%s", tc.want, out)
 			}
 		})
+	}
+}
+
+// The SYS strip cuts a long CPU model to keep one row readable; the plain
+// report wraps to the terminal's width and has no such row to fit, so it must
+// print the model whole. A cut name there is a fact the reader cannot get
+// back from anywhere else in the output.
+func TestPlainFramePrintsTheFullCPUModel(t *testing.T) {
+	const cpu = "AMD Ryzen Threadripper PRO 5995WX 64-Cores"
+	snap := busySnap()
+	snap.Sys = &core.SysSample{
+		MemTotal: 32 << 30, MemUsed: 16 << 30,
+		CPUModel: cpu,
+		Drivers:  map[string]string{"nvidia": "550.54.14"},
+	}
+	out := PlainTextFrame(Config{Version: "t"}, snap)
+	if !strings.Contains(out, cpu) {
+		t.Errorf("plain frame truncated the CPU model:\n%s", out)
+	}
+	if !strings.Contains(out, "nvidia 550.54.14") {
+		t.Errorf("plain frame truncated the driver version:\n%s", out)
+	}
+	// The strip is a fixed row and still cuts, so the two stay different.
+	m := New(Config{Version: "t"}, nil)
+	m.snap = snap
+	if stripSegs := m.renderSystem(); strings.Contains(strip(stripSegs), cpu) {
+		t.Errorf("SYS strip let a %d-cell model past its budget", len(cpu))
 	}
 }

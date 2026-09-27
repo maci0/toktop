@@ -41,7 +41,7 @@ func (m Model) renderSystem() string {
 
 	var ident []string
 	if sy != nil && (sy.CPUModel != "" || sy.OsName != "" || len(sy.Drivers) > 0 || len(sy.NPUs) > 0) {
-		ident = hostSegments(sy)
+		ident = hostSegments(sy, stripHostLimits)
 	}
 
 	cpuTemps := sysCPUTemps(sy)
@@ -80,27 +80,45 @@ func (m Model) renderSystem() string {
 	return panelStyle.Render(row1 + row2)
 }
 
+// hostSegmentLimits caps each identity segment's cells. The SYS strip packs
+// these left to right on one row, so cutting a long CPU model to a readable
+// segment is right there; the plain report has no row to fit and asks for the
+// same fields uncapped, since a truncated model name there is a fact the
+// reader cannot recover.
+type hostSegmentLimits struct{ cpu, os, drivers int }
+
+// stripHostLimits are the SYS strip's per-segment caps.
+var stripHostLimits = hostSegmentLimits{cpu: 22, os: 34, drivers: 40}
+
+// fitSeg caps s to n cells, or returns it whole when n is 0 or less.
+func fitSeg(s string, n int) string {
+	if n <= 0 {
+		return s
+	}
+	return shorten(s, n)
+}
+
 // hostSegments adds CPU model, OS·kernel and driver versions to the strip.
 // All values can originate from another host (ssh vitals) or vendor tooling,
 // so they pass the terminal sanitizer.
-func hostSegments(sy *core.SysSample) []string {
+func hostSegments(sy *core.SysSample, lim hostSegmentLimits) []string {
 	var segs []string
 	if sy.CPUModel != "" {
-		segs = append(segs, dim(shorten(core.SanitizeText(sy.CPUModel), 22)))
+		segs = append(segs, dim(fitSeg(core.SanitizeText(sy.CPUModel), lim.cpu)))
 	}
 	if sy.OsName != "" || sy.Kernel != "" {
 		osPart := core.SanitizeText(sy.OsName)
 		if sy.Kernel != "" {
 			osPart = strings.TrimSpace(osPart + " · " + core.SanitizeText(sy.Kernel))
 		}
-		segs = append(segs, dim(shorten(osPart, 34)))
+		segs = append(segs, dim(fitSeg(osPart, lim.os)))
 	}
 	if len(sy.Drivers) > 0 {
 		var parts []string
 		for _, k := range slices.Sorted(maps.Keys(sy.Drivers)) {
 			parts = append(parts, core.SanitizeText(k)+" "+core.SanitizeText(sy.Drivers[k]))
 		}
-		segs = append(segs, styleInfo.Render(shorten(strings.Join(parts, " · "), 40)))
+		segs = append(segs, styleInfo.Render(fitSeg(strings.Join(parts, " · "), lim.drivers)))
 	}
 	if len(sy.NPUs) > 0 {
 		names := make([]string, len(sy.NPUs))

@@ -192,9 +192,10 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 		}
 		b.WriteString(line + "\n")
 	}
-	// Same segments as the TUI strip (hostSegments): a kernel string with no
-	// CPU model or OS name used to render here and nowhere else.
-	if ident := hostSegments(sy); len(ident) > 0 {
+	// Same segments as the TUI strip (hostSegments), uncapped: this report
+	// wraps to the terminal's width, so a cut CPU model would be a fact the
+	// reader has no way to get back.
+	if ident := hostSegments(sy, hostSegmentLimits{}); len(ident) > 0 {
 		b.WriteString(strings.Join(ident, " ") + "\n")
 	}
 	shown := 0

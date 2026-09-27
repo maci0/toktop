@@ -9,53 +9,94 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-func (m Model) providersBody(w int) string {
+// providersBody renders whole engine blocks into the mid-row panel and reports
+// how many engines it drew. A block is two rows for every engine: the error
+// line replaces the stats line on a down one. A row budget of odd height
+// therefore ends mid-block, and the cut left a name with no gauge under it, so
+// the block that does not fit is dropped whole. Returning the drawn count is
+// what keeps the title's "+N more" in step with the body below it.
+func (m Model) providersBody(w, rows int) (string, int) {
 	var b strings.Builder
+	used, shown := 0, 0
 	for _, p := range m.snap.Providers {
-		dot := dotUp
-		if !p.OK {
-			dot = dotBad
+		block := providerBlock(p, w)
+		if used+len(block) > rows {
+			break
 		}
-		model := shorten(core.SanitizeText(primaryModel(p)), w-15)
-		line1 := dot + " " + kindBadge(p.Kind) + " " + styleValue.Render(model)
-		if p.Version != "" {
-			line1 += " " + dim("v"+shorten(core.SanitizeText(p.Version), 12))
+		for _, ln := range block {
+			b.WriteString(ln + "\n")
 		}
-		b.WriteString(clip(line1, w) + "\n")
-		if !p.OK {
-			b.WriteString(styleBad.Render("  "+clip(shorten(core.SanitizeText(p.Err), w-3), w-3)) + "\n")
-		} else {
-			kvg := "kv " + GaugeBar(p.KVPct, min(max(w-30, 4), 14), kvHeat)
-			stats := fmt.Sprintf("▲%s ▼%s run %d wait %d",
-				fmtRate(p.OutTokPS), fmtRate(p.InTokPS), p.Running, p.Waiting)
-			line2 := "  " + kvg + " " + styleDim.Render(stats)
-			b.WriteString(clip(line2, w) + "\n")
-		}
+		used += len(block)
+		shown++
 	}
-	return b.String()
+	return b.String(), shown
 }
 
-func (m Model) gaugesBody(w int) string {
+func providerBlock(p core.ProviderSnapshot, w int) []string {
+	dot := dotUp
+	if !p.OK {
+		dot = dotBad
+	}
+	model := shorten(core.SanitizeText(primaryModel(p)), w-15)
+	line1 := dot + " " + kindBadge(p.Kind) + " " + styleValue.Render(model)
+	if p.Version != "" {
+		line1 += " " + dim("v"+shorten(core.SanitizeText(p.Version), 12))
+	}
+	block := []string{clip(line1, w)}
+	if !p.OK {
+		return append(block, styleBad.Render("  "+clip(shorten(core.SanitizeText(p.Err), w-3), w-3)))
+	}
+	kvg := "kv " + GaugeBar(p.KVPct, min(max(w-30, 4), 14), kvHeat)
+	stats := fmt.Sprintf("▲%s ▼%s run %d wait %d",
+		fmtRate(p.OutTokPS), fmtRate(p.InTokPS), p.Running, p.Waiting)
+	return append(block, clip("  "+kvg+" "+styleDim.Render(stats), w))
+}
+
+// gaugesBody renders the healthy engines' detail blocks, three rows each (or
+// two when the host reports no memory, cpu or ttft for one) into the row
+// budget, and reports how many it drew. Same whole-block rule as
+// providersBody: a block that would not fit is dropped rather than cut, so
+// ENGINE STATE never ends on a kv bar with no engine named above it. The blank
+// spacer separates two blocks and is not counted against the last one, which
+// would otherwise cost a whole engine on a full panel.
+func (m Model) gaugesBody(w, rows int) (string, int) {
 	var b strings.Builder
+	used, shown := 0, 0
 	for _, p := range m.snap.Providers {
 		if !p.OK {
 			continue
 		}
 		name := styleDim.Render(clip(shorten(core.SanitizeText(p.Label), w-6), w-6))
 		kv := "kv  " + GaugeBar(p.KVPct, min(max(w-10, 4), 20), kvHeat)
-		third := procLine(p)
-		row := clipBlock(name+"\n"+kv+"\n"+third, w, -1)
-		b.WriteString(row + "\n\n")
+		block := []string{name, kv}
+		if third := procLine(p); third != "" {
+			block = append(block, third)
+		}
+		need := len(block)
+		if shown > 0 {
+			need++
+		}
+		if used+need > rows {
+			break
+		}
+		if shown > 0 {
+			b.WriteString("\n")
+		}
+		for _, ln := range block {
+			b.WriteString(clip(ln, w) + "\n")
+		}
+		used += need
+		shown++
 	}
-	if b.Len() == 0 {
+	if shown == 0 {
 		// No engines yet is genuinely "waiting"; engines present but all
 		// down never resolves, so name it instead of promising telemetry.
 		if len(m.snap.Providers) == 0 {
-			return dim("waiting for telemetry…")
+			return dim("waiting for telemetry…"), 0
 		}
-		return dim("no healthy engines (see ENGINES)")
+		return dim("no healthy engines (see ENGINES)"), 0
 	}
-	return b.String()
+	return b.String(), shown
 }
 
 // procLine composes the third detail row: memory/context/process stats.
@@ -169,7 +210,9 @@ func (m Model) probesBody(w, h int) string {
 	}
 	if len(m.snap.Probes) == 0 {
 		out.WriteString(dim("press ") + styleInfo.Render("p") + dim(" to fire a probe") + "\n")
-		out.WriteString(dim("q quit, then --probe N to auto-probe"))
+		// Short enough for the narrowest legal pane's PROBES column: the
+		// longer spelling ended in an ellipsis on every dashboard.
+		out.WriteString(dim("q to quit, re-run with --probe N"))
 	}
 	return out.String()
 }

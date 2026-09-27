@@ -1188,7 +1188,7 @@ func TestHostSegmentsSanitizeDrivers(t *testing.T) {
 		Drivers: map[string]string{"nv\x1b]0;title": "5\x1b[35m50"},
 		NPUs:    []string{"ane\x1b]52;c;QUJD\x07"},
 	}
-	segs := hostSegments(sy)
+	segs := hostSegments(sy, stripHostLimits)
 	for _, s := range segs {
 		if strings.ContainsRune(strip(s), '\x1b') || strings.ContainsRune(strip(s), '\x07') {
 			t.Errorf("hostSegments leaked escape bytes: %q", strip(s))
@@ -1339,7 +1339,7 @@ func TestEnginesPanelLabelsKVAndQueue(t *testing.T) {
 		Label: "ollama", Kind: core.KindOllama, OK: true,
 		OutTokPS: 42, InTokPS: 10, KVPct: 55, Running: 1, Waiting: 2,
 	}}}
-	out := strip(m.providersBody(50))
+	out, _ := m.providersBody(50, 4)
 	for _, want := range []string{"kv ", "run 1", "wait 2"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("engine row missing %q:\n%s", want, out)
@@ -1360,7 +1360,8 @@ func TestEngineStateKeepsRowsWhenDetailsOverflow(t *testing.T) {
 		Label: "engine-b", OK: true, KVPct: 20,
 	}}}
 	for _, w := range []int{15, 20, 33} {
-		lines := strings.Split(m.gaugesBody(w), "\n")
+		body, _ := m.gaugesBody(w, 8)
+		lines := strings.Split(body, "\n")
 		for i, want := range map[int]string{0: "engine-a", 1: "kv ", 2: "mem ", 4: "engine-b", 5: "kv "} {
 			if i >= len(lines) || !strings.Contains(strip(lines[i]), want) {
 				t.Errorf("width %d: row %d missing %q in %q", w, i, want, lines)
@@ -1381,11 +1382,11 @@ func TestEngineStateNamesAllDownEngines(t *testing.T) {
 	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{
 		{Label: "a", OK: false}, {Label: "b", OK: false},
 	}}
-	if out := strip(m.gaugesBody(30)); !strings.Contains(out, "no healthy engines") {
+	if out, _ := m.gaugesBody(30, 8); !strings.Contains(strip(out), "no healthy engines") {
 		t.Errorf("gaugesBody hides all-down state: %q", out)
 	}
 	m.snap = core.Snapshot{}
-	if out := strip(m.gaugesBody(30)); !strings.Contains(out, "waiting for telemetry") {
+	if out, _ := m.gaugesBody(30, 8); !strings.Contains(strip(out), "waiting for telemetry") {
 		t.Errorf("gaugesBody lost the pre-discovery message: %q", out)
 	}
 }
@@ -1756,6 +1757,90 @@ func TestProbeEmptyHintsRerunForAuto(t *testing.T) {
 
 // p and t only have a visible effect with engines (or agents, for t). The
 // compact strip already hides them; the full footer must match.
+// The mid-row panels clip to a row budget, and a half-drawn engine reads as a
+// sixth engine on a fleet of five: the body must stop at whole blocks and the
+// title must count what the body drew, not what the budget could guess.
+func TestMidRowPanelsCountOnlyWholeEngines(t *testing.T) {
+	provs := make([]core.ProviderSnapshot, 5)
+	for i := range provs {
+		provs[i] = core.ProviderSnapshot{Label: fmt.Sprintf("engine-%d", i), OK: true,
+			Models: []core.ModelInfo{{SizeVRAM: 8 << 30}}, TTFTms: 120}
+	}
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: provs}
+	// Seven rows is what the mid row gets on the default pane: three two-row
+	// engine blocks fit, three three-row state blocks plus a spacer fit.
+	body, shown := m.providersBody(40, 7)
+	if shown != 3 {
+		t.Errorf("ENGINES drew %d blocks into 7 rows, want 3", shown)
+	}
+	if rows := len(strings.Split(strings.TrimRight(body, "\n"), "\n")); rows != 6 {
+		t.Errorf("ENGINES wrote %d rows, want 6 whole blocks:\n%s", rows, body)
+	}
+	if got := strip(m.enginesTitle(40, shown)); got != "ENGINES  +2 more" {
+		t.Errorf("ENGINES title = %q, want the two engines it did not draw", got)
+	}
+	state, stateShown := m.gaugesBody(40, 7)
+	if stateShown != 2 {
+		t.Errorf("ENGINE STATE drew %d blocks into 7 rows, want 2", stateShown)
+	}
+	if got := strip(m.engineStateTitle(40, stateShown)); got != "ENGINE STATE  +3 more" {
+		t.Errorf("ENGINE STATE title = %q, want the three engines it did not draw", got)
+	}
+	if strings.Contains(strip(state), "engine-2") {
+		t.Errorf("ENGINE STATE drew a block it had no rows for:\n%s", state)
+	}
+}
+
+// An engine with no memory, cpu or ttft reading has a two-row state block
+// where a measured one has three, so a count derived from the row budget alone
+// miscounts the panel. The title follows the body either way.
+func TestEngineStateCountsShortBlocksByRow(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{
+		{Label: "a", OK: true}, {Label: "b", OK: true}, {Label: "c", OK: true},
+	}}
+	body, shown := m.gaugesBody(40, 8)
+	if shown != 3 {
+		t.Errorf("drawn %d two-row blocks into 8 rows, want 3:\n%s", shown, body)
+	}
+	if got := strip(m.engineStateTitle(40, shown)); got != "ENGINE STATE" {
+		t.Errorf("ENGINE STATE title = %q, want no hidden-engine badge", got)
+	}
+	// A measured engine needs a third row, so only two of the same three fit.
+	m.snap.Providers[0].TTFTms = 120
+	_, shown = m.gaugesBody(40, 7)
+	if shown != 2 {
+		t.Errorf("drawn %d blocks into 7 rows, want 2", shown)
+	}
+	if got := strip(m.engineStateTitle(40, shown)); got != "ENGINE STATE  +1 more" {
+		t.Errorf("ENGINE STATE title = %q, want +1 more", got)
+	}
+}
+
+// A notice is the answer to a key that changed nothing. On a pane too narrow to
+// carry it beside the key list it has to stand alone: the key list is what
+// gives way, or the explanation is clipped off the row entirely.
+func TestFooterNoticeSurvivesANarrowPane(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "x", OK: true}}}
+	m.notice = "p: no engines to probe"
+	m.w = minDashW
+	got := strip(m.renderFooter())
+	if !strings.Contains(got, "p: no engines to probe") {
+		t.Errorf("notice dropped on a %d-column pane: %q", minDashW, got)
+	}
+	if w := lipgloss.Width(got); w > minDashW {
+		t.Errorf("footer is %d columns wide on a %d-column pane: %q", w, minDashW, got)
+	}
+	// Where both fit, the notice answers beside the key it belongs to.
+	m.w = 120
+	got = strip(m.renderFooter())
+	if !strings.Contains(got, "help") || !strings.Contains(got, "p: no engines to probe") {
+		t.Errorf("wide footer lost either the keys or the notice: %q", got)
+	}
+}
+
 func TestFooterOmitsDeadKeys(t *testing.T) {
 	empty := New(Config{Version: "t", Prober: func() {}}, nil)
 	if got := strip(empty.renderFooter()); strings.Contains(got, "probe") || strings.Contains(got, "timescale") {

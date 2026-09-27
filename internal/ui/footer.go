@@ -35,6 +35,12 @@ func (m Model) canSwapFocus() bool {
 	return len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents)
 }
 
+// noticeMinCells is the shortest notice the footer will print beside the key
+// list. Below it the two cannot share a row, and the key list is what gives way:
+// the notice names its own key ("p: …"), so on its own it still answers the
+// press, where the key list alone would drop the answer off the clipped edge.
+const noticeMinCells = 16
+
 func (m Model) renderFooter() string {
 	foot := styleInfo.Render("q") + dim(" quit  ") +
 		styleInfo.Render("space") + dim(" pause  ")
@@ -52,16 +58,21 @@ func (m Model) renderFooter() string {
 		foot += styleInfo.Render("a") + dim(label+"  ")
 	}
 	foot += styleInfo.Render("?") + dim(" help")
-	// The notice shares the footer row so a key that did nothing is answered
-	// where the key itself is printed.
-	if m.notice != "" {
-		foot += dim("  ·  ") + styleWarn.Render(m.notice)
-	}
 	tag := ""
 	if m.cfg.Demo {
 		tag = styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
 	}
-	return tag + foot
+	if m.notice == "" {
+		return tag + foot
+	}
+	// The notice shares the footer row so a key that did nothing is answered
+	// where the key itself is printed.
+	sep := dim("  ·  ")
+	if avail := m.w - widthOf(tag) - widthOf(foot) - widthOf(sep); avail >= noticeMinCells {
+		return tag + foot + sep + styleWarn.Render(m.notice)
+	}
+	room := max(m.w-widthOf(tag), 0)
+	return tag + styleWarn.Render(shorten(m.notice, room))
 }
 
 func (m Model) renderEmpty() string {

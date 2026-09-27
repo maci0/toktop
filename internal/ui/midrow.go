@@ -14,35 +14,36 @@ func (m Model) renderMidRow() string {
 	rw := m.w - pw - gw
 	_, midIn, _ := m.sectionHeights()
 
-	prov := panel(m.enginesTitle(pw-4, midIn), m.providersBody(pw-4), pw-4, midIn)
-	gaug := panel(m.engineStateTitle(gw-4, midIn), m.gaugesBody(gw-4), gw-4, midIn)
+	provBody, provShown := m.providersBody(pw-4, midIn)
+	gaugBody, gaugShown := m.gaugesBody(gw-4, midIn)
+	prov := panel(m.enginesTitle(pw-4, provShown), provBody, pw-4, midIn)
+	gaug := panel(m.engineStateTitle(gw-4, gaugShown), gaugBody, gw-4, midIn)
 	prb := panel(clip(m.probesTitle(), rw), m.probesBody(rw-4, midIn), rw-4, midIn)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, prov, gaug, prb)
 }
 
-func (m Model) enginesTitle(w, midIn int) string {
-	title := "ENGINES"
-	visible := max(midIn/2, 1)
-	if hidden := len(m.snap.Providers) - visible; hidden > 0 {
-		more := fmt.Sprintf("+%d more", hidden)
-		if lipgloss.Width(title)+lipgloss.Width(more)+2 <= w {
-			title += "  " + dim(more)
-		}
-	}
-	return title
+// enginesTitle names what the ENGINES body could not fit. shown is the count
+// the body reports, not a guess from the row budget: the two must agree or the
+// badge reads as a sixth engine on a fleet of five.
+func (m Model) enginesTitle(w, shown int) string {
+	return moreTitle("ENGINES", w, len(m.snap.Providers)-shown)
 }
 
-func (m Model) engineStateTitle(w, midIn int) string {
-	title := "ENGINE STATE"
+// engineStateTitle is engineStateTitle's counterpart over the healthy engines
+// only, matching the body that skips the down ones.
+func (m Model) engineStateTitle(w, shown int) string {
 	healthy := 0
 	for _, p := range m.snap.Providers {
 		if p.OK {
 			healthy++
 		}
 	}
-	visible := max((midIn+1)/4, 1)
-	if hidden := healthy - visible; hidden > 0 {
+	return moreTitle("ENGINE STATE", w, healthy-shown)
+}
+
+func moreTitle(title string, w, hidden int) string {
+	if hidden > 0 {
 		more := fmt.Sprintf("+%d more", hidden)
 		if lipgloss.Width(title)+lipgloss.Width(more)+2 <= w {
 			title += "  " + dim(more)
