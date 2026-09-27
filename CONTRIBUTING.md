@@ -153,8 +153,8 @@ weight, so a recapture that blows the budget fails there.
 | `make lint` | staticcheck over both halves of the sqlite tag gate |
 | `make govulncheck` | `govulncheck` over both sqlite tag halves at the Makefile pin (same pin as CI) |
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
-| `make site-lint` | biome format-check and lint over `site/` at the Makefile `BIOME` pin (CI parity) |
-| `make site-fmt` | rewrite `site/` with the biome formatter, then re-lint |
+| `make site-lint` | biome format-check and lint over the files `biome.jsonc` includes (the Worker and the jsonc configs) at the Makefile `BIOME` pin (CI parity) |
+| `make site-fmt` | rewrite those files with the biome formatter, then re-lint |
 | `make site-check` | `bun test site/` |
 | `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick` and `avifenc`) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
@@ -186,7 +186,8 @@ make pr
 
 That is `make ci` (gofmt, tidy, staticcheck, vet, govulncheck, race tests for
 both sqlite tag halves), `make site-lint` (biome formatter and linter over the
-Worker, at the `BIOME` pin in the Makefile, config in `biome.jsonc`; run
+Worker and the jsonc configs, at the `BIOME` pin in the Makefile, config in
+`biome.jsonc`; run
 `make site-fmt` to apply the formatter), `make site-check`
 (`bun test site/`), `make scripts-check`, and `make repro-check-pair`.
 `scripts-check` installs the exact versions in

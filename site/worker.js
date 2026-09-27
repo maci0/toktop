@@ -59,10 +59,10 @@ const LIGHT = {
 // The h1 cursor block, in the panel and accent colors: the icon is the mark the
 // page already ends on, not a placeholder glyph.
 const FAVICON = `data:image/svg+xml,${encodeURIComponent(
-  `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">` +
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
     `<rect width="100" height="100" fill="${DARK.panel}"/>` +
     `<rect x="37" y="25" width="26" height="50" fill="${DARK.accent}"/>` +
-    `</svg>`,
+    "</svg>",
 )}`;
 
 const HTML = htmlForWire(`<!doctype html>

@@ -391,12 +391,12 @@ site-check: require-bun ## bun test the Cloudflare Worker in site/ (CI parity)
 	bun test site/
 
 .PHONY: site-lint
-site-lint: require-bun ## biome format-check and lint site/ at the BIOME pin (CI parity)
-	bunx $(BIOME) check site/
+site-lint: require-bun ## biome format-check and lint the files biome.jsonc includes, at the BIOME pin (CI parity)
+	bunx $(BIOME) check
 
 .PHONY: site-fmt
-site-fmt: require-bun ## rewrite site/ with the BIOME formatter, then re-lint
-	bunx $(BIOME) check --write site/
+site-fmt: require-bun ## rewrite the included files with the BIOME formatter, then re-lint
+	bunx $(BIOME) check --write
 
 # The site's only deployment step, and its undo. The /health poll proves the
 # site is answering, not that this tree is the version answering, so it is an

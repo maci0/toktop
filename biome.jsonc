@@ -5,7 +5,10 @@
 // run cannot pick different rule sets.
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
-  "files": { "includes": ["site/**/*.js"] },
+  // The jsonc entries are the site config and this file: they are the only
+  // other files biome can check, and both were being formatted by hand with
+  // no gate over them.
+  "files": { "includes": ["site/**/*.js", "site/**/*.jsonc", "*.jsonc"] },
   // Two-space indent, as the worker has always been written. lineWidth 100 is
   // the width the tree already lives at: every line past it is embedded markup,
   // a long literal, or a biome-ignore comment, none of which a formatter
@@ -28,11 +31,16 @@
       // useQwikValidLexicalScope flags every ordinary closure capture. There is
       // no Qwik build here for the rule to be right about.
       "correctness": { "useQwikValidLexicalScope": "off" },
-      // complexity, performance, style and nursery stay off: the tree does not
-      // pass them today (cognitive-complexity on the representation picker,
-      // await-in-loop in the image tests, magic numbers in the FNV hash), and
-      // those are refactors rather than defects to gate on.
-    },
+      // One style rule on its own, not the group: complexity, the rest of
+      // performance, the rest of style and nursery stay off because the tree
+      // does not pass them today (cognitive-complexity on the representation
+      // picker, await-in-loop in the image tests, magic numbers in the FNV
+      // hash, noContinue in the encoding parser), and those are refactors
+      // rather than defects to gate on. A template literal with no
+      // interpolation is a string that reads as markup, where a stray `${`
+      // would be the mistake, and the tree passes that one.
+      "style": { "noUnusedTemplateLiteral": "error" }
+    }
   },
   "overrides": [
     {
@@ -40,7 +48,7 @@
       // a node: import there is a test harness detail, not a bundle-bloat
       // defect.
       "includes": ["site/worker.test.js"],
-      "linter": { "rules": { "correctness": { "noNodejsModules": "off" } } },
-    },
-  ],
+      "linter": { "rules": { "correctness": { "noNodejsModules": "off" } } }
+    }
+  ]
 }

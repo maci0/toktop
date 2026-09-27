@@ -283,7 +283,8 @@ Every externally reachable input, with its code location:
 Deployment surface:
 
 - GitHub Actions CI runs gofmt/vet/`go mod tidy -diff`/govulncheck/staticcheck/
-  race tests on pushes and PRs, plus biome over `site/`, `bun test site/` and
+  race tests on pushes and PRs, plus biome over the Worker and the jsonc
+  configs, `bun test site/` and
   screenshot-script lint (.github/workflows/ci.yml, actions pinned by SHA, bun
   from `.bun-version`, biome at the Makefile `BIOME` pin, uv 0.12.6, Python
   tools from `scripts/requirements-dev.txt`);
