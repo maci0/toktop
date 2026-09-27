@@ -11,8 +11,10 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// Palette matches the toktop.ai tokens in site/worker.js (cool dark, green
-// accent, amber pressure). Degrades to nearest 256/16 colors on old terminals.
+// Palette follows the toktop.ai tokens in site/worker.js (cool dark, green
+// accent, amber pressure): bg, fg, dim, accent and warm are shared values.
+// The border and status colors are TUI-only, the site drawing its dividers
+// from --line. Degrades to nearest 256/16 colors on old terminals.
 var (
 	cBase = lipgloss.Color("#0d1117")
 	// Secondary text must stay >= 4.5:1 on cBase (WCAG 1.4.3). Site --dim

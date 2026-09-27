@@ -13,8 +13,9 @@ import (
 
 // Discovery is the result of one sweep over a remote host.
 type Discovery struct {
-	// Listening holds every port answering on the target, read straight from
-	// /proc/net/tcp(+6) so no bash/nc is needed remotely.
+	// Listening holds every port answering on the target, read from
+	// /proc/net/tcp(+6). On hardened kernels where that read is denied, it
+	// falls back to actively probing the well-known ports over the shell.
 	Listening []int
 	// EnginePorts holds ports inferred from engine-looking processes: their
 	// --port flag when present, otherwise the engine's default. These catch
@@ -112,7 +113,7 @@ func parseNetTCP(out string) []int {
 	return slices.Sorted(maps.Keys(seen))
 }
 
-// ProbeScript prints listening ports from the given candidate list. Uses bash
+// probeScript prints listening ports from the given candidate list. Uses bash
 // /dev/tcp first, falling back to nc. Kept as a fallback for hosts where
 // /proc/net/tcp is not readable.
 func probeScript(ports []int) string {

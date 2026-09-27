@@ -252,8 +252,3 @@ func validateOnceEnv() error {
 	}
 	return nil
 }
-
-// logActiveConfig writes one startup line of the knobs that will actually
-// apply. Secrets are named as set/unset, never printed. The live dashboard
-// hides stderr under the alt screen; --once and a journal after quit keep it.
-// opencodeOn is the resolved gate, not the flag: a build without the sqlite

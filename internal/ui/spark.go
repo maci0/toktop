@@ -44,7 +44,7 @@ var brailleBits = [4][2]byte{
 // ChartStyle tunes BrailleChart rendering.
 type ChartStyle struct {
 	Heat func(float64) lipgloss.Color
-	Grid map[int]bool // columns marked true get a faint vertical guide
+	Grid map[int]bool // columns marked true get a faint baseline tick where the data leaves the bottom row empty
 }
 
 const hexDigits = "0123456789abcdef"
@@ -208,7 +208,8 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 	return strings.Join(out, "\n")
 }
 
-// GaugeBar renders "[██████░░░░] 62%"-style meter content without label.
+// GaugeBar renders "━━━━── 62%": a heavy rule for the filled part, a dim one
+// for the rest, then the percentage. No label, no brackets.
 func GaugeBar(pct float64, w int, heat func(float64) lipgloss.Color) string {
 	if w < 3 {
 		w = 3

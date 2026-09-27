@@ -90,7 +90,3 @@ func validateAddURL(raw string) error {
 	}
 	return nil
 }
-
-// usage prints the full help screen: what toktop is, how to invoke it,
-// worked examples, generated flag docs and where the env fallbacks live.
-// -h/--help sends it to stdout so piping works (`toktop --help | grep

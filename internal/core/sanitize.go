@@ -112,8 +112,8 @@ func MixedScriptIdentity(s string) bool {
 
 // needsSanitize reports whether s contains any byte that SanitizeText would
 // remove. ASCII controls (except newline/tab) and DEL are one class; any
-// non-ASCII byte takes the slow path because bidi and zero-width marks are
-// 2- and 3-byte UTF-8 that the previous C2-C3-only check missed.
+// non-ASCII byte takes the slow path, because bidi controls and zero-width
+// marks run past the 0xC2-0xC3 range.
 func needsSanitize(s string) bool {
 	for i := 0; i < len(s); i++ {
 		c := s[i]

@@ -180,5 +180,3 @@ func unexpectedArg(arg string) error {
 		return fmt.Errorf("toktop: unexpected argument %q (see 'toktop --help')", arg)
 	}
 }
-
-// warnIgnoredFlags names flags passed explicitly but with no effect in the

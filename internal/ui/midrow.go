@@ -1,6 +1,6 @@
 package ui
 
-// The mid row: the engine, agent and probe panel titles side by side.
+// The mid row: the engines, engine state and probes panel titles side by side.
 
 import (
 	"fmt"

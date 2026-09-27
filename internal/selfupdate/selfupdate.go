@@ -63,7 +63,7 @@ type Release struct {
 func (r *Release) Version() string { return strings.TrimPrefix(r.TagName, "v") }
 
 // AssetName is the binary this platform needs from a release. It must match
-// what the Makefile's dist target produces, or self-update finds nothing.
+// the names `make release` writes into dist/, or self-update finds nothing.
 func AssetName(version string) string {
 	name := fmt.Sprintf("toktop_%s_%s_%s", version, runtime.GOOS, runtime.GOARCH)
 	if runtime.GOOS == "windows" {

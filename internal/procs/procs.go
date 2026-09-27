@@ -231,9 +231,19 @@ func baseName(n string) string {
 	return strings.TrimSuffix(strings.ToLower(n), ".exe")
 }
 
+// anyArgContains reports whether any argument holds one of subs. The
+// arguments draw on one matchJoinBytes budget, not one per argument, so the
+// matchers read no further into a command line than CmdlinePrefix allows.
+// Clipping per argument matters on its own: a Chrome --disable-features blob
+// is tens of kilobytes and never an engine module path.
 func anyArgContains(args []string, subs ...string) bool {
+	budget := matchJoinBytes
 	for _, a := range args {
-		la := strings.ToLower(clipArg(a))
+		if budget <= 0 {
+			return false
+		}
+		la := strings.ToLower(clipUTF8Prefix(a, budget))
+		budget -= len(la)
 		for _, sub := range subs {
 			if strings.Contains(la, sub) {
 				return true
@@ -258,13 +268,6 @@ const (
 // bytes per process: the tail is where an agent's inline prompt, a file path
 // or a credential sits, and none of it is read back on the other side.
 const CmdlinePrefix = matchJoinBytes
-
-// clipArg keeps the prefix of a single argument that engine matchers look
-// at. A Chrome --disable-features blob is tens of kilobytes and never an
-// engine module path.
-func clipArg(a string) string {
-	return clipUTF8Prefix(a, matchJoinBytes)
-}
 
 // clipUTF8Prefix keeps at most n bytes of s, ending on a code-point
 // boundary so a cut cannot leave a dangling lead byte (é as 0xC3).

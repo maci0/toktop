@@ -80,7 +80,7 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    16 << 10, // default 1 MiB; this endpoint has no large headers
 		// net/http interpolates conn.RemoteAddr into panic and handshake
-		// lines. That is the same peer address logPost redacts: personal
+		// lines. That is the same peer address logRemote redacts: personal
 		// data when --ingest is bound off loopback.
 		ErrorLog: slog.NewLogLogger(addrRedactHandler{lg.Handler()}, slog.LevelError),
 	}
@@ -176,10 +176,10 @@ func clientEventKey(r *http.Request) string {
 // derivedEventID maps one line of a POST onto a stable event id so a replay
 // of the same stream (lost 202, retry after a mid-stream 400) lands on the
 // same keys the collector already ignores. seq is 1-based within the POST.
-// The key is kept verbatim and hashed, so two POSTs whose keys differ only
-// after cap truncation or whitespace collapsing stay distinct: replaying one
-// must not swallow the other's events. A collision needs both a 121+ byte
-// key pair and a sha256 prefix match; keyed ids still fit the 128-event cap.
+// The key is NFC-normalized and hashed rather than truncated, so a collision
+// needs only a match on the 8-byte sha256 prefix however long the keys are.
+// A derived id is 16 hex chars plus the ":seq" suffix, well inside the
+// 128-character id cap applied when the event is stored.
 func derivedEventID(key string, seq int) string {
 	if key == "" || seq < 1 {
 		return ""

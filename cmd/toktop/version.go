@@ -35,5 +35,3 @@ func resolveVersion(stamped, moduleVersion string) string {
 	}
 	return "dev"
 }
-
-// cliFlags is the top-level FlagSet. Registration is independent of

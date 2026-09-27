@@ -126,10 +126,10 @@ func (m Model) renderHelp() string {
 	return clipBlock(placed, m.w, m.h)
 }
 
-// helpRows is the in-app key reference. Compact panes already hide p and t
-// (their effects live on panels the compact strip does not draw) and have
-// no room for the restart-flag list; matching that list here keeps help
-// from advertising keys that appear to do nothing.
+// helpRows is the in-app key reference. Compact panes keep p (the strip
+// draws a "● probing…" badge) but drop t and the restart-flag list, which
+// name panels the compact strip does not draw; matching that list here keeps
+// help from advertising keys that appear to do nothing.
 func (m Model) helpRows() [][2]string {
 	if m.w < minDashW || m.h < minDashH {
 		return [][2]string{

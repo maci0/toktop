@@ -90,8 +90,8 @@ func fmtDur(d time.Duration) string {
 }
 
 // humanBytes renders a byte count. The KiB tier exists because a sub-MiB
-// value (a small size_vram, a small process) would otherwise round to a
-// flat "0MiB", reading as no allocation at all.
+// value (a small size_vram) would otherwise round to a flat "0MiB", reading
+// as no allocation at all.
 func humanBytes(b uint64) string {
 	const g = 1 << 30
 	if b >= g {

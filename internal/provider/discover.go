@@ -163,8 +163,11 @@ func newProvider(kind, base string) Provider {
 }
 
 // identify returns the provider kind serving base, or "" if none matches.
-// Order matters: specific metrics prefixes first, then engine-specific
-// endpoints, then generic OpenAI probing.
+// Order matters. OmniRoute and Ollama go first because each is settled by a
+// single response header that no later probe can still see: both serve the
+// OpenAI surface too, so a body scan would not tell them apart. Then the
+// specific metrics prefixes, then engine-specific endpoints, then generic
+// OpenAI probing.
 func identify(ctx context.Context, base string) string {
 	if isOmniRoute(ctx, base) {
 		return core.KindOmniRoute

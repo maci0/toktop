@@ -120,19 +120,19 @@ func TestLowerJoinedArgsCapsSize(t *testing.T) {
 	}
 }
 
-func TestClipArgDoesNotSplitUTF8(t *testing.T) {
+func TestClipUTF8PrefixDoesNotSplitUTF8(t *testing.T) {
 	// 4095 ASCII bytes plus é (U+00E9, two UTF-8 bytes). A raw s[:4096]
 	// keeps 0xC3 and drops 0xA9, so ToLower would run on invalid UTF-8.
 	a := strings.Repeat("x", matchJoinBytes-1) + "é"
-	got := clipArg(a)
+	got := clipUTF8Prefix(a, matchJoinBytes)
 	if !utf8.ValidString(got) {
-		t.Fatalf("clipArg split a character: %q is not valid UTF-8", got)
+		t.Fatalf("clipUTF8Prefix split a character: %q is not valid UTF-8", got)
 	}
 	if strings.HasSuffix(got, "é") {
-		t.Fatal("clipArg kept a character that does not fit in the byte cap")
+		t.Fatal("clipUTF8Prefix kept a character that does not fit in the byte cap")
 	}
 	if len(got) != matchJoinBytes-1 {
-		t.Fatalf("clipArg length = %d, want %d (ASCII prefix only)", len(got), matchJoinBytes-1)
+		t.Fatalf("clipUTF8Prefix length = %d, want %d (ASCII prefix only)", len(got), matchJoinBytes-1)
 	}
 	joined := lowerJoinedArgs([]string{a})
 	if !utf8.ValidString(joined) {
@@ -140,6 +140,18 @@ func TestClipArgDoesNotSplitUTF8(t *testing.T) {
 	}
 	if len(joined) > matchJoinBytes {
 		t.Fatalf("joined command is %d bytes, cap is %d", len(joined), matchJoinBytes)
+	}
+}
+
+func TestAnyArgContainsSharesByteBudget(t *testing.T) {
+	// A match must never depend on anything past CmdlinePrefix bytes, so the
+	// budget is spent across arguments, not reset per argument.
+	args := []string{strings.Repeat("x", matchJoinBytes), "vllm.entrypoints"}
+	if anyArgContains(args, "vllm.entrypoints") {
+		t.Fatal("anyArgContains matched past the shared byte budget")
+	}
+	if !anyArgContains([]string{"python", "-m", "vllm.entrypoints"}, "vllm.entrypoints") {
+		t.Fatal("anyArgContains missed a match inside the budget")
 	}
 }
 

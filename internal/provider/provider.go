@@ -24,7 +24,9 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// PollTimeout bounds a single metrics scrape.
+// PollTimeout bounds a single HTTP request, including a metrics scrape, the
+// concurrent /v1/models probe and each hop of the version chain, so one poll
+// can spend several of these in the worst case.
 const PollTimeout = 1500 * time.Millisecond
 
 // Metrics is the raw engine state a single poll yields. Rates are derived by
