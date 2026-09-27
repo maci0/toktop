@@ -6,6 +6,7 @@ package agentusage
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 	"time"
@@ -86,6 +87,63 @@ func TestKimiWorkDirKeyMatchesTheCLI(t *testing.T) {
 	} {
 		if got := kimiWorkDirKey(tc.cwd); got != tc.key {
 			t.Errorf("kimiWorkDirKey(%q) = %q, want %q", tc.cwd, got, tc.key)
+		}
+	}
+}
+
+// kimiStoreTree builds the store a Kimi Code CLI session writes, the shape the
+// CLI uses on this platform: sessions/<workDirKey>/<session>/state.json beside
+// an agents/ directory of wire logs, one per agent.
+func kimiStoreTree(t *testing.T, cwd string, agents ...string) (wire string) {
+	t.Helper()
+	store := t.TempDir()
+	session := filepath.Join(store, "wd_key", "session-1")
+	if err := os.MkdirAll(filepath.Join(session, "agents"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(session, "state.json"), []byte(`{"cwd":`+jsonPath(cwd)+`}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if len(agents) == 0 {
+		agents = []string{"main"}
+	}
+	for _, a := range agents {
+		dir := filepath.Join(session, "agents", a)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if a == agents[0] {
+			wire = filepath.Join(dir, "wire.jsonl")
+		}
+	}
+	return wire
+}
+
+// A wire log's session directory is above the agents/ directory, not beside
+// it. Reading two levels up finds agents/ instead, so the cwd is never read and
+// every kimi session reports nothing, which the dashboard renders as an agent
+// that ran and spent nothing.
+func TestKimiSessionCwdReadsTheCLILayout(t *testing.T) {
+	work := t.TempDir()
+	wire := kimiStoreTree(t, work, "main")
+	cwd, ok := kimiSessionCwd(wire)
+	if !ok || cwd != work {
+		t.Fatalf("kimiSessionCwd(%q) = %q, %v; want %q, true", wire, cwd, ok, work)
+	}
+}
+
+// A subagent's log is a session of its own and counts its own tokens, so the
+// cwd is read for every agent directory, not only the main one.
+func TestKimiSessionCwdReadsSubagentLogs(t *testing.T) {
+	work := t.TempDir()
+	wire := kimiStoreTree(t, work, "main", "agent-3", "agent-7")
+	for _, a := range []string{"main", "agent-3", "agent-7"} {
+		path := filepath.Join(filepath.Dir(filepath.Dir(wire)), a, "wire.jsonl")
+		if cwd, ok := kimiSessionCwd(path); !ok || cwd != work {
+			t.Fatalf("kimiSessionCwd(%q) = %q, %v; want %q, true", path, cwd, ok, work)
 		}
 	}
 }
@@ -184,5 +242,46 @@ func TestKimiStoreHonorsOnlyAnAbsoluteHome(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", "relative/home")
 	if got, want := kimiStore(), home(".kimi-code", "sessions"); got != want {
 		t.Fatalf("kimiStore() = %q, want the default %q", got, want)
+	}
+}
+
+// A session with no state.json yet yields no verdict, so the transcript is
+// retried on a later poll rather than refused for the life of the session. The
+// walk must stop at the store, not climb into the user's home and read some
+// other program's state.json.
+func TestKimiSessionCwdWithoutAStateFile(t *testing.T) {
+	store := t.TempDir()
+	session := filepath.Join(store, "wd_key", "session-1")
+	wire := filepath.Join(session, "agents", "main", "wire.jsonl")
+	if err := os.MkdirAll(filepath.Dir(wire), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if cwd, ok := kimiSessionCwd(wire); ok {
+		t.Fatalf("a session with no state.json answered %q", cwd)
+	}
+}
+
+// The session directory is agent-writable, so a state.json planted as a
+// symlink out of it is refused the same way a transcript symlink is.
+func TestKimiSessionCwdRefusesALinkedStateFile(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs a privilege Windows does not grant by default")
+	}
+	outside := t.TempDir()
+	target := filepath.Join(outside, "state.json")
+	if err := os.WriteFile(target, []byte(`{"cwd":"/somewhere/else"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	store := t.TempDir()
+	session := filepath.Join(store, "wd_key", "session-1")
+	wire := filepath.Join(session, "agents", "main", "wire.jsonl")
+	if err := os.MkdirAll(filepath.Dir(wire), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, filepath.Join(session, "state.json")); err != nil {
+		t.Fatal(err)
+	}
+	if cwd, ok := kimiSessionCwd(wire); ok {
+		t.Fatalf("a linked state.json answered %q", cwd)
 	}
 }

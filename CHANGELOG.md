@@ -183,6 +183,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A Kimi Code CLI session's tokens are counted again. The working directory a
+  session ran in is recorded in its `state.json`, which the CLI writes beside
+  the session's `agents/` directory, one level above the `wire.jsonl` the
+  transcript is read from. The lookup went up two levels, landed in `agents/`,
+  and found no `state.json` there, so every kimi session was left undecided and
+  every poll retried it, reporting nothing for the life of the run: an agent
+  that spent tokens read as one that spent none. The walk now looks for the
+  file up the tree rather than counting levels, so a change in how deep the CLI
+  nests an agent id does not read the wrong directory again.
 - The `demo_origin` a `--json` report names keeps the sub-second precision of
   the `--origin` it was pinned to. `--origin` takes a fractional RFC 3339
   instant, and the report printed it to whole seconds, so the value a replay is

@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -114,6 +115,59 @@ func kimiRoots(dir string) []string {
 		out = append(out, filepath.Join(store, name))
 	}
 	return out
+}
+
+// kimiSessionCwd reads the working directory a session was started in, from
+// the state.json the wire log's session directory holds. An unreadable or
+// unwritten state.json yields no verdict, so the transcript is retried on a
+// later poll rather than being refused for good.
+//
+// The wire log sits at <session>/agents/<agentId>/wire.jsonl, so the session
+// directory is above the agents/ directory rather than beside it. The walk up
+// is bounded and looks for the file instead of counting levels, since how deep
+// the agent id nests is the CLI's choice: a fixed count reads the wrong
+// directory the moment it changes, and a session with no state.json anywhere
+// then reports nothing forever. Each candidate is opened through os.Root, so a
+// state.json swapped for a symlink out of the session directory is refused the
+// same way a transcript symlink is.
+func kimiSessionCwd(wirePath string) (string, bool) {
+	dir := filepath.Dir(wirePath)
+	for range kimiSessionDepth {
+		if cwd, ok := readKimiState(dir); ok {
+			return cwd, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
+// kimiSessionDepth bounds the walk from a wire log to the session directory
+// holding its state.json. A store holds a workDirKey above the session, so a
+// walk that reaches the filesystem root is looking too far.
+const kimiSessionDepth = 4
+
+// readKimiState reads the cwd state.json records in dir.
+func readKimiState(dir string) (string, bool) {
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", false
+	}
+	defer r.Close()
+	b, err := fs.ReadFile(r.FS(), "state.json")
+	if err != nil {
+		return "", false
+	}
+	var st struct {
+		Cwd string `json:"cwd"`
+	}
+	if err := json.Unmarshal(bytes.TrimPrefix(b, utf8BOM), &st); err != nil || st.Cwd == "" {
+		return "", false
+	}
+	return st.Cwd, true
 }
 
 // kimiStoreEvery bounds how often the store's own listing is read. Every
