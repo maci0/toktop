@@ -435,7 +435,7 @@ func TestIngestMethodNotAllowedSetsAllow(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		io.Copy(io.Discard, resp.Body)
+		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusMethodNotAllowed {
 			t.Errorf("%s %s status = %d, want 405", tc.method, tc.path, resp.StatusCode)
@@ -446,6 +446,33 @@ func TestIngestMethodNotAllowedSetsAllow(t *testing.T) {
 			if !strings.Contains(allow, m) {
 				t.Errorf("%s %s Allow = %q, missing %s", tc.method, tc.path, allow, m)
 			}
+		}
+		// The body carries the same information as the header: a caller
+		// reading only the reason line can see what the path takes.
+		e, _ := lookupEndpoint(tc.path)
+		if got, want := string(body), methodNotAllowedMessage(e, tc.method); !strings.Contains(got, want) {
+			t.Errorf("%s %s body = %q, want %q", tc.method, tc.path, got, want)
+		}
+	}
+}
+
+// The 404 and the 405 both come from the endpoint table, so what a sender is
+// told the server serves cannot drift from what it serves.
+func TestIngestRejectionsNameTheServedEndpoints(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+
+	resp, err := http.Get("http://" + s.Addr() + "/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+	for _, e := range ingestEndpoints {
+		if want := e.primary() + " " + e.path; !strings.Contains(string(body), want) {
+			t.Errorf("404 body %q missing %q", body, want)
 		}
 	}
 }

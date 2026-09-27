@@ -246,7 +246,8 @@ Other statuses: `400` for malformed JSON or a bad `ts`, `408` when a stream
 stalls mid-body, and `413` past the 1 MiB body cap. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
 refused with `403`, so a web page cannot forge rows into a running
-dashboard. Wrong methods on these paths answer `405` with `Allow`.
+dashboard. Wrong methods on these paths answer `405` with `Allow` and a
+body naming the path and the methods it takes.
 Unknown paths answer `404` naming the two endpoints, so a POST to `/events`
 is not a generic not-found page. Error bodies are short plain-text reasons
 that name the field or expected shape, and a malformed line in a stream also

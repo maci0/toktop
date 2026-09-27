@@ -18,6 +18,7 @@ import (
 	"os"
 	"regexp"
 	"runtime/debug"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -68,12 +69,11 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 	}
 	s := &Server{rec: rec, now: time.Now, ln: ln, addr: ln.Addr().String(), log: lg}
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /v1/events", s.handlePost)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, "ok")
-	})
+	for _, e := range ingestEndpoints {
+		mux.HandleFunc(e.primary()+" "+e.path, func(w http.ResponseWriter, r *http.Request) {
+			e.handle(s, w, r)
+		})
+	}
 	s.srv = http.Server{
 		Handler:           s.wrap(mux),
 		ReadHeaderTimeout: 5 * time.Second,
@@ -107,8 +107,10 @@ func setSecurityHeaders(h http.Header) {
 }
 
 // wrap is the single ingest handler: security headers, request id, panic
-// recover, 404 naming the two endpoints, and 404/405 audit lines. POST
-// /v1/events keeps a bare ResponseWriter so handlePost can SetReadDeadline.
+// recover, and the 404/405 rejections with their audit lines. Both come
+// from the endpoint table, so the 404 lists exactly what is served and a 405
+// names the methods the path takes. A request that passes both guards is
+// logged by its own handler, which knows the counts.
 func (s *Server) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w.Header())
@@ -132,32 +134,27 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}()
 
-		if r.URL == nil || !knownIngestPath(r.URL.Path) {
-			http.Error(w, "not found; endpoints: POST /v1/events, GET /healthz", http.StatusNotFound)
+		e, known := endpoint{}, false
+		if r.URL != nil {
+			e, known = lookupEndpoint(r.URL.Path)
+		}
+		if !known {
+			http.Error(w, notFoundMessage(), http.StatusNotFound)
 			s.logRequest(r, id, http.StatusNotFound, 0, 0, time.Since(start), "not found")
 			return
 		}
-		if skipUnhandledLog(r) {
-			next.ServeHTTP(w, r)
+		// The mux would answer a wrong method with the same status and Allow
+		// header, but a body that names no method. Answering here keeps both
+		// rejections in one error envelope: a plain-text line the caller can
+		// act on, the way the 404 names the endpoints.
+		if !e.serves(r.Method) {
+			w.Header().Set("Allow", e.allow())
+			msg := methodNotAllowedMessage(e, r.Method)
+			http.Error(w, msg, http.StatusMethodNotAllowed)
+			s.logRequest(r, id, http.StatusMethodNotAllowed, 0, 0, time.Since(start), "method not allowed")
 			return
 		}
-		sw := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r)
-		status := sw.status
-		if status == 0 {
-			status = http.StatusOK
-		}
-		if status < 400 {
-			return
-		}
-		msg := "method not allowed"
-		if status != http.StatusMethodNotAllowed {
-			msg = "not found"
-			if status != http.StatusNotFound {
-				msg = strings.ToLower(http.StatusText(status))
-			}
-		}
-		s.logRequest(r, id, status, 0, 0, time.Since(start), msg)
+		next.ServeHTTP(w, r)
 	})
 }
 
@@ -329,22 +326,54 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, sto
 	s.log.Log(r.Context(), level, "toktop: ingest", attrs...)
 }
 
-func knownIngestPath(path string) bool {
-	switch path {
-	case "/v1/events", "/healthz":
-		return true
-	}
-	return false
+const (
+	eventsPath = "/v1/events"
+	healthPath = "/healthz"
+)
+
+// endpoint is one served path, the methods it answers, and the handler that
+// serves them. This table is the single source for routing, the 404 endpoint
+// list and the 405 Allow header, so an endpoint registered in one place
+// cannot be missing from the other two.
+type endpoint struct {
+	path    string
+	methods []string // methods answered; a GET registration also answers HEAD
+	handle  func(*Server, http.ResponseWriter, *http.Request)
 }
 
-func skipUnhandledLog(r *http.Request) bool {
-	switch r.URL.Path {
-	case "/healthz":
-		return r.Method == http.MethodGet || r.Method == http.MethodHead
-	case "/v1/events":
-		return r.Method == http.MethodPost
+// primary is the method the path is registered and advertised under.
+func (e endpoint) primary() string { return e.methods[0] }
+
+func (e endpoint) allow() string { return strings.Join(e.methods, ", ") }
+
+func (e endpoint) serves(method string) bool { return slices.Contains(e.methods, method) }
+
+var ingestEndpoints = []endpoint{
+	{path: eventsPath, methods: []string{http.MethodPost}, handle: (*Server).handlePost},
+	{path: healthPath, methods: []string{http.MethodGet, http.MethodHead}, handle: (*Server).handleHealth},
+}
+
+func lookupEndpoint(path string) (endpoint, bool) {
+	for _, e := range ingestEndpoints {
+		if e.path == path {
+			return e, true
+		}
 	}
-	return false
+	return endpoint{}, false
+}
+
+// notFoundMessage names every served endpoint, so an unknown path is a route
+// mistake a sender can act on rather than a dead end.
+func notFoundMessage() string {
+	advertised := make([]string, 0, len(ingestEndpoints))
+	for _, e := range ingestEndpoints {
+		advertised = append(advertised, e.primary()+" "+e.path)
+	}
+	return "not found; endpoints: " + strings.Join(advertised, ", ")
+}
+
+func methodNotAllowedMessage(e endpoint, method string) string {
+	return fmt.Sprintf("method not allowed; %s accepts %s, not %s", e.path, e.allow(), method)
 }
 
 type statusWriter struct {
@@ -461,6 +490,15 @@ func (b *progressBody) Read(p []byte) (int, error) {
 	}
 	_ = b.rc.SetReadDeadline(next)
 	return b.ReadCloser.Read(p)
+}
+
+// handleHealth answers the liveness probe. Plain text like every other
+// non-event answer here, and never audited: a probe runs continuously and
+// would drown the event log.
+func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "ok")
 }
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {

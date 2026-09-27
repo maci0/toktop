@@ -123,7 +123,7 @@ func (m Model) renderHelp() string {
 		return clipBlock(box, m.w, m.h)
 	}
 	placed := lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
-	return clipFrame(placed, m.w)
+	return clipBlock(placed, m.w, m.h)
 }
 
 // helpRows is the in-app key reference. Compact panes already hide p and t

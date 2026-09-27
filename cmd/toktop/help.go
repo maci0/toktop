@@ -73,14 +73,12 @@ func runHelp(out io.Writer, args []string) int {
 	switch args[0] {
 	case "update":
 		if len(args) > 1 {
-			fmt.Fprintf(os.Stderr, "toktop help: unexpected argument %q (see 'toktop --help')\n", args[1])
-			return 2
+			return rejectExtra("toktop update", args[1])
 		}
 		return runUpdate(context.Background(), out, []string{"--help"})
 	case "version":
 		if len(args) > 1 {
-			fmt.Fprintf(os.Stderr, "toktop help: unexpected argument %q (see 'toktop --help')\n", args[1])
-			return 2
+			return rejectExtra("toktop version", args[1])
 		}
 		return outputStatus(usage(out))
 	}
@@ -107,8 +105,7 @@ func runVersion(out io.Writer, args []string) int {
 			}
 			return outputStatus(usage(out))
 		}
-		fmt.Fprintf(os.Stderr, "toktop version: unexpected argument %q (see 'toktop --help')\n", args[0])
-		return 2
+		return rejectExtra("toktop version", args[0])
 	}
 	_, err := fmt.Fprintln(out, "toktop", version)
 	return outputStatus(err)
@@ -126,7 +123,7 @@ func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 		return "help", args[1:], nil
 	case "version":
 		if len(args) > 1 {
-			return "", nil, fmt.Errorf("toktop version: unexpected argument %q (see 'toktop --help')", args[1])
+			return "", nil, fmt.Errorf("toktop version: unexpected argument %q (see 'toktop version --help')", args[1])
 		}
 		return "version", nil, nil
 	}
@@ -140,12 +137,13 @@ func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 	return "", remotes, nil
 }
 
-// unexpectedArg names the leftover and how to fix it. Only http(s) URLs
-// suggest --add; bare words point at --help.
+// unexpectedArg names the leftover and how to fix it. A subcommand word that
+// did not come first says so and names the command that would work; only
+// http(s) URLs suggest --add; other bare words point at --help.
 func unexpectedArg(arg string) error {
 	switch {
-	case arg == "update":
-		return fmt.Errorf("toktop: unexpected argument %q (the update subcommand must be first: toktop update)", arg)
+	case arg == "update" || arg == "help" || arg == "version":
+		return fmt.Errorf("toktop: unexpected argument %q (the %s subcommand must be first: toktop %s)", arg, arg, arg)
 	case strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://"):
 		return fmt.Errorf("toktop: unexpected argument %q (did you mean --add %s?)", arg, arg)
 	default:
