@@ -4,9 +4,11 @@
 package agentusage
 
 import (
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -169,6 +171,23 @@ func writeAgyLast(t *testing.T, store, workspace, id, otherWorkspace, otherID st
 		",\n  " + jsonPath(otherWorkspace) + ": " + jsonPath(otherID) + "\n}\n"
 	if err := os.WriteFile(filepath.Join(dir, "last_conversations.json"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGrokDirNameIsOnePathElement(t *testing.T) {
+	// A Windows working directory carries a colon. The encoded form has to
+	// round-trip and stay a single component, or the session directory
+	// cannot be created there.
+	const win = `C:\Users\me\proj`
+	for _, dir := range []string{t.TempDir(), win} {
+		name := grokDirName(dir)
+		if name == "" || strings.ContainsAny(name, `/\`) || strings.Contains(name, ":") {
+			t.Fatalf("grokDirName(%q) = %q, want one path element", dir, name)
+		}
+		got, err := url.PathUnescape(name)
+		if err != nil || got != dir {
+			t.Fatalf("unescape(%q) = %q, %v, want %q", name, got, err, dir)
+		}
 	}
 }
 

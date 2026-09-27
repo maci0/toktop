@@ -37,12 +37,16 @@ func grokRoots(dir string) []string {
 }
 
 // grokDirName is the directory name the CLI uses for one working directory.
-// PathEscape leaves '/' alone; the store encodes those too.
+// PathEscape leaves '/' and ':' alone. '/' is encoded so the working
+// directory is one path component. ':' is encoded because a Windows
+// directory name cannot contain it: C:\Users\... would otherwise be the
+// component C:%5CUsers%5C..., which Windows refuses to create.
 func grokDirName(dir string) string {
 	if dir == "" {
 		return ""
 	}
-	return strings.ReplaceAll(url.PathEscape(dir), "/", "%2F")
+	name := strings.ReplaceAll(url.PathEscape(dir), "/", "%2F")
+	return strings.ReplaceAll(name, ":", "%3A")
 }
 
 func grokSessionCwd(path string) (string, bool) {
