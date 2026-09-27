@@ -20,6 +20,11 @@
   `make scripts-check` (CI installs that file's version via `version-file`;
   black/ruff pins in `scripts/requirements-dev.txt`). The target names a
   too-old uv rather than failing on an unknown flag.
+- The Python in `.python-version`, exact like the other toolchains. `make
+  scripts-env` passes it to `uv venv` as `--python`, so uv downloads that
+  build when the host does not have it; nothing reads whatever `python3` the
+  machine happens to offer. `target-version` in `pyproject.toml` is the
+  floor the code must keep supporting, not the interpreter it runs on.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
 - Only to regenerate the README screenshot (below), and never for the
@@ -27,7 +32,12 @@
   `magick` (ImageMagick 7) plus `avifenc` (libavif) for `make site-assets`,
   which rebuilds the captures under `site/public/`. Nothing in `make pr` runs
   them, so a machine without them passes every gate and only fails when it
-  tries to recapture.
+  tries to recapture. `make site-assets` records the two versions in
+  `site/encoders.txt` and commits them with the captures; a machine whose
+  encoders disagree with that record is refused, so a recapture cannot
+  quietly rewrite every shipped capture with a different encoder's bytes.
+  Bumping them is a deliberate act: delete `site/encoders.txt`, recapture, and
+  commit the new record.
 - Network access on first run. `make` pins `GOTOOLCHAIN` to the `go.mod`
   version, so a host with a different compiler downloads that toolchain; the
   first `make lint` and `make vet-cross` download the `staticcheck` tool the

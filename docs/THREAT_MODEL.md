@@ -353,7 +353,8 @@ Deployment surface:
   race tests on pushes and PRs, plus biome over the Worker and the jsonc
   configs, `bun test site/` and
   screenshot-script lint (.github/workflows/ci.yml, actions pinned by SHA, bun
-  from `.bun-version`, biome at the Makefile `BIOME` pin, uv 0.12.6, Python
+  from `.bun-version`, biome at the Makefile `BIOME` pin, uv 0.12.6, the
+  interpreter in `.python-version`, Python
   tools from `scripts/requirements-dev.txt`);
   Dependabot updates modules, actions, and `scripts/` pip deps
   (.github/dependabot.yml); tag pushes build release binaries for six

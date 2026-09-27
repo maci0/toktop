@@ -39,7 +39,10 @@ newer x/tools requirement cannot drag the shipped build up.
 ## Python, scripts/ only
 
 `scripts/screenshot.py` runs on a developer's machine and is never linked into
-a release artifact. The pins are exact, with sha256 hashes on the pure-Python
+a release artifact. The interpreter is pinned exactly in `.python-version` and
+the Makefile passes it to `uv venv` as `--python`, so the pins below fix both
+what is installed and what it is installed into. The pins are exact, with
+sha256 hashes on the pure-Python
 packages (a registry swap of those files fails the install). pillow and pytokens
 ship per-platform or per-interpreter wheels, so they stay version pins: hashing
 one wheel would refuse every other OS/arch/CPython.

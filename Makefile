@@ -155,6 +155,25 @@ BUN_PIN := $(shell tr -d ' \t\r\n' < .bun-version 2>/dev/null)
 ifeq ($(BUN_PIN),)
 $(error .bun-version missing or empty; site-check and CI need a bun version)
 endif
+# The interpreter the Python tool env is built on, exact like the other
+# toolchains. `uv venv` without --python takes the newest interpreter on the
+# host, so the exact requirement pins fixed what is installed into the env
+# but not the interpreter it went into, and a format or lint verdict could
+# move with the host's Python. uv reads .python-version on its own; naming it
+# here too makes the Makefile the enforcement point and turns a missing file
+# into a named error instead of a silent fallback, and uv downloads the pinned
+# build when the host does not have it, which is what GOTOOLCHAIN does for the
+# Go toolchain.
+PY_PIN := $(shell tr -d ' \t\r\n' < .python-version 2>/dev/null)
+ifeq ($(PY_PIN),)
+$(error .python-version missing or empty; scripts-env and scripts-check need a Python version)
+endif
+# Where make site-assets writes the captures, and the checked-in record of the
+# encoder builds that produced the ones now there. The record sits beside the
+# assets rather than inside them, so it is a build record and not a file the
+# Worker serves.
+SITE_PUBLIC    := site/public
+ENCODER_RECORD := site/encoders.txt
 
 # Pin locale and timezone for every recipe: glob expansion order and formatted
 # dates must not follow the invoking shell's environment into artifacts
@@ -417,9 +436,18 @@ govulncheck: ## run govulncheck at the GOVULNCHECK pin (same pin as CI)
 #
 # The encoders are not the project's package manager, so their versions are
 # recorded instead of pinned: -strip drops the metadata that would otherwise
-# carry the encoder version and a build clock into every byte. magick and
-# avifenc stay out of prereqs and out of every gate: they are only needed to
+# carry the encoder version and a build clock into every byte, and the record
+# says which builds produced the captures now committed under site/public.
+# site-assets writes $(ENCODER_RECORD) after every rebuild and require-encoders
+# refuses a machine whose encoders disagree with it, so a recapture that
+# silently rewrites every committed capture with a different encoder's bytes
+# is a named failure rather than a diff nobody attributes. magick and avifenc
+# stay out of prereqs and out of every gate: they are only needed to
 # recapture, so a machine without them still passes the whole merge path.
+#
+# `sed -n 1p`, not `head -1`: head closes the pipe on its first line, and
+# pipefail turns the encoder's SIGPIPE into a failed recipe.
+ENCODER_VERSIONS = magick -version 2>&1 | sed -n 1p; avifenc --version 2>&1 | sed -n 1p
 .PHONY: require-encoders
 require-encoders:
 	@for tool in magick avifenc; do \
@@ -428,15 +456,27 @@ require-encoders:
 			exit 1; \
 		}; \
 	done
+	@if [ -f $(ENCODER_RECORD) ]; then \
+		have=$$({ $(ENCODER_VERSIONS); } | tr -d '\r'); \
+		want=$$(tr -d '\r' < $(ENCODER_RECORD)); \
+		if [ "$$have" != "$$want" ]; then \
+			echo "make site-assets: the encoders on this machine are not the ones that produced the captures in $(SITE_PUBLIC):" >&2; \
+			printf '%s\n' "$$have" | sed 's/^/  have: /' >&2; \
+			printf '%s\n' "$$want" | sed 's/^/  want: /' >&2; \
+			echo "  install those builds to recapture byte-identically, or delete $(ENCODER_RECORD) and" >&2; \
+			echo "  run 'make site-assets' to record the encoders this machine has and commit the result." >&2; \
+			exit 1; \
+		fi; \
+	fi
 
 .PHONY: site-assets
 site-assets: require-encoders ## rebuild the site dashboard captures from docs/images/dashboard.png
 	@mkdir -p $(DIST)
-	cp docs/images/dashboard.png site/public/dashboard.png
-	magick docs/images/dashboard.png -strip -resize 1920x -quality 82 site/public/dashboard.webp
-	magick docs/images/dashboard.png -strip -resize 1280x -quality 82 site/public/dashboard-1280.webp
-	magick docs/images/dashboard.png -strip -resize 768x -quality 82 site/public/dashboard-768.webp
-	magick docs/images/dashboard.png -strip -resize 1200x -colors 128 PNG8:site/public/dashboard-card.png
+	cp docs/images/dashboard.png $(SITE_PUBLIC)/dashboard.png
+	magick docs/images/dashboard.png -strip -resize 1920x -quality 82 $(SITE_PUBLIC)/dashboard.webp
+	magick docs/images/dashboard.png -strip -resize 1280x -quality 82 $(SITE_PUBLIC)/dashboard-1280.webp
+	magick docs/images/dashboard.png -strip -resize 768x -quality 82 $(SITE_PUBLIC)/dashboard-768.webp
+	magick docs/images/dashboard.png -strip -resize 1200x -colors 128 PNG8:$(SITE_PUBLIC)/dashboard-card.png
 	# avifenc -q 32 is the measured floor for this capture: 10,577 bytes at
 	# 768w against 13,563 at -q 40, a 22% cut of the image that is 79% of a
 	# phone's visit, at 30.0 dB PSNR against the resized source. The page
@@ -449,8 +489,9 @@ site-assets: require-encoders ## rebuild the site dashboard captures from docs/i
 		stem=$$( [ "$$width" = 1920 ] && echo dashboard || echo "dashboard-$$width" ); \
 		magick docs/images/dashboard.png -strip -resize $${width}x $(DIST)/$$stem.png; \
 		avifenc -q 32 -s 2 -y 444 --ignore-exif --ignore-xmp \
-			$(DIST)/$$stem.png site/public/$$stem.avif; \
+			$(DIST)/$$stem.png $(SITE_PUBLIC)/$$stem.avif; \
 	done
+	@{ $(ENCODER_VERSIONS); } | tr -d '\r' > $(ENCODER_RECORD)
 	@bun test site/
 
 # Every site-* target depends on this: .bun-version is what CI installs
@@ -647,15 +688,18 @@ require-uv: ## fail unless uv is on PATH at or above UV_MIN
 		exit 1; \
 	fi
 
-# Rebuilds the env when either requirements file moves, so an edited pin or a
-# corrected hash is picked up without `make clean`.
+# Rebuilds the env when either requirements file moves, or when the pinned
+# interpreter moves, so an edited pin, a corrected hash or a Python bump is
+# picked up without `make clean`. Missing .python-version from the
+# prerequisites would leave a venv built on the old interpreter in place under
+# a new pin, and every later `make scripts-check` would answer from it.
 .PHONY: scripts-env
 scripts-env: $(SCRIPTS_BIN)/.stamp ## Python tool env under dist/, hashes verified
 
-$(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt
+$(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt .python-version
 	@$(MAKE) --no-print-directory require-uv
 	@mkdir -p $(DIST)
-	@uv venv --quiet --clear $(SCRIPTS_ENV)
+	@uv venv --quiet --clear --python $(PY_PIN) $(SCRIPTS_ENV)
 	@VIRTUAL_ENV=$(SCRIPTS_ENV) uv pip install --quiet -r scripts/requirements-dev.txt
 	@touch $@
 
