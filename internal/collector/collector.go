@@ -350,11 +350,11 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			outPS, inPS := c.rates(key, r.m, now)
 			ps.OutTokPS = outPS
 			ps.InTokPS = inPS
-			outR.push(outPS, now, c.interval)
-			inR.push(inPS, now, c.interval)
+			outR.push(outPS, now)
+			inR.push(inPS, now)
 		}
-		ps.OutHist, ps.OutT0 = outR.copy(), outR.t0
-		ps.InHist, ps.InT0 = inR.copy(), inR.t0
+		ps.OutHist, ps.OutStamps = outR.copy(), outR.times()
+		ps.InHist, ps.InStamps = inR.copy(), inR.times()
 		snap.Providers = append(snap.Providers, ps)
 	}
 	c.mu.Unlock()
@@ -418,39 +418,38 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 
 func ema(prev, raw float64) float64 { return prev*(1-emaAlpha) + raw*emaAlpha }
 
-// timedRing is a value history carrying the wall-clock time of its oldest
-// sample so charts can place every point on an absolute time axis.
+// timedRing is a value history carrying the wall-clock time of every sample,
+// so charts can place each point on an absolute time axis.
 //
 // The backing buffer is allocated once at HistoryLen and reused head-first:
 // after warm-up push never allocates or copies, where sliding a slice
 // (vals = vals[1:]) would realloc on every push for the life of the ring.
+// Times ride in a parallel ring with the same head, so a sample and its
+// instant are always overwritten together.
 type timedRing struct {
-	buf  []float64 // fixed capacity HistoryLen, samples in insertion order
-	head int       // counts fills while filling; then indexes the oldest element
-	t0   time.Time
+	buf  []float64   // fixed capacity HistoryLen, samples in insertion order
+	ts   []time.Time // the instant each buf entry was pushed
+	head int         // counts fills while filling; then indexes the oldest element
 }
 
-func (r *timedRing) push(v float64, now time.Time, interval time.Duration) {
+func (r *timedRing) push(v float64, now time.Time) {
 	if r.buf == nil { // one reservation for the ring's whole life
 		r.buf = make([]float64, 0, core.HistoryLen)
+		r.ts = make([]time.Time, 0, core.HistoryLen)
 	}
 	if len(r.buf) < core.HistoryLen { // filling: keep appending in order
 		r.buf = append(r.buf, v)
-	} else {
-		// head is always in [0, HistoryLen) here: filling leaves it at 0,
-		// and each overwrite below wraps it after incrementing.
-		r.buf[r.head] = v // overwrite the oldest sample
-		r.head++
-		if r.head == core.HistoryLen {
-			r.head = 0
-		}
+		r.ts = append(r.ts, now)
+		return
 	}
-	// Anchor hist[0] to this push instead of sliding it one interval per
-	// sample: pushes are not guaranteed evenly spaced (a scrape may take up
-	// to PollTimeout, and a stalled emit lets ticks coalesce), and a slid t0
-	// would drift behind wall-clock time forever, shifting the whole chart
-	// axis into the past. Even spacing reproduces the slide exactly.
-	r.t0 = now.Add(-time.Duration(len(r.buf)-1) * interval)
+	// head is always in [0, HistoryLen) here: filling leaves it at 0,
+	// and each overwrite below wraps it after incrementing.
+	r.buf[r.head] = v // overwrite the oldest sample
+	r.ts[r.head] = now
+	r.head++
+	if r.head == core.HistoryLen {
+		r.head = 0
+	}
 }
 
 // copy returns the samples in insertion order (oldest first), detached from
@@ -462,6 +461,17 @@ func (r *timedRing) copy() []float64 {
 	out := make([]float64, len(r.buf))
 	n := copy(out, r.buf[r.head:])
 	copy(out[n:], r.buf[:r.head])
+	return out
+}
+
+// times returns each sample's instant, oldest first, paired with copy.
+func (r *timedRing) times() []time.Time {
+	if len(r.ts) == 0 {
+		return nil
+	}
+	out := make([]time.Time, len(r.ts))
+	n := copy(out, r.ts[r.head:])
+	copy(out[n:], r.ts[:r.head])
 	return out
 }
 

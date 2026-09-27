@@ -77,9 +77,33 @@ type timedVal struct {
 	engine int
 }
 
-// timedSeries flattens every provider's history onto absolute timestamps
-// spaced one cadence apart, tagging each sample with its engine: compressed
-// buckets must tell engines apart to average within one and sum across all.
+// sampleTime is the instant history sample j was taken, or the zero time when
+// the snapshot carries no stamps for it. An unstamped sample is not placed on
+// any axis: a chart must show when a rate was measured, not guess from the
+// sample's position.
+func sampleTime(ts []time.Time, j int) time.Time {
+	if j < 0 || j >= len(ts) || ts[j].IsZero() {
+		return time.Time{}
+	}
+	return ts[j]
+}
+
+// lastSampleTime is the newest instant among the n samples of a history.
+func lastSampleTime(ts []time.Time, n int) time.Time {
+	var out time.Time
+	for j := 0; j < n; j++ {
+		if t := sampleTime(ts, j); t.After(out) {
+			out = t
+		}
+	}
+	return out
+}
+
+// timedSeries flattens every provider's history onto absolute timestamps,
+// tagging each sample with its engine: compressed buckets must tell engines
+// apart to average within one and sum across all. Each sample carries the
+// instant it was taken, so a slow scrape or a coalesced tick lands where it
+// happened rather than one cadence per sample index.
 //
 // The slice is pre-sized: the caller replays this every frame, and growing
 // it from nil reallocated per provider row.
@@ -93,11 +117,11 @@ func timedSeries(s core.Snapshot, cadence time.Duration) []timedVal {
 	var end time.Time
 	for i := range s.Providers {
 		p := &s.Providers[i]
-		if p.OutT0.IsZero() {
-			continue
-		}
 		for j, v := range p.OutHist {
-			t := p.OutT0.Add(time.Duration(j) * cadence)
+			t := sampleTime(p.OutStamps, j)
+			if t.IsZero() {
+				continue
+			}
 			tv = append(tv, timedVal{at: t, rate: v, engine: i})
 			if t.After(end) {
 				end = t

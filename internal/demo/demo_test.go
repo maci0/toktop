@@ -221,31 +221,35 @@ func TestSnapshotCarriesAgentsAndProbes(t *testing.T) {
 	})
 }
 
-// Sub-second poll intervals must still anchor t0 correctly; the whole-second
-// truncation used previously pinned t0 and skewed the time axis.
-func TestAdvanceT0SubSecondCadence(t *testing.T) {
-	start := time.Now()
-	if t0 := anchorT0(1, start, 500*time.Millisecond); !t0.Equal(start) {
-		t.Fatalf("first-sample t0 = %v, want %v", t0, start)
+// Every history sample carries the instant it was produced, so a
+// sub-second cadence and a coalesced tick both stay on the real axis rather
+// than being reconstructed from the sample's position.
+func TestRingTimeKeepsRealInstants(t *testing.T) {
+	base := time.Now()
+	var ts []time.Time
+	for i := range 5 {
+		ts = ringTime(ts, base.Add(time.Duration(i)*500*time.Millisecond))
 	}
-	next := anchorT0(core.HistoryLen, start.Add(500*time.Millisecond), 500*time.Millisecond)
-	want := start.Add(500 * time.Millisecond).Add(-time.Duration(core.HistoryLen-1) * 500 * time.Millisecond)
-	if !next.Equal(want) {
-		t.Fatalf("wrapped t0 = %v, want %v", next, want)
+	ts = ringTime(ts, base.Add(9*time.Second)) // 6.5s stall, ticks coalesced
+	if want := base.Add(2 * time.Second); !ts[4].Equal(want) {
+		t.Fatalf("stamp before the gap = %v, want %v", ts[4], want)
+	}
+	if want := base.Add(9 * time.Second); !ts[5].Equal(want) {
+		t.Fatalf("stamp after the gap = %v, want %v", ts[5], want)
 	}
 }
 
-// A stalled consumer coalesces ticks, so frames arrive more than one cadence
-// apart. Re-anchoring must place the newest sample at its true timestamp
-// instead of letting the axis lag wall-clock time by every lost interval.
-func TestAnchorT0RecoversFromGap(t *testing.T) {
-	now := time.Unix(1_000_000, 0)
-	got := anchorT0(4, now, time.Second)
-	if !got.Equal(now.Add(-3 * time.Second)) {
-		t.Fatalf("t0 after gap = %v, want %v", got, now.Add(-3*time.Second))
+func TestRingTimeSlidesAtHistoryLen(t *testing.T) {
+	base := time.Unix(1_000_000, 0)
+	var ts []time.Time
+	for i := range core.HistoryLen + 3 {
+		ts = ringTime(ts, base.Add(time.Duration(i)*time.Second))
 	}
-	if got := anchorT0(0, now, time.Second); !got.IsZero() {
-		t.Fatalf("empty history t0 = %v, want zero", got)
+	if len(ts) != core.HistoryLen {
+		t.Fatalf("stamps = %d, want %d", len(ts), core.HistoryLen)
+	}
+	if want := base.Add(3 * time.Second); !ts[0].Equal(want) {
+		t.Fatalf("oldest stamp = %v, want %v", ts[0], want)
 	}
 }
 

@@ -32,10 +32,12 @@ type Source struct {
 	t       float64
 	histOut map[string][]float64
 	histIn  map[string][]float64
-	t0      map[string]time.Time // first-sample timestamp per label
-	kv      []float64
-	nextEv  time.Time
-	nextPr  time.Time
+	// ts is the instant each history sample was produced, per label. Both
+	// directions are sampled together, so one ring of stamps serves both.
+	ts     map[string][]time.Time
+	kv     []float64
+	nextEv time.Time
+	nextPr time.Time
 
 	memPct  float64
 	swapPct float64
@@ -65,7 +67,7 @@ func NewSource(interval time.Duration, seed int64) *Source {
 		},
 		histOut: map[string][]float64{},
 		histIn:  map[string][]float64{},
-		t0:      map[string]time.Time{},
+		ts:      map[string][]time.Time{},
 		kv:      make([]float64, 5),
 		memPct:  52,
 		swapPct: 14,
@@ -177,7 +179,7 @@ func (s *Source) frame(now time.Time) {
 		in := clamp((b.inBase*wave+burst*4)*jitter, 0, 20000)
 		s.histOut[b.label] = ring(s.histOut[b.label], out)
 		s.histIn[b.label] = ring(s.histIn[b.label], in)
-		s.t0[b.label] = anchorT0(len(s.histOut[b.label]), now, s.interval)
+		s.ts[b.label] = ringTime(s.ts[b.label], now)
 
 		target := 45 + 40*math.Sin(s.t/14+float64(i)) + s.rng.NormFloat64()*3
 		s.kv[i] += (clamp(target, 3, 99) - s.kv[i]) * 0.15
@@ -328,12 +330,12 @@ func (s *Source) snapshot(now time.Time) core.Snapshot {
 			KVPct:    clamp(s.kv[i], 0, 100),
 			TTFTms:   90 + 70*math.Abs(math.Sin(s.t/10+float64(i))),
 
-			Running: 1 + i%3 + int(clamp(math.Sin(s.t/7+float64(i))*1.5+1.5, 0, 4)),
-			Waiting: int(clamp(math.Sin(s.t/13+float64(i*2))*3+3, 0, 24)),
-			OutHist: slices.Clone(s.histOut[b.label]),
-			InHist:  slices.Clone(s.histIn[b.label]),
-			OutT0:   s.t0[b.label],
-			InT0:    s.t0[b.label],
+			Running:   1 + i%3 + int(clamp(math.Sin(s.t/7+float64(i))*1.5+1.5, 0, 4)),
+			Waiting:   int(clamp(math.Sin(s.t/13+float64(i*2))*3+3, 0, 24)),
+			OutHist:   slices.Clone(s.histOut[b.label]),
+			InHist:    slices.Clone(s.histIn[b.label]),
+			OutStamps: slices.Clone(s.ts[b.label]),
+			InStamps:  slices.Clone(s.ts[b.label]),
 		}
 		snap.Providers = append(snap.Providers, ps)
 	}
@@ -356,14 +358,11 @@ func ring(h []float64, v float64) []float64 {
 	return append(h, v)
 }
 
-// anchorT0 timestamps hist[0] so the UI can place every sample on an
-// absolute time axis (mirrors the collector): the newest sample landed at
-// now, earlier entries sit one cadence apart behind it. Recomputing each
-// frame keeps the axis pinned to real time even when ticks coalesce after a
-// stalled consumer, where sliding t0 forward one cadence would lag forever.
-func anchorT0(length int, now time.Time, cadence time.Duration) time.Time {
-	if length <= 0 {
-		return time.Time{}
+// ringTime slides the stamp ring alongside a value ring, so every sample
+// keeps the simulated instant it was produced at.
+func ringTime(h []time.Time, at time.Time) []time.Time {
+	if len(h) >= core.HistoryLen {
+		h = h[1:]
 	}
-	return now.Add(-time.Duration(length-1) * cadence)
+	return append(h, at)
 }

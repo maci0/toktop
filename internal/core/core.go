@@ -65,12 +65,6 @@ type ProviderSnapshot struct {
 	ProcRSS uint64  // resident memory of that process
 	ProcCPU float64 // percent of one core
 
-	// OutT0/InT0 timestamp Hist[0]; combined with the collector cadence this
-	// lets the UI place samples on an absolute time axis (outages and late
-	// joiners no longer skew the chart window).
-	OutT0 time.Time
-	InT0  time.Time
-
 	Models []ModelInfo
 
 	OutTokPS float64
@@ -82,6 +76,15 @@ type ProviderSnapshot struct {
 
 	OutHist []float64
 	InHist  []float64
+	// OutStamps/InStamps carry the instant each history sample was taken, oldest
+	// first and the same length as the history they belong to. Samples are
+	// not evenly spaced: a scrape can take up to the poll timeout, a
+	// coalesced tick can push two samples at once, and an engine can join
+	// late. Deriving a time from the sample's index and the collector
+	// cadence would invent a spacing that never happened and skew every
+	// chart that shared the axis, so the stamps travel with the values.
+	OutStamps []time.Time
+	InStamps  []time.Time
 }
 
 // MaxEventTokens bounds one token count on one AgentEvent. Real usage never

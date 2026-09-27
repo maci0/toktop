@@ -455,13 +455,23 @@ func TestFmtRateAndCount(t *testing.T) {
 	}
 }
 
+// stamps builds one instant per history sample, cadence apart: the shape a
+// provider snapshot carries, so a test states the real sample times.
+func stamps(t0 time.Time, n int, cad time.Duration) []time.Time {
+	ts := make([]time.Time, n)
+	for i := range ts {
+		ts[i] = t0.Add(time.Duration(i) * cad)
+	}
+	return ts
+}
+
 func TestAggHistTimeAligned(t *testing.T) {
 	// Provider B joins 3 cadences after A: tail-index alignment would smear
 	// the window; absolute-time alignment must not.
 	t0 := time.Now()
 	s := core.Snapshot{Providers: []core.ProviderSnapshot{
-		{OutT0: t0, OutHist: []float64{1, 1, 1, 1, 1, 1}},             // samples at t0..t0+5
-		{OutT0: t0.Add(3 * time.Second), OutHist: []float64{2, 2, 2}}, // t0+3..t0+5
+		{OutStamps: stamps(t0, 6, time.Second), OutHist: []float64{1, 1, 1, 1, 1, 1}}, // t0..t0+5
+		{OutStamps: stamps(t0.Add(3*time.Second), 3, time.Second), OutHist: []float64{2, 2, 2}},
 	}}
 	got := aggHist(s, true, 6, time.Second)
 	want := []float64{1, 1, 1, 3, 3, 3}
@@ -475,14 +485,32 @@ func TestAggHistTimeAligned(t *testing.T) {
 	}
 }
 
+// A provider sampled slower than the grid keeps its real spacing: the
+// samples land in the buckets they were taken in, and the stretch between
+// them is a real stretch, not a compressed one-cadence fiction.
+func TestAggHistKeepsIrregularSampleSpacing(t *testing.T) {
+	t0 := time.Now()
+	ts := []time.Time{t0, t0.Add(4 * time.Second), t0.Add(5 * time.Second)}
+	s := core.Snapshot{Providers: []core.ProviderSnapshot{
+		{OutStamps: ts, OutHist: []float64{2, 4, 6}},
+	}}
+	got := aggHist(s, true, 6, time.Second)
+	want := []float64{2, 0, 0, 0, 4, 6}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("aggHist = %v, want %v", got, want)
+		}
+	}
+}
+
 // An engine that stopped reporting must leave its buckets empty rather than
 // dragging the whole window leftward.
 func TestAggHistIgnoresStaleEngine(t *testing.T) {
 	now := time.Now()
 	old := now.Add(-30 * time.Second)
 	s := core.Snapshot{Providers: []core.ProviderSnapshot{
-		{OutT0: old, OutHist: []float64{9, 9}},
-		{OutT0: now.Add(-2 * time.Second), OutHist: []float64{4, 4}},
+		{OutStamps: stamps(old, 2, time.Second), OutHist: []float64{9, 9}},
+		{OutStamps: stamps(now.Add(-2*time.Second), 2, time.Second), OutHist: []float64{4, 4}},
 	}}
 	got := aggHist(s, true, 4, time.Second)
 	// window = [now-3s .. now]; the stale engine's last sample is 29s old
@@ -698,6 +726,7 @@ func TestUniqueAgents(t *testing.T) {
 }
 
 func TestStaticFrameRenders(t *testing.T) {
+	t0 := time.Now()
 	snap := core.Snapshot{
 		At:     time.Now(),
 		Uptime: time.Minute,
@@ -705,8 +734,10 @@ func TestStaticFrameRenders(t *testing.T) {
 			Label: "ollama", Kind: core.KindOllama, Addr: "http://127.0.0.1:11434", OK: true,
 			Models:   []core.ModelInfo{{Name: "llama3"}},
 			OutTokPS: 42, InTokPS: 100, KVPct: 55,
-			OutHist: []float64{1, 2, 3, 4},
-			InHist:  []float64{2, 4, 6, 8},
+			OutHist:   []float64{1, 2, 3, 4},
+			InHist:    []float64{2, 4, 6, 8},
+			OutStamps: stamps(t0, 4, time.Second),
+			InStamps:  stamps(t0, 4, time.Second),
 		}},
 		Agents: []core.AgentEvent{{At: time.Now(), Agent: "tester", Kind: "turn",
 			PromptTokens: 10, OutputTokens: 5}},
@@ -1074,12 +1105,13 @@ func TestKindIconsCoverAgentKinds(t *testing.T) {
 	}
 }
 
-// Sample spacing on the compressed timescale must follow the poll cadence,
-// not an assumed 1s: --interval 2s covers twice the wall-clock window.
-func TestTimedSeriesHonorsCadence(t *testing.T) {
+// Sample spacing on the compressed timescale comes from the stamps the
+// collector recorded, not an assumed 1s: --interval 2s covers twice the
+// wall-clock window, and the render cadence does not move a sample.
+func TestTimedSeriesUsesSampleStamps(t *testing.T) {
 	t0 := time.Now()
 	s := core.Snapshot{Providers: []core.ProviderSnapshot{
-		{OutT0: t0, OutHist: []float64{1, 2}},
+		{OutStamps: stamps(t0, 2, 2*time.Second), OutHist: []float64{1, 2}},
 	}}
 	tv := timedSeries(s, 2*time.Second)
 	if len(tv) != 2 {
@@ -1130,8 +1162,9 @@ func busySnap() core.Snapshot {
 			{Label: "ollama", Kind: core.KindOllama, OK: true,
 				Models: []core.ModelInfo{{Name: "llama3:8b-instruct-q5_K_M"}}, Version: "0.12.1",
 				OutTokPS: 42.7, InTokPS: 1200.5, KVPct: 55, Running: 1, Waiting: 2,
-				OutT0: time.Now(), InT0: time.Now(),
-				OutHist: []float64{1, 2, 3}, InHist: []float64{1, 2, 3}},
+				OutHist: []float64{1, 2, 3}, InHist: []float64{1, 2, 3},
+				OutStamps: stamps(time.Now().Add(-2*time.Second), 3, time.Second),
+				InStamps:  stamps(time.Now().Add(-2*time.Second), 3, time.Second)},
 			{Label: "vllm", Kind: core.KindVLLM, OK: false, Err: "connection refused"},
 		},
 		Sys: &core.SysSample{

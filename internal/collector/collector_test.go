@@ -229,7 +229,7 @@ func TestHistoryRingCap(t *testing.T) {
 	r := &timedRing{}
 	t0 := time.Now()
 	for i := range core.HistoryLen + 10 {
-		r.push(float64(i), t0.Add(time.Duration(i)*time.Second), time.Second)
+		r.push(float64(i), t0.Add(time.Duration(i)*time.Second))
 	}
 	vals := r.copy()
 	if len(vals) != core.HistoryLen {
@@ -241,10 +241,13 @@ func TestHistoryRingCap(t *testing.T) {
 	if vals[0] != 10 { // oldest slid off in order: 0..9 evicted, 10 is now first
 		t.Fatal("ring order broken after wrap")
 	}
-	// oldest timestamp must slide forward one cadence per evicted sample
-	wantT0 := t0.Add(10 * time.Second)
-	if !r.t0.Equal(wantT0) {
-		t.Fatalf("t0 = %v, want %v", r.t0, wantT0)
+	// the oldest stamp must slide forward with the values it belongs to
+	ts := r.times()
+	if len(ts) != len(vals) {
+		t.Fatalf("stamps = %d, want %d", len(ts), len(vals))
+	}
+	if want := t0.Add(10 * time.Second); !ts[0].Equal(want) {
+		t.Fatalf("oldest stamp = %v, want %v", ts[0], want)
 	}
 }
 
@@ -253,7 +256,7 @@ func TestHistoryRingCap(t *testing.T) {
 func TestHistoryRingDoesNotGrowBuffer(t *testing.T) {
 	r := &timedRing{}
 	for i := range core.HistoryLen * 3 {
-		r.push(float64(i), time.Unix(int64(i), 0), time.Second)
+		r.push(float64(i), time.Unix(int64(i), 0))
 	}
 	if cap(r.buf) != core.HistoryLen {
 		t.Fatalf("buffer capacity = %d, want exactly %d", cap(r.buf), core.HistoryLen)
@@ -265,19 +268,22 @@ func TestHistoryRingDoesNotGrowBuffer(t *testing.T) {
 }
 
 // Pushes are not guaranteed one cadence apart: a scrape can take up to
-// PollTimeout and coalesced ticks widen gaps further. t0 must re-anchor to
-// the real push time (newest sample at now) or the chart's absolute time
-// axis drifts into the past by every lost interval, permanently.
-func TestHistoryRingRetimesAfterGap(t *testing.T) {
+// PollTimeout and coalesced ticks widen gaps further. Each sample keeps the
+// instant it was actually pushed, so a stall leaves a real gap in the series
+// instead of a chart that claims the samples were evenly spaced.
+func TestHistoryRingKeepsRealStampsAfterGap(t *testing.T) {
 	r := &timedRing{}
 	base := time.Unix(1_000_000, 0)
 	for i := range 5 {
-		r.push(float64(i), base.Add(time.Duration(i)*time.Second), time.Second)
+		r.push(float64(i), base.Add(time.Duration(i)*time.Second))
 	}
-	r.push(5, base.Add(9*time.Second), time.Second) // 4s stall, tick coalesced
-	want := base.Add(9 * time.Second).Add(-5 * time.Second)
-	if !r.t0.Equal(want) {
-		t.Fatalf("t0 after gap = %v, want %v", r.t0, want)
+	r.push(5, base.Add(9*time.Second)) // 4s stall, tick coalesced
+	ts := r.times()
+	if want := base.Add(4 * time.Second); !ts[4].Equal(want) {
+		t.Fatalf("stamp before the gap = %v, want %v", ts[4], want)
+	}
+	if want := base.Add(9 * time.Second); !ts[5].Equal(want) {
+		t.Fatalf("stamp after the gap = %v, want %v", ts[5], want)
 	}
 }
 

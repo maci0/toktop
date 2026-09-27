@@ -88,6 +88,12 @@ support channel (see SECURITY.md).
 - Intel GPU metrics run one process per device concurrently, each with its own
   timeout. On a multi-device node the last device used to start only after
   three timeout windows had elapsed and could be dropped by them.
+- Chart samples carry the instant they were taken instead of a time derived
+  from their position in the history and the poll interval. A scrape that ran
+  long, or coalesced ticks after a stalled frame, used to draw a window that
+  was shorter than the time it claimed to cover; the axis now follows the
+  recorded stamps, so a slow engine shows its real spacing and a stall shows
+  as a gap.
 
 ### Fixed
 

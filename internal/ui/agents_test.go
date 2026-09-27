@@ -364,7 +364,7 @@ func TestAgentsFocusToggleSwapsEstate(t *testing.T) {
 	now := time.Now()
 	snap := core.Snapshot{
 		Providers: []core.ProviderSnapshot{{Label: "ollama", Kind: core.KindOllama, OK: true,
-			OutTokPS: 42, OutT0: now, OutHist: []float64{1, 2, 3}, Models: []core.ModelInfo{{Name: "llama3"}}}},
+			OutTokPS: 42, OutStamps: stamps(now.Add(-2*time.Second), 3, time.Second), OutHist: []float64{1, 2, 3}, Models: []core.ModelInfo{{Name: "llama3"}}}},
 		Agents: []core.AgentEvent{
 			{At: now.Add(-2 * time.Second), Agent: "claude", Kind: "turn", OutputTokens: 40},
 			{At: now.Add(-time.Second), Agent: "claude", Kind: "turn", OutputTokens: 40},

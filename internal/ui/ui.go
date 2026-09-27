@@ -484,28 +484,28 @@ func uniqueAgents(events []core.AgentEvent) int {
 }
 
 // aggHist sums every provider's history onto one absolute time grid of w
-// columns ending at the newest sample anywhere. Because samples carry their
-// own timestamps (OutT0/InT0), engines that joined late or dropped out for a
-// while cannot stretch or compress the visible window.
+// columns ending at the newest sample anywhere. Every sample carries the
+// instant it was taken, so engines that joined late, dropped out, or were
+// scraped slowly cannot stretch or compress the visible window, and an engine
+// that fell silent leaves a real gap rather than a fabricated one.
 func aggHist(s core.Snapshot, out bool, w int, cadence time.Duration) []float64 {
 	type src struct {
 		vals []float64
-		t0   time.Time
+		ts   []time.Time
 	}
 	var srcs []src
 	var end time.Time
 	for i := range s.Providers {
 		p := &s.Providers[i]
-		vals, t0 := p.OutHist, p.OutT0
+		vals, ts := p.OutHist, p.OutStamps
 		if !out {
-			vals, t0 = p.InHist, p.InT0
+			vals, ts = p.InHist, p.InStamps
 		}
-		if len(vals) == 0 || t0.IsZero() {
+		if len(vals) == 0 {
 			continue
 		}
-		srcs = append(srcs, src{vals, t0})
-		last := t0.Add(time.Duration(len(vals)-1) * cadence)
-		if last.After(end) {
+		srcs = append(srcs, src{vals, ts})
+		if last := lastSampleTime(ts, len(vals)); last.After(end) {
 			end = last
 		}
 	}
@@ -524,15 +524,20 @@ func aggHist(s core.Snapshot, out bool, w int, cadence time.Duration) []float64 
 		ts := start.Add(time.Duration(j) * cadence)
 		var sum float64
 		for _, sr := range srcs {
-			idx := nearestCadenceIndex(ts.Sub(sr.t0), cadence)
-			if idx < 0 || idx >= len(sr.vals) {
-				continue
+			// A bucket takes every sample within half a cadence of it, so a
+			// source sampled faster than the grid is summed rather than
+			// overwritten, and one sampled slower lands on the bucket it
+			// belongs to. A sample with no instant is not placed at all.
+			for k, v := range sr.vals {
+				st := sampleTime(sr.ts, k)
+				if st.IsZero() {
+					continue
+				}
+				if d := st.Sub(ts); d > half || d < -half {
+					continue
+				}
+				sum += v
 			}
-			sampleT := sr.t0.Add(time.Duration(idx) * cadence)
-			if d := sampleT.Sub(ts); d > half || d < -half {
-				continue // no sample near this bucket: engine was silent
-			}
-			sum += sr.vals[idx]
 		}
 		grid[j] = sum
 	}

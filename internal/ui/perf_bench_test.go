@@ -34,7 +34,7 @@ func perfSnap() core.Snapshot {
 			Addr:     fmt.Sprintf("http://127.0.0.1:%d", 8000+i),
 			Models:   []core.ModelInfo{{Name: "llama3:8b-instruct-q5_K_M"}, {Name: "qwen2.5:32b"}},
 			OutTokPS: 42.7 + float64(i), InTokPS: 1200.5, KVPct: 55, Running: 2, Waiting: 1,
-			OutT0: now, InT0: now, OutHist: out, InHist: in,
+			OutHist: out, InHist: in, OutStamps: stamps(now, len(out), time.Second), InStamps: stamps(now, len(in), time.Second),
 		}
 	}
 	agents := make([]core.AgentEvent, core.AgentHistoryLen)
