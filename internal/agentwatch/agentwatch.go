@@ -519,7 +519,7 @@ func (w *Watcher) engineEndpoints() ([]netip.AddrPort, []string, error) {
 // agent talking to that engine would not be labelled via, so its tokens would
 // be counted twice. A string carrying a scheme that will not parse is an
 // error, not a hostname: the operator wrote something malformed and needs to
-// be told which.
+// be told which. So is a port of 0, which parses but names no endpoint.
 func parseEngineAddr(addr string) (netip.AddrPort, string, error) {
 	host := addr
 	// Only a scheme-bearing string is a URL. url.Parse rejects a bare
@@ -529,7 +529,10 @@ func parseEngineAddr(addr string) (netip.AddrPort, string, error) {
 	if strings.Contains(addr, "://") {
 		u, err := url.Parse(addr)
 		if err != nil {
-			return netip.AddrPort{}, "", fmt.Errorf("engine address %q is not a URL: %w", addr, err)
+			// The library's message quotes the address back, so it carries
+			// engine-supplied text to the dashboard banner. The snippet is
+			// what keeps that text renderable and bounded.
+			return netip.AddrPort{}, "", fmt.Errorf("engine address is not a URL: %s", core.Snippet([]byte(err.Error())))
 		}
 		if u.Host != "" {
 			host = u.Host
@@ -545,6 +548,13 @@ func parseEngineAddr(addr string) (netip.AddrPort, string, error) {
 	ap, err := netip.ParseAddrPort(host)
 	if err != nil {
 		return netip.AddrPort{}, "", nil
+	}
+	if ap.Port() == 0 {
+		// Port 0 parses but is not an endpoint: no connection table holds it,
+		// so the entry would sit in the sweep forever and match nothing,
+		// labelling no agent and hiding the reason. An explicit :0 is a
+		// misspelled address, which is the operator's to fix.
+		return netip.AddrPort{}, "", fmt.Errorf("engine address %q names port 0, which is not a connectable endpoint", core.Snippet([]byte(addr)))
 	}
 	return ap, host, nil
 }

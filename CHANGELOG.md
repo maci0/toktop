@@ -121,6 +121,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `GAUNTLET_HOME`) now names the cause and exits 2 instead of starting with
   every in-house agent missing from the watch.
 
+- An engine address whose port is 0 is refused, with the address named. The
+  port parsed, so the address joined the sweep the agent watcher compares
+  connections against, and no connection ever holds that port: the entry
+  labelled no agent and left nothing in the output to say why. A misspelled
+  address is now reported like any other malformed one.
+
+- A host-key store that would not parse quoted the bytes it choked on whole.
+  The reason a record was refused carried the malformed key blob, and a host
+  recorded twice with different keys named the host field unbounded, so
+  arbitrary store bytes, including escape sequences and invisible formatting
+  characters, reached the terminal through an error meant to name a file and
+  a line. Both go through the same snippet cap as the line itself now.
+
 - `--probe` under `--demo` ran off the wall clock, so a run carrying a seed
   and an origin stopped replaying. Auto-probe fired from a real ticker while
   every other value came off the simulated timeline, so how many probe waves

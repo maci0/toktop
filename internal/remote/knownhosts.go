@@ -270,12 +270,15 @@ func parseKnownHosts(path string, b []byte) (map[string]string, error) {
 		// is dropped before parsing, so such a record still reads as a pin.
 		rest = strings.TrimSpace(strings.TrimPrefix(rest, host+" "))
 		if _, _, _, _, err := ssh.ParseAuthorizedKey([]byte(rest)); err != nil {
-			return nil, malformedPin(path, n, line, err.Error())
+			// The library's message quotes the blob it choked on, raw, so it
+			// carries store bytes to a terminal on its own. It goes through
+			// the same snippet as the line.
+			return nil, malformedPin(path, n, line, core.Snippet([]byte(err.Error())))
 		}
 		record := host + " " + rest
 		key := core.FoldASCII(host)
 		if prev, dup := out[key]; dup && pinKey(prev) != pinKey(record) {
-			return nil, fmt.Errorf("%s: host %s is recorded twice with different keys; refusing to pick one", path, host)
+			return nil, fmt.Errorf("%s: host %s is recorded twice with different keys; refusing to pick one", path, core.Snippet([]byte(host)))
 		}
 		out[key] = record
 	}
