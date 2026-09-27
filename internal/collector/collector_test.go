@@ -1164,6 +1164,10 @@ func TestConcurrentRecordProbeEmit(t *testing.T) {
 // waits to deliver a snapshot. Regression for sending under the lock.
 func TestEmitBlockedSendDoesNotPinMu(t *testing.T) {
 	col := New(nil, time.Hour) // no providers: emit parks on the send at once
+	// A stub sampler: the point is where emit parks, and a cold real sample
+	// (GPU vendor CLIs) runs before the send and can outlast the deadline
+	// below, which would fail a test that has nothing to do with vitals.
+	col.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 1} })
 	ctx := t.Context()
 	ch := make(chan core.Snapshot) // unbuffered: the send blocks until consumed
 	go col.emit(ctx, ch)
@@ -1233,6 +1237,11 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Fatal(msg)
 }
 
+// waitUntilEmitParked blocks until an emit goroutine is actually parked on the
+// snapshot send. The state line must say select in the same goroutine as the
+// emit frame: emit does a cold host-vitals sample and a process-table read
+// before it sends, so a match on the function name alone returns while the
+// snapshot is still being built and reports a pending send that is not.
 func waitUntilEmitParked(t *testing.T) {
 	t.Helper()
 	waitFor(t, func() bool {
