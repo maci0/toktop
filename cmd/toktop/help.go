@@ -6,19 +6,110 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"slices"
 	"strings"
 )
 
 // The help screen and the help/version/update subcommands.
+
+// flagAliases are the one-letter spellings listed beside a long flag. The flag
+// package records no alias relationship, so the pairing is declared here;
+// without it PrintDefaults would list -h and --help as two unrelated flags.
+var flagAliases = map[string]string{
+	"help": "h",
+}
+
+// flagPlaceholders overrides the argument word the flag package would print.
+// Its type-derived words are accurate but generic ("--add value", "--seed
+// int64"), which reads as a different CLI from the words the README's flag
+// table already commits to ("--add URL", "--seed N").
+var flagPlaceholders = map[string]string{
+	"add":      "URL",
+	"bearer":   "TOKEN",
+	"frames":   "N",
+	"ingest":   "ADDR",
+	"interval": "D",
+	"probe":    "N",
+	"seed":     "N",
+	"ssh-key":  "PATH",
+}
+
+// flagDocs renders one entry per flag, in long form. flag.PrintDefaults
+// prints Go's own spelling ("-add value", "-frames int", "(default true)"),
+// which contradicts the --long-form used by the examples, the prose below the
+// flag list, the README, and every error message naming a flag.
+func flagDocs(fs *flag.FlagSet) string {
+	names := make([]string, 0, fs.NFlag())
+	fs.VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })
+	slices.Sort(names)
+
+	var b strings.Builder
+	for _, name := range names {
+		if isFlagAlias(name) {
+			continue
+		}
+		f := fs.Lookup(name)
+		if f == nil {
+			continue
+		}
+		b.WriteString("  --" + name)
+		if short, ok := flagAliases[name]; ok {
+			b.WriteString(", -" + short)
+		}
+		if ph := flagPlaceholder(name, f); ph != "" {
+			b.WriteString(" " + ph)
+		}
+		b.WriteString("\n    \t" + f.Usage)
+		if def := defaultDoc(f.DefValue); def != "" {
+			b.WriteString(" (" + def + ")")
+		}
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// isFlagAlias reports whether name is the short spelling of a long flag, in
+// which case it is printed beside that flag rather than as an entry of its
+// own: a separate "-h" line made it read as a second help flag.
+func isFlagAlias(name string) bool {
+	for _, short := range flagAliases {
+		if short == name {
+			return true
+		}
+	}
+	return false
+}
+
+// flagPlaceholder is the argument word for a flag, empty for the booleans
+// that take none. The flag package's value types are unexported, so the word
+// comes from the type name it reports ("*flag.durationValue" -> "duration"),
+// which is the same word PrintDefaults would have used.
+func flagPlaceholder(name string, f *flag.Flag) string {
+	if ph, ok := flagPlaceholders[name]; ok {
+		return ph
+	}
+	word := strings.TrimSuffix(strings.TrimPrefix(fmt.Sprintf("%T", f.Value), "*flag."), "Value")
+	if word == "bool" || word == "func" {
+		return ""
+	}
+	return word
+}
+
+// defaultDoc renders a flag's default, or nothing when it is the zero value
+// (a bare "false", "0" or empty string says nothing a reader did not already
+// assume).
+func defaultDoc(def string) string {
+	if def == "" || def == "false" || def == "0" {
+		return ""
+	}
+	return "default " + def
+}
 
 // -h/--help sends it to stdout so piping works (`toktop --help | grep
 // probe`); flag-package error paths call it with stderr.
 func usage(w io.Writer) error {
 	registerFlags()
 	var buf strings.Builder
-	out := flag.CommandLine.Output()
-	flag.CommandLine.SetOutput(&buf)
-	defer flag.CommandLine.SetOutput(out)
 	fmt.Fprint(&buf, `toktop - btop-style dashboard for LLM inference engines and the agents hammering them
 
 Usage:
@@ -40,7 +131,7 @@ Examples:
 
 Flags:
 `)
-	flag.PrintDefaults()
+	buf.WriteString(flagDocs(topFS))
 	fmt.Fprint(&buf, `
 Positional arguments are ssh:// targets and may repeat; help and version
 are also accepted as commands. http(s) URLs are rejected with an --add hint;
@@ -76,6 +167,38 @@ without filtering status lines out of it.
 	_, err := io.WriteString(w, buf.String())
 	return err
 }
+
+// flagParseError renders a parse failure in the long flag spelling. The flag
+// package reports "-interval" for a flag the help screen, the README and every
+// example in both document as "--interval", so its message named a spelling
+// the reader was never shown and that is not the one accepted elsewhere.
+func flagParseError(err error) string {
+	msg := err.Error()
+	const unknownFlag = "flag provided but not defined: "
+	if name, rest, ok := strings.Cut(msg, unknownFlag); ok && name == "" {
+		return unknownFlag + longFlag(rest)
+	}
+	// The package names the flag two ways: "for flag -x" for a value that
+	// failed to parse, and a bare "for -x" for a boolean given a non-boolean.
+	// Both are rebuilt as "for flag --x", so the two read the same and the
+	// boolean case gains the noun the other already had.
+	for _, sep := range [...]string{" for flag -", " for -"} {
+		if before, after, ok := strings.Cut(msg, sep); ok {
+			name, tail, _ := strings.Cut(after, ":")
+			return before + " for flag " + longFlag(name) + ":" + tail
+		}
+	}
+	const needsArg = "flag needs an argument: "
+	if name, ok := strings.CutPrefix(msg, needsArg); ok {
+		return needsArg + longFlag(name)
+	}
+	return msg
+}
+
+// longFlag renders a flag name the help screen and the README use. The flag
+// package's messages already carry the single dash it prints, so the leading
+// one is dropped before the long form is put back.
+func longFlag(name string) string { return "--" + strings.TrimPrefix(name, "-") }
 
 // isHelpArg reports whether arg is one of Go's supported help flag spellings.
 func isHelpArg(arg string) bool {

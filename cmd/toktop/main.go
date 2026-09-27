@@ -36,6 +36,16 @@ import (
 )
 
 func main() {
+	// A reader that closes the pipe early (`toktop version | true`,
+	// `toktop --once | head -1`) must leave the exit code at 0, which is what
+	// the help screen promises and what outputStatus returns for a broken
+	// pipe. The Go runtime re-raises SIGPIPE with its default disposition for
+	// a write to stdout, so the process died of signal 13 (141 to a shell)
+	// before the write ever returned the EPIPE isBrokenPipe looks for. With
+	// SIGPIPE ignored the write returns EPIPE instead, and the documented
+	// contract holds whatever the reader does.
+	signal.Ignore(syscall.SIGPIPE)
+
 	f := registerFlags()
 	// Subcommands taken before flag parsing so their own flags
 	// (`update --check`) are not rejected by the top-level FlagSet, and so
@@ -53,16 +63,23 @@ func main() {
 			os.Exit(runVersion(os.Stdout, os.Args[2:]))
 		}
 	}
-	flag.Parse()
+	// The flag package reports a bad flag in its own single-dash spelling;
+	// flagParseError restores the long form so the error names the flag as
+	// the help screen and the README document it.
+	if err := topFS.Parse(os.Args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "toktop: %s\n", flagParseError(err))
+		usage(os.Stderr)
+		os.Exit(2)
+	}
 
 	// Leftovers are forwarded so `toktop --help update` matches
 	// `toktop help update`, and `toktop --version extra` is a usage error
 	// like `toktop version extra`.
 	if f.showHelp {
-		os.Exit(runHelp(os.Stdout, flag.Args()))
+		os.Exit(runHelp(os.Stdout, topFS.Args()))
 	}
 	if f.showVer {
-		os.Exit(runVersion(os.Stdout, flag.Args()))
+		os.Exit(runVersion(os.Stdout, topFS.Args()))
 	}
 	log.SetFlags(0)
 
@@ -87,7 +104,7 @@ func main() {
 
 	// Leftover args before the TTY check: a piped `toktop help` or
 	// `toktop http://host` must name that mistake, not "stdout is not a terminal".
-	cmd, remoteTargets, err := interpretArgs(flag.Args())
+	cmd, remoteTargets, err := interpretArgs(topFS.Args())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -108,7 +125,7 @@ func main() {
 	}
 
 	explicit := map[string]bool{}
-	flag.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	topFS.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	// Both halves of opencode's gate, resolved once before the config line:
 	// the sqlite build tag decides whether the driver is linked in, and
 	// --opencode-db (on unless explicitly disabled) whether it is opened.

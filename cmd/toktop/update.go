@@ -21,9 +21,6 @@ import (
 // --help | grep repo`), matching how the top-level command treats --help.
 func updateUsage(w io.Writer, fs *flag.FlagSet) error {
 	var buf strings.Builder
-	prev := fs.Output()
-	fs.SetOutput(&buf)
-	defer fs.SetOutput(prev)
 	fmt.Fprint(&buf, `toktop update - install the latest release
 
 Usage:
@@ -41,7 +38,7 @@ Examples:
 
 Flags:
 `)
-	fs.PrintDefaults()
+	buf.WriteString(flagDocs(fs))
 	fmt.Fprint(&buf, `
 $GITHUB_TOKEN authenticates GitHub API calls past the anonymous rate limit.
 With --check, stdout is the release URL and nothing else, so
@@ -63,7 +60,6 @@ A failed check or install exits 1, a usage error exits 2, Ctrl+C exits 130.
 // over a running image, so the dashboard exits and asks you to start it again.
 func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	fs := flag.NewFlagSet("toktop update", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
 	check := fs.Bool("check", false, "report the latest release without installing it")
 	repo := fs.String("repo", selfupdate.DefaultRepo, "GitHub repository to fetch releases from (owner/name)")
 	var showHelp, showVer bool
@@ -73,8 +69,14 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	// Defining -h/--help as real flags keeps the flag package from treating
 	// them as a parse error, so they can land on stdout with exit 0 the way
 	// the top-level command's --help does. --version matches the parent.
-	fs.Usage = func() { updateUsage(os.Stderr, fs) }
+	fs.Usage = func() {}
+	fs.SetOutput(io.Discard)
 	if err := fs.Parse(args); err != nil {
+		// Reported here rather than by the package, so the message and the
+		// usage screen under it both use the long flag spelling the help
+		// screen documents.
+		fmt.Fprintf(os.Stderr, "toktop update: %s\n", flagParseError(err))
+		updateUsage(os.Stderr, fs)
 		return 2
 	}
 	if fs.NArg() > 0 {

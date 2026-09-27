@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -45,6 +47,39 @@ func TestOutputFailures(t *testing.T) {
 			stderr := captureStderr(t, func() { code = tt.run(failedOutput{}) })
 			if code != 1 || !strings.Contains(stderr, "write stdout: output unavailable") {
 				t.Fatalf("code = %d, stderr = %q; want 1 and output error", code, stderr)
+			}
+		})
+	}
+}
+
+// The help screen promises exit 0 "including a reader such as head closing
+// stdout early". Go's runtime re-raises SIGPIPE with its default disposition
+// for a write to stdout, so a reader that exits before the write returned
+// killed toktop with signal 13 (141 to a shell) and the documented contract
+// never held. This drives the real binary through a shell pipeline, which is
+// the only way to observe the signal.
+func TestPipingToAnEarlyExitingReaderExitsZero(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no /bin/true to close the pipe early on Windows")
+	}
+	bin := filepath.Join(t.TempDir(), "toktop")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+
+	for _, args := range [][]string{
+		{"version"},
+		{"--help"},
+		{"--version"},
+		{"update", "--help"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			// PIPESTATUS[0] is toktop's status; a bare pipeline would report
+			// the reader's, which is always 0 and would prove nothing.
+			script := `"` + bin + `" ` + strings.Join(args, " ") + ` | true; exit ${PIPESTATUS[0]}`
+			out, err := exec.Command("bash", "-c", script).CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s | true = %v, want exit 0\n%s", script, err, out)
 			}
 		})
 	}
@@ -451,6 +486,105 @@ func TestUsage(t *testing.T) {
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() missing %q", want)
+		}
+	}
+}
+
+// Every flag is documented in the same long form the examples, the prose and
+// the README use, with its argument word matching the README's flag table.
+// Go's PrintDefaults would print "-add value" and a separate "-h" line, which
+// read as a different CLI from the rest of the screen.
+func TestUsageDocumentsFlagsInLongForm(t *testing.T) {
+	var buf strings.Builder
+	usage(&buf)
+	got := buf.String()
+
+	for _, want := range []string{
+		"--add URL", "--bearer TOKEN", "--frames N", "--ingest ADDR",
+		"--interval D", "--probe N", "--seed N", "--ssh-key PATH",
+		"--help, -h",
+	} {
+		if !strings.Contains(got, "\n  "+want+"\n") {
+			t.Errorf("usage() flag list missing entry %q", want)
+		}
+	}
+	// The short spelling belongs beside its long form, never as its own entry.
+	if strings.Contains(got, "\n  -h\n") {
+		t.Error("usage() lists -h as a flag of its own")
+	}
+	// No entry may fall back to Go's single-dash spelling. Scoped to the flag
+	// list, since under `go test` flag.CommandLine also carries the test
+	// binary's own --test.* flags.
+	for _, line := range strings.Split(flagSection(t, got), "\n") {
+		if strings.HasPrefix(line, "  -") && !strings.HasPrefix(line, "  --") {
+			t.Errorf("usage() has a single-dash flag entry: %q", line)
+		}
+	}
+}
+
+// A parse failure must name the flag the way the help screen and the README
+// spell it. The flag package reports its own single-dash form, which is not
+// the spelling shown anywhere else and reads as a different flag.
+func TestFlagParseErrorUsesLongForm(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			name: "unknown flag",
+			in:   "flag provided but not defined: -bogus",
+			want: "flag provided but not defined: --bogus",
+		},
+		{
+			name: "unparseable value",
+			in:   `invalid value "1" for flag -interval: parse error`,
+			want: `invalid value "1" for flag --interval: parse error`,
+		},
+		{
+			name: "non-boolean value for a boolean",
+			in:   `invalid boolean value "x" for -demo: parse error`,
+			want: `invalid boolean value "x" for flag --demo: parse error`,
+		},
+		{
+			name: "missing value",
+			in:   "flag needs an argument: -ingest",
+			want: "flag needs an argument: --ingest",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := flagParseError(errors.New(tc.in)); got != tc.want {
+				t.Errorf("flagParseError(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// A single-letter alias the user typed keeps its single dash: "-h" is how it
+// was written, and "---h" would name a flag that does not exist.
+func TestLongFlagKeepsOneLetterAlias(t *testing.T) {
+	if got := longFlag("-h"); got != "--h" {
+		t.Errorf("longFlag(-h) = %q, want %q", got, "--h")
+	}
+}
+
+// flagSection returns the lines between the "Flags:" heading and the prose
+// that follows the list.
+func flagSection(t *testing.T, help string) string {
+	t.Helper()
+	_, rest, ok := strings.Cut(help, "\nFlags:\n")
+	if !ok {
+		t.Fatal("help has no Flags: section")
+	}
+	section, _, _ := strings.Cut(rest, "\n\n")
+	return section
+}
+
+// toktop update documents its flags the same way the top-level command does.
+func TestUpdateUsageDocumentsFlagsInLongForm(t *testing.T) {
+	var out bytes.Buffer
+	if code := runUpdate(context.Background(), &out, []string{"--help"}); code != 0 {
+		t.Fatalf("runUpdate(--help) = %d, want 0", code)
+	}
+	for _, want := range []string{"--check", "--repo string", "--help, -h"} {
+		if !strings.Contains(out.String(), "\n  "+want+"\n") {
+			t.Errorf("update usage flag list missing entry %q", want)
 		}
 	}
 }

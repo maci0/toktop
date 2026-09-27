@@ -238,6 +238,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the binary, as it already did for the checksums archive. A transport that
   transparently decompressed the body would write the wrong bytes and hash
   bytes nobody else hashed, and the check would fail on a good release.
+- A result piped to a reader that exits before the write finished exits `0`,
+  as `--help` documents. The Go runtime re-raises `SIGPIPE` with its default
+  disposition for a write to stdout, so `toktop version | true` died of signal
+  13 (141 to a shell) instead of returning the `0` that the broken-pipe
+  handling in the same binary produces for every other early reader.
+- `toktop --help` and `toktop update --help` list every flag in the long
+  `--long-form` the examples, the prose and the README already use, and name
+  its argument with the same word the README's flag table does (`--add URL`,
+  `--seed N`). Go's flag package printed its own single-dash spelling
+  (`-add value`, `--seed int64`) and gave `-h` a line of its own beside
+  `--help`, so the flag list read as a different CLI from the screen around
+  it.
+- A flag parse error names the flag the same way. `toktop --bogus` said
+  "flag provided but not defined: -bogus" and `toktop --interval 1` named
+  `-interval`, spellings shown nowhere else; both now use `--`. A boolean
+  given a non-boolean value also gains the "flag" the other messages already
+  had.
 - A dsh session log whose record straddles a Zstandard frame boundary is read
   as one record. The read stopped at frame boundaries and counted each half as
   its own line, so neither parsed and both were dropped, under-reporting the
