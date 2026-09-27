@@ -119,8 +119,9 @@ const (
 
 // AgentRecorder is the sink for agent events (ingest HTTP and --agents).
 // RecordAgent reports whether the event reached the retained feed: false
-// means the id was already there, so a sender retrying a POST whose response
-// was lost is told its replay stored nothing.
+// means the id was already recorded inside the recorder's dedup window, so a
+// sender retrying a POST whose response was lost is told its replay stored
+// nothing.
 type AgentRecorder interface {
 	RecordAgent(ev AgentEvent) bool
 }
@@ -129,7 +130,7 @@ type AgentRecorder interface {
 // wire shape is defined separately by ingest's agentEventWire.
 type AgentEvent struct {
 	At             time.Time
-	ID             string // caller-chosen; a repeat still in the retained feed is ignored
+	ID             string // caller-chosen; a repeat still inside the dedup window is ignored
 	Agent          string
 	Model          string
 	Kind           string // AgentKindTurn/Tool/Error/Note, or a sanitized unknown

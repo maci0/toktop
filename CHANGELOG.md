@@ -177,6 +177,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `/proc/driver/nvidia/version` is read. The scan for it was gated on the
   driver line having already been seen, so a driver that wrote CUDA first
   reported its version with the CUDA row silently missing.
+- An event `id` (or a derived `Idempotency-Key` id) stays deduplicated for 15
+  minutes instead of only while the event sits in the 512-event display ring.
+  A sender whose POST was retried after the ring moved on found its ids
+  evicted and had every line of the replay counted a second time. The ledger
+  is bounded by that horizon and by a count cap, so an id ages out rather than
+  pinning a key forever.
 - An `ssh://` host-key pin store that holds no records at all is refused
   instead of read as an empty one. A file truncated to nothing, or one a backup
   or a dotfile manager restored empty, read as "nothing pinned yet" and

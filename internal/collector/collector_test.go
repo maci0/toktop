@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"runtime"
 	"strings"
@@ -793,33 +794,104 @@ func TestEmitDoesNotLeakGoroutines(t *testing.T) {
 	t.Fatalf("goroutines after emit = %d, want no more than the %d before it", runtime.NumGoroutine(), before)
 }
 
-// The id window is the retained ring: once an event is evicted, its id may
-// be reused rather than pinning a key forever.
-func TestRecordAgentReusesEvictedID(t *testing.T) {
+// A replay that lands after the event has left the display ring is still the
+// same logical operation, so the id has to stay dedup-able well past the
+// ring's cap: a client retrying a lost 202 after a minute of backoff would
+// otherwise have every line of the stream counted twice.
+func TestRecordAgentIgnoresReplayAfterRingEviction(t *testing.T) {
 	// Explicit timestamps, not time.Now(): a coarse clock (Windows ticks at
 	// milliseconds) hands out the same instant to the whole run, and equal
 	// timestamps order by id, which would sort "old" newest and pin it.
 	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
 	c := New(nil, time.Second)
-	c.RecordAgent(core.AgentEvent{At: base, ID: "old", Agent: "a"})
+	c.SetNow(func() time.Time { return now })
+	if !c.RecordAgent(core.AgentEvent{At: base, ID: "turn-1", Agent: "a", OutputTokens: 7}) {
+		t.Fatal("first send reported a duplicate")
+	}
 	for i := range core.AgentHistoryLen {
+		now = base.Add(time.Duration(i+1) * time.Second)
 		c.RecordAgent(core.AgentEvent{
-			At:    base.Add(time.Duration(i+1) * time.Millisecond),
+			At:    now,
 			ID:    fmt.Sprintf("n%d", i),
 			Agent: "a",
 		})
 	}
-	if core.HasAgentID(c.agents, "old") {
-		t.Fatal("old id still retained after eviction")
+	if core.HasAgentID(c.agents, "turn-1") {
+		t.Fatal("turn-1 still in the display ring; the test proves nothing")
 	}
-	c.RecordAgent(core.AgentEvent{
-		At:           base.Add((core.AgentHistoryLen + 1) * time.Millisecond),
-		ID:           "old",
-		Agent:        "a",
-		OutputTokens: 7,
-	})
+	// The sender never got its 202 and retries the same POST, seconds later.
+	now = base.Add((core.AgentHistoryLen + 1) * time.Second)
+	if c.RecordAgent(core.AgentEvent{At: base, ID: "turn-1", Agent: "a", OutputTokens: 7}) {
+		t.Fatal("replay outside the display ring was stored as new")
+	}
+	for _, e := range c.agents {
+		if e.ID == "turn-1" {
+			t.Fatal("replayed event is back in the feed")
+		}
+	}
+}
+
+// The dedup window is bounded by time, not by the display ring: past the
+// horizon an id is reusable again rather than pinning a key forever, and a
+// fleet emitting faster than the horizon can evict is capped by count.
+func TestRecordAgentReusesIDPastHorizon(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
+	c := New(nil, time.Second)
+	c.SetNow(func() time.Time { return now })
+	c.RecordAgent(core.AgentEvent{At: base, ID: "old", Agent: "a"})
+	now = base.Add(agentIDHorizon + time.Second)
+	if !c.RecordAgent(core.AgentEvent{At: now, ID: "old", Agent: "a", OutputTokens: 7}) {
+		t.Fatal("id older than the dedup horizon must be reusable")
+	}
 	if !core.HasAgentID(c.agents, "old") {
-		t.Fatal("evicted id must be reusable")
+		t.Fatal("reused id missing from the feed")
+	}
+	// The same id, still inside the horizon, is still a duplicate.
+	if c.RecordAgent(core.AgentEvent{At: now, ID: "old", Agent: "a", OutputTokens: 7}) {
+		t.Fatal("reused id accepted twice inside the horizon")
+	}
+}
+
+// The ledger cannot grow without bound: a flood of distinct ids past the
+// count cap evicts the oldest and the feed keeps answering in constant time.
+func TestRecordAgentIDLedgerStaysBounded(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
+	c := New(nil, time.Second)
+	c.SetNow(func() time.Time { return now })
+	const flood = 4 * agentIDMax
+	for i := range flood {
+		now = base.Add(time.Duration(i) * time.Millisecond)
+		c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("e%d", i), Agent: "a"})
+	}
+	if len(c.agentIDs) > agentIDMax || len(c.agentIDOrder) > agentIDMax {
+		t.Fatalf("ledger holds %d ids in %d slots, want at most %d",
+			len(c.agentIDs), len(c.agentIDOrder), agentIDMax)
+	}
+	if _, ok := c.agentIDs["e0"]; ok {
+		t.Fatal("oldest id outlived the count cap")
+	}
+	if _, ok := c.agentIDs[fmt.Sprintf("e%d", flood-1)]; !ok {
+		t.Fatal("newest id evicted")
+	}
+	// A replay of the newest id is still refused, whichever bound applied.
+	if c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("e%d", flood-1), Agent: "a"}) {
+		t.Fatal("newest id accepted twice")
+	}
+}
+
+// README's ingest table names the dedup window, since that is what tells a
+// sender how long a retry stays safe. A horizon bump has to land there too.
+func TestREADMEDocumentsAgentIDHorizon(t *testing.T) {
+	b, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := fmt.Sprintf("last %d minutes", int(agentIDHorizon/time.Minute))
+	if !strings.Contains(string(b), want) {
+		t.Fatalf("README.md ingest section must say %q (matches agentIDHorizon)", want)
 	}
 }
 
