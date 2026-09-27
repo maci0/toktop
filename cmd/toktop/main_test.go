@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -1270,4 +1271,43 @@ func TestWarnInsecureAdd(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestStartProbeTicker(t *testing.T) {
+	t.Run("fires immediately and on every tick", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		fired := make(chan time.Time, 4)
+		startProbeTicker(ctx, func() { fired <- time.Now() }, 10*time.Millisecond)
+
+		first := <-fired // no tick has elapsed: the call is immediate
+		for i := 0; i < 2; i++ {
+			if <-fired == first {
+				t.Fatal("ticker fired twice at the same instant")
+			}
+		}
+	})
+
+	t.Run("stops on cancel", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		var mu sync.Mutex
+		count := 0
+		startProbeTicker(ctx, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			count++
+		}, 5*time.Millisecond)
+		<-time.After(30 * time.Millisecond)
+		cancel()
+		time.Sleep(20 * time.Millisecond) // past several ticks
+		mu.Lock()
+		at := count
+		mu.Unlock()
+		time.Sleep(30 * time.Millisecond)
+		mu.Lock()
+		defer mu.Unlock()
+		if count != at {
+			t.Fatalf("prober ran %d more times after cancel", count-at)
+		}
+	})
 }

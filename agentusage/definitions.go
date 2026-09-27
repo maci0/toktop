@@ -21,7 +21,7 @@ import (
 //
 // Recognition and readability are separate questions: an agent here is one
 // whose process can be identified, which is what makes it appear in Discover.
-// Whether its tokens can be read is decided by the adapters in watch.go, and
+// Whether its tokens can be read is decided by the adapters in registry.go, and
 // most of this list keeps no transcript worth reading.
 var knownAgents = []string{
 	"agy", "claude", "clanker", "codex", "copilot", "crush", "cursor-agent",

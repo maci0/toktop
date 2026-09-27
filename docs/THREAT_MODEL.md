@@ -162,7 +162,7 @@ Every externally reachable input, with its code location:
 8. **Agent transcript and session-store reading** (local disk, `--agents`
    only): `/proc` (Linux) or `ps`/`lsof` (Darwin) finds coding-agent
    processes; their JSONL transcripts are read every second via `agentusage`
-   (internal/agentwatch/agentwatch.go; agentusage/watch.go),
+   (internal/agentwatch/agentwatch.go; agentusage/watcher.go),
    including dsh's default concatenated-zstd logs (agentusage/dsh.go). With
    the `sqlite` build tag, crush's `.crush/crush.db` is opened automatically
    for each watched working directory (agentusage/crush_sqlite.go).
@@ -330,7 +330,7 @@ Deployment surface:
   read-only (sqlite.go, `_query_only=1`, `_defensive=1`, `_dqs=0`,
   and `trusted_schema=OFF` in the DSN).
   Transcript and crush paths that leave their root via a planted symlink are
-  refused (watch.go; crush_sqlite.go).
+  refused (watcher.go; crush_sqlite.go).
 
 Privilege transitions: toktop gains no privileges at runtime (no setuid,
 no sudo). The ssh connection is the one place code acts with authority beyond
@@ -489,9 +489,9 @@ ports that are then exposed on local loopback (client.go).
   ingest-equivalent recording and at render (M2). Planted symlinks out of
   the transcript root or crush project are refused (M29).
 - *Denial of service*: a huge transcript or database is opened read-only and
-  queried with bounds (maxSaneTokens 1<<40, agentusage/watch.go);
+  queried with bounds (maxSaneTokens 1<<40, agentusage/sample.go);
   JSONL is tailed from the attach point rather than replayed in full
-  (agentusage/watch.go). dsh zstd frames are size-capped
+  (agentusage/watcher.go). dsh zstd frames are size-capped
   (`zstdMaxFrameBytes`, `WithDecoderMaxMemory` in agentusage/dsh.go).
 
 ## Existing mitigations map
@@ -523,12 +523,12 @@ Controls verified in code, with the threats they cover:
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (discover.go, 70-74), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 9) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
-| M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; watch.go; opencode_sqlite.go |
+| M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; sample.go; opencode_sqlite.go |
 | M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go; internal/ingest/server_test.go |
 | M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, 81, 100-107 |
 | M27: logRemote rewrites non-loopback peer addresses to `"remote"` on the audit line and on http.Server.ErrorLog | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | server.go |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go |
-| M29: Transcript and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watch.go; crush_sqlite.go |
+| M29: Transcript and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watcher.go; crush_sqlite.go |
 
 Documentation claims checked against code this pass (2026-09-27):
 

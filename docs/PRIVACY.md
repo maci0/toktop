@@ -16,7 +16,7 @@ data flows, so the claim is checkable rather than a slogan.
 
 `--agents` is off by default: it means reading session files nobody pointed
 toktop at. The adapters in
-[agentusage/watch.go](../agentusage/watch.go) parse token counters only.
+[agentusage/transcript.go](../agentusage/transcript.go) parse token counters only.
 Prompt text, tool output and file contents in a transcript are not decoded,
 copied into events, or displayed. A working directory becomes a note in the
 feed with the last two path components and `~` in place of your home

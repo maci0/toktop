@@ -34,12 +34,6 @@ import (
 	"github.com/maci0/toktop/internal/ui"
 )
 
-// version is the release stamp. Empty means unstamped: init fills it from the
-// module version Go embeds (`go install @v0.5.0`), then "dev". Release and
-// `make build` override it with -ldflags "-X main.version=...", including the
-// Makefile's default "dev". The source default must not be a real tag:
-// "0.1.0" made `go install @latest` report the first release, so --version
-// lied and `toktop update` always thought it was behind.
 func main() {
 	f := registerFlags()
 	// Subcommands taken before flag parsing so their own flags
@@ -257,23 +251,7 @@ func main() {
 	}
 
 	if f.probeSecs > 0 && prober != nil {
-		d := time.Duration(f.probeSecs) * time.Second
-		go func() {
-			t := time.NewTicker(d)
-			defer t.Stop()
-			prober()
-			for {
-				select {
-				case <-ctx.Done():
-					return
-				case <-t.C:
-					if ctx.Err() != nil {
-						return
-					}
-					prober()
-				}
-			}
-		}()
+		startProbeTicker(ctx, prober, time.Duration(f.probeSecs)*time.Second)
 	}
 
 	// Agents running on this machine, read from the transcripts they already
@@ -346,6 +324,29 @@ func main() {
 	}
 
 	runTUI(ctx, cfg, ch, !f.noReload)
+}
+
+// startProbeTicker fires prober once straight away and then every d, until
+// the context is canceled. The first call is not deferred to the first tick:
+// --probe should put a request on the wire when the dashboard comes up, not
+// one interval later.
+func startProbeTicker(ctx context.Context, prober func(), d time.Duration) {
+	go func() {
+		t := time.NewTicker(d)
+		defer t.Stop()
+		prober()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-t.C:
+				if ctx.Err() != nil {
+					return
+				}
+				prober()
+			}
+		}
+	}()
 }
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the

@@ -5,8 +5,12 @@ import (
 	"strings"
 )
 
-// The release stamp baked in at build time.
-
+// version is the release stamp. Empty means unstamped: init fills it from the
+// module version Go embeds (`go install @v0.5.0`), then "dev". Release and
+// `make build` override it with -ldflags "-X main.version=...", including the
+// Makefile's default "dev". The source default must not be a real tag:
+// "0.1.0" made `go install @latest` report the first release, so --version
+// lied and `toktop update` always thought it was behind.
 var version = ""
 
 func init() {

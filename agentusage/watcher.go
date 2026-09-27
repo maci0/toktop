@@ -1,0 +1,517 @@
+// Copyright (C) 2026 Marcel W. Wysocki
+// SPDX-License-Identifier: MIT
+
+// Package agentusage reads live token counts out of the transcripts agent CLIs
+// already write to disk.
+//
+// Typical use: LoadDefinitions, Discover running agents, Watch each process
+// (or Process.Watch), then Poll or Run for Sample values. EnableOpenCodeDB
+// opts into opencode's machine-wide SQLite store; crush is read whenever the
+// sqlite build tag is on.
+//
+// Agents differ in what they print to stdout: some report token usage as they
+// stream, some only at exit, some never. They agree on something else, though,
+// which is that they keep a structured session transcript, and that transcript
+// carries per-message usage with timestamps. Tailing it gives a live rate
+// without root, without intercepting anyone's network traffic, and without
+// asking the agent to behave differently.
+//
+// The design constraints that shape everything here:
+//
+//   - Only count usage after the watcher attached. Session transcripts persist
+//     across runs, so the watcher records where each file ended when it
+//     attached and reads only what is appended after that. Database-backed
+//     agents (opencode, crush) use the since argument the same way; file
+//     transcripts are always tailed from their attach-time end.
+//   - Attribute the transcript to the right process. Each adapter ties its
+//     files to a working directory: recorded per record, read from the
+//     session header, or implicit because the log lives inside the project
+//     directory itself (clanker), so the cwd is the key.
+//   - Never invent a number. An agent whose transcript cannot be found, parsed,
+//     or attributed simply reports nothing, and the dashboard shows no rate.
+package agentusage
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"sync"
+	"time"
+)
+
+// Watcher tails one agent's transcripts from the moment it attached.
+type Watcher struct {
+	// source is set for agents whose usage is not in files (opencode, crush).
+	// When it is present, every field below that describes file state is unused.
+	source tokenSource
+	// dirs are the spellings a source matches against, for agents that record
+	// the directory they were started in rather than its resolved form.
+	dirs    []string
+	ad      adapter
+	tool    string
+	dir     string
+	since   time.Time
+	offsets map[string]int64 // file -> bytes already accounted for
+	// preexisting marks transcripts that were already on disk when the watcher
+	// attached. Their earlier content belongs to a previous run; a file that
+	// appears afterwards belongs entirely to this attach.
+	preexisting map[string]bool
+	// stamps records what a transcript looked like when it was last read, so
+	// idle files are skipped without opening them. Size rides along with the
+	// mtime because a coarse clock (NTFS, and Windows' lazy last-write update
+	// for an open handle) can leave two writes sharing one stamp: a file that
+	// only grew would then look untouched and its records would be lost.
+	stamps  map[string]fileStamp
+	owner   map[string]bool // file -> belongs to this working directory (cached)
+	cached  []string        // candidate files, refreshed on an interval
+	scanned time.Time
+	// Cumulative adapters need a baseline per file: usage recorded before the
+	// watcher attached belongs to a previous run.
+	base      map[string]int
+	baseThink map[string]int
+	baseInput map[string]int
+	seen      map[string]values // file -> this attach's contribution
+	total     map[string]int
+	// sourceBase is per-session counters at attach for a sessionSource
+	// (crush). completion_tokens and prompt_tokens are cumulative for the
+	// session's life, so without this a continued session would dump its
+	// history into this attach the first time it was updated. hasSessionBase
+	// is the latch: an empty map is a valid snapshot (no sessions yet), and
+	// a failed attach read must not look like that or a later successful
+	// poll would count the whole store as growth.
+	sourceBase     map[string]map[string]sessionCounts
+	hasSessionBase bool
+
+	// pollMu serializes reads: the ticker goroutine and a caller's final
+	// synchronous Poll both walk the same offsets and counters.
+	pollMu sync.Mutex
+
+	mu     sync.Mutex
+	sample Sample
+}
+
+// fileStamp is what a transcript looked like when it was last read.
+type fileStamp struct {
+	mtimeNanos int64
+	size       int64
+}
+
+// Tool is the agent this watcher follows.
+func (w *Watcher) Tool() string {
+	if w == nil {
+		return ""
+	}
+	return w.tool
+}
+
+// Dir is the working directory this watcher attributes usage to.
+func (w *Watcher) Dir() string {
+	if w == nil {
+		return ""
+	}
+	return w.dir
+}
+
+// Err reports whether this watcher can read anything, and is the reason to
+// show a caller who asked for one it cannot have.
+//
+// A watcher is either usable or nil: Watch never returns one that is bound to
+// nothing, so Err is nil on every live watcher and matches
+// [ErrUnsupportedTool] on the nil one. Like Tool and Dir it is safe to call on
+// the result without a nil check:
+//
+//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
+//		return w.Err() // the agent is known, but keeps nothing readable here
+//	}
+//
+// A nil watcher means the agent is unknown here, or keeps transcripts no build
+// of this package can read, or has a definition naming no roots. The error says
+// only that: the caller already knows which agent it asked about.
+func (w *Watcher) Err() error {
+	if w != nil {
+		return nil
+	}
+	return fmt.Errorf("%w: no usage source is registered for this agent", ErrUnsupportedTool)
+}
+
+// Watch starts reading usage for one agent working in one directory.
+//
+// tool is the agent name (claude, codex, crush, …). dir is the working
+// directory that attributes transcripts to this process. since bounds
+// database-backed agents (opencode, crush): only usage recorded after that
+// instant is counted. File transcripts are always tailed from their
+// attach-time end, so since does not rewind them; pass time.Now() at attach.
+//
+// It returns nil when that agent keeps no readable transcript, which callers
+// should treat as "no rate available" rather than an error. Err names that
+// case for a caller that reports it:
+//
+//	if w := agentusage.Watch(tool, dir, time.Now()); w.Err() != nil {
+//		// no readable usage for this agent
+//	}
+func Watch(tool, dir string, since time.Time) *Watcher {
+	tool = canonicalTool(tool)
+	if source, ok := sourceFor(tool); ok {
+		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since}
+		if source.session != nil {
+			// A failed snapshot must not become an empty baseline: that
+			// would credit every pre-attach token the first time the store
+			// becomes readable. Leave sourceBase unset and retry on poll.
+			if base, ok := source.session.sessions(w.dirs, time.Time{}); ok {
+				w.sourceBase = base
+				w.hasSessionBase = true
+			}
+		}
+		return w
+	}
+	ad, ok := adapterFor(tool)
+	if !ok {
+		return nil
+	}
+	w := &Watcher{
+		ad: ad, tool: tool, dir: resolveDir(dir), since: since,
+		offsets: map[string]int64{}, preexisting: map[string]bool{}, stamps: map[string]fileStamp{},
+		owner: map[string]bool{}, base: map[string]int{}, baseThink: map[string]int{},
+		baseInput: map[string]int{},
+		seen:      map[string]values{}, total: map[string]int{},
+	}
+	// Record where existing files end before anything is counted. Every
+	// transcript already in the store is seeded, not only the ones written in
+	// the last recencyWindow: a session that went idle before the dashboard
+	// started is still on disk, and leaving its end unrecorded would make the
+	// next append to it be read from byte zero, crediting the whole earlier
+	// session to this attach.
+	recent := time.Now().Add(-recencyWindow)
+	for _, path := range w.attachCandidates() {
+		fi, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		w.offsets[path] = fi.Size()
+		w.preexisting[path] = true
+		if ad.kind == cumulative && fi.ModTime().After(recent) {
+			// Cumulative counters only make sense against what the session had
+			// already spent. That value is in the bytes being skipped, so it is
+			// read once here; without it the first record after attaching would
+			// become the baseline and this attach would measure zero forever.
+			// Only recent transcripts get it: a machine-wide store holds
+			// thousands, and a session idle for minutes baselining on its
+			// first post-attach record costs a few seconds of delta, not its
+			// history.
+			w.seedBaseline(path)
+		}
+	}
+	// The seeding walk serves attach bookkeeping, not reads: leave the listing
+	// unstamped so the first poll re-walks and sees sessions created between
+	// attach and then. From that poll on, empty and non-empty listings share the
+	// same rescanEvery freshness window.
+	w.scanned = time.Time{}
+	return w
+}
+
+// resolveDir is the form a working directory is compared in: absolute, with
+// symlinks resolved, since that is what agents record.
+func resolveDir(dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		abs = resolved
+	}
+	return abs
+}
+
+// dirSpellings lists the paths a process's working directory can be recorded under:
+// the resolved one, and the one the caller passed if it differs. On macOS
+// every temporary directory is reached through a symlink, and an agent records
+// whichever spelling it was started with; there the list also carries the
+// other Unicode normalization forms of each spelling, since the file system
+// treats them as one directory while agents record either.
+func dirSpellings(dir string) []string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		abs = dir
+	}
+	spellings := []string{abs}
+	if resolved := resolveDir(dir); resolved != abs {
+		spellings = append(spellings, resolved)
+	}
+	var out []string
+	for _, s := range spellings {
+		for _, v := range dirVariants(s) {
+			if !slices.Contains(out, v) {
+				out = append(out, v)
+			}
+		}
+	}
+	return out
+}
+
+// openTranscript opens path only if it still lives under one of this
+// watcher's roots. A symlink swapped to point outside is refused, so a
+// writable store cannot pull in a file from elsewhere.
+func (w *Watcher) openTranscript(path string) (*os.File, error) {
+	for _, root := range w.ad.roots(w.dir) {
+		if root == "" {
+			continue
+		}
+		f, err := openUnder(root, path)
+		if err == nil {
+			return f, nil
+		}
+	}
+	return nil, os.ErrNotExist
+}
+
+func openUnder(root, path string) (*os.File, error) {
+	rel, err := filepath.Rel(root, path)
+	if err != nil {
+		return nil, err
+	}
+	if !filepath.IsLocal(rel) {
+		return nil, errOutsideRoot
+	}
+	r, err := os.OpenRoot(root)
+	if err != nil {
+		return nil, err
+	}
+	defer r.Close()
+	return r.Open(rel)
+}
+
+var errOutsideRoot = errors.New("path is outside the transcript root")
+
+// baselineTailBytes bounds the seed read. Cumulative values only grow, so the
+// last one in the file is the baseline, and the tail always holds it.
+const baselineTailBytes = 256 << 10
+
+// seedBaseline records what a pre-existing session had already spent.
+// consumeAppend is used rather than a Scanner: a line past maxLineBytes
+// aborts bufio.Scanner and would leave a stale (too-low) baseline from
+// earlier records, so later attach-time totals look like this attach's
+// growth. consumeAppend skips the oversized line and keeps reading, and
+// a real I/O error leaves the baseline unset instead of committing a
+// partial one.
+func (w *Watcher) seedBaseline(path string) {
+	f, err := w.openTranscript(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return
+	}
+	off := int64(0)
+	if fi.Size() > baselineTailBytes {
+		off = fi.Size() - baselineTailBytes
+		if _, err := f.Seek(off, 0); err != nil {
+			return
+		}
+	}
+	var (
+		recs []values
+		ok   bool
+	)
+	if isDshZstd(path) {
+		recs, _, ok = w.consumeZstd(f, 0)
+	} else {
+		recs, _, ok = w.consumeAppend(f, off)
+	}
+	if !ok {
+		return
+	}
+	for _, v := range recs {
+		w.base[path] = max(w.base[path], v.output)
+		w.baseThink[path] = max(w.baseThink[path], v.thinking)
+		w.baseInput[path] = max(w.baseInput[path], v.input)
+	}
+}
+
+// Run polls until the context is canceled, calling onChange whenever the
+// observed usage changes, growth or the drop a rewritten transcript causes.
+// A caller that reports deltas should re-baseline on a sample smaller than
+// the one it last reported. It is meant to run in its own goroutine.
+func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sample)) {
+	if w == nil {
+		return
+	}
+	if every <= 0 {
+		every = pollEvery
+	}
+	// A first read straight away: an agent that reports early should show a
+	// rate early, rather than waiting out a tick.
+	w.poll(onChange)
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			w.poll(onChange) // one last read, so the tail of a run is not lost
+			return
+		case <-t.C:
+			if ctx.Err() != nil {
+				w.poll(onChange)
+				return
+			}
+			w.poll(onChange)
+		}
+	}
+}
+
+// readSource is one reading from a non-file source. A sessionSource is
+// snapshotted at attach (or on the first successful poll if that read
+// failed), so only growth since then is counted. A usageSource (opencode)
+// reports this attach's usage in full each time via a timestamp filter.
+//
+// src is the source registered for this agent right now, which poll resolves
+// each time so a withdrawn provider stops being read.
+func (w *Watcher) readSource(src tokenSource) (values, bool) {
+	if src.session != nil {
+		return w.readSessionSource(src.session)
+	}
+	if src.usage != nil {
+		return src.usage.read(w.dirs, w.since)
+	}
+	return values{}, false
+}
+
+// readSessionSource counts growth against the attach snapshot. If that
+// snapshot has not landed yet, this call is the retry: a success becomes
+// the baseline and reports nothing, so pre-attach tokens are never the
+// first "growth".
+func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
+	if !w.hasSessionBase {
+		base, ok := ss.sessions(w.dirs, time.Time{})
+		if !ok {
+			return values{}, false
+		}
+		w.sourceBase = base
+		w.hasSessionBase = true
+		return values{}, false // attach baseline: nothing yet is this attach's
+	}
+	cur, ok := ss.sessions(w.dirs, w.since)
+	if !ok {
+		return values{}, false
+	}
+	var outN, inN int64
+	for path, sess := range cur {
+		base := w.sourceBase[path]
+		for id, tokens := range sess {
+			b := base[id]
+			if d := tokens.output - b.output; d > 0 {
+				if outN > int64(maxSaneTokens)-d {
+					return values{}, false
+				}
+				outN += d
+			}
+			if d := tokens.input - b.input; d > 0 {
+				if inN > int64(maxSaneTokens)-d {
+					return values{}, false
+				}
+				inN += d
+			}
+		}
+	}
+	v := values{output: counter64(outN), input: counter64(inN)}
+	return v, v.present()
+}
+
+// Poll reads whatever the transcripts have gained since the last read and
+// returns the total. Callers use it for a final synchronous read once the
+// agent has exited, since the last records land after the process is gone.
+func (w *Watcher) Poll() Sample {
+	if w == nil {
+		return Sample{}
+	}
+	// Force a fresh walk: this is the caller's last chance to see a session
+	// file created seconds ago, and a run short enough to finish inside
+	// rescanEvery would otherwise report nothing at all. Clearing the stamp is
+	// what forces it; the listing itself is what candidates rewrites. The cost
+	// is one walk per final read, not one per periodic poll: Run's ticker goes
+	// through poll, which still reuses the cached listing.
+	w.pollMu.Lock()
+	w.scanned = time.Time{}
+	w.pollMu.Unlock()
+	w.poll(nil)
+	return w.Sample()
+}
+
+// Sample returns the usage observed so far.
+func (w *Watcher) Sample() Sample {
+	if w == nil {
+		return Sample{}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.sample
+}
+
+func (w *Watcher) poll(onChange func(Sample)) {
+	s, changed := w.read()
+	// Callback after read has released pollMu: onChange may Poll (final read,
+	// tests), and holding the lock across it deadlocks that path.
+	if changed && onChange != nil {
+		onChange(s)
+	}
+}
+
+// read takes one reading and publishes it, reporting the new sample only when
+// the observed counts differ from the published ones. Both mutexes are
+// released by defer, so a panic
+// raised while parsing an agent's transcript cannot leave a watcher holding
+// pollMu for the rest of the dashboard's life with no goroutine left to
+// unlock it.
+func (w *Watcher) read() (Sample, bool) {
+	w.pollMu.Lock()
+	defer w.pollMu.Unlock()
+	var out, thinking, total, input int
+	if w.source.present() {
+		// The provider is resolved per poll rather than trusted from attach:
+		// EnableOpenCodeDB(false) withdraws it, and a watcher that kept the
+		// binding it was built with would go on reading the operator's
+		// database after the opt-out. A withdrawn provider reports nothing,
+		// so the sample stays where it was instead of jumping.
+		src, ok := sourceFor(w.tool)
+		if !ok {
+			return Sample{}, false
+		}
+		v, ok := w.readSource(src)
+		if !ok {
+			return Sample{}, false
+		}
+		out, thinking, total, input = v.output, v.thinking, v.total, v.input
+	} else {
+		// A definition can be reloaded under a running watcher, so its adapter
+		// is re-derived each poll; the same reason the source is re-resolved.
+		w.refreshAdapter()
+		for _, path := range w.candidates() {
+			w.readNew(path)
+		}
+		for _, v := range w.seen {
+			out = satAdd(out, v.output)
+			thinking = satAdd(thinking, v.thinking)
+			input = satAdd(input, v.input)
+		}
+		for _, v := range w.total {
+			total = max(total, v)
+		}
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	// Counts are what the transcripts say right now, not a running total that
+	// only ever rises: a transcript rewritten to a shorter length is re-read
+	// from its start, and the figures it replaces are ones it no longer
+	// records. Publishing the drop is what keeps a rewrite from being billed
+	// twice; callers that differencing see a smaller sample and re-baseline.
+	changed := out != w.sample.Output || total != w.sample.Total ||
+		thinking != w.sample.Thinking || input != w.sample.Input
+	if changed {
+		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: time.Now()}
+	}
+	return w.sample, changed
+}
