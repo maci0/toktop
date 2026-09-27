@@ -151,6 +151,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   characters, reached the terminal through an error meant to name a file and
   a line. Both go through the same snippet cap as the line itself now.
 
+- An agent whose host clock runs ahead of the dashboard's never left the agent
+  list. An ingested event carries its sender's timestamp, and the endpoint
+  accepts one up to its skew bound ahead of arrival, so those stamps sit in
+  the dashboard's future: nothing is ever older than the 30s rate window's
+  cutoff, and the agent stayed listed with its tokens in the header totals
+  however long the host had been quiet, with a `last` in the future beside an
+  `idle` recency cell. A sender's offset is one clock reading, not elapsed
+  time, so it is recorded once per agent and subtracted from that agent's
+  stamps: the feed keeps the spacing the sender measured, and with it the
+  rate derived from that spacing, and the agent ages out one window after the
+  events that named it arrived. A sender on the dashboard's own timeline, and
+  every locally watched agent, is stored exactly as before.
+
 - `--probe` under `--demo` ran off the wall clock, so a run carrying a seed
   and an origin stopped replaying. Auto-probe fired from a real ticker while
   every other value came off the simulated timeline, so how many probe waves

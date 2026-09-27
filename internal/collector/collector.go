@@ -75,9 +75,14 @@ type Collector struct {
 	agents       []core.AgentEvent
 	agentIDs     map[string]time.Time // NFC event id -> instant it was recorded
 	agentIDOrder []agentIDEntry       // the same ids in insertion order, oldest first
-	probes       []core.ProbeSample
-	started      time.Time
-	baseCtx      context.Context // set by Run; bounds ad-hoc probes past shutdown
+	// agentSkews maps a canonical agent name to that sender's clock offset, so
+	// its events are stored on this machine's timeline; agentSkewOrder holds
+	// the same offsets in insertion order, oldest first.
+	agentSkews     map[string]time.Duration
+	agentSkewOrder []agentSkewEntry
+	probes         []core.ProbeSample
+	started        time.Time
+	baseCtx        context.Context // set by Run; bounds ad-hoc probes past shutdown
 	// down holds the endpoints that failed their last poll, with when the
 	// outage started and what it said, so the audit log records an engine
 	// going away and coming back once each instead of once per poll.
@@ -138,6 +143,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		lastModel:     map[string]string{},
 		kvPct:         map[string]float64{},
 		agentIDs:      map[string]time.Time{},
+		agentSkews:    map[string]time.Duration{},
 		down:          map[string]downState{},
 		slow:          map[string]time.Time{},
 		probeInflight: map[string]bool{},

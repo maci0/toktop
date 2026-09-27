@@ -33,6 +33,43 @@ type agentIDEntry struct {
 	at time.Time
 }
 
+// agentSkewEntry is one agent's clock offset: how far the timestamps on its
+// events sat ahead of arrival when the agent was first seen. Every stamp that
+// agent sends carries the same offset, so recording it once is enough to put
+// the whole agent on this machine's timeline, spacing intact. An agent on this
+// timeline records zero and is stored exactly as it arrived.
+type agentSkewEntry struct {
+	agent string
+	skew  time.Duration
+	at    time.Time
+}
+
+// maxAgentSkews bounds the clock-offset ledger the way agentIDMax bounds the
+// id ledger, and on the same reasoning: an agent that stops reporting ages
+// out of the horizon, so the count cap only ever bites for a fleet still
+// sending.
+const maxAgentSkews = 8 * core.AgentHistoryLen
+
+// forgetAgedAgentSkews drops the offset ledger entries the window has moved
+// past, then the oldest ones if the count cap is still exceeded. An offset
+// that is dropped and read again off a fresh event costs nothing: the
+// difference between the two readings is the sender's clock drift since, not
+// a different clock.
+func (c *Collector) forgetAgedAgentSkews(cutoff time.Time) {
+	for len(c.agentSkewOrder) > 0 {
+		front := c.agentSkewOrder[0]
+		if len(c.agentSkewOrder) <= maxAgentSkews &&
+			c.agentSkews[front.agent] == front.skew &&
+			front.at.After(cutoff) {
+			return
+		}
+		c.agentSkewOrder = c.agentSkewOrder[1:]
+		if off, ok := c.agentSkews[front.agent]; ok && off == front.skew {
+			delete(c.agentSkews, front.agent)
+		}
+	}
+}
+
 // forgetAgedAgentIDs drops the entries the window has moved past, then, if the
 // count cap is still exceeded, the oldest ones. An id can appear twice in the
 // order (recorded, evicted, reused), so an entry is only removed from the
@@ -68,6 +105,23 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	// An event's timestamp is its sender's clock reading. A sender whose clock
+	// runs ahead of this one (a host with a dead RTC, a VM, a laptop off the
+	// network since boot) would otherwise stamp events in this machine's
+	// future, where they never age out: the agent stays in the list and its
+	// tokens in the header totals however long it has been quiet, because
+	// nothing is older than the window's cutoff. The offset is one clock
+	// reading, not elapsed time, so subtracting it leaves the spacing the
+	// sender measured and the rate the summary derives from it.
+	key := core.CanonicalAgent(ev.Agent)
+	offset, seen := c.agentSkews[key]
+	if !seen {
+		offset = max(ev.At.Sub(now), 0)
+		c.agentSkews[key] = offset
+		c.agentSkewOrder = append(c.agentSkewOrder, agentSkewEntry{agent: key, skew: offset, at: now})
+		c.forgetAgedAgentSkews(now.Add(-agentIDHorizon))
+	}
+	ev.At = ev.At.Add(-offset)
 	// The id index answers the dedup check in one map probe. Scanning the
 	// window instead cost a full slice walk plus an NFC normalization per
 	// retained event, under the mutex emit needs, for every ingested line.

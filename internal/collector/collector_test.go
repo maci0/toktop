@@ -897,21 +897,64 @@ func TestRecordEqualTimestampOrdersByIdentity(t *testing.T) {
 // Agent events arrive over the ingest endpoint from senders whose clocks
 // disagree, so arrival order is not time order; the retained slice must
 // still be chronological or the agent feed renders a stale event last and
-// eviction drops the wrong end.
+// eviction drops the wrong end. The sender here also runs ahead of the
+// collector's clock, so the stamps land on the collector's timeline with the
+// sender's spacing intact.
 func TestRecordAgentKeepsChronologicalOrder(t *testing.T) {
 	c := New(nil, time.Second)
 	base := time.Now()
-	order := []time.Duration{3 * time.Second, 7 * time.Second, 0, 5 * time.Second}
+	const skew = 3 * time.Second
+	c.SetNow(func() time.Time { return base.Add(10 * time.Second) })
+	order := []time.Duration{0, 3 * time.Second, 7 * time.Second, 5 * time.Second}
 	for _, d := range order {
-		c.RecordAgent(core.AgentEvent{At: base.Add(d), Agent: "a", OutputTokens: 1})
+		c.RecordAgent(core.AgentEvent{At: base.Add(10*time.Second + d + skew), Agent: "a", OutputTokens: 1})
 	}
 	for i := 1; i < len(c.agents); i++ {
 		if c.agents[i].At.Before(c.agents[i-1].At) {
 			t.Fatalf("agent ring not sorted at %d: %v", i, c.agents)
 		}
 	}
-	if !c.agents[len(c.agents)-1].At.Equal(base.Add(7 * time.Second)) {
-		t.Fatal("newest agent is not last")
+	if !c.agents[len(c.agents)-1].At.Equal(base.Add(10*time.Second + 7*time.Second)) {
+		t.Fatalf("newest agent is %v, want %v", c.agents[len(c.agents)-1].At, base.Add(17*time.Second))
+	}
+}
+
+// An event's timestamp is its sender's clock, and the ingest endpoint accepts
+// one running ahead of arrival up to its skew bound. Stored as sent, such a
+// stamp is never older than the summary's window cutoff, so its agent stays in
+// the list and its tokens in the header aggregate however long the host has
+// been quiet. The offset is one clock reading, not elapsed time: the feed
+// keeps the sender's spacing, and the agent ages out one window after the
+// events that named it arrived.
+func TestRecordAgentAgesOutSenderRunningAhead(t *testing.T) {
+	c := New(nil, time.Second)
+	base := time.Now()
+	const skew = 90 * time.Second
+	now := base
+	c.SetNow(func() time.Time { return now })
+
+	// Two events a second apart, on a host whose clock is 90s fast. The
+	// second names the same agent, so one offset covers both.
+	for _, d := range []time.Duration{4 * time.Second, 3 * time.Second} {
+		if !c.RecordAgent(core.AgentEvent{At: now.Add(skew - d), Agent: "remote", OutputTokens: 40}) {
+			t.Fatalf("event at -%s was not retained", d)
+		}
+	}
+	sum := core.Summarize(c.agents, now)
+	if len(sum.Rates) != 1 || sum.Rates[0].Tokens != 80 {
+		t.Fatalf("rates = %+v, want one remote row of 80 output tokens", sum.Rates)
+	}
+	if sum.Rates[0].TokPS != 80 {
+		t.Errorf("remote = %v tok/s, want 80: a clock offset is not elapsed time", sum.Rates[0].TokPS)
+	}
+
+	// The agent leaves once its corrected stamps are a full window old. They
+	// land at the instants the events arrived, so the newest is exactly the
+	// window old one second past it; raw sender stamps would still be 90s in
+	// this machine's future and the row would never go.
+	now = base.Add(core.AgentRateWindow + 2*time.Second)
+	if later := core.Summarize(c.agents, now); len(later.Rates) != 0 || len(later.Own) != 0 {
+		t.Fatalf("a window later = %+v / %+v, want an empty summary", later.Rates, later.Own)
 	}
 }
 
