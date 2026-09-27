@@ -20,6 +20,10 @@ support channel (see SECURITY.md).
   seconds instead of being swallowed.
 - The help overlay is titled `KEYS`.
 - `docs/PRIVACY.md` lists what toktop reads, sends and stores.
+- Every release publishes `toktop_<version>_buildinfo.txt` next to the
+  binaries, naming the commit, Go toolchain, build tags, and flags behind the
+  bytes. A checksum list proves a download arrived intact; this says what
+  produced it.
 
 ### Changed
 
@@ -40,6 +44,49 @@ support channel (see SECURITY.md).
   so the offending line is findable in a long stream.
 - A dashboard image that the asset store cannot serve answers with the site's
   own `text/plain` error body instead of the store's HTML error page.
+- Ingested events are deduplicated through an id index instead of a scan of
+  the retained window, which normalized every retained id under the lock the
+  emit path needs. A sender posting a large stream no longer pays a full
+  window walk per line.
+- Intel GPU metrics run one process per device concurrently, each with its own
+  timeout. On a multi-device node the last device used to start only after
+  three timeout windows had elapsed and could be dropped by them.
+
+### Fixed
+
+- An `agentusage` session whose first header line was larger than the owner
+  scan's old 4 MiB cap but no larger than the record path accepts stopped
+  being read for the life of the dashboard: the scan returned "undecided",
+  and every poll after it bailed. The scan now buffers the same line cap the
+  record path uses.
+- Agent discovery matches a process name under Unicode NFC, the same
+  normalization the agent registry uses, so a binary whose name the
+  filesystem stores decomposed (a macOS `café` as `cafe` + U+0301) is found by
+  an agent registered precomposed. Before, the running agent never appeared.
+- A byte count under 1 MiB renders in KiB (`900KiB` in the panes, `900K` in
+  the compact system strip) instead of rounding to a flat `0MiB` or `1M`,
+  which read as no allocation at all for a small `size_vram` or a small
+  process.
+- An engine-reported `eval_duration` is normalized against the measured round
+  trip before tokens/s is computed. The field is a bare integer with no unit
+  on the wire: Ollama sends nanoseconds, but llama.cpp-derived and several
+  gateway builds send microseconds or milliseconds, and those readings came out
+  1000x or 1e6x slow.
+- Agent token totals saturate instead of wrapping. One event carrying an
+  absurd transcript accumulator no longer turns that agent's windowed prompt,
+  output, and thinking totals negative.
+- On macOS, memory used is capped at memory total (compressed pages are
+  already counted inside active and inactive), the `ps(1)` RSS shift and the
+  page sums saturate, and a negative or infinite load average reads as zero
+  instead of printing `ld -0.42`.
+- Over `ssh://`, a kernel-chosen loopback port that collided with a remote
+  port still to be forwarded could point one engine at another engine's relay.
+  The ephemeral bind now rebinds until the pick is clear of the forwarded set,
+  and a duplicate port in the forward set is bound once.
+- A panic raised while parsing an agent's transcript releases the watcher's
+  locks instead of leaving one held with no goroutine left to unlock it, and
+  holding `p` dispatches the probe as a program-owned command rather than
+  spawning an untracked goroutine per key press.
 
 ## [0.14.1] - 2026-09-26
 
