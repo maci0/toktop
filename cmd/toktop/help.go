@@ -72,6 +72,8 @@ func runHelp(out io.Writer, args []string) int {
 		}
 		return outputStatus(usage(out))
 	}
+	// A topic names the command whose help applies, so the extra-argument
+	// message points at the screen that would have answered it.
 	switch args[0] {
 	case "update":
 		if len(args) > 1 {

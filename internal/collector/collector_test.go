@@ -1238,8 +1238,17 @@ func waitUntilEmitParked(t *testing.T) {
 	waitFor(t, func() bool {
 		buf := make([]byte, 1<<20)
 		n := runtime.Stack(buf, true)
-		s := string(buf[:n])
-		return strings.Contains(s, "/collector.") && strings.Contains(s, "emit")
+		// The park is a select on the snapshot send (collector.go), so look
+		// for one goroutine that is both in emit and blocked, not for the two
+		// words anywhere in the dump: a goroutine merely inside this package's
+		// emit (a helper, a finished run) is not parked, and matching on that
+		// alone let the caller race ahead of emit.
+		for _, g := range strings.Split(string(buf[:n]), "\n\ngoroutine ") {
+			if strings.Contains(g, "Collector).emit") && strings.Contains(g, "[select]") {
+				return true
+			}
+		}
+		return false
 	}, "emit never parked on the snapshot send")
 }
 
