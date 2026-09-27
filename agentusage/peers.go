@@ -48,6 +48,11 @@ var peersByPID func([]int) map[int][]netip.AddrPort
 // as equal: an engine advertised as 127.0.0.1:11434 and a connection to
 // ::1:11434 are the same engine. The returned value is the advertised
 // endpoint, not the peer's local spelling.
+//
+// A pid with no connection to any of the endpoints is absent from the map, so
+// look one up with the comma-ok form; the zero [netip.AddrPort] a bare index
+// yields is not a result. As in [Peers], an empty or unreadable result means
+// "cannot tell", which a caller should read as "not connected".
 func MatchingEndpoints(pids []int, endpoints []netip.AddrPort) map[int]netip.AddrPort {
 	out := map[int]netip.AddrPort{}
 	if len(pids) == 0 || len(endpoints) == 0 {

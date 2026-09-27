@@ -373,3 +373,52 @@ func TestWatcherPicksUpReloadedDefinition(t *testing.T) {
 		t.Fatalf("output %d, want 12: the reloaded definition was not read", got)
 	}
 }
+
+// SpecFor is the read side of the definition registry: what a file registered,
+// as written, under the canonical name. A caller cannot otherwise tell an entry
+// LoadDefinitions skipped from one the file never carried, and it must not be
+// able to mutate the registry through the returned slices.
+func TestSpecForReportsWhatDefinitionsRegistered(t *testing.T) {
+	const tool = "zz-specfor"
+	addDef(t, tool, Spec{Roots: []string{"~/.zz/sessions"}, Suffix: ".ndjson"})
+
+	spec, ok := SpecFor("  " + tool + "  ")
+	if !ok {
+		t.Fatal("SpecFor(name with padding) = false, want the registered spec")
+	}
+	if !slices.Equal(spec.Roots, []string{"~/.zz/sessions"}) || spec.Suffix != ".ndjson" {
+		t.Fatalf("SpecFor() = %+v, want the roots and suffix as registered", spec)
+	}
+	if _, ok := SpecFor("no-such-agent"); ok {
+		t.Error("SpecFor(unregistered) = true, want false")
+	}
+	if _, ok := SpecFor("claude"); ok {
+		t.Error("SpecFor of a built-in adapter = true; those have no definition")
+	}
+	if !Supported("claude") {
+		t.Error("a built-in agent must still be Supported")
+	}
+
+	spec.Roots[0] = "/mutated"
+	if again, _ := SpecFor(tool); again.Roots[0] != "~/.zz/sessions" {
+		t.Error("mutating the returned spec changed the registry")
+	}
+}
+
+// A definitions file that carries a usage block for an agent registers it, so
+// SpecFor sees exactly what LoadDefinitions loaded.
+func TestSpecForSeesLoadedDefinitions(t *testing.T) {
+	path := writeDefs(t, `{"zz-loaded": {"usage": {"roots": ["~/.loaded/sessions"]}}}`)
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	dropDefs(t, "zz-loaded")
+
+	spec, ok := SpecFor("zz-loaded")
+	if !ok || !slices.Equal(spec.Roots, []string{"~/.loaded/sessions"}) {
+		t.Fatalf("SpecFor(loaded) = %+v, %t", spec, ok)
+	}
+	if _, ok := SpecFor("launchonly"); ok {
+		t.Error("SpecFor(never written) = true, want false")
+	}
+}

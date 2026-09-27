@@ -53,7 +53,16 @@ func Agents() []string {
 // any JSONL whose objects carry recognizable token counters works, and one
 // whose objects do not simply reports nothing.
 type Spec struct {
-	// Roots are directories to search, with ~ expanded.
+	// Roots are directories to search, with ~ expanded. Blank entries are
+	// ignored, and a spec with none left is not usable.
+	//
+	// {dir} in a root stands for the agent process's working directory, which
+	// is what an agent keeping its transcripts inside the project it works in
+	// needs (clanker keeps one under state/):
+	//
+	//	{"roots": ["{dir}/state"]}
+	//
+	// Roots name directories; the suffix chooses the files inside them.
 	Roots []string `json:"roots"`
 	// Suffix filters transcript files (default ".jsonl").
 	Suffix string `json:"suffix,omitempty"`
@@ -104,6 +113,23 @@ var (
 		"feynman":     {Roots: []string{"~/.feynman/sessions"}},
 	}
 )
+
+// SpecFor reports the transcript location registered for an agent, whether it
+// was compiled in (the pi family) or loaded by [LoadDefinitions], and whether
+// there is one at all. It is how a program that wrote a definitions file finds
+// out what that file registered, since [LoadDefinitions] says nothing about
+// entries it skipped and a skipped entry is otherwise indistinguishable from
+// one that was never in the file.
+//
+// The name is canonicalized like everywhere else, so " pi " and "pi" name the
+// same agent. Roots come back as written: ~ and {dir} are expanded per process
+// when a watcher walks them, which is why a spec is the right thing to show a
+// person and the resolved paths are not.
+//
+// An agent this package was compiled to read (claude, codex, dsh, …) is
+// described by a built-in adapter rather than a definition, so SpecFor reports
+// false for it; [Supported] is the question that covers every agent.
+func SpecFor(tool string) (Spec, bool) { return definedSpec(tool) }
 
 // definedSpec returns an agent's transcript location, whether compiled in
 // (the pi family) or loaded at runtime by LoadDefinitions.

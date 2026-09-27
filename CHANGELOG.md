@@ -34,6 +34,10 @@ support channel (see SECURITY.md).
   is nil because the agent keeps nothing readable, and matches the new
   `agentusage.ErrUnsupportedTool`. It is safe on a nil `*Watcher`, like
   `Tool` and `Dir`.
+- `agentusage.SpecFor` reports the transcript location registered for an
+  agent, roots as written, so a program can see which entries a definitions
+  file registered and which it skipped. A `{dir}` root placeholder is
+  documented on `agentusage.Spec`.
 
 ### Changed
 

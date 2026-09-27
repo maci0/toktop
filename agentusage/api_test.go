@@ -35,6 +35,7 @@ var publicFuncs = []string{
 	"Peers",
 	"Rate",
 	"RegisterSpec",
+	"SpecFor",
 	"Supported",
 	"UnregisterSpec",
 	"Watch",

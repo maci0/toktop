@@ -99,6 +99,15 @@ func ExampleWatcher_Err() {
 	// Output: true true
 }
 
+func ExampleSpecFor() {
+	// A definitions file says nothing about the entries it skipped, so a
+	// program that wrote one asks the registry what actually landed. Roots come
+	// back as written, and the name is canonicalized like every other lookup.
+	spec, ok := agentusage.SpecFor(" pi ")
+	fmt.Println(ok, spec.Roots)
+	// Output: true [~/.pi/agent/sessions]
+}
+
 func ExampleSample_Empty() {
 	fmt.Println(agentusage.Sample{}.Empty())
 	fmt.Println(agentusage.Sample{Thinking: 12}.Empty())

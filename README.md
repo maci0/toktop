@@ -107,11 +107,23 @@ block matters here (launch fields are ignored):
 }
 ```
 
-`roots` are searched, `suffix` filters the files under them (default
-`.jsonl`), `suffixes` does the same for an agent that writes more than one
-extension, `cumulative` marks counters that already include everything
-before them, and `header_cwd` says the working directory appears once in a
-session header rather than on every record.
+`roots` are searched directories, `suffix` filters the files under them
+(default `.jsonl`), `suffixes` does the same for an agent that writes more
+than one extension, `cumulative` marks counters that already include
+everything before them, and `header_cwd` says the working directory appears
+once in a session header rather than on every record. A root may contain
+`{dir}`, which stands for the agent process's working directory, for an agent
+that keeps its transcripts inside the project it works in:
+
+```json
+{
+  "myagent": {
+    "usage": {
+      "roots": ["{dir}/.myagent/sessions"]
+    }
+  }
+}
+```
 
 ### Using the Go package
 
@@ -164,11 +176,15 @@ are skipped. Keep an agent generating during that window to see output.
 `RegisterSpec` teaches the package about an agent it was not compiled to know,
 and `UnregisterSpec` takes it back, restoring the adapter it displaced (the
 registry is process-wide, so a program that registers a fake agent in its own
-tests needs that undo). `errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on
-a rejected spec, and `ErrInvalidDefinitions` on a malformed definitions file or
-colliding agent names after normalization. `Watch` returns a nil `*Watcher`
-when an agent keeps nothing readable; `Watcher.Err` says so, and matches
-`ErrUnsupportedTool`. `Rate` is output
+tests needs that undo). `SpecFor` is the read side: it reports the transcript
+location registered for an agent, roots as written, which is how a program
+finds out which entries a definitions file registered and which it skipped
+(the built-in agents are compiled-in adapters, not definitions, so they are
+not reported; `Supported` covers them). `errors.Is` matches `ErrEmptyTool` and
+`ErrNoRoots` on a rejected spec, and `ErrInvalidDefinitions` on a malformed
+definitions file or colliding agent names after normalization. `Watch` returns
+a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
+and matches `ErrUnsupportedTool`. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
 prompt tokens.
 
