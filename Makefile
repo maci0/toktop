@@ -108,6 +108,16 @@ endif
 # given, which is what scripts/requirements-dev.txt documents.
 SCRIPTS_ENV := $(CURDIR)/$(DIST)/scripts-env
 SCRIPTS_BIN := $(SCRIPTS_ENV)/bin
+# True when $1 is a uv version below UV_MIN. Defined once so `make
+# scripts-check` and `make prereqs` cannot accept different uv. One line, so
+# it drops into a recipe that is a single continued command.
+UV_TOO_OLD = uv_too_old() { [ "$$(printf '%s\n%s\n' "$(UV_MIN)" "$$1" | sort -V | head -1)" != "$(UV_MIN)" ]; }
+# bun's exact pin, from the file CI installs (bun-version-file), so
+# require-bun and prereqs compare against the same string.
+BUN_PIN := $(shell tr -d ' \t\r\n' < .bun-version 2>/dev/null)
+ifeq ($(BUN_PIN),)
+$(error .bun-version missing or empty; site-check and CI need a bun version)
+endif
 
 # Pin locale and timezone for every recipe: glob expansion order and formatted
 # dates must not follow the invoking shell's environment into artifacts
@@ -146,6 +156,12 @@ REPRO_PLATFORMS ?= linux/amd64 windows/amd64
 
 .DEFAULT_GOAL := help
 
+# Width of the target column in `make help`, one past the longest target
+# (repro-check-pair). A narrower column pushes the longest names' descriptions
+# out of alignment, and alignment is the one thing a help listing has to get
+# right.
+HELP_WIDTH := 17
+
 .PHONY: help
 help: ## show available targets
 	@if [ -t 1 ] && [ -z "$${NO_COLOR:-}" ] && [ "$${TERM:-}" != "dumb" ]; then \
@@ -154,7 +170,57 @@ help: ## show available targets
 		color=; \
 	fi; \
 	grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | \
-		awk -v color="$$color" 'BEGIN {FS = ":.*## "} { if (color) printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2; else printf "  %-14s %s\n", $$1, $$2 }'
+		awk -v color="$$color" -v width="$(HELP_WIDTH)" 'BEGIN {FS = ":.*## "} { if (color) printf "  \033[36m%-*s\033[0m %s\n", width, $$1, $$2; else printf "  %-*s %s\n", width, $$1, $$2 }'
+
+# One run over every tool a gate needs, so a contributor installs the set
+# before the first failure rather than one missing tool per round trip. The
+# per-target checks below still fire where the tool is actually used: this
+# reports, it does not replace them. Every gap is listed, then one verdict.
+.PHONY: prereqs
+prereqs: ## check every tool the merge gates need, naming all gaps at once
+	@fail=0; \
+	ok() { printf '  ok       %s\n' "$$1"; }; \
+	gap() { printf '  MISSING  %s\n' "$$1" >&2; fail=1; }; \
+	$(UV_TOO_OLD); \
+	if command -v $(GO) >/dev/null 2>&1; then \
+		ok "go $$($(GO) env GOVERSION) (go.mod pins $(GO_VERSION); make selects it)"; \
+	else \
+		gap "go is not on PATH; install the version go.mod pins ($(GO_VERSION))"; \
+	fi; \
+	if [ "$(RACE)" = "0" ]; then \
+		ok "C compiler not needed (RACE=0 skips the race detector)"; \
+	elif [ -n "$${CC:-}" ] && command -v "$${CC}" >/dev/null 2>&1 \
+		|| command -v gcc >/dev/null 2>&1 \
+		|| command -v clang >/dev/null 2>&1; then \
+		ok "C compiler for 'go test -race' ($${CC:-gcc or clang})"; \
+	else \
+		gap "no C compiler (gcc or clang) for the race tests in 'make test'; pass RACE=0 to skip them"; \
+	fi; \
+	if command -v bun >/dev/null 2>&1; then \
+		have=$$(bun --version); \
+		if [ "$$have" = "$(BUN_PIN)" ]; then \
+			ok "bun $$have (matches .bun-version)"; \
+		else \
+			gap "bun $$have on PATH, .bun-version pins $(BUN_PIN)"; \
+		fi; \
+	else \
+		gap "bun is not on PATH (make site-check and site-lint need $(BUN_PIN))"; \
+	fi; \
+	if command -v uv >/dev/null 2>&1; then \
+		have=$$(uv --version | awk '{print $$2}'); \
+		if uv_too_old "$$have"; then \
+			gap "uv $$have on PATH, make scripts-check needs >= $(UV_MIN)"; \
+		else \
+			ok "uv $$have (>= $(UV_MIN))"; \
+		fi; \
+	else \
+		gap "uv is not on PATH (make scripts-check needs >= $(UV_MIN))"; \
+	fi; \
+	if [ "$$fail" != "0" ]; then \
+		echo "make prereqs: install the MISSING tools above; CONTRIBUTING.md 'Prerequisites' explains each" >&2; \
+		exit 1; \
+	fi; \
+	echo "make prereqs: every tool the merge gates need is present"
 
 # CGO stays off so the host build matches the released artifacts exactly;
 # with cgo available the net package links host-specific resolver code and
@@ -271,9 +337,9 @@ require-bun:
 		echo "make: bun is not on PATH (see .bun-version)" >&2; \
 		exit 1; \
 	}
-	@want=$$(tr -d ' \t\r\n' < .bun-version); have=$$(bun --version); \
-	if [ "$$have" != "$$want" ]; then \
-		echo "make: bun $$have on PATH, .bun-version pins $$want" >&2; \
+	@have=$$(bun --version); \
+	if [ "$$have" != "$(BUN_PIN)" ]; then \
+		echo "make: bun $$have on PATH, .bun-version pins $(BUN_PIN)" >&2; \
 		exit 1; \
 	fi
 
@@ -374,10 +440,11 @@ require-uv: ## fail unless uv is on PATH at or above UV_MIN
 		exit 1; \
 	}
 	@have=$$(uv --version | awk '{print $$2}'); \
-		if [ "$$(printf '%s\n%s\n' "$(UV_MIN)" "$$have" | sort -V | head -1)" != "$(UV_MIN)" ]; then \
-			echo "make: uv $$have on PATH, need >= $(UV_MIN) (CI installs $(UV_MIN))" >&2; \
-			exit 1; \
-		fi
+	$(UV_TOO_OLD); \
+	if uv_too_old "$$have"; then \
+		echo "make scripts-check: uv $$have on PATH, need >= $(UV_MIN) (CI installs $(UV_MIN))" >&2; \
+		exit 1; \
+	fi
 
 # Rebuilds the env when either requirements file moves, so an edited pin or a
 # corrected hash is picked up without `make clean`.

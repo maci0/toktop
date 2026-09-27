@@ -40,9 +40,15 @@
 
 ```
 git clone https://github.com/maci0/toktop && cd toktop
+make prereqs     # check go, a C compiler, bun and uv against the pins above
 make test        # all tests, race detector, shuffled order
 make demo        # build and run against a simulated fleet
 ```
+
+`make prereqs` lists every missing or mismatched tool in one run and exits
+non-zero if any is left, so the whole set gets installed before the first
+failure instead of one tool per round trip. The per-target checks still fire
+where the tool is used, so it never replaces them.
 
 ## The edit-test loop
 
@@ -137,6 +143,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | target | what it does |
 |---|---|
 | `make build` | host binary with version stamping |
+| `make prereqs` | check go, a C compiler, bun and uv against the pins, naming every gap at once |
 | `make demo` / `make run` | build, then launch |
 | `make test` | all tests, `-race -shuffle=on` (same flags as CI); `RACE=0` skips `-race` |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |

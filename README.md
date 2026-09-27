@@ -551,6 +551,7 @@ as `bearer=set`.
 
 ```
 make help                          # every task, one line each
+make prereqs                       # check go, a C compiler, bun, uv against the pins
 make build                         # host binary, version-stamped
 make demo                          # build, then run the simulated fleet
 make test                          # all tests, -race -shuffle=on
