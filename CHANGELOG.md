@@ -180,6 +180,13 @@ Binaries, checksums, and a CycloneDX SBOM are on
   redirects, and validate remote target hostnames and user names.
 - Fixed baseline seeding for zstd-compressed dsh session logs in
   `agentusage`.
+- A quoted `ssh_config` argument is read without its quotes, so a Windows
+  `IdentityFile` under a user directory with a space in it (`"C:\Users\a
+  b\key"`) is found instead of being looked up with the quote characters
+  still attached.
+- `toktop update` failures redact the home directory whether the message
+  spells it the way `USERPROFILE` does or the way the process that named it
+  wrote it, so the tilde rewrite also lands on Windows and macOS.
 - Added integer overflow saturation and handled NaN/infinite values in
   duration, memory, rate, and UI percentage conversions.
 - Safeguarded background ticker loops against non-positive intervals to

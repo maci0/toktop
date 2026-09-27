@@ -190,7 +190,8 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 }
 
 // cutConfigField splits an ssh_config line into keyword and argument,
-// handling "key=value", space and tab separation, plus '#' comments.
+// handling "key=value", space and tab separation, double-quoted arguments and
+// '#' comments.
 func cutConfigField(line string) (key, val string, ok bool) {
 	line = strings.TrimSpace(line)
 	if line == "" || strings.HasPrefix(line, "#") {
@@ -202,7 +203,31 @@ func cutConfigField(line string) (key, val string, ok bool) {
 	}
 	rest := strings.TrimSpace(line[i:])
 	rest = strings.TrimPrefix(rest, "=")
-	return line[:i], strings.TrimSpace(rest), true
+	return line[:i], unquote(strings.TrimSpace(rest)), true
+}
+
+// unquote drops the surrounding double quotes ssh_config puts around an
+// argument containing spaces, and any comment trailing the closing quote.
+// Windows IdentityFile paths are quoted routinely, since a user directory
+// under C:\Users almost always has a space in it.
+//
+// Only the quotes go: a backslash inside the quotes stays a backslash, because
+// on Windows that is the path separator and eating it would break the quoted
+// paths this exists to read.
+func unquote(s string) string {
+	if !strings.HasPrefix(s, `"`) {
+		return s
+	}
+	var b strings.Builder
+	for i := 1; i < len(s); i++ {
+		switch s[i] {
+		case '"':
+			return b.String() // whatever follows the closing quote is a comment
+		default:
+			b.WriteByte(s[i])
+		}
+	}
+	return b.String()
 }
 
 // patternMatch implements ssh_config glob matching ('*' and '?') through
