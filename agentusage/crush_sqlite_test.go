@@ -298,8 +298,10 @@ func TestCrushDBSymlinkOutsideProjectIsIgnored(t *testing.T) {
 	if path := crushDBPath(dir); path != "" {
 		t.Fatalf("followed a crush.db symlink out of the project: %s", path)
 	}
-	if out, _, ok := crushSessionSum([]string{dir}, time.Time{}); ok || out != 0 {
-		t.Fatalf("read outside crush store via file symlink: output=%d ok=%v", out, ok)
+	// The tree is read successfully and contributes nothing: the refusal is
+	// the symlink being skipped, which a failed read would also produce.
+	if out, in, ok := crushSessionSum([]string{dir}, time.Time{}); !ok || out != 0 || in != 0 {
+		t.Fatalf("read outside crush store via file symlink: output=%d input=%d ok=%v", out, in, ok)
 	}
 
 	dir2 := t.TempDir()
@@ -309,13 +311,15 @@ func TestCrushDBSymlinkOutsideProjectIsIgnored(t *testing.T) {
 	if path := crushDBPath(dir2); path != "" {
 		t.Fatalf("followed a .crush directory symlink out of the project: %s", path)
 	}
-	if out, _, ok := crushSessionSum([]string{dir2}, time.Time{}); ok || out != 0 {
-		t.Fatalf("read outside crush store via dir symlink: output=%d ok=%v", out, ok)
+	if out, in, ok := crushSessionSum([]string{dir2}, time.Time{}); !ok || out != 0 || in != 0 {
+		t.Fatalf("read outside crush store via dir symlink: output=%d input=%d ok=%v", out, in, ok)
 	}
 }
 
 // crushSessionSum is the sessions snapshot flattened to totals, for tests
-// that care about what was recorded rather than per-session identity.
+// that care about what was recorded rather than per-session identity. ok is
+// the source's own: a tree with no crush database is read successfully and
+// contributes nothing, which is not the same as a read that failed.
 func crushSessionSum(dirs []string, since time.Time) (output, input int, ok bool) {
 	got, ok := (crushDBSource{}).sessions(dirs, since)
 	if !ok {
@@ -328,7 +332,7 @@ func crushSessionSum(dirs []string, since time.Time) (output, input int, ok bool
 			in += c.input
 		}
 	}
-	return int(out), int(in), out > 0 || in > 0
+	return int(out), int(in), true
 }
 
 // Prompt can grow while completion stays put (a follow-up that only billed

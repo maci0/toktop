@@ -1427,15 +1427,40 @@ func TestWarnInsecureAdd(t *testing.T) {
 }
 
 func TestStartProbeTicker(t *testing.T) {
-	t.Run("fires immediately and on every tick", func(t *testing.T) {
+	// Every receive below is bounded, so a ticker that stops firing fails the
+	// test instead of wedging it until the go test panic.
+	awaitFire := func(t *testing.T, fired <-chan time.Time, within time.Duration) time.Time {
+		t.Helper()
+		select {
+		case at := <-fired:
+			return at
+		case <-time.After(within):
+			t.Fatalf("prober did not fire within %s", within)
+			return time.Time{}
+		}
+	}
+
+	t.Run("fires without waiting for the first tick", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
-		fired := make(chan time.Time, 4)
+		fired := make(chan time.Time, 1)
+		// The interval is far longer than the wait below, so a first call
+		// that arrives is the immediate one and not a tick: with a 10ms
+		// interval the two are indistinguishable and deferring the first
+		// probe to the tick would still pass.
+		startProbeTicker(ctx, func() { fired <- time.Now() }, time.Hour)
+		awaitFire(t, fired, 2*time.Second)
+	})
+
+	t.Run("fires on every tick", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		fired := make(chan time.Time, 8)
 		startProbeTicker(ctx, func() { fired <- time.Now() }, 10*time.Millisecond)
 
-		first := <-fired // no tick has elapsed: the call is immediate
+		first := awaitFire(t, fired, 2*time.Second)
 		for i := 0; i < 2; i++ {
-			if <-fired == first {
+			if second := awaitFire(t, fired, 2*time.Second); second == first {
 				t.Fatal("ticker fired twice at the same instant")
 			}
 		}

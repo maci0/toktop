@@ -91,10 +91,12 @@ func TestAgentOwnTokPS(t *testing.T) {
 	}
 }
 
-// Summarize replaces the pair of independent walks the frame used to run,
-// so it has to agree with them exactly on both halves, and a frame must be
-// able to account the whole feed in a single pass.
-func TestSummarizeMatchesSeparateWalks(t *testing.T) {
+// Summarize returns both views in one walk, and a frame must be able to
+// account the whole feed in a single pass. The expected numbers here are
+// derived by hand from the fixture, not from AgentRates or AgentOwnTokPS:
+// both of those call Summarize, so comparing against them would compare
+// Summarize with itself and pass for any implementation of it.
+func TestSummarizeAccountsEveryAgentInOnePass(t *testing.T) {
 	now := time.Unix(1_700_000_100, 0)
 	events := []AgentEvent{
 		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 10},
@@ -114,26 +116,91 @@ func TestSummarizeMatchesSeparateWalks(t *testing.T) {
 
 	sum := Summarize(events, now)
 
-	wantRates := AgentRates(events, now)
-	if !reflect.DeepEqual(sum.Rates, wantRates) {
-		t.Errorf("Summarize.Rates = %+v, AgentRates = %+v", sum.Rates, wantRates)
+	// Rates spans first to last event, not the window: claude runs from -2s
+	// to -500ms, so 80 out over 1.5s. routed counts its 11+11 over 1s.
+	wantRates := []struct {
+		agent     string
+		tokPS     float64
+		promptPS  float64
+		tokens    int64
+		last      time.Duration
+		viaEngine string
+	}{
+		{"codex", 60, 120, 60, -time.Second, ""},
+		{"claude", 80 / 1.5, 20 / 1.5, 80, -500 * time.Millisecond, "127.0.0.1:11434"},
+		{"routed", 22, 0, 22, -time.Second, "127.0.0.1:8000"},
+		// A single event has no span to divide by, so it reports tokens only.
+		{"dsh", 0, 0, 7, 0, ""},
 	}
-	wantOut, wantIn := AgentOwnTokPS(events, now)
+	if len(sum.Rates) != len(wantRates) {
+		t.Fatalf("Rates = %+v, want %d entries", sum.Rates, len(wantRates))
+	}
+	for i, w := range wantRates {
+		got := sum.Rates[i]
+		if got.Agent != w.agent {
+			t.Fatalf("Rates[%d] = %q, want %q (order is busiest first)", i, got.Agent, w.agent)
+		}
+		if math.Abs(got.TokPS-w.tokPS) > 1e-9 || math.Abs(got.PromptPS-w.promptPS) > 1e-9 {
+			t.Errorf("Rates[%d] %q = %v tok/s, %v prompt/s; want %v, %v",
+				i, w.agent, got.TokPS, got.PromptPS, w.tokPS, w.promptPS)
+		}
+		if got.Tokens != w.tokens {
+			t.Errorf("Rates[%d] %q tokens = %d, want %d", i, w.agent, got.Tokens, w.tokens)
+		}
+		if want := now.Add(w.last); !got.Last.Equal(want) {
+			t.Errorf("Rates[%d] %q last = %v, want %v", i, w.agent, got.Last, want)
+		}
+		if got.ViaEngine != w.viaEngine {
+			t.Errorf("Rates[%d] %q via = %q, want %q", i, w.agent, got.ViaEngine, w.viaEngine)
+		}
+	}
+
+	// Own counts only the events with no engine, so claude's own span is the
+	// two direct turns at -2s and -1s (80 out over 1s), not the -500ms routed
+	// event that widened the Rates span. routed has no direct event at all.
+	wantOwn := []struct {
+		agent    string
+		tokPS    float64
+		promptPS float64
+		tokens   int64
+	}{
+		{"claude", 80, 20, 80},
+		{"codex", 60, 120, 60},
+		{"dsh", 0, 0, 7},
+	}
+	if len(sum.Own) != len(wantOwn) {
+		t.Fatalf("Own = %+v, want %d entries (routed has no direct events)", sum.Own, len(wantOwn))
+	}
 	var out, in float64
-	for _, r := range sum.Own {
-		out += r.TokPS
-		in += r.PromptPS
-	}
-	if math.Abs(out-wantOut) > 1e-9 || math.Abs(in-wantIn) > 1e-9 {
-		t.Errorf("Summarize.Own totals = %v out / %v in, AgentOwnTokPS = %v/%v", out, in, wantOut, wantIn)
+	for i, w := range wantOwn {
+		got := sum.Own[i]
+		if got.Agent != w.agent {
+			t.Fatalf("Own[%d] = %q, want %q", i, got.Agent, w.agent)
+		}
+		if math.Abs(got.TokPS-w.tokPS) > 1e-9 || math.Abs(got.PromptPS-w.promptPS) > 1e-9 {
+			t.Errorf("Own[%d] %q = %v tok/s, %v prompt/s; want %v, %v",
+				i, w.agent, got.TokPS, got.PromptPS, w.tokPS, w.promptPS)
+		}
+		if got.Tokens != w.tokens {
+			t.Errorf("Own[%d] %q tokens = %d, want %d", i, w.agent, got.Tokens, w.tokens)
+		}
+		if got.ViaEngine != "" {
+			t.Errorf("Own[%d] %q carries a via engine %q; an unattributed rate has none", i, w.agent, got.ViaEngine)
+		}
+		out += got.TokPS
+		in += got.PromptPS
 	}
 	if math.Abs(out-140) > 1e-9 || math.Abs(in-140) > 1e-9 {
-		t.Errorf("own rates = %v out / %v in, want 140/140", out, in)
+		t.Errorf("own totals = %v out / %v in, want 140/140", out, in)
 	}
-	for _, r := range sum.Own {
-		if r.Agent == "routed" {
-			t.Error("Own lists an agent whose every event went through an engine")
-		}
+	// The wrappers the frame used to call are defined in terms of Summarize;
+	// they exist so callers need one walk, not two.
+	wantOut, wantIn := AgentOwnTokPS(events, now)
+	if wantOut != out || wantIn != in {
+		t.Errorf("AgentOwnTokPS = %v/%v, want the Own totals %v/%v", wantOut, wantIn, out, in)
+	}
+	if !reflect.DeepEqual(sum.Rates, AgentRates(events, now)) {
+		t.Errorf("AgentRates disagrees with Summarize.Rates: %+v", AgentRates(events, now))
 	}
 }
 

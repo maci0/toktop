@@ -161,12 +161,41 @@ func TestAnyArgContainsSharesByteBudget(t *testing.T) {
 	}
 }
 
+// toktop must never count itself as an engine. The lister is stubbed to
+// return this very process under an engine-looking name and command line, so
+// the self-skip is what the assertion is about; reading the host's real
+// process table would leave the entry absent for two other reasons and pass
+// even with the skip removed.
 func TestSelfIsSkipped(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+	platformList = func() ([]raw, error) {
+		list := []raw{
+			{pid: os.Getpid(), name: "ollama", args: []string{"ollama", "serve"}},
+			{pid: os.Getpid() + 1, name: "ollama", args: []string{"ollama", "serve"}},
+		}
+		for i := range list {
+			annotate(&list[i]) // every real lister derives engine/port this way
+		}
+		return list, nil
+	}
+
 	for _, list := range [][]Info{NewSampler().Snapshot(), Snapshot()} {
 		for _, p := range list {
-			if p.PID == os.Getpid() && p.Name == baseName(os.Args[0]) {
+			if p.PID == os.Getpid() {
 				t.Errorf("toktop's own test process leaked in: %+v", p)
 			}
+		}
+		// The sibling is otherwise a perfect match, so its presence is what
+		// shows the stub was actually in force.
+		found := false
+		for _, p := range list {
+			if p.PID == os.Getpid()+1 {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("stubbed listing did not reach the snapshot: %+v", list)
 		}
 	}
 }

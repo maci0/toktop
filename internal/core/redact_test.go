@@ -28,11 +28,42 @@ func TestRedactHomeLeavesOtherPathsAlone(t *testing.T) {
 	for _, msg := range []string{
 		"checksum mismatch",
 		filepath.Join(string(filepath.Separator)+"srv", "engines", "model.safetensors") + ": truncated",
-		filepath.Join(home, "..", "etc", "hosts"), // spelled without the prefix boundary
 	} {
 		if got := RedactHome(msg); got != msg {
 			t.Errorf("RedactHome(%q) = %q, want it unchanged", msg, got)
 		}
+	}
+}
+
+// The match is textual, not a path resolution: an unnormalized message that
+// literally begins with home+separator has that prefix folded, and the ".."
+// tail is left exactly as written rather than normalized to a real directory
+// the redaction never proved anything about.
+func TestRedactHomeFoldsUnnormalizedPrefixWithoutCleaningIt(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator)+"home", "private-user")
+	setHome(t, home)
+	sep := string(filepath.Separator)
+	msg := home + sep + ".." + sep + "etc" + sep + "hosts"
+	want := "~" + sep + ".." + sep + "etc" + sep + "hosts"
+	if got := RedactHome(msg); got != want {
+		t.Errorf("RedactHome(%q) = %q, want %q", msg, got, want)
+	}
+}
+
+// A message that is exactly the home directory carries the same account name
+// as a path under it, and the separator-terminated match does not reach it. A
+// sibling whose name merely starts with the home's is a different directory
+// and must survive verbatim.
+func TestRedactHomeFoldsBareHomeAndNotASibling(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator)+"home", "private-user")
+	setHome(t, home)
+	if got := RedactHome(home); got != "~" {
+		t.Errorf("RedactHome(%q) = %q, want %q", home, got, "~")
+	}
+	sibling := home + "-old"
+	msg := sibling + string(filepath.Separator) + "hosts"
+	if got := RedactHome(msg); got != msg {
+		t.Errorf("RedactHome(%q) = %q, want it unchanged", msg, got)
 	}
 }
 
@@ -46,14 +77,26 @@ func TestRedactHomeFoldsCaseOnCaseInsensitivePlatforms(t *testing.T) {
 	if got := RedactHome("cannot write " + other); strings.Contains(got, "me"+string(filepath.Separator)) {
 		t.Errorf("RedactHome(%q) = %q, want the cased spelling folded too", other, got)
 	}
+	// The bare-home shortcut compares folded too, so a home spelled in another
+	// case still collapses to "~" rather than surviving as a full account name.
+	if got := RedactHome(strings.ToLower(home)); got != "~" {
+		t.Errorf("RedactHome(%q) = %q, want %q", strings.ToLower(home), got, "~")
+	}
 }
 
 func TestRedactHomeRootHomeIsNotFolded(t *testing.T) {
 	root := string(filepath.Separator)
 	setHome(t, root)
-	msg := filepath.Join(root, "srv", "engines")
-	if got := RedactHome(msg); got != msg {
-		t.Errorf("RedactHome(%q) = %q; a root home would swallow every path", msg, got)
+	// A message holding "//" is what the root guard is for: with home "/", the
+	// needle is "//" and an unguarded rewrite would turn every URL in a
+	// diagnostic into "http:~/host", losing the address the operator needs.
+	for _, msg := range []string{
+		"cannot reach http://host:8000/v1/models",
+		filepath.Join(root, "srv", "engines"),
+	} {
+		if got := RedactHome(msg); got != msg {
+			t.Errorf("RedactHome(%q) = %q; a root home would swallow every path", msg, got)
+		}
 	}
 }
 

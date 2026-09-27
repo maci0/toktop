@@ -355,14 +355,26 @@ func TestEmitUsesCachedSysSample(t *testing.T) {
 	ctx := t.Context()
 	c.startSysPoller(ctx)
 
+	// Read the cache directly rather than through sysSnapshot: that falls
+	// back to sampling inline whenever the cache is cold, so polling it here
+	// would let this test's own call satisfy the wait and a dead background
+	// poller would still pass.
+	cached := func() *core.SysSample {
+		c.sysMu.Lock()
+		defer c.sysMu.Unlock()
+		return c.sysCache
+	}
 	deadline := time.Now().Add(2 * time.Second)
-	for c.sysSnapshot() == nil {
+	for cached() == nil {
 		if time.Now().After(deadline) {
 			t.Fatal("background poller never cached a sample")
 		}
 		time.Sleep(time.Millisecond)
 	}
 	before := calls.Load()
+	if before == 0 {
+		t.Fatal("no sample was taken before emit; the wait proved nothing")
+	}
 
 	ch := make(chan core.Snapshot, 1)
 	done := make(chan struct{})

@@ -2,6 +2,7 @@ package core
 
 import (
 	"cmp"
+	"slices"
 	"testing"
 	"time"
 )
@@ -98,6 +99,9 @@ func TestInsertSorted(t *testing.T) {
 	s = InsertSorted(append(s, 1), intCmp)
 	s = InsertSorted(append(s, 4), intCmp)
 	want := []int{1, 2, 4, 5, 8}
+	if len(s) != len(want) {
+		t.Fatalf("InsertSorted got %v, want %v", s, want)
+	}
 	for i, v := range s {
 		if v != want[i] {
 			t.Fatalf("InsertSorted got %v, want %v", s, want)
@@ -110,4 +114,19 @@ func TestInsertSorted(t *testing.T) {
 		}
 	}()
 	InsertSorted([]int{}, intCmp)
+}
+
+// Stability is the point of the binary search: the element lands after every
+// one equal to it, so two equal timestamps order by arrival rather than
+// swapping on each insert. Distinct operands cannot tell a stable insert from
+// an unstable one, so this inserts duplicates.
+func TestInsertSortedKeepsEqualElementsInArrivalOrder(t *testing.T) {
+	intCmp := cmp.Compare[int]
+	s := []int{}
+	for _, v := range []int{5, 2, 5, 2, 5, 2, 1, 5, 1} {
+		s = InsertSorted(append(s, v), intCmp)
+	}
+	if !slices.Equal(s, []int{1, 1, 2, 2, 2, 5, 5, 5, 5}) {
+		t.Fatalf("InsertSorted got %v, want []int{1 1 2 2 2 5 5 5 5}", s)
+	}
 }

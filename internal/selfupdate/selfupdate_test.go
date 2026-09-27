@@ -116,9 +116,18 @@ func TestChecksumForRejectsNonHex(t *testing.T) {
 }
 
 func TestCheckRejectsBadRepoWithoutNetwork(t *testing.T) {
-	_, err := Check(context.Background(), "maci0/toktop/../../../users/octocat")
-	if err == nil {
-		t.Fatal("Check accepted a path-injecting repo")
+	// The contract is ValidateRepo refusing the string, not Check returning
+	// some error. Dropping the check lets the traversal reach the network and
+	// come back as a transport or 4xx failure, which err == nil alone would
+	// still accept, so the assertion is on which refusal it is.
+	const bad = "maci0/toktop/../../../users/octocat"
+	want := ValidateRepo(bad)
+	if want == nil {
+		t.Fatal("ValidateRepo accepted a path-injecting repo")
+	}
+	_, err := Check(context.Background(), bad)
+	if err == nil || err.Error() != want.Error() {
+		t.Fatalf("Check(%q) error = %v, want the ValidateRepo refusal %v", bad, err, want)
 	}
 }
 
@@ -139,6 +148,17 @@ func TestGitHubRedirectStaysOnGitHub(t *testing.T) {
 	if cdnReq.Header.Get("Authorization") != "" {
 		t.Fatal("Authorization header leaked to CDN host on redirect")
 	}
+	// The strip is host-conditional, and only the strip direction was
+	// asserted: a rule that deleted the header on every hop would pass every
+	// refusal case below while breaking the authenticated api.github.com hop.
+	apiReq := req("https://api.github.com/repos/maci0/toktop/releases/12345")
+	apiReq.Header = http.Header{"Authorization": []string{"Bearer secret"}}
+	if err := githubRedirect(apiReq, via); err != nil {
+		t.Fatalf("api.github.com hop refused: %v", err)
+	}
+	if apiReq.Header.Get("Authorization") != "Bearer secret" {
+		t.Fatal("Authorization stripped from an api.github.com hop")
+	}
 	if err := githubRedirect(req("https://user:pass@objects.githubusercontent.com/file"), via); err == nil {
 		t.Fatal("userinfo redirect allowed")
 	}
@@ -147,6 +167,11 @@ func TestGitHubRedirectStaysOnGitHub(t *testing.T) {
 	}
 	if err := githubRedirect(req("http://github.com/x"), via); err == nil {
 		t.Fatal("http downgrade allowed")
+	}
+	// Replacing the client's default policy also caps the chain, so a
+	// server that keeps redirecting to itself is stopped rather than followed.
+	if err := githubRedirect(req("https://github.com/x"), make([]*http.Request, 10)); err == nil {
+		t.Fatal("redirect chain past the hop cap allowed")
 	}
 }
 

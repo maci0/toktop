@@ -166,15 +166,46 @@ func TestCounter64RejectsOverflow(t *testing.T) {
 	}
 }
 
-func TestDeeplyNestedPayloadDoesNotRunAway(t *testing.T) {
-	// A tool result can nest arbitrarily; the walk must stop and stay quiet.
-	line := `{"type":"tool_result","content":` + strings.Repeat(`{"a":`, 40) + `"deep"` + strings.Repeat(`}`, 40) + `}`
+// A tool result can nest arbitrarily; the walk must stop and stay quiet. The
+// nesting sits under a non-payload key on purpose: walk skips payload-keyed
+// subtrees without descending, so nesting under "content" would never reach
+// the depth guard and the cap would go untested.
+func TestDeeplyNestedRecordDoesNotRunAway(t *testing.T) {
+	line := `{"type":"tool_result","node":` + strings.Repeat(`{"a":`, 40) + `"deep"` + strings.Repeat(`}`, 40) + `}`
 	ev, ok := parseJSON([]byte(line))
 	if !ok {
 		t.Fatal("valid JSON was rejected")
 	}
 	if ev.Usage.Has() || ev.Cwd != "" {
 		t.Fatal("walked past the depth limit")
+	}
+}
+
+// The guard bounds the descent; it does not blind the walk to everything below
+// it. Both sides of the boundary are pinned: the deepest wrapper still read
+// contributes its counters, and the next one down contributes nothing.
+func TestNestingBoundaryAtMaxDepth(t *testing.T) {
+	nested := func(deep int) string {
+		return `{"type":"tool_result","node":` + strings.Repeat(`{"a":`, deep) +
+			`{"usage":{"input_tokens":11,"output_tokens":22}` + strings.Repeat(`}`, deep+1) + `}`
+	}
+	for _, tc := range []struct {
+		name string
+		deep int
+		want bool
+	}{
+		{"deepest level still read", maxDepth - 2, true},
+		{"one level past the cap", maxDepth - 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ev, ok := parseJSON([]byte(nested(tc.deep)))
+			if !ok {
+				t.Fatal("valid JSON was rejected")
+			}
+			if ev.Usage.Has() != tc.want {
+				t.Fatalf("%d wrappers: usage collected = %v, want %v", tc.deep, ev.Usage.Has(), tc.want)
+			}
+		})
 	}
 }
 

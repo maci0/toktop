@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/iotest"
@@ -421,18 +422,39 @@ func TestRunRequestsBoundedGeneration(t *testing.T) {
 // Engines that ignore max_tokens keep streaming; the client must hang up
 // after probeTokens content frames so a billed gateway cannot run until the
 // HTTP timeout.
+//
+// The server parks after the cap and the probe has to return anyway. Asserting
+// only on s.Tokens cannot see the hang-up: resolveTokens clamps whatever it
+// observed back to probeTokens, so a client that drained every frame and
+// reported afterwards would produce the same number.
 func TestRunOpenAIStopsAfterProbeTokens(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		f := http.NewResponseController(w)
-		for range probeTokens * 8 {
+		for range probeTokens + 1 {
 			fmt.Fprintf(w, "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n")
 			f.Flush()
 		}
+		<-release // the cap has to be reached without this ever being closed
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
-	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
+	done := make(chan core.ProbeSample, 1)
+	go func() { done <- Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"}) }()
+
+	var s core.ProbeSample
+	select {
+	case s = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("probe kept reading past the cap instead of hanging up")
+	}
+	unblock()
+
 	if !s.OK {
 		t.Fatalf("probe failed: %+v", s)
 	}
@@ -489,19 +511,38 @@ func TestRunOllamaStopsOnContentBytes(t *testing.T) {
 	}
 }
 
+// The Ollama twin of the hang-up test, and it needs the same shape: the
+// engine-reported eval_count here exceeds probeTokenTrust, so resolveTokens
+// falls back to the cap whether the client stopped reading or not.
 func TestRunOllamaStopsAfterProbeTokens(t *testing.T) {
+	release := make(chan struct{})
+	var once sync.Once
+	unblock := func() { once.Do(func() { close(release) }) }
+	t.Cleanup(unblock)
+
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		f := http.NewResponseController(w)
-		for range probeTokens * 8 {
+		for range probeTokens + 1 {
 			fmt.Fprintf(w, `{"response":"x","done":false}`+"\n")
 			f.Flush()
 		}
+		<-release
 		fmt.Fprintf(w, `{"response":"","done":true,"eval_count":999,"eval_duration":1000000}`+"\n")
 	}))
-	defer srv.Close()
+	t.Cleanup(srv.Close)
 
-	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	done := make(chan core.ProbeSample, 1)
+	go func() { done <- Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"}) }()
+
+	var s core.ProbeSample
+	select {
+	case s = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("probe kept reading past the cap instead of hanging up")
+	}
+	unblock()
+
 	if !s.OK {
 		t.Fatalf("probe failed: %+v", s)
 	}
