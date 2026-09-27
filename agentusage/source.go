@@ -64,11 +64,15 @@ var (
 	sources   = map[string]tokenSource{}
 )
 
-// builtinSource returns a source compiled into this build, or false. It is a
-// build-tagged function rather than a registry row so no source is installed
-// at module load: a built-in cannot be left behind by a runtime switch meant
-// for another agent, and it needs no owner to dispose it. The registry holds
-// only what a runtime switch put there (opencode).
+// sourceFor returns the source registered for an agent, the runtime registry
+// first and the build's built-ins second, so a source EnableOpenCodeDB
+// withdrew stops being read. A registered entry that is not present counts as
+// registered-and-off, not as a fall-through to the built-in. The built-ins
+// come from builtinSource, a build-tagged function rather than a registry row
+// so no source is installed at module load: a built-in cannot be left behind
+// by a runtime switch meant for another agent, and it needs no owner to
+// dispose it. The registry holds only what a runtime switch put there
+// (opencode).
 func sourceFor(tool string) (tokenSource, bool) {
 	sourcesMu.RLock()
 	s, registered := sources[tool]

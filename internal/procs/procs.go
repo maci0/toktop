@@ -108,8 +108,9 @@ func Snapshot() []Info {
 	return packageSampler().Snapshot()
 }
 
-// Snapshot lists processes, best effort. Returns nil on unsupported/erroring
-// platforms so callers can degrade silently.
+// Snapshot lists processes, best effort. Returns nil when the platform is
+// unsupported or nothing has been listed yet; a listing error returns the
+// last good snapshot, so callers see stale processes rather than none.
 func (s *Sampler) Snapshot() []Info {
 	return s.SnapshotAt(time.Now())
 }

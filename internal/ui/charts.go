@@ -154,9 +154,11 @@ func timedSeries(s core.Snapshot, cadence time.Duration) []timedVal {
 }
 
 // compressSeries maps samples onto w columns whose covered timespan doubles
-// every `block` columns moving away from the newest sample: right edge shows
-// per-cadence detail, the far left packs hours. bounds marks where each
-// coarser block begins so charts can draw faint separators.
+// every `block` columns moving away from the newest sample: the right edge
+// spans one second, the far left packs hours. The base span is a fixed second
+// rather than the collector cadence, because this mode owns its own
+// timescale. bounds marks where each coarser block begins so charts can draw
+// faint separators.
 //
 // Aggregation matches uniform mode (aggHist) and the aggregate the panel
 // title prints: engines sum. Within one engine, samples sharing a coarse

@@ -107,10 +107,11 @@ same wheel hashes. `-c "$PWD"` is what puts the pane in this checkout: a
 detached session otherwise starts wherever the tmux server did, and
 `./toktop` is not there.
 
-The image's pixel size is repeated in `site/worker.js` as the `og:image`
-dimensions. `make site-assets` rebuilds every capture the page serves from
-that PNG and then runs `bun test site/`, so the set that ships and the set the
-worker names cannot drift:
+The share card's pixel size (1200x704) is repeated in `site/worker.js` as the
+`og:image` dimensions, since that card, not the full-size capture, is what
+`og:image` points at. `make site-assets` rebuilds every capture the page serves
+from the full-size PNG and then runs `bun test site/`, so the set that ships
+and the set the worker names cannot drift:
 
 ```
 make site-assets

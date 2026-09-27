@@ -165,9 +165,9 @@ func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 const probeSecsMax = 24 * 60 * 60
 
 // Poll interval bounds apply after flag.Duration parses a unit-bearing value
-// (or zero). The 50ms floor prevents excessive polling; PollTimeout is 1.5s.
-// The 1h ceiling also caps the per-frame wait in --once, which is three
-// times the interval.
+// (or zero). The 50ms floor prevents excessive polling; a provider request is
+// bounded by provider.PollTimeout (1.5s). The 1h ceiling also caps the
+// per-frame wait in --once, which is three times the interval.
 const (
 	intervalMin = 50 * time.Millisecond
 	intervalMax = time.Hour

@@ -77,7 +77,7 @@ func AgentNameField(s string) string {
 // the header aggregate), and the feed retains 512 events that each half
 // would otherwise walk, group and normalize on its own.
 type AgentSummary struct {
-	Rates []AgentRate // every agent with tokens in the window
+	Rates []AgentRate // every agent reporting, engine-attributed events included
 	Own   []AgentRate // the same, counting only unattributed tokens
 }
 

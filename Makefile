@@ -53,7 +53,9 @@ BIOME       := @biomejs/biome@2.5.14
 # depend on PATH, so the pin is named here and every deploy path reads it.
 WRANGLER    := 4.126.0
 # The Worker answers /health with `ok`; site-deploy and site-rollback poll it
-# until the expected version is serving or give up.
+# until the site is answering `ok` at all, or give up. The body names no
+# version, so this is an availability check, not a confirmation that this
+# tree is what is serving.
 SITE_HEALTH_URL   := https://toktop.ai/health
 SITE_HEALTH_TRIES := 6
 SITE_HEALTH_WAIT  := 10
@@ -695,8 +697,9 @@ repro-check: ## build every release platform twice, from two different source pa
 	done
 	@rm -rf $(DIST)/repro
 
-# The same gate over REPRO_PLATFORMS, so a contributor can reproduce the
-# merge-gate repro job locally instead of only the full pre-release sweep.
+# The same gate over REPRO_PLATFORMS, so a contributor can reproduce either
+# the merge-gate repro job or the release job locally without paying for all
+# of PLATFORMS. `make repro-check` is the full sweep, local only.
 .PHONY: repro-check-pair
 repro-check-pair: ## repro-check over REPRO_PLATFORMS (what the PR gate runs)
 	@$(MAKE) repro-check PLATFORMS="$(REPRO_PLATFORMS)"

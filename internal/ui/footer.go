@@ -255,8 +255,8 @@ func (m Model) renderMinimal() string {
 		}
 	}
 	// Only keys with a visible effect in this layout are advertised. p and t
-	// still work, but their results render only in the full dashboard; compact
-	// help matches this list.
+	// still work, but their results render only in the full dashboard. The
+	// compact help above adds esc, which quits from here too.
 	foot := dim(clip("q quit · space pause · ? help", m.w))
 	bodyH := max(m.h-lipgloss.Height(foot)-1, 0)
 	if len(lines) > bodyH && bodyH >= 3 {

@@ -134,12 +134,6 @@ func humanBytesShort(b uint64) string {
 	return fmt.Sprintf("%.0fK", float64(b)/(1<<10))
 }
 
-// shorten truncates s to n visible cells with an ellipsis. Cells, not
-// runes: CJK and other wide glyphs occupy two columns, and cutting by rune
-// count would let the result render wider than n and break panel alignment.
-// The cut also only ever lands between grapheme clusters (user-perceived
-// characters): slicing a flag emoji into lone regional indicators or an
-// accented letter off its combining mark would print garbage in the pane.
 // plainWidth returns the visible width of s when every rune is single-cell,
 // else -1. The Width fast path: every frame calls Width on dozens of short
 // labels ("TOKTOP", "engine-0", "v0.12.0") and on whole chart and border
@@ -174,6 +168,12 @@ func widthOf(s string) int {
 	return lipgloss.Width(s)
 }
 
+// shorten truncates s to n visible cells with an ellipsis. Cells, not
+// runes: CJK and other wide glyphs occupy two columns, and cutting by rune
+// count would let the result render wider than n and break panel alignment.
+// The cut also only ever lands between grapheme clusters (user-perceived
+// characters): slicing a flag emoji into lone regional indicators or an
+// accented letter off its combining mark would print garbage in the pane.
 func shorten(s string, n int) string {
 	if n <= 0 {
 		return ""
@@ -202,8 +202,9 @@ func shorten(s string, n int) string {
 	return b.String()
 }
 
-// clip hard-cuts a rendered (possibly styled) line to w visible cells.
-// Styling is dropped past the cut; good enough for our own strings.
+// clip cuts a rendered (possibly styled) line to w visible cells, appending
+// an ellipsis when it has to. Styling is dropped across the whole line, since
+// strip removes escape sequences; good enough for our own strings.
 func clip(s string, w int) string {
 	if w <= 0 {
 		return ""

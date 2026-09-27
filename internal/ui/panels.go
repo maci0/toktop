@@ -173,10 +173,10 @@ func (m Model) probesTitle() string {
 	return t
 }
 
-// probeModelMin is the narrowest model column a probe row keeps. The
-// successful and failed rows reserve different widths for it (the rate and
-// ttft readouts), so the floor is set where neither reservation is negative
-// on the smallest legal dashboard pane.
+// probeModelMin is the narrowest model column a probe row keeps, so a narrow
+// pane still names the model instead of dropping it. The successful and the
+// failed row reserve the same w-18; the floor keeps that positive on the
+// smallest legal dashboard pane.
 const probeModelMin = 8
 
 func (m Model) probesBody(w, h int) string {

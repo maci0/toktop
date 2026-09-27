@@ -29,7 +29,7 @@ import (
 )
 
 // Server accepts POST /v1/events (single object or newline-delimited stream)
-// and GET /healthz.
+// and GET or HEAD /healthz.
 type Server struct {
 	rec  core.AgentRecorder
 	now  func() time.Time // event stamps; defaults to time.Now. I/O deadlines stay wall-clock.
@@ -39,10 +39,11 @@ type Server struct {
 	log  *slog.Logger
 }
 
-// idleTimeout reaps keep-alive connections that sit between requests. Both
-// timeouts zero would let vanished peers hold an fd and a goroutine apiece
-// for the life of the dashboard; the endpoint is localhost-bound by default
-// but can be exposed via --ingest.
+// idleTimeout reaps keep-alive connections that sit between requests. Without
+// it a vanished peer holds an fd and a goroutine for the life of the dashboard;
+// ReadHeaderTimeout covers only the headers and no ReadTimeout is set, so a
+// peer that finishes them and then goes silent is this one's to reap. The
+// endpoint is localhost-bound by default but can be exposed via --ingest.
 var idleTimeout = 2 * time.Minute
 
 // New binds addr and returns a server that Serve will accept on. The listen
@@ -383,7 +384,7 @@ const maxInFlightEvents = 64
 // eventSlots counts the POST bodies being decoded. It is process-wide: the
 // endpoint is one listener bound to a fixed address, so the descriptors a
 // pile-up would cost are the process's either way, and a cap shared by every
-// server in it is the same bound. A var so tests can shrink it.
+// server in it is the same bound. The channel is the var tests shrink.
 var eventSlots = make(chan struct{}, maxInFlightEvents)
 
 // maxEventSkew bounds how far ahead of arrival a claimed event timestamp may
@@ -547,9 +548,9 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(br)
 	defer r.Body.Close()
 	replayKey := clientEventKey(r)
-	// keyedStream is set once a line arrives without its own id, so its
-	// identity was derived from the POST key and its position in the body.
-	// Such a line can only be recovered by replaying the whole request.
+	// keyedStream tracks whether the last id-less line had an identity derived
+	// from the POST key and its position in the body. Such a line can only be
+	// recovered by replaying the whole request.
 	keyedStream := false
 	// fail reports a stream-level error. Events decode-and-record one by one,
 	// so everything before the failing line is already in the feed; saying so

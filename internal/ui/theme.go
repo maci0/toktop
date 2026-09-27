@@ -81,8 +81,8 @@ var (
 )
 
 // panel wraps content in a titled rounded box. Content is padded/cut to
-// innerW x innerH with plain spaces; we deliberately avoid lipgloss Width()
-// here because its wrapping mishandles densely styled chart cells.
+// innerW x innerH with plain spaces; the padding is ours rather than
+// lipgloss's, whose wrapping mishandles densely styled chart cells.
 func panel(title, content string, innerW, innerH int) string {
 	body := panelStyle.Render(padBlock(content, innerW, innerH))
 	return styleTitle.Render(title) + "\n" + body
@@ -163,10 +163,9 @@ var linearChannel = func() [256]float64 {
 // color. ok is false for any other encoding (256-color names): callers must
 // treat those as already visible rather than guessing at their brightness.
 //
-// This runs inside the chart fade, which bisects a blend against the contrast
-// floor for every column of every chart, so it parses with strconv: the
-// fmt.Sscanf spelling of the same parse allocated a scanner per call and was
-// the single largest source of per-frame garbage.
+// Only the base background goes through this: the chart fade computes
+// luminance inline from linearChannel, so a per-column parse would be wasted
+// work.
 func relLuminance(c lipgloss.Color) (lum float64, ok bool) {
 	s := string(c)
 	if len(s) != 7 || s[0] != '#' {

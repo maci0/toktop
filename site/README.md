@@ -124,10 +124,10 @@ a line per visit would bury the few that name a broken deploy.
 | `method-not-allowed` | a method the path does not take, on the page or on an image |
 | `not-acceptable` | the client refused every encoding the isolate can produce, so the page cannot be sent to it at all |
 
-Every request line carries the same fields: the request's `cf-ray` (empty off
-Cloudflare), its `method` and `path`, the `status` the client was given, the
-`duration_ms` the edge spent getting there, and whatever reason the event
-adds. A filter on method, path or status works across every event. That is
+Every request line carries the same fields: `event`, the request's ray under
+`ray` (empty off Cloudflare), its `method` and `path`, the `status` the
+client was given, the `duration_ms` the edge spent getting there, and
+whatever reason the event adds. A filter on method, path or status works across every event. That is
 the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. A `405` or a

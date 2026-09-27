@@ -30,9 +30,9 @@ var client = &http.Client{
 // probeTokens sizes a probe: a few dozen tokens are plenty to time
 // first-token latency and decode rate without turning a benchmark into an
 // unbounded generation. The request asks the engine to stop there; the
-// client also stops reading after this many content frames, because some
-// gateways ignore max_tokens/num_predict and would otherwise generate (and
-// bill) until the HTTP timeout.
+// client also stops reading once this many content or reasoning frames have
+// arrived, because some gateways ignore max_tokens/num_predict and would
+// otherwise generate (and bill) until the HTTP timeout.
 const probeTokens = 32
 
 // probeTokenTrust is the highest engine-reported eval_count /
@@ -43,8 +43,9 @@ const probeTokenTrust = probeTokens * 4
 // probeContentBytes is a second hang-up: frame counting treats each
 // SSE/NDJSON content payload as one token, so a gateway that dumps a huge
 // delta in one frame would otherwise keep the connection open (and keep
-// billing) until the HTTP timeout. 32 bytes per requested token covers
-// any encoding of a 32-token reply.
+// billing) until the HTTP timeout. 32 bytes per requested token is a floor,
+// not a guarantee: a multibyte or base64-wrapped 32-token reply can exceed
+// it, and hanging up early is the safe direction.
 const probeContentBytes = probeTokens * 32
 
 // evalDurationBandDiv sets the floor of the band a scaled engine-reported
@@ -60,10 +61,11 @@ const evalDurationBandDiv = 4
 // trip) describes it better than the value does.
 const maxEvalDuration = 24 * time.Hour
 
-// probeLineMax is the largest SSE/NDJSON frame we will buffer. A 32-token
-// completion plus wrapper JSON is hundreds of bytes; a megabyte line is
-// the engine ignoring the cap in one shot, and bufio.Scanner only applies
-// the hang-up after the line is fully read.
+// probeLineMax is the largest SSE/NDJSON frame we will buffer, and the cap on
+// a whole non-stream body. probeStreamMax (128 KiB) bounds a streamed body
+// overall. A 32-token completion plus wrapper JSON is hundreds of bytes; a
+// megabyte line is the engine ignoring the cap in one shot, and
+// bufio.Scanner only applies the hang-up after the line is fully read.
 const probeLineMax = 16 << 10
 
 const probeStreamMax = 128 << 10
@@ -440,18 +442,18 @@ func streamReadErr(ctx context.Context, err error, tokens int) error {
 // engineErrorText bounds a recognized engine error. The engine chooses the
 // text, and ProbeSample keeps the last 128 samples, so an uncapped message is
 // unbounded memory held across a poll cycle and an arbitrarily wide line at
-// render time. ClampField is the cap and the terminal sanitization the
-// unrecognized-junk path below already gets from core.Snippet.
+// render time. core.ClampField is the cap; the unrecognized-junk path below
+// gets terminal sanitization from core.Snippet instead.
 func engineErrorText(s string) string {
 	return core.ClampField(s, core.SnippetCap)
 }
 
 // sseErrorMessage extracts an engine-reported failure from a streaming data
 // payload. Gateways disagree on the shape: {"error":{"message":…}},
-// {"error":"…"}, or other junk; null and absent mean no error. Unrecognized
-// junk and a recognized message are both capped by core.Snippet and stripped
-// of terminal escapes; the result is clipped to the readout's line width at
-// render time.
+// {"error":"…"}, or other junk; null and absent mean no error. A recognized
+// message is capped by core.ClampField; only the unrecognized-junk path gets
+// core.Snippet, and with it terminal-escape stripping. The result is clipped
+// to the readout's line width at render time.
 func sseErrorMessage(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""

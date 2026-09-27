@@ -334,9 +334,9 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 			Kind:  p.Kind,
 			Addr:  p.Addr,
 		}
-		// Per-provider state is keyed by endpoint, not display label (see
-		// providerKey): labels repeat across instances of the same engine
-		// kind, and shared baselines or histories would mix their counters.
+		// Per-provider state is keyed by providerKey: the endpoint when the
+		// provider has one, the label otherwise, so labels repeat across
+		// instances of the same engine kind without sharing baselines.
 		key := providerKey(p)
 		// ring() (not a bare map index): a provider whose first poll failed
 		// has no history yet, and indexing the map there would deref nil.

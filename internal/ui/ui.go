@@ -26,7 +26,7 @@ type Config struct {
 	// Agents reports that local agent watching (--agents) is on: only then
 	// may empty-feed guidance promise that running agents are picked up.
 	Agents bool
-	// FeedErr receives one message the first time the agent event stream
+	// FeedErr receives a message each time the agent event stream
 	// degrades after startup: the ingest endpoint dying, or the agent watch
 	// refusing to read a monitored engine's address. Every message names its
 	// own subsystem, because it is rendered verbatim in the feed panel.
@@ -125,8 +125,9 @@ func StaticFrame(cfg Config, s core.Snapshot, w, h int) string {
 type snapMsg core.Snapshot
 type tickMsg time.Time
 
-// feedDownMsg reports the ingest endpoint died after startup; the payload is
-// the server's error text.
+// feedDownMsg reports the agent event stream degraded after startup; the
+// payload is the producer's own subsystem-prefixed message, rendered
+// verbatim.
 type feedDownMsg string
 
 func waitSnap(ch <-chan core.Snapshot) tea.Cmd {
@@ -453,17 +454,16 @@ func aggOutAt(s core.Snapshot, now time.Time) float64 {
 	return out
 }
 
-// aggInAt is the input-side half of aggBothAt, for call sites needing one
-// direction only: it reuses aggBoth's single pass over the agent feed rather
-// than scanning again.
+// aggInAt is the input-side half of aggBothAt, for a call site needing one
+// direction without the output half.
 func aggInAt(s core.Snapshot, now time.Time) float64 {
 	_, in := aggBothAt(s, now)
 	return in
 }
 
-// aggBothAt sums provider rates with unattributed agent rates in one pass.
-// renderHeader and PlainTextFrame need both directions; two separate calls
-// each run AgentRates (map + sort) over the same feed.
+// aggBothAt sums provider rates with unattributed agent rates in one pass, so
+// the output and input halves of a snapshot cost one walk of the agent feed
+// rather than two.
 func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
 	return aggBoth(s, core.Summarize(s.Agents, now))
 }

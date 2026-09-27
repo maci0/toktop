@@ -142,13 +142,13 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 		rootListMu.Unlock()
 
 		// The claim is released from a defer, not at the end of the body. Every
-		// other caller for this key parks on <-walk with no deadline, and the
-		// goroutine holding the walk is a watcher's Run loop, which owns pollMu
-		// and nothing else can release: a panic here would wedge one agent's
-		// ticker forever and then hang agentwatch.stopOne on its done channel,
-		// taking the whole discovery pass with it. Stamped with the instant the
-		// walk started, not a second clock read, so the listing's age stays a
-		// function of the caller's clock alone.
+		// other caller for this key parks on <-walk, bounded by walkWait above,
+		// and the goroutine holding the walk is a watcher's Run loop, which owns
+		// pollMu and nothing else can release: a panic here would wedge one
+		// agent's ticker forever and then hang agentwatch.stopOne on its done
+		// channel, taking the whole discovery pass with it. Stamped with the
+		// instant the walk started, not a second clock read, so the listing's age
+		// stays a function of the caller's clock alone.
 		var files []string
 		defer func() {
 			rootListMu.Lock()

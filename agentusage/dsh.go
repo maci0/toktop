@@ -49,8 +49,8 @@ const (
 	zstdMaxPlainBytes = 32 << 20
 	// zstdInitialPlainBytes is the accumulator's first capacity. A poll reads
 	// one tail of at most zstdTailBytes compressed, which decodes to a small
-	// fraction of a megabyte of events in practice; one reservation covers the
-	// whole walk instead of a realloc per frame.
+	// fraction of a megabyte of events in practice; the reservation covers the
+	// usual walk instead of a realloc per frame.
 	zstdInitialPlainBytes = 64 << 10
 )
 
@@ -264,9 +264,10 @@ func decodeZstdPrefix(src []byte) (plain []byte, consumed int, err error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	// One reservation for the whole walk. Without it every frame reallocates
-	// and copies the accumulator so far, so a window of N small frames costs
-	// O(N^2) bytes moved.
+	// One reservation up front. Without it every frame reallocates and copies
+	// the accumulator so far, so a window of N small frames costs O(N^2)
+	// bytes moved. A window larger than zstdInitialPlainBytes still grows the
+	// slice, but geometrically rather than once per frame.
 	plain = make([]byte, 0, zstdInitialPlainBytes)
 	off := 0
 	for off < len(src) && len(plain) < zstdMaxPlainBytes {

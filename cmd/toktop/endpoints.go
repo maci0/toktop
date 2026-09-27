@@ -26,9 +26,10 @@ func routableBind(addr string) bool {
 }
 
 // localHost reports whether a host names this machine only. A literal loopback
-// address, and the "localhost" name, are local; every other name is treated as
-// routable without a lookup, so `--ingest box.internal:8420` is named at
-// startup rather than staying silent because the name did not parse as an IP.
+// address, "localhost", and any name under the reserved .localhost suffix are
+// local; every other name is treated as routable without a lookup, so
+// `--ingest box.internal:8420` is named at startup rather than staying silent
+// because the name did not parse as an IP.
 // A name that does resolve to loopback (ip6-localhost and friends) costs one
 // extra warning line; the reverse mistake is a publicly reachable endpoint
 // nobody was told about.

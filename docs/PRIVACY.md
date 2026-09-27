@@ -12,7 +12,7 @@ data flows, so the claim is checkable rather than a slogan.
 | Engine HTTP APIs (`--add`, or engines found on local ports) | model names, version, token counts, load, KV-cache and slot state |
 | `/proc`, `ps`, Win32 CIM, `nvidia-smi`, `rocm-smi` | CPU, memory, GPU, power, temperature, process name, port flags |
 | Agent transcripts, only with `--agents` | the token counters each agent records about itself, plus the working directory it ran in |
-| `ssh://` target, only when you name one | the same vitals, and the leading 4096 bytes of each process's command line (see below) |
+| `ssh://` target, only when you name one | the same vitals, the listening ports `/proc/net/tcp(+6)` reports (or an active probe of the well-known list), and the leading 4096 bytes of each process's command line (see below) |
 
 `--agents` is off by default: it means reading session files nobody pointed
 toktop at. The adapters in
@@ -29,7 +29,11 @@ Nothing about usage, agents or engines. The only files toktop writes are:
 - `$XDG_CONFIG_HOME/toktop/known_hosts` (mode 0600): ssh host keys, trust on
   first use, for `ssh://` targets only. `known_hosts.lock` sits beside it
   while a host key is being added and is removed when the write finishes.
-- The binary itself, when `toktop update` replaces it in place.
+  Each write goes to a short-lived `.known_hosts-*` staging file that is
+  renamed into place, and a Windows replacement that had to move the old store
+  aside leaves a `known_hosts.displaced` copy behind.
+- A `.toktop-update-*` download next to the binary, and the previous binary as
+  `<binary>.old`, when `toktop update` replaces it in place.
 
 Agent events live in memory for the life of the process. There is no history
 file, no cache and no database. If you want the feed to disappear, quit.
@@ -47,12 +51,13 @@ verified out of band, as any first contact is.
 - **The endpoints you name.** Requests carry the engine bearer token
   (`$TOKTOP_BEARER`, `--bearer`) only to URLs given with `--add`.
   Engines found by port scanning are contacted with no credentials.
-- **The remote host you name.** `toktop ssh://user@host` runs two fixed
-  scripts over that one ssh connection: a vitals dump and a process sweep.
-  The process sweep ships each command line cut to its first 4096
-  characters, which is all an engine match can read; the tail, where an
-  inline prompt or a credential passed as a flag sits, never crosses the
-  connection.
+- **The remote host you name.** `toktop ssh://user@host` runs fixed scripts
+  over one ssh connection: a vitals dump, a `/proc/net/tcp(+6)` read (falling
+  back to an active port probe against the well-known list when the kernel
+  hides the table), and a process sweep. The process sweep ships each command
+  line cut to its first 4096 characters, which is all an engine match can
+  read; the tail, where an inline prompt or a credential passed as a flag
+  sits, never crosses the connection.
 - **GitHub**, for `toktop update` only, which is never on the startup path.
   Requests are limited to `github.com`, `api.github.com` and
   `*.githubusercontent.com` over HTTPS.
