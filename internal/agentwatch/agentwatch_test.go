@@ -266,8 +266,12 @@ func TestForgetsExitedAgents(t *testing.T) {
 	}
 	t.Setenv("HOME", t.TempDir())
 
+	// The fake agent stays up until this test has seen it followed. One that
+	// exits on its own races the watcher's first discover tick: the process
+	// can be gone from /proc before the tick lands, and the test then fails
+	// on a machine that is merely slow to start a goroutine.
 	bin := filepath.Join(t.TempDir(), "codex")
-	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 0.6\n"), 0o755); err != nil {
+	if err := os.WriteFile(bin, []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command(bin)
@@ -275,6 +279,7 @@ func TestForgetsExitedAgents(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { _ = cmd.Process.Kill() })
 
 	w := New(&recorder{}, nil)
 	w.discoverEvery, w.readEvery = 100*time.Millisecond, time.Hour
@@ -285,6 +290,7 @@ func TestForgetsExitedAgents(t *testing.T) {
 	// running, so a global count would never reach zero.
 	pid := cmd.Process.Pid
 	waitFor(t, 3*time.Second, func() bool { return w.following(pid) })
+	_ = cmd.Process.Kill()
 	_, _ = cmd.Process.Wait()
 	waitFor(t, 3*time.Second, func() bool { return !w.following(pid) })
 }

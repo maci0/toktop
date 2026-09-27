@@ -36,6 +36,10 @@ support channel (see SECURITY.md).
 - The `DEMO` tag names the seed the run drew from (`DEMO seed 42`), and
   `--once --plain --demo` leads with `[demo seed 42]`. A demo frame is
   reproducible from that seed alone, so the frame has to carry it.
+- A malformed event line in an NDJSON POST names the body offset it failed at,
+  so the offending line is findable in a long stream.
+- A dashboard image that the asset store cannot serve answers with the site's
+  own `text/plain` error body instead of the store's HTML error page.
 
 ## [0.14.1] - 2026-09-26
 

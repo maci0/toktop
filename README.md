@@ -239,7 +239,8 @@ refused with `403`, so a web page cannot forge rows into a running
 dashboard. Wrong methods on these paths answer `405` with `Allow`.
 Unknown paths answer `404` naming the two endpoints, so a POST to `/events`
 is not a generic not-found page. Error bodies are short plain-text reasons
-that name the field or expected shape; unknown fields are ignored, so
+that name the field or expected shape, and a malformed line in a stream also
+names the body offset it failed at; unknown fields are ignored, so
 harnesses can include their own. The request `Content-Type` header is not
 checked: the body is always read as JSON/NDJSON, so plain `curl -d` works
 unmodified.

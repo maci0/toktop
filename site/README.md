@@ -15,12 +15,15 @@ login already on the machine); nothing about them is written to this repo.
 
 `worker.js` holds the HTML: it is a template literal, so there is nothing to
 bundle. The Worker answers `/health` with `ok` for uptime checks, serves the
-dashboard capture from `public/` at `/dashboard.png` and `/dashboard.webp`,
+dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
+`/dashboard-1280.avif`, `/dashboard.webp` and `/dashboard-1280.webp`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). Wrong methods are `405` with `Allow: GET, HEAD`. Image paths
 without an asset binding, and 404/5xx from the asset store, are `no-store`
 so a missing file is not cached as a day-long success. Error bodies are
-`text/plain`, matching `/health`.
+`text/plain`, matching `/health`: a failure the asset store reports is
+rewritten into that envelope, status kept, rather than passing the store's
+own HTML error page through at an image path.
 
 The page carries an ETag derived from its own bytes: reloads and visits
 past the five-minute freshness window answer with an empty 304 instead of

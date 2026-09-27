@@ -421,6 +421,13 @@ function errorResponse(status, body, extraHeaders = {}) {
   });
 }
 
+// The reason line for a failure the asset store reported. The store's own
+// body is not repeated: it is an HTML page that names no image path.
+function assetErrorBody(status) {
+  if (status === 404 || status === 410) return "not found\n";
+  return "asset store error\n";
+}
+
 // Every page answer (200 any encoding, 304) carries these; the security
 // headers ride along because a fresh load is exactly where they must apply.
 const PAGE_HEADERS = {
@@ -466,6 +473,17 @@ export default {
           headers: assetHeaders,
         }),
       );
+      // An asset-store failure is the one answer whose body the Worker does
+      // not write: the store ships an HTML error page under its own headers.
+      // Every other status here is text/plain like /health, so a missing
+      // capture stays a one-line reason a client can act on instead of a
+      // document at an image path. The status passes through unchanged.
+      if (asset.status >= 400) {
+        return errorResponse(
+          asset.status,
+          request.method === "HEAD" ? null : assetErrorBody(asset.status),
+        );
+      }
       const headers = new Headers(asset.headers);
       for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
         headers.set(name, value);

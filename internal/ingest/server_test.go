@@ -504,6 +504,23 @@ func TestIngestPartialStreamReportsRecordedCount(t *testing.T) {
 	}
 }
 
+// A syntax failure in a stream says which line failed but not where in the
+// body, so a sender with a long NDJSON body cannot find the offending line.
+func TestIngestSyntaxErrorNamesBodyOffset(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	code, body := postBody(t, "http://"+s.Addr()+"/v1/events",
+		`{"agent":"kept"}`+"\n"+`{"agent":oops}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", code)
+	}
+	// The offset is into the whole body, 17 bytes of kept line plus newline.
+	if !strings.Contains(body, "at body offset 27") {
+		t.Errorf("error should name the body offset, got %q", body)
+	}
+}
+
 // The recorded-count note rides along on every stream-level failure,
 // including the size cap.
 func TestIngestOversizedAfterEventsReportsRecordedCount(t *testing.T) {

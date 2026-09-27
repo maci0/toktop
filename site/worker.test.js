@@ -496,6 +496,41 @@ test("image 404s from ASSETS are not cached as successes", async () => {
   expect(res.headers.get("cache-control")).toBe("no-store");
 });
 
+test("an asset-store failure answers with the worker's own error envelope", async () => {
+  const missing = {
+    ASSETS: {
+      fetch: () =>
+        Promise.resolve(
+          new Response("<html><body>not here</body></html>", {
+            status: 404,
+            headers: { "content-type": "text/html" },
+          }),
+        ),
+    },
+  };
+  const failed = {
+    ASSETS: {
+      fetch: () => Promise.resolve(new Response("boom", { status: 502 })),
+    },
+  };
+  for (const [env, status, body] of [
+    [missing, 404, "not found\n"],
+    [failed, 502, "asset store error\n"],
+  ]) {
+    const res = await imageCall("/dashboard.png", {}, { env });
+    expect(res.status).toBe(status);
+    expect(await res.text()).toBe(body);
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    for (const name of SECURITY_HEADER_NAMES) {
+      expect(res.headers.get(name)).not.toBeNull();
+    }
+  }
+  const head = await imageCall("/dashboard.png", {}, { env: missing, method: "HEAD" });
+  expect(head.status).toBe(404);
+  expect((await head.arrayBuffer()).byteLength).toBe(0);
+});
+
 test("image paths are served from ASSETS with cache and security headers", async () => {
   const env = assetsEnv({ "/dashboard.avif": "avif-bytes" });
   const res = await imageCall("/dashboard.avif", { "accept-encoding": "gzip, br" }, { env });

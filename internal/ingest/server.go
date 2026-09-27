@@ -626,6 +626,12 @@ func clientJSONError(err error) string {
 	if errors.Is(err, io.ErrUnexpectedEOF) {
 		return "bad json: truncated"
 	}
+	// A syntax failure in an NDJSON stream says nothing about where it
+	// happened, so a sender with a 200-event body cannot find the line. The
+	// decoder's offset is a body offset, which is what a sender can seek to.
+	if se, ok := errors.AsType[*json.SyntaxError](err); ok {
+		return fmt.Sprintf("bad json: %s at body offset %d", se.Error(), se.Offset)
+	}
 	return "bad json: " + err.Error()
 }
 
