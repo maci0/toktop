@@ -158,7 +158,7 @@ func main() {
 	warnIgnoredFrameEnv(f.once, f.plain, f.jsonOut)
 	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, f.agents, len(f.adds), len(remoteTargets))
 	warnIgnoredGauntletHome(f.agents)
-	warnIgnoredXDGHome(opencodeOn, !f.demo && len(remoteTargets) > 0)
+	warnIgnoredXDGHome(opencodeOn, !f.demo && len(remoteTargets) > 0, f.agents)
 	if !f.noIngest {
 		if err := validateIngestAddr(f.ingest); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)

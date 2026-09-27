@@ -15,6 +15,15 @@ CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
 	awk '/^\#\# \[Unreleased\]/{f=1;next} /^\#\# \[/{f=0} f && /^- /{n++} END{exit (n>0)}' CHANGELOG.md || { echo "make: CHANGELOG.md still has entries under [Unreleased]; move them under [$(VERSION)] first" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "]") == 1 {f=1;next} /^\#\# \[/{f=0} f && /^- /{n++} END{exit (n==0)}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) has no entries; a release ships notes or does not ship" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "]") == 1 {f=1;next} /^\#\# \[/{f=0} f && /^\#\#\# /{if (seen[$$0]++) d=1} END{exit (d==1)}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) repeats an impact heading; one heading per impact" >&2; exit 1; }; \
+	awk -v v='$(VERSION)' 'BEGIN{ if (v !~ /^[0-9]+\.[0-9]+\.[0-9]+$$/) exit 0 } \
+		index($$0, "\#\# [" v "]") == 1 {f=1; next} \
+		/^\#\# \[/ {if (f==1) {f=0; if (match($$0, /\#\# \[[0-9]+\.[0-9]+\.[0-9]+/)) prev=substr($$0, RSTART+4, RLENGTH-4)} next} \
+		f==1 && $$0 == "\#\#\# Breaking" {breaking=1} \
+		END { \
+			if (!breaking || prev == "") exit 0; \
+			split(v, a, "."); split(prev, b, "."); \
+			exit (a[1] == b[1] && a[2] == b[2]) \
+		}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) carries a 'Breaking' entry but $(VERSION) is a patch bump; the project is 0.x, so a breaking change rides a minor bump" >&2; exit 1; }; \
 fi
 
 GO          ?= go

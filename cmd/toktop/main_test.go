@@ -460,7 +460,7 @@ func TestWarnIgnoredGauntletHome(t *testing.T) {
 
 // An XDG base directory that cannot be used is named at startup wherever it
 // would have been read: the same rule GAUNTLET_HOME follows, applied to the
-// two variables that otherwise fall back to a default directory in silence.
+// variables that otherwise fall back to a default directory in silence.
 func TestWarnIgnoredXDGHome(t *testing.T) {
 	// t.TempDir is absolute on every platform; a hand-built "/srv/xdg" is
 	// drive-relative on Windows, where the warning is then correct.
@@ -469,26 +469,31 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 		name       string
 		opencodeDB bool
 		sshTarget  bool
+		agents     bool
 		dataHome   string
 		configHome string
+		kimiHome   string
 		wantStderr []string
 	}{
-		{name: "unset passes", opencodeDB: true, sshTarget: true},
-		{name: "absolute passes", opencodeDB: true, sshTarget: true, dataHome: abs, configHome: abs},
+		{name: "unset passes", opencodeDB: true, sshTarget: true, agents: true},
+		{name: "absolute passes", opencodeDB: true, sshTarget: true, agents: true, dataHome: abs, configHome: abs, kimiHome: abs},
 		{name: "relative data home is named", opencodeDB: true, dataHome: "share", wantStderr: []string{"$XDG_DATA_HOME"}},
 		{name: "relative config home is named", sshTarget: true, configHome: "cfg", wantStderr: []string{"$XDG_CONFIG_HOME"}},
+		{name: "relative kimi home is named", agents: true, kimiHome: "kimi", wantStderr: []string{"$KIMI_CODE_HOME"}},
 		{
 			name: "both are named", opencodeDB: true, sshTarget: true,
 			dataHome: "share", configHome: "cfg", wantStderr: []string{"$XDG_DATA_HOME", "$XDG_CONFIG_HOME"},
 		},
 		{name: "data home unread without the opencode database", sshTarget: true, dataHome: "share"},
 		{name: "config home unread without an ssh target", opencodeDB: true, configHome: "cfg"},
+		{name: "kimi home unread without --agents", kimiHome: "kimi"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("XDG_DATA_HOME", tt.dataHome)
 			t.Setenv("XDG_CONFIG_HOME", tt.configHome)
-			got := captureStderr(t, func() { warnIgnoredXDGHome(tt.opencodeDB, tt.sshTarget) })
+			t.Setenv("KIMI_CODE_HOME", tt.kimiHome)
+			got := captureStderr(t, func() { warnIgnoredXDGHome(tt.opencodeDB, tt.sshTarget, tt.agents) })
 			if len(tt.wantStderr) == 0 {
 				if got != "" {
 					t.Fatalf("warnIgnoredXDGHome() printed %q, want silence", got)

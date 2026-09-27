@@ -103,7 +103,8 @@ What is worth stealing, corrupting, or denying:
   the SHA-256 of its path rather than walked, agentusage/kimi.go), clanker
   (its token log inside the repository it runs in, registry.go, 126-133), and
   the built-in pi, prime-agent, and feynman definitions
-  (agentusage/definitions.go, 115-121). Beyond plain JSONL, dsh's default
+  (agentusage/definitions.go, 115-121), and kimi
+  (`~/.kimi-code/sessions`, agentusage/kimi.go, 69). Beyond plain JSONL, dsh's default
   `session.v<N>.jsonl.zstd` (concatenated zstd frames, agentusage/dsh.go),
   crush's project database `.crush/crush.db`
   (agentusage/crush_sqlite.go, gated by the `sqlite` build tag and

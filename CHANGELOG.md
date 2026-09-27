@@ -95,6 +95,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   toktop's own audit configuration: `TOKTOP_LOG_LEVEL`, a text handler on
   stderr, and a message that began `toktop:`. The default is the process
   logger from `log/slog`, which is where a Go program already sends its own.
+- `agentusage.DefaultPollInterval` is the 250ms a transcript is re-read at,
+  and what `Watcher.Run` polls at when its interval is not positive. It was
+  an unexported constant documented only on `Watcher.Run`, so a caller naming
+  an interval copied the number out of that doc and drifted the moment either
+  side changed.
+- kimi session usage logs are read under `--agents`, as a machine-wide store
+  under `~/.kimi-code/sessions/<workDirKey>/<session>/agents/<id>/wire.jsonl`
+  carrying a `usage.record` event per model call. The log names no working
+  directory, so ownership follows the cwd the session's `state.json` records,
+  and a subagent's log under the same session counts on its own tokens. No
+  build tag and no flag gates it: a `toktop` upgrade starts reporting these
+  agents for anyone who had kimi sessions on the machine. `KIMI_CODE_HOME`
+  moves the store when it is absolute, and a relative value is named at
+  startup under `--agents` rather than ignored in silence, the rule
+  `XDG_DATA_HOME` and `XDG_CONFIG_HOME` already followed.
 
 ### Changed
 
@@ -103,6 +118,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   now carries the program from its own log handler. toktop installs its audit
   logger into `agentusage` at startup, so the line still reaches the same
   stream at the same level, folded and redacted as before.
+- `agentusage.Spec.Suffix` and `agentusage.Spec.Suffixes` entries are trimmed
+  before they are matched, and one left blank falls back to the `.jsonl`
+  default. A definition written by hand with a padded suffix searched for
+  files whose names ended in the padding and found nothing, so the agent
+  reported no rate at all; the trim is the same rule `Spec.Suffixes` already
+  applied to its blank entries, and both now go through one named default.
 
 - A dashboard pane too narrow for a full row now shows the measurement and
   shortens the decoration, where before the decoration was drawn at its own

@@ -75,8 +75,7 @@ Once asked for, nothing else has to be configured and the agent does not have
 to cooperate: claude, codex, qwen, copilot, kimi, pi, prime-agent, feynman,
 clanker, crush, opencode, and dsh all keep records carrying the provider's own
 counts (JSONL transcripts, except opencode and crush which keep SQLite stores).
-dsh's
-default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
+dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 Agents that report nothing show no rate rather than a zero.
 
@@ -630,6 +629,7 @@ follow the run rather than how long the process took.
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows, and so is an absolute one with no `agents.json` under it |
 | `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
 | `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with an `ssh://` target; a run on Linux with one fails at connect |
+| `KIMI_CODE_HOME` | with `--agents`: directory under which kimi's `sessions` are read (default `~/.kimi-code`); a relative value is ignored and named at startup |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset |
 | `NO_COLOR` | strips terminal styling when set to a non-empty value (honored by the terminal renderer, as usual) |
 

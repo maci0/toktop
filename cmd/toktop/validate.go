@@ -142,25 +142,27 @@ func warnIgnoredGauntletHome(agents bool) {
 		core.RedactHome(path))
 }
 
-// warnIgnoredXDGHome names an $XDG_DATA_HOME or $XDG_CONFIG_HOME that is set
-// but not a path DefinitionsPath-style consumers can use. Both readers honor
-// the variable only when it is absolute, so a relative value silently falls
-// back to the default directory: opencode's session database is read from
-// ~/.local/share (agents that generated tokens report none) and the ssh
-// trust-on-first-use store from ~/.config. Nothing else would report it.
+// warnIgnoredXDGHome names an $XDG_DATA_HOME, $XDG_CONFIG_HOME or
+// $KIMI_CODE_HOME that is set but not a path DefinitionsPath-style consumers
+// can use. Every reader honors its variable only when it is absolute, so a
+// relative value silently falls back to the default directory: opencode's
+// session database is read from ~/.local/share (agents that generated tokens
+// report none), the ssh trust-on-first-use store from ~/.config, and kimi's
+// session logs from ~/.kimi-code/sessions. Nothing else would report it.
 //
 // Each variable is named only where it would have been read: XDG_DATA_HOME
 // with the opencode database open (f.agents && --opencode-db, resolved),
-// XDG_CONFIG_HOME with an ssh:// target to connect to. Without one, the
-// variable cannot take effect, and the rule GAUNTLET_HOME follows above
-// names only a --agents run for the same reason.
-func warnIgnoredXDGHome(opencodeDB, sshTargets bool) {
+// XDG_CONFIG_HOME with an ssh:// target to connect to, KIMI_CODE_HOME with
+// --agents. Without one, the variable cannot take effect, and the rule
+// GAUNTLET_HOME follows above names only a --agents run for the same reason.
+func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 	for _, e := range [...]struct {
 		name string
 		read bool
 	}{
 		{"XDG_DATA_HOME", opencodeDB},
 		{"XDG_CONFIG_HOME", sshTargets},
+		{"KIMI_CODE_HOME", agents},
 	} {
 		if !e.read {
 			continue
