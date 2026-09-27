@@ -172,6 +172,77 @@ func TestSummarizeUnattributedTotals(t *testing.T) {
 	}
 }
 
+// The via label on a rate row is a claim that the engine already counts that
+// row's tokens, so it holds only when every in-window event of the agent went
+// through the same engine. Two cases withdraw it, and both used to be decided
+// by whichever event the walk reached last, which the feed's lack of ordering
+// made arbitrary: an agent that spent some tokens direct, and an agent that
+// named two engines. Neither is walked twice, so an order-dependence cannot be
+// pinned by running the fixture in two orders.
+func TestSummarizeViaLabelNeedsTheWholeRow(t *testing.T) {
+	now := time.Unix(1_700_000_100, 0)
+	cases := []struct {
+		name   string
+		events []AgentEvent
+		want   string
+	}{
+		{
+			"every event through one engine",
+			[]AgentEvent{
+				{At: now.Add(-2 * time.Second), Agent: "routed", ViaEngine: "127.0.0.1:8000"},
+				{At: now.Add(-1 * time.Second), Agent: "routed", ViaEngine: "127.0.0.1:8000"},
+			},
+			"127.0.0.1:8000",
+		},
+		{
+			// The direct event is walked last here, so the label came out
+			// right by accident; walked first it did not. The totals count
+			// these tokens, so the row may not claim the engine did.
+			"one event direct, direct walked first",
+			[]AgentEvent{
+				{At: now.Add(-2 * time.Second), Agent: "mixed", OutputTokens: 40},
+				{At: now.Add(-1 * time.Second), Agent: "mixed", ViaEngine: "127.0.0.1:8000"},
+			},
+			"",
+		},
+		{
+			"one event direct, direct walked last",
+			[]AgentEvent{
+				{At: now.Add(-2 * time.Second), Agent: "mixed", ViaEngine: "127.0.0.1:8000"},
+				{At: now.Add(-1 * time.Second), Agent: "mixed", OutputTokens: 40},
+			},
+			"",
+		},
+		{
+			"two engines named in one window",
+			[]AgentEvent{
+				{At: now.Add(-2 * time.Second), Agent: "hopped", ViaEngine: "127.0.0.1:8000"},
+				{At: now.Add(-1 * time.Second), Agent: "hopped", ViaEngine: "127.0.0.1:11434"},
+			},
+			"",
+		},
+		{
+			"no engine at all",
+			[]AgentEvent{
+				{At: now.Add(-2 * time.Second), Agent: "direct", OutputTokens: 40},
+				{At: now.Add(-1 * time.Second), Agent: "direct", OutputTokens: 40},
+			},
+			"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rates := Summarize(tc.events, now).Rates
+			if len(rates) != 1 {
+				t.Fatalf("rates = %+v, want one row", rates)
+			}
+			if got := rates[0].ViaEngine; got != tc.want {
+				t.Errorf("via = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // Summarize returns both views in one walk, and a frame must be able to
 // account the whole feed in a single pass. The expected numbers here are
 // derived by hand from the fixture, not from another Summarize call:
@@ -199,6 +270,11 @@ func TestSummarizeAccountsEveryAgentInOnePass(t *testing.T) {
 
 	// Rates spans first to last event, not the window: claude runs from -2s
 	// to -500ms, so 80 out over 1.5s. routed counts its 11+11 over 1s.
+	//
+	// claude carries no via label: two of its three events went direct, so the
+	// engine did not see those tokens and the totals do count them. routed,
+	// whose every event went through 127.0.0.1:8000, is the row that may name
+	// one.
 	wantRates := []struct {
 		agent     string
 		tokPS     float64
@@ -208,7 +284,7 @@ func TestSummarizeAccountsEveryAgentInOnePass(t *testing.T) {
 		viaEngine string
 	}{
 		{"codex", 60, 120, 60, -time.Second, ""},
-		{"claude", 80 / 1.5, 20 / 1.5, 80, -500 * time.Millisecond, "127.0.0.1:11434"},
+		{"claude", 80 / 1.5, 20 / 1.5, 80, -500 * time.Millisecond, ""},
 		{"routed", 22, 0, 22, -time.Second, "127.0.0.1:8000"},
 		// A single event has no span to divide by, so it reports tokens only.
 		{"dsh", 0, 0, 7, 0, ""},

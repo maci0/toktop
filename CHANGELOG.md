@@ -168,6 +168,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the top-level screen. `toktop help update` has its own screen and version
   takes no flags, so the usage block claiming a subcommand screen for both
   sent readers looking for one that does not exist.
+- An agent's clock offset follows a corrected sender instead of being decided
+  by the first event the name was seen on. The ledger held one reading per
+  agent for fifteen minutes, and an agent name is not a sender: a host whose
+  clock was 90s fast and has since been corrected kept every later event 90s
+  stale, and two machines both running `claude` post under one name, so the
+  fast one dragged the other's events with it. Past the 30s rate window those
+  events count toward no total and the agent reads as idle while it works. The
+  ledger now holds the smallest lead seen, and a smaller one takes over.
+- An agent row names its engine only when every event in the window went
+  through that one. The label was read off the last event the walk reached,
+  which the feed's lack of ordering made arbitrary, and it claimed "the engine
+  counts these tokens" for an agent whose direct tokens the header total
+  counts anyway. A row that also spent tokens direct, or that named two
+  engines, now shows its measured rate; the per-event feed lines still name
+  the engine on the events that went through one.
 - An agent's rate spans its first to its last event in time, not to the last
   event the walk happened to reach. The feed is not time-ordered: the ingest
   endpoint accepts any `ts`, and a producer's clock can step. One out-of-order

@@ -958,6 +958,92 @@ func TestRecordAgentAgesOutSenderRunningAhead(t *testing.T) {
 	}
 }
 
+// The offset ledger is keyed on the agent name, and a name is not a sender.
+// A host whose clock was fast and has since been corrected keeps posting under
+// the same name, and the first reading latched for that name would hold every
+// later event back by the old error: past AgentRateWindow, so the agent reads
+// as idle and its tokens land in no total. A smaller lead is a better estimate
+// of the sender's clock than the larger one it replaces, so it takes over.
+func TestRecordAgentOffsetFollowsASmallerLead(t *testing.T) {
+	c := New(nil, time.Second)
+	base := time.Now()
+	now := base
+	c.SetNow(func() time.Time { return now })
+
+	// First sight: a host 90s fast, as a dead RTC leaves it.
+	const stale = 90 * time.Second
+	c.RecordAgent(core.AgentEvent{At: now.Add(stale), Agent: "remote", OutputTokens: 40})
+	if got := c.agentSkews["remote"]; got != stale {
+		t.Fatalf("first lead = %v, want %v", got, stale)
+	}
+
+	// The clock is corrected (NTP, a resumed laptop). Its next events carry
+	// the true offset, which is far smaller.
+	now = base.Add(2 * time.Second)
+	for _, d := range []time.Duration{2 * time.Second, time.Second} {
+		if !c.RecordAgent(core.AgentEvent{At: now.Add(d), Agent: "remote", OutputTokens: 40}) {
+			t.Fatalf("event at +%s was not retained", d)
+		}
+	}
+	if got := c.agentSkews["remote"]; got != time.Second {
+		t.Fatalf("offset after the clock was corrected = %v, want 1s", got)
+	}
+	// The three events have to sit on the recent timeline, not 90s back. The
+	// first was corrected by the reading in force when it arrived, so it
+	// lands 2s old; the two the corrected clock sent land alongside it. Under
+	// a latched 90s offset all three would sit at base and the two later ones
+	// would still be, so only the first would fall inside the window.
+	sum := core.Summarize(c.agents, now)
+	if len(sum.Rates) != 1 {
+		t.Fatalf("rates = %+v, want one remote row", sum.Rates)
+	}
+	if sum.Rates[0].Tokens != 120 {
+		t.Errorf("remote tokens = %d, want 120: the corrected events are outside the window", sum.Rates[0].Tokens)
+	}
+	if sum.Rates[0].Last.After(now) {
+		t.Errorf("remote Last = %v, in this machine's future", sum.Rates[0].Last)
+	}
+
+	// The superseded row must not delete the offset now in force when it ages
+	// out: the ledger holds one entry per (agent, skew), and the count cap
+	// walks past the older twin first.
+	now = base.Add(core.AgentRateWindow + 2*time.Second)
+	c.forgetAgedAgentSkews(now.Add(-agentIDHorizon))
+	if got, ok := c.agentSkews["remote"]; !ok {
+		t.Fatal("the offset in force was dropped with its superseded row")
+	} else if got != time.Second {
+		t.Errorf("offset after ageing = %v, want the 1s reading to survive", got)
+	}
+}
+
+// Two hosts running the same agent post under one canonical name, and each
+// carries its own clock error. Latching the first name seen would hold the
+// other host's events back by that error, dropping a working agent's tokens
+// out of the window. The ledger holds the smallest lead, so a host on this
+// machine's timeline pulls the shared name onto it.
+func TestRecordAgentSharedNameTakesTheSmallerOffset(t *testing.T) {
+	c := New(nil, time.Second)
+	base := time.Now()
+	now := base
+	c.SetNow(func() time.Time { return now })
+
+	const fast = 60 * time.Second
+	c.RecordAgent(core.AgentEvent{At: now.Add(fast), Agent: "claude", OutputTokens: 40})
+
+	// A second machine, whose clock is right, reports under the same name.
+	now = base.Add(3 * time.Second)
+	if !c.RecordAgent(core.AgentEvent{At: now, Agent: "claude", OutputTokens: 40}) {
+		t.Fatal("the on-timeline event was not retained")
+	}
+	if got := c.agentSkews["claude"]; got != 0 {
+		t.Fatalf("offset = %v, want 0: an on-timeline host is the better estimate", got)
+	}
+	sum := core.Summarize(c.agents, now)
+	if len(sum.Rates) != 1 || sum.Rates[0].Tokens != 80 {
+		t.Errorf("rates = %+v, want one claude row of 80 tokens", sum.Rates)
+	}
+}
+
 // A retried ingest POST (lost 202, replayed NDJSON) carries the same id;
 // the retained feed must stay a single event so rates do not double-count.
 func TestRecordAgentSameIDKeptOnce(t *testing.T) {

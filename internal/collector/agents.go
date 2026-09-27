@@ -33,11 +33,11 @@ type agentIDEntry struct {
 	at time.Time
 }
 
-// agentSkewEntry is one agent's clock offset: how far the timestamps on its
-// events sat ahead of arrival when the agent was first seen. Every stamp that
-// agent sends carries the same offset, so recording it once is enough to put
-// the whole agent on this machine's timeline, spacing intact. An agent on this
-// timeline records zero and is stored exactly as it arrived.
+// agentSkewEntry is one agent's clock offset: the smallest lead its timestamps
+// have sat ahead of arrival. Every stamp that agent sends carries the same
+// offset, so one reading is enough to put the whole agent on this machine's
+// timeline, spacing intact. An agent on this timeline records zero and is
+// stored exactly as it arrived.
 type agentSkewEntry struct {
 	agent string
 	skew  time.Duration
@@ -113,13 +113,32 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	// nothing is older than the window's cutoff. The offset is one clock
 	// reading, not elapsed time, so subtracting it leaves the spacing the
 	// sender measured and the rate the summary derives from it.
+	//
+	// The ledger holds the smallest lead seen for the agent, and a later
+	// event that leads by less lowers it. Latching the first reading instead
+	// made one outlier decide the timeline for the whole horizon, in two ways
+	// a real sender produces: a clock that was 90s fast and was then corrected
+	// (NTP, a resumed laptop) keeps every later event 90s stale, and two hosts
+	// both running claude post under one name, so the fast one drags the
+	// other's events out of the window too. Both show as an agent that has
+	// gone quiet while it is still working, and the tokens are outside
+	// AgentRateWindow so no total counts them. A minimum is the right estimate
+	// here: a lead below the sender's true offset is a clock reading under
+	//stating it (jitter, a late POST), and subtracting too little leaves the
+	// stamp ahead rather than behind, where the sender's own next event
+	// corrects it again.
 	key := core.CanonicalAgent(ev.Agent)
+	lead := max(ev.At.Sub(now), 0)
 	offset, seen := c.agentSkews[key]
-	if !seen {
-		offset = max(ev.At.Sub(now), 0)
-		c.agentSkews[key] = offset
-		c.agentSkewOrder = append(c.agentSkewOrder, agentSkewEntry{agent: key, skew: offset, at: now})
+	if !seen || lead < offset {
+		c.agentSkews[key] = lead
+		// A fresh order entry, not a rewrite of the old one: forgetAgedAgentSkews
+		// matches on agent and skew, so the superseded row ages out on its own
+		// without deleting the offset now in force, the same way a reused id
+		// leaves its older twin behind.
+		c.agentSkewOrder = append(c.agentSkewOrder, agentSkewEntry{agent: key, skew: lead, at: now})
 		c.forgetAgedAgentSkews(now.Add(-agentIDHorizon))
+		offset = lead
 	}
 	ev.At = ev.At.Add(-offset)
 	// The id index answers the dedup check in one map probe. Scanning the

@@ -78,6 +78,43 @@ type AgentSummary struct {
 	Own   []AgentRate // the same, counting only unattributed tokens
 }
 
+// agentAcc is one agent's running totals over the summary window.
+type agentAcc struct {
+	tokens   int64
+	prompt   int64
+	thinking int64
+	first    time.Time
+	last     time.Time
+	// via is the engine every attributed event named, and viaSplit records
+	// that the agent named more than one across the window. Neither is read
+	// off the last event walked: the feed is not time-ordered, so that made
+	// the label depend on arrival order.
+	via      string
+	viaSplit bool
+	n        int
+	// Unattributed half. Kept per event rather than per agent: an
+	// agent that connects to (or leaves) a monitored engine mid-window
+	// contributes the slice that went direct.
+	ownTokens int64
+	ownPrompt int64
+	ownFirst  time.Time
+	ownLast   time.Time
+	ownN      int
+}
+
+// viaEngine is the engine a rate row may name: one every in-window event of
+// the agent went through. A direct event in the window withdraws the claim,
+// because the engine did not see those tokens and the totals below count them,
+// and so does a window that names two engines, because there is no single one
+// to point at. An agent in either case reports no label, which every consumer
+// already renders as the row's own measured rate.
+func (a *agentAcc) viaEngine() string {
+	if a.ownN > 0 || a.viaSplit {
+		return ""
+	}
+	return a.via
+}
+
 // Summarize walks the feed once and returns both views. Own is empty for an
 // agent whose every in-window event went through an engine, since that
 // agent contributes nothing to the unattributed totals.
@@ -85,24 +122,7 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 	if len(events) == 0 {
 		return AgentSummary{}
 	}
-	type acc struct {
-		tokens   int64
-		prompt   int64
-		thinking int64
-		first    time.Time
-		last     time.Time
-		via      string
-		n        int
-		// Unattributed half. Kept per event rather than per agent: an
-		// agent that connects to (or leaves) a monitored engine mid-window
-		// contributes the slice that went direct.
-		ownTokens int64
-		ownPrompt int64
-		ownFirst  time.Time
-		ownLast   time.Time
-		ownN      int
-	}
-	by := map[string]*acc{}
+	by := map[string]*agentAcc{}
 	cutoff := now.Add(-AgentRateWindow)
 	for _, ev := range events {
 		if ev.At.Before(cutoff) {
@@ -114,7 +134,7 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 		agent := CanonicalAgent(ev.Agent)
 		a, ok := by[agent]
 		if !ok {
-			a = &acc{first: ev.At}
+			a = &agentAcc{first: ev.At}
 			by[agent] = a
 		}
 		a.tokens = satAddPos(a.tokens, ev.OutputTokens)
@@ -130,7 +150,13 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 		if ev.At.After(a.last) {
 			a.last = ev.At
 		}
-		a.via = ev.ViaEngine
+		if ev.ViaEngine != "" {
+			if a.via == "" {
+				a.via = ev.ViaEngine
+			} else if a.via != ev.ViaEngine {
+				a.viaSplit = true
+			}
+		}
 		a.n++
 		if ev.ViaEngine == "" {
 			if a.ownN == 0 {
@@ -153,12 +179,15 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 	}
 	for name, a := range by {
 		r := AgentRate{
-			Agent:     name,
-			Tokens:    a.tokens,
-			Prompt:    a.prompt,
-			Thinking:  a.thinking,
-			Last:      a.last,
-			ViaEngine: a.via,
+			Agent:    name,
+			Tokens:   a.tokens,
+			Prompt:   a.prompt,
+			Thinking: a.thinking,
+			Last:     a.last,
+			// The engine label says the engine already counts these tokens, so
+			// it is claimed only when it is true of the whole row; see
+			// agentAcc.viaEngine.
+			ViaEngine: a.viaEngine(),
 		}
 		// A rate needs a span. One event says how much, not how fast, so it
 		// reports tokens without a rate.
