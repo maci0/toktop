@@ -37,6 +37,14 @@ const (
 	zstdMaxFrameBytes = 8 << 20
 	// zstdMaxDecodeMemory bounds decompressed output of one frame.
 	zstdMaxDecodeMemory = 32 << 20
+	// zstdMaxPlainBytes bounds the decompressed output of one decodeZstdPrefix
+	// call across every frame in the window. zstdMaxDecodeMemory is applied by
+	// the decoder per DecodeAll call, so a window of many small frames resets
+	// it on each iteration: an RLE frame costs 10 compressed bytes and yields
+	// 128 KiB, so 8 MiB of such frames would grow the accumulator to ~100 GiB
+	// with every individual frame well inside the cap. The walk stops at the
+	// cap instead, and the remaining frames are read on the next poll.
+	zstdMaxPlainBytes = 32 << 20
 )
 
 // zstdTailBytes is the most newly-appended compressed bytes one poll will
@@ -218,7 +226,7 @@ func decodeZstdPrefix(src []byte) (plain []byte, consumed int, err error) {
 		return nil, 0, err
 	}
 	off := 0
-	for off < len(src) {
+	for off < len(src) && len(plain) < zstdMaxPlainBytes {
 		n, ok := zstdFrameLen(src[off:])
 		if !ok {
 			break

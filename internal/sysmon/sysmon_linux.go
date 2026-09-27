@@ -407,6 +407,13 @@ func readSensors(inputs []sensorInput) []core.TempReading {
 	return out
 }
 
+// sensorLabel normalizes a hwmon name/label or thermal-zone type. These are
+// file contents on a host toktop may not own, and they reach a terminal, so
+// escape sequences are stripped before the value is stored.
+func sensorLabel(raw string) string {
+	return strings.ToLower(strings.TrimSpace(core.SanitizeText(raw)))
+}
+
 func listHwmon(root string) []sensorInput {
 	chips, err := filepath.Glob(filepath.Join(root, "hwmon*"))
 	if err != nil {
@@ -418,14 +425,14 @@ func listHwmon(root string) []sensorInput {
 		if err != nil {
 			continue
 		}
-		chipName := strings.ToLower(strings.TrimSpace(string(nameB)))
+		chipName := sensorLabel(string(nameB))
 		isGPUChip := core.ContainsAny(chipName, gpuChips...)
 		inputs, _ := filepath.Glob(filepath.Join(chip, "temp*_input"))
 		for _, in := range inputs {
 			label := chipName
 			base := strings.TrimSuffix(filepath.Base(in), "_input")
 			if lb, err := os.ReadFile(filepath.Join(chip, base+"_label")); err == nil {
-				label = strings.ToLower(strings.TrimSpace(string(lb)))
+				label = sensorLabel(string(lb))
 			}
 			gpu := isGPUChip || core.ContainsAny(label, "gpu", "junction", "hotspot", "edge")
 			out = append(out, sensorInput{path: in, label: label, gpu: gpu})
@@ -445,7 +452,7 @@ func listThermalZones(root string) []sensorInput {
 		if err != nil {
 			continue
 		}
-		typ := strings.ToLower(strings.TrimSpace(string(tb)))
+		typ := sensorLabel(string(tb))
 		out = append(out, sensorInput{
 			path:  filepath.Join(z, "temp"),
 			label: typ,

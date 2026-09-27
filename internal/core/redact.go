@@ -32,9 +32,17 @@ func RedactHome(msg string) string {
 	sep := string(filepath.Separator)
 	from, to := home+sep, "~"+sep
 	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
-		return replaceFold(msg, from, to)
+		msg = replaceFold(msg, from, to)
+	} else {
+		msg = strings.ReplaceAll(msg, from, to)
 	}
-	return strings.ReplaceAll(msg, from, to)
+	// A message that ends at the home directory itself ("cannot chdir
+	// /home/me") carries the same account name as a path under it, and the
+	// separator-terminated match above leaves it untouched.
+	if msg == home {
+		return "~"
+	}
+	return msg
 }
 
 // replaceFold replaces every case-insensitive occurrence of old with new,

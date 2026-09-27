@@ -74,6 +74,16 @@ const (
 // is older than storeLockStale, so the store cannot wedge.
 func lockStore(path string, fn func() error) error {
 	lock := path + storeLockSuffix
+	// The lock lives beside the store, and the store's directory is created by
+	// the write inside fn. On a first remote connect the directory does not
+	// exist yet, the exclusive create fails with ENOENT rather than EEXIST, and
+	// the fallback below would run the read-modify-write with no lock at all:
+	// two first contacts racing on a fresh install, the loser renaming away
+	// the winner's pin, and the next connect re-trusting that host silently.
+	// Create the directory first so the lock is always real.
+	if err := os.MkdirAll(filepath.Dir(lock), 0o700); err != nil {
+		return err
+	}
 	deadline := time.Now().Add(storeLockWait)
 	for {
 		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
@@ -145,7 +155,16 @@ func tofu() (ssh.HostKeyCallback, error) {
 					path)
 			}
 			store[hostname] = line
-			return writeKnownHosts(path, store)
+			if err := writeKnownHosts(path, store); err != nil {
+				return err
+			}
+			// First contact is the one moment the operator can still judge the
+			// key. OpenSSH says so; a silent trust means a fresh config dir, a
+			// different account, or a container with no store accepts whatever
+			// key is presented, with nothing in the output to notice.
+			fmt.Fprintf(os.Stderr, "toktop: first use of %s, host key %s pinned to %s\n",
+				hostname, short(line), fingerprintOf(line))
+			return nil
 		})
 	}, nil
 }

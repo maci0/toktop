@@ -131,6 +131,44 @@ func (c *handshakeConn) Read(b []byte) (int, error) {
 	return n, err
 }
 
+// newClientConnCtx runs the SSH transport handshake under ctx. x/crypto/ssh
+// consults neither a context nor a deadline of its own, and handshakeConn
+// lifts its deadline the moment the version banner arrives (interactive
+// password auth may then take as long as the user needs). A peer that sends
+// the banner and then stalls, or stalls mid key exchange, would otherwise
+// block here forever: nothing observes the cancel from a signal handler, and
+// the dashboard becomes unkillable by Ctrl-C. Closing the conn unblocks the
+// handshake's read, which then reports the closed-conn error.
+func newClientConnCtx(ctx context.Context, c net.Conn, addr string, cfg *ssh.ClientConfig) (ssh.Conn, <-chan ssh.NewChannel, <-chan *ssh.Request, error) {
+	type result struct {
+		conn  ssh.Conn
+		chans <-chan ssh.NewChannel
+		reqs  <-chan *ssh.Request
+		err   error
+	}
+	// Buffered: after a cancel the goroutine still delivers, and nobody is
+	// left reading.
+	done := make(chan result, 1)
+	go func() {
+		cc, chans, reqs, err := ssh.NewClientConn(c, addr, cfg)
+		done <- result{cc, chans, reqs, err}
+	}()
+	select {
+	case r := <-done:
+		return r.conn, r.chans, r.reqs, r.err
+	case <-ctx.Done():
+		c.Close()
+		// The handshake may have completed in the same instant; drop the
+		// connection rather than leak its goroutines and fds.
+		go func() {
+			if r := <-done; r.conn != nil {
+				r.conn.Close()
+			}
+		}()
+		return nil, nil, nil, ctx.Err()
+	}
+}
+
 // Connect establishes an authenticated connection to t. Credentials are tried
 // in order: explicit key file, config/default keys, agent, then a password
 // (TOKTOP_SSH_PASSWORD first, else an interactive prompt when stdin is a
@@ -190,9 +228,12 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		nc.Close()
 		return nil, fmt.Errorf("dial %s: %w", addr, err)
 	}
-	cc, chans, reqs, err := ssh.NewClientConn(hc, addr, cfg)
+	cc, chans, reqs, err := newClientConnCtx(ctx, hc, addr, cfg)
 	if err != nil {
 		nc.Close()
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
 		return nil, fmt.Errorf("ssh %s: %w", t.userHost(), authHint(err))
 	}
 	if err := hc.SetDeadline(time.Time{}); err != nil {
