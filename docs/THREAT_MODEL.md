@@ -7,20 +7,20 @@ they live and what already stands in their way.
 
 - **Last reviewed:** 2026-09-27 (every claim below re-read against code at
   this commit: ingest, bearer, provider, probe, remote, selfupdate, selfreload,
-  gpu, agentusage, workflows, Makefile, site/worker.js). The most recent pass
-  re-anchored every `site/worker.js`, `internal/bearer/bearer.go`,
-  `internal/provider/discover.go`, and `internal/remote/discover.go` line
-  reference, all of which had drifted against later commits, and recorded two
-  behavior changes in the worker: `/health` now reports 503 while the asset
-  binding is unbound, and every answer carries `server-timing`. No risk,
-  boundary, or gap changed; the documentation-claims section lists what moved.
-  The pass before it corrected three drifted claims: the ingest kind default
-  (M5), the discovery port bound (M22, now gap 9), and the site forwarding
-  claim. M13's ssh algorithm claim was re-verified against the pinned
-  x/crypto source and upheld. The first pass the same day re-anchored every
-  `site/worker.js` line reference, corrected the worker's request-bytes
-  claim, and added the environment, CLI, and agentusage surface that had
-  been missing (see the documentation-claims section).
+  gpu, agentusage, workflows, Makefile, site/worker.js). The current pass
+  found this file had drifted behind five commits that each changed a
+  documented control, and that the site paragraph had been re-anchored three
+  times in one day without the underlying problem being addressed. The
+  material correction is that the ingest server bounds concurrent POST bodies
+  process-wide (`maxInFlightEvents`), which the B1 denial-of-service threat
+  and gap 6 both described as unbounded; gap 6 is now written against the
+  real bound. Four controls that did not exist when those lines were written
+  are recorded (M30-M33), and gap 11's claim that a hostile `$USER` chooses
+  the ssh login account no longer holds, since the value is validated before
+  it reaches the transport. Site references now name a symbol as well as a
+  line. The per-pass correction diary that had accumulated below is gone; the
+  documentation-claims section records what holds and what the current pass
+  found instead. Nothing left the surface and no risk changed rank.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -36,7 +36,7 @@ targets, the static site worker at site/worker.js). Out of scope: the
 
 | # | Risk | Boundary | Where | State |
 |---|------|----------|-------|-------|
-| 1 | Ingest endpoint accepts unauthenticated events from any local process (any network peer if bound non-loopback via `--ingest`); forged telemetry renders as real agents | local processes -> ingest, network -> ingest | internal/ingest/server.go, cmd/toktop/main.go | No authentication; browser-driven forgery, DoS, injection, mixed-script names, and timestamp forgery mitigated (M3-M7, M21, M26) |
+| 1 | Ingest endpoint accepts unauthenticated events from any local process (any network peer if bound non-loopback via `--ingest`); forged telemetry renders as real agents | local processes -> ingest, network -> ingest | internal/ingest/server.go, cmd/toktop/main.go | No authentication; browser-driven forgery, DoS, injection, mixed-script names, and timestamp forgery mitigated (M3-M7, M21, M26, M30) |
 | 2 | Trust-on-first-use accepts a first-contact MITM by design; only key *changes* are refused | operator -> ssh target | internal/remote/knownhosts.go | Documented residual risk (README "Auth" section) |
 | 3 | Self-update installs whatever binary the named GitHub repo published: integrity rests on the release's own checksums.txt over TLS; no external signature exists | runtime -> update channel | internal/selfupdate/selfupdate.go, .github/workflows/release.yml | Checksum + size + GitHub-host URL verification present; owner/name validated (M18); signing absent |
 | 4 | SSH engine relays bind loopback listeners (`127.0.0.1:0`); any local process can reach the remote engines those listeners front | local processes -> remote engines | internal/remote/client.go | Bound loopback-only; no listener auth |
@@ -135,7 +135,12 @@ Every externally reachable input, with its code location:
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
    NDJSON stream), `GET`/`HEAD /healthz`
    (internal/ingest/server.go; routes registered from the endpoint table at
-   :257, the 405 `Allow` header names `GET, HEAD`). Binds `127.0.0.1:8420`
+   :257, the 405 `Allow` header names `GET, HEAD`). The health route is a
+   load report, not a bare liveness probe: it answers 503 with a
+   `degraded: N/64 event streams in flight` line and the same
+   `Retry-After` a refused POST carries while every decode slot is held
+   (M30, server.go, 466-478), so it cannot report `ok` for an endpoint that
+   is accepting nothing. Binds `127.0.0.1:8420`
    unless `--ingest` says otherwise (cmd/toktop/flags.go); any address is
    accepted, including routable interfaces. An empty `--ingest` is rejected
    (validateIngestAddr, validate.go) because `net.Listen` would treat it as
@@ -152,7 +157,10 @@ Every externally reachable input, with its code location:
    (cmd/toktop/update.go, 67-72); and the `help` and `version` subcommands
    (cmd/toktop/main.go, 51-53), which accept arbitrary trailing arguments
    (`runHelp(os.Stdout, os.Args[2:])`) and are reachable in forwarded form as
-   `toktop --help update` (main.go, 62-65). `--seed` fixes the demo RNG, and
+   `toktop --help update` (main.go, 62-65). A set-but-empty `--ssh-key` is
+   rejected with exit 2 rather than falling back to `~/.ssh/config` (M31), and
+   an `ssh://` target named more than once attaches once, which also keeps one
+   forward per remote port (M33). `--seed` fixes the demo RNG, and
    demo mode is the one path where the ingest endpoint runs against a
    synthetic recorder. `--repo` is checked with `ValidateRepo`
    (owner/name only). `--add` rejects non-http(s), missing host, and userinfo,
@@ -181,9 +189,11 @@ Every externally reachable input, with its code location:
    from this list before this pass:
    - `USER` then `USERNAME` supply the ssh login user when an `ssh://` target
      names no user, before falling back to the passwd database
-     (`currentUser`, internal/remote/client.go, 78-89). A hostile value
-     redirects the ssh connection to a different account on the same host;
-     it is a destination input, not a display string.
+     (`currentUser`, internal/remote/client.go, 81-89). Both are validated
+     through `validTargetField` and skipped when they would fail, so a
+     malformed value falls through instead of reaching the transport (M32);
+     any well-formed value is still a destination input, not a display
+     string.
    - `HOME` / `USERPROFILE` via `os.UserHomeDir` outranks every other path
      root this model discusses: `~/.ssh/config`, the default identity set,
      `~/.gauntlet/agents.json`, every built-in transcript root, the opencode
@@ -303,23 +313,23 @@ Deployment surface:
   signature step exists. Tag names that reach ldflags and dist filenames are
   refused unless they are a safe identifier (release.yml).
 - The marketing site is a single Cloudflare Worker serving one static page
-  from an embedded string (site/worker.js, 751 lines): GET/HEAD only (the
-  method guard runs twice, at :620-622 for image paths and :687-689 for the
+  from an embedded string (site/worker.js, 813 lines): GET/HEAD only (the
+  method guard runs twice, at :678-681 for image paths and :736-739 for the
   page, and any other method gets 405 with `allow: GET, HEAD`), a `/health`
-  route (:688-717), weak FNV ETag over the page with weak `If-None-Match`
-  matching (ETAG_HASH :335-344, ETAG :346, ifNoneMatchMatches :352-364, the
-  304 answer :728-739), content negotiation (brotli, zstd, gzip, identity)
+  route (:740-770), weak FNV ETag over the page with weak `If-None-Match`
+  matching (ETAG_HASH :351-360, ETAG :362, ifNoneMatchMatches :368-377, the
+  304 answer :786-797), content negotiation (brotli, zstd, gzip, identity)
   compressed once per isolate, keyed by `Vary: Accept-Encoding` on every
-  page response (VARY :492, PAGE_CACHE_CONTROL :487, representationFor
-  :465-481), and hardening headers
+  page response (VARY :518, PAGE_CACHE_CONTROL :513, representationFor
+  :491-507), and hardening headers
   (nosniff, HSTS, referrer-policy, CSP
   `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
   base-uri 'none'; form-action 'none'; frame-ancestors 'none'`) on every
-  page, image, and health response (SECURITY_HEADERS, :494-501; the same set
+  page, image, and health response (SECURITY_HEADERS, :520-527; the same set
   adds `x-frame-options: DENY` and an HSTS of `max-age=31536000` with no
   `includeSubDomains`). Every answer also carries
   `server-timing: edge;dur=<ms>`, which names the worker itself, not any
-  origin (serverTiming, :543-546). wrangler.jsonc sets
+  origin (serverTiming, :590-592). wrangler.jsonc sets
   `assets.run_worker_first` with `html_handling: none` and
   `not_found_handling: none`, so /dashboard.png and related images hit that
   Worker path instead of the asset pipeline; it also publishes the worker on
@@ -330,33 +340,33 @@ Deployment surface:
   The one forward is on image paths: the Worker re-issues the request to
   `env.ASSETS` carrying the full request URL (so any query string rides
   along) but forwarding only `if-none-match` and `if-modified-since`
-  (worker.js, :637-655, the fetch itself at :643), and an asset-store failure
+  (worker.js, :688-702, the fetch itself at :696), and an asset-store failure
   becomes a one-line text/plain body rather than the store's HTML error
-  page (assetErrorBody, :565-570, :663-670), with `cache-control: no-store`
-  on any non-200/304 answer so a 404 cannot stick (:675-680).
+  page (assetErrorBody, :612-615, :713-717), with `cache-control: no-store`
+  on any non-200/304 answer so a 404 cannot stick (:718-725).
   `style-src 'unsafe-inline'` is idle:
   the HTML is a compile-time string.
-  Any path that is neither in `IMAGE_PATHS` (:584-589) nor `/health` serves
-  the marketing page with 200, not a 404 (the catch-all, :718-751). A client
+  Any path that is neither in `IMAGE_PATHS` (:631-636) nor `/health` serves
+  the marketing page with 200, not a 404 (the catch-all, :778-813). A client
   that refuses every offered coding gets 406 with `vary: Accept-Encoding`
-  (:724-727). An unbound `env.ASSETS` on an image path logs and returns 404
-  (:623-636), and any throw becomes a 500 with the body `internal error`
-  (:598-616); both answers go out through ERROR_HEADERS (:503-511), which is
+  (:783-785). An unbound `env.ASSETS` on an image path logs and returns 404
+  (:685-687), and any throw becomes a 500 with the body `internal error`
+  (:660-672); both answers go out through ERROR_HEADERS (:529-533), which is
   otherwise undescribed.
   `/health` is a binding check, not a presence check: with `env.ASSETS`
   unbound it answers 503 with
   `degraded: no asset binding; the dashboard captures are not served`
-  rather than `ok` (:688-717), because the page still serves while every
+  rather than `ok` (:740-770), because the page still serves while every
   capture it shows is a 404. `make site-deploy` polls it with
   `curl -fsS` (Makefile, :384), which fails on that 503, so a deploy that
   shipped without its assets cannot report success. What the poll still
   cannot tell is *which* version answered: an upload that never took effect
   leaves an older live version with its bindings answering `ok`.
   Finally, the set of request bytes and strings the Worker inspects is
-  larger than this file previously claimed: `logFailure` (:552-563) writes a
+  larger than this file previously claimed: `logFailure` (:599-608) writes a
   JSON line carrying the caller-controlled `cf-ray` header, plus `method` and
   `path` on the `assets-unbound`, `asset-missing`, `asset-store-error`, and
-  `unhandled` lines (failRequest, :528-541). The unhandled line adds
+  `unhandled` lines (failRequest, :573-582). The unhandled line adds
   `error: String(err?.message ?? err)`, a thrown message from the asset store
   or the runtime rather than from the caller. The values are JSON-encoded, so
   this is not injection into the log, but a caller can write arbitrary
@@ -444,8 +454,10 @@ Deployment surface:
   and which identity is offered (target.go); `GAUNTLET_HOME` /
   `~/.gauntlet/agents.json` defines which processes count as agents and which
   files are read (cmd/toktop/main.go); `PATH` decides which vendor
-  CLIs execute (gpu.go). All three are same-user-writable inputs treated
-  as trusted.
+  CLIs execute (gpu.go, whose stdout is capped at 1 MiB, M33); `USER` /
+  `USERNAME` choose the login account and `HOME` / `USERPROFILE` relocates
+  every home-relative path, both of which are validated for shape at most
+  (M32, gap 11). All are same-user-writable inputs treated as trusted.
 - **B7: host filesystem -> agentusage (opt-in).** With `--agents`, process
   discovery plus transcript/SQLite reads cross from other processes' files
   into the dashboard. The operator never names those files; `agents.json`
@@ -494,11 +506,16 @@ ports that are then exposed on local loopback (client.go).
 - *Information disclosure*: none beyond presence (`/healthz` answers any
   requester, server.go). Residual: a routable bind would otherwise have
   put peer IPs on stderr; logRemote drops them.
-- *Denial of service*: mitigated (see M3-M5). Residual: no per-peer
-  connection quota; each open POST holds an fd plus goroutine until the byte
-  cap, body-idle timeout (1m), or absolute lifetime (10m) reaps it
-  (server.go) (a local flood of stalled POSTs is bounded but
-  nonzero). MaxHeaderBytes is 16 KiB (server.go).
+- *Denial of service*: mitigated (see M3-M5, M30). Bounded three ways per
+  connection (byte cap, 1 min body-idle, 10 min absolute lifetime) and a
+  fourth across the endpoint: at most `maxInFlightEvents` 64 POST bodies are
+  decoded at any instant, process-wide, and a POST arriving when every slot is
+  held is refused at once with 503 and `Retry-After` rather than read
+  (server.go, 372-387, 529). Residual: the cap is a count, not a per-peer
+  quota, so 64 stalled local POSTs still hold 64 descriptors and goroutines
+  and the 65th legitimate sender is refused with them (gap 6); nothing
+  attributes a slot to a peer, so one process can occupy all of them.
+  MaxHeaderBytes is 16 KiB (server.go, 81).
 - *Elevation of privilege*: none; event content reaches only parsing and
   rendering.
 
@@ -656,7 +673,7 @@ Controls verified in code, with the threats they cover:
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go |
 | M8: Engine response caps: 4 MiB JSON, 8 MiB text, 256-rune error snippets | memory blowup and log flooding from hostile engines (B2 DoS/disclosure) | provider/provider.go httpStatus; core.Snippet |
 | M9: Non-finite rejection in metrics (per-value and family-sum overflow guard) and vendor CSV/JSON coercion | poisoned counters/rates propagating through history (B2 tampering) | provider.go; gpu.go; collector counter-reset clamp collector.go |
-| M10: Probes request 32 tokens, Ollama `think=false`, OpenAI `n=1`; streaming readers stop after 32 observed content/reasoning units or 1 KiB decoded content/reasoning, with 16 KiB scanner and 128 KiB stream limits. Non-stream OpenAI JSON over 16 KiB is rejected. Reported token counts trusted only up to 128; fixed prompt, model-id cap 256, embed/rerank filtering, and 429/503 backoff 15s–5m | Limits client work and reduces B2 compute/spend amplification; request parameters and closing a response do not guarantee that a backend stops generation or billing | internal/probe/probe.go |
+| M10: Probes request 32 tokens, Ollama `think=false`, OpenAI `n=1`; streaming readers stop after 32 observed content/reasoning units or 1 KiB decoded content/reasoning, with 16 KiB scanner and 128 KiB stream limits. Non-stream OpenAI JSON over 16 KiB is rejected. Reported token counts trusted only up to 128; fixed prompt, model-id cap 256, embed/rerank filtering, and 429/503 backoff 15s–5m. A wire-reported `eval_duration` is passed through `nanoseconds`, which returns zero for a negative value, one outside the int64 nanosecond range, or one beyond `maxEvalDuration` 24h, so a count that would wrap into a plausible duration cannot reach `fitEvalDuration`'s band rescale and report a throughput the engine never claimed | Limits client work and reduces B2 compute/spend amplification; request parameters and closing a response do not guarantee that a backend stops generation or billing; a hostile engine's reported durations cannot wrap into a plausible rate (B2 tampering) | internal/probe/probe.go |
 | M11: Poll/scan/probe timeouts (700ms/1.5s/30s) + context-bounded requests | hung-engine DoS (B2/B3) | discover.go; provider.go; probe.go |
 | M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, writes serialized within and across processes (mutex plus `known_hosts.lock` over the whole read-modify-write, stale locks broken), temp-file plus rename with the directory entry flushed (core.SyncDir, shared with the self-update install), and unparsable, conflicting-duplicate or record-free stores failing the read | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect, in one process or two; corruption or an appended line read as a shorter store, forcing a re-TOFU | knownhosts.go; core/fs.go |
 | M13: Banner deadline lifted only on complete version line; 15s command timeout; keepalive with bounded probe waits; SupportedAlgorithms (no ssh-rsa SHA-1 / DSA); forwardDialTimeout 8s | trickle/silent-peer hangs (B3 DoS); weak host-key algorithms; hung tunnel dial (B3b) | client.go |
@@ -668,7 +685,7 @@ Controls verified in code, with the threats they cover:
 | M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo rejected; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, and a silently reduced `--agents` watch set | validate.go validateFlags, validateOnceEnv, validateIngestAddr; endpoints.go validateAddURL; main.go logActiveConfig; | 
 | M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, 8); the release workflow holds `contents: write` (.github/workflows/release.yml, 7), which is the scope that can push a tag and its assets, so it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift (deployment surface); release-channel write scope | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 7, Makefile |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
-| M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (discover.go, 41-48), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 9) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
+| M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (discover.go, 41-48, the parse at :45), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 9) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; sample.go; opencode_sqlite.go |
 | M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go; internal/ingest/server_test.go |
@@ -676,161 +693,134 @@ Controls verified in code, with the threats they cover:
 | M27: logRemote rewrites non-loopback peer addresses to `"remote"` on the audit line and on http.Server.ErrorLog | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | server.go |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go |
 | M29: Transcript, candidate-walk, and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused. The ownership scan is capped at `ownerScanLines` and refused durably when no header is found, so an undecided session is not re-read on every poll | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watcher.go, 296; agentusage/candidates.go, 121 (`walkTranscripts`); agentusage/crush_sqlite.go, 118 |
+| M30: In-flight POST cap. `eventSlots` is a process-wide counting channel of `maxInFlightEvents` 64 acquired before the body is read; a POST that cannot take a slot is refused immediately with 503 and one shared `Retry-After: 1` (RFC 9110 whole seconds) rather than queued. `handleHealth` reports the same degraded state with the same delay, so a probe that keeps saying `ok` while every POST is refused cannot be believed. `stallReason` names which of the two 408 bounds broke (`no body bytes for 1m` vs `stream exceeded the 10m lifetime`), since the raw i/o timeout is identical for both and the two have opposite sender-side fixes | a local pile-up of stalled POST bodies holding an fd and goroutine each for a minute (B1 DoS); a sender or health probe inventing a shorter retry interval than the slots free (B1 DoS) | internal/ingest/server.go, 372-387, 442-458, 466-478, 529, 599 |
+| M31: `--ssh-key` is rejected when set to an empty value (exit 2). An empty value is indistinguishable from the flag never being given: the run silently fell back to `~/.ssh/config` and authenticated with a key the operator did not choose | silent identity substitution from a mistyped or quoted-empty flag (B4 disclosure) | cmd/toktop/validate.go, 206-220; cmd/toktop/main.go, 130-133 |
+| M32: `currentUser` validates `USER` and `USERNAME` through `validTargetField` before handing either to the transport and falls through to the passwd database when either is empty or would fail validation; the passwd name is passed through `basenameLogin` so a Windows `DOMAIN\user` yields `user`. `TOKTOP_SSH_PASSWORD` moved behind the exported `remote.PasswordEnv` constant so the startup warning that names an unusable variable spells it the way the code reads it | a hostile environment redirecting the ssh connection to a different account, or naming an invalid string the transport would reject later as a password failure (B6) | internal/remote/client.go, 81-104; internal/remote/target.go, 258; internal/remote/auth.go, 93-107; cmd/toktop/validate.go, 137-147 |
+| M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick (B5 DoS) | cmd/toktop/main.go, 548-575; internal/remote/client.go, 532-570; internal/gpu/gpu.go, 90-121 |
 
-Documentation claims checked against code on 2026-09-27. The last two
-bullets are from the third pass, the same day, after
-`fix: make failed site requests as measurable and honest as served ones`
-grew site/worker.js past the revision the second pass anchored against:
+Documentation claims checked against code on 2026-09-27. The first four
+bullets are what the current pass found: this file had drifted behind five
+commits of security-relevant change, and the site paragraph had been
+re-anchored three times in one day without the drift that caused it being
+addressed. The list after them records claims that hold as written, so the
+next pass has something to re-check rather than a narrative of what used to
+be wrong:
 
-- The site paragraph's references had drifted again. The method guards it
-  cited at :602 and :660 are at :620-622 and :687-689, `/health` it cited
-  at :663-678 is at :688-717, the `env.ASSETS` forward it cited at
-  :614-624 is at :637-655, `logFailure` at :531-537 is at :552-563,
-  `IMAGE_PATHS` at :563 is at :584-589, the 406 at :685-689 is at :724-727,
-  the unbound-`env.ASSETS` 404 at :605-610 is at :623-636, and
-  `ERROR_HEADERS` at :503-514 is at :503-511. The ETAG, VARY,
-  PAGE_CACHE_CONTROL, SECURITY_HEADERS, and representationFor anchors
-  still hold. Every site reference has been re-anchored again, because this
-  file's own maintenance rule is that a line reference is what lets the next
-  pass diff a claim against code.
-- `/health` is no longer a presence check. It answers 503 with
+- The B1 denial-of-service threat and gap 6 both described the ingest
+  endpoint as bounded per connection but unbounded across connections, and
+  neither mentioned `maxInFlightEvents`. The cap is the oldest of the five
+  commits' worth of drift and the only one that made a threat statement
+  wrong rather than incomplete: a flood of stalled local POSTs is now refused
+  at the 65th, not merely bounded at the 1-minute reap. B1 DoS and gap 6
+  rewritten against the real bound; the residual is now the absence of a
+  sender identity on a slot, not the absence of a cap. Recorded as M30.
+- Gap 11 claimed a hostile `$USER` is handed to the ssh transport. It is not:
+  `currentUser` runs both `USER` and `USERNAME` through `validTargetField`
+  and skips a value that would fail, so a malformed one now falls through to
+  the passwd database and the transport sees nothing. The claim is narrowed
+  to what validation cannot see (any well-formed name is still accepted, and
+  `HOME` is not validated at all) and M32 records the control. Gap 11's
+  `internal/remote/client.go, 78-89` reference had drifted to 81-89 and is
+  re-anchored.
+- Four controls did not exist when these lines were written and are now
+  recorded: `--ssh-key` set-but-empty rejected (M31), the `$USER` and
+  `TOKTOP_SSH_PASSWORD` handling (M32), the repeated-ssh-target and
+  per-port forward dedup with the vendor-CLI output cap (M33), and the
+  eval_duration range refusal folded into M10. None of them changes the
+  ranking in the summary; the repeated-target one narrows a real B3b
+  consequence, since attaching one host twice used to open a second set of
+  loopback relays and double-count its engines in the UI totals.
+- The `strconv.Atoi` in the shell-probe fallback was cited at
+  internal/remote/discover.go, :44; it is at :45, and gap 9 now says so.
+  The `41-48` range was already right, and the claim itself is unchanged
+  and re-verified: `p > 0` is still the only check on that path.
+- The site paragraph's references had drifted again, for the fourth time in
+  one day: the file is 813 lines, not the 751 the paragraph cited, and every
+  anchor had moved 30-60 lines. Re-anchored: the method guards at :678-681
+  and :736-739, `/health` at :740-770, the `env.ASSETS` forward at
+  :688-702, `logFailure` at :599-608, `failRequest` at :573-582,
+  `IMAGE_PATHS` at :631-636, the 406 at :783-785, the unbound-`env.ASSETS`
+  404 at :685-687, the unhandled-500 path at :660-672, and `ERROR_HEADERS`
+  at :529-533. Every site reference now names the symbol it points at as well
+  as the line, so the next pass can grep the symbol and see the drift without
+  trusting a number that a comment insertion moved. Earlier passes corrected
+  the same references three times; those corrections are gone rather than
+  appended, because a list of what was wrong last week is a fourth thing to
+  keep current and reads as a claim about the code when it is not one.
+
+Other claims checked against code on this pass, all of which hold as written:
+
+- `/health` answers 503 with
   `degraded: no asset binding; the dashboard captures are not served` when
-  `env.ASSETS` is unbound (worker.js, :688-717), and `make site-deploy`
-  polls it with `curl -fsS` (Makefile, :384), so a deploy that shipped
-  without its assets fails the gate instead of waiting out a green probe.
-  The paragraph above said the poll is a pure availability check; that is
-  still true of the case it cannot cover (an older live version with its
-  bindings answers `ok`), so the residual stands.
-- Every answer now carries `server-timing: edge;dur=<ms>`
-  (worker.js, :543-546). It names the worker, not an origin, so it adds no
-  new disclosure; recorded because the header set changed.
-- `failRequest` (:528-541) adds `error: String(err?.message ?? err)` to
-  the unhandled-500 line, so a thrown message from the asset store or the
-  runtime now reaches Workers Logs alongside the caller-controlled `cf-ray`.
-  The caller-controlled set is unchanged in kind: still JSON-encoded, still
+  `env.ASSETS` is unbound, and `make site-deploy` polls it with `curl -fsS`
+  (Makefile, :384), so a deploy that shipped without its assets fails the
+  gate instead of waiting out a green probe. The poll is still only a
+  presence-and-binding check: an older live version with its bindings answers
+  `ok` for an upload that never took effect.
+- Every answer carries `server-timing: edge;dur=<ms>`. It names the worker,
+  not an origin, so it adds no disclosure.
+- `failRequest` (:573-582) adds `error: String(err?.message ?? err)` to the
+  unhandled-500 line, so a thrown message from the asset store or the runtime
+  reaches Workers Logs alongside the caller-controlled `cf-ray`. The
+  caller-controlled set is unchanged in kind: JSON-encoded, so still
   caller-chosen strings in a log stream, not injection.
-- The bearer call-site and helper references had drifted too: `Set` at
-  :40-48, `Allow` at :57-66, `Apply` at :70-77, `admits` at :114-122, and
-  `CheckRedirect` at :97-113 (internal/bearer/bearer.go); the four `Apply`
-  call sites are provider/discover.go, 72 and 287, provider.go, 79, and
-  probe.go, 448. The scoping claim is unchanged and re-verified: `Apply`
-  sets the header only when the request's origin is in the allow map, and
-  the only writer to that map is `bearer.Allow` at cmd/toktop/main.go, 207,
-  reached solely from `--add` URLs.
-- The shell-probe fallback is at internal/remote/discover.go, 41-48 (the
-  `strconv.Atoi` at :44), not 70-74; the uncapped identification decoders
-  are at internal/provider/discover.go, 254, 308, 324, and the capped poll
-  path at internal/provider/provider.go, 101, 115. Gaps 5 and 9 stand as
-  written once the references are right.
-
-Earlier passes, same date:
-
-- The site paragraph's line references were all wrong. It cited the page
-  method guard at :517-519, `/health` at :520-535, `SECURITY_HEADERS` at
-  :416-423, the `env.ASSETS` forward at :484-490, and the page as served from
-  `representationFor` :388-404. In the current file those anchors are :660,
-  :663-678, :494-501, :614-624, and :465-481. The file grew past the
-  revision the citations were written against. Every site reference has been
-  re-anchored, because this file's own maintenance rule is that a line
-  reference is what lets the next pass diff a claim against code.
-- The site paragraph claimed "the only request bytes inspected are the
-  method, path, If-None-Match, If-Modified-Since, and Accept-Encoding
-  headers" and that nothing is stored. `logFailure` also reads the
-  caller-controlled `cf-ray` header and writes it, with `path`, into Workers
-  Logs (worker.js, 531-537, and the `assets-unbound`, `asset-missing`,
-  `asset-store-error` lines). `observability.enabled` is true
-  (site/wrangler.jsonc, 23). Corrected above; the values are JSON-encoded,
-  so the exposure is arbitrary caller-chosen strings in a log stream, not
-  injection.
-- The site paragraph did not say what an unknown path answers. It is the
-  marketing page with 200, not a 404 (the catch-all, worker.js, 679-712).
-  405 (with `allow: GET, HEAD`) and 406 answers also exist. Corrected.
-- The forward to `env.ASSETS` passes the whole request URL, so a query string
-  rides along; the previous wording said it carried only two headers, true
-  of headers and silent on the URL. Corrected.
-- The agent-store asset named dsh, crush, and opencode only. The default
+- The bearer call sites re-verified: `Set` at :40-48, `Allow` at :57-66,
+  `Apply` at :70-77, `admits` at :114-122, and `CheckRedirect` at :97-113
+  (internal/bearer/bearer.go); the four `Apply` call sites are
+  provider/discover.go, 72 and 287, provider.go, 79, and probe.go, 448.
+  `Apply` sets the header only when the request's origin is in the allow map,
+  and the only writer to that map is `bearer.Allow` at cmd/toktop/main.go,
+  207, reached solely from `--add` URLs.
+- The uncapped identification decoders are at
+  internal/provider/discover.go, 254, 308, 324: none passes an
+  `io.LimitReader` to `json.NewDecoder`, while the poll path does
+  (internal/provider/provider.go, 101, 115). Gap 5 stands.
+- M5's unknown-kind rule holds: internal/ingest/event.go, 63-70 keeps a
+  nonempty unknown kind (lowercased, sanitized, 24-rune cap) and only an
+  empty or sanitize-to-empty kind becomes `turn`.
+- M13's ssh algorithm claim was re-checked against
+  golang.org/x/crypto v0.57.0 `ssh/common.go`, 163-176 and upheld:
+  `ssh.SupportedAlgorithms()` carries only RSA-SHA2, ECDSA and Ed25519 host
+  keys, no `ssh-rsa` and no DSA.
+- M29 names three `os.OpenRoot` sites, not two: `walkTranscripts`
+  (agentusage/candidates.go, 121) is a third, re-run every second over each
+  transcript root.
+- M20's supply-chain list holds, including that CI runs
+  `permissions: contents: read` while the release workflow holds
+  `contents: write` (.github/workflows/ci.yml, 8;
+  .github/workflows/release.yml, 7). That scope is what a workflow or runner
+  compromise would use against the update channel of summary risk 3.
+- The agent-store asset names dsh, crush, and opencode, and the default
   `--agents` path also tails claude, codex, qwen, copilot, clanker, and the
   built-in pi, prime-agent, and feynman definitions
   (agentusage/registry.go, 93-121; agentusage/claude.go, 15; codex.go, 31).
-  None of those names appeared anywhere in this file. Corrected.
-- The env list presented itself as the inventory but omitted `USER` /
-  `USERNAME`, which choose the ssh login account
-  (internal/remote/client.go, 78-89), `HOME` / `USERPROFILE`, which relocates
-  every home-relative path this model reasons about, `PROCESSOR_IDENTIFIER`
-  on Windows, and `WINDIR` in the screenshot script. `NO_COLOR` and the
-  color env vars are read by lipgloss/termenv rather than by this
-  repository. Corrected.
-- The CLI entry point omitted the `help` and `version` subcommands, which
-  take arbitrary trailing arguments (cmd/toktop/main.go, 51-65), and the
-  `--demo`, `--probe`, `--interval`, `--frames`, `--seed`, `--version`, and
-  `--help` flags. Corrected.
-- The ingest entry point said `GET /healthz`; the route registers GET and
-  HEAD (internal/ingest/server.go, 347+, and the 405 `Allow` header).
-- M29 named two `os.OpenRoot` sites; `walkTranscripts`
-  (agentusage/candidates.go, 121) is a third, re-run every second over each
-  transcript root.
-- M20 listed the supply-chain controls but not that CI runs
-  `permissions: contents: read` while the release workflow holds
-  `contents: write` (.github/workflows/ci.yml, 8;
-  .github/workflows/release.yml, 7). That scope is what a workflow or
-  runner compromise would use against the update channel of summary risk 3.
-- B7 named symlink escape and root choice but not that transcript *content*
-  supplies the `cwd` that decides session ownership
-  (agentusage/transcript.go, 263 and 307), nor that Linux same-engine
-  attribution reads `/proc/<pid>/fd` of other processes
-  (agentusage/peers_linux.go, 72-126). Both are now boundaries, and the
-  first is gap 10.
-- gap 5 cited the uncapped identification decoders at discover.go 249, 303,
-  319; they are at 254, 308, 324. The claim itself is correct and was
-  re-verified: none of the three passes an `io.LimitReader` to
-  `json.NewDecoder`, while the poll path does
-  (internal/provider/provider.go, 101, 115).
-- The three claims the first pass corrected stand: M5 said an unknown event
-  kind defaults to `turn`, while
-  internal/ingest/event.go, 63-70 keeps a nonempty unknown kind
-  (lowercased, sanitized, 24-rune cap) and only an empty or
-  sanitize-to-empty kind becomes `turn`; M22 said every discovery port is
-  bounded 16-bit, which holds for the `/proc/net/tcp` parser but not for
-  the shell-probe fallback (now gap 9); the site paragraph said nothing
-  is forwarded anywhere, while image requests are re-issued to
-  `env.ASSETS`. M13's ssh
-  algorithm claim was re-checked against
-  golang.org/x/crypto v0.57.0 `ssh/common.go`, 163-176 and upheld:
-  `ssh.SupportedAlgorithms()` carries only RSA-SHA2, ECDSA and Ed25519
-  host keys, no `ssh-rsa` and no DSA.
+- The ingest route registers GET and HEAD on `/healthz`
+  (internal/ingest/server.go, 257 and the 405 `Allow` header); the
+  `help` and `version` subcommands take arbitrary trailing arguments
+  (cmd/toktop/main.go, 51-65).
+- `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are honored only when absolute. A
+  relative `XDG_CONFIG_HOME` would write the known_hosts store under the
+  working directory, where a later run from another directory would not find
+  the pins and would re-TOFU; the same rule for `XDG_DATA_HOME`
+  (agentusage/opencode_sqlite.go) costs an empty agent panel rather than a
+  lost pin. Both are named as ignored at startup.
 - README states a malformed `agents.json` "is reported at startup rather than
-  silently shrinking the watch" (README.md, 92-95). That matches the code;
-  this file previously said it warns and falls back to the built-in set, which
-  was wrong in both directions: the loader exits 2
-  (cmd/toktop/main.go, 143-152). Corrected above.
-- README "Zero vendor libraries", "Engines: how discovery works", and the SSH
-  auth chain match the code paths cited above, including ioreg on Darwin.
-- README documents the post-21e3feb scoping accurately: "--bearer TOKEN ...
-  sent to --add endpoints only" and the environment-variable table listing
-  `GITHUB_TOKEN` for `toktop update`; both match bearer.go and
-  selfupdate.go. This pass confirmed the token rides probes as well as
+  silently shrinking the watch" (README.md, 92-95), which matches the loader
+  exiting 2 (cmd/toktop/main.go, 143-152). README "Zero vendor libraries",
+  "Engines: how discovery works", the SSH auth chain, the loopback relay
+  listeners, the Origin-header 403, the stream-resume semantics, and the
+  ingest POST audit log all match the code paths cited above.
+- README documents the origin-scoped bearer correctly: "--bearer TOKEN ...
+  sent to --add endpoints only", and the environment table lists
+  `GITHUB_TOKEN` for `toktop update`. The token rides probes as well as
   identification and polls, but only to `--add` origins.
-- README documents the Origin-header 403, the stream-resume semantics, and
-  the ingest POST audit log; they match server.go Origin refusal, the fail()
-  path, and logRequest.
-- README documents loopback listeners for ssh engine relays
-  (client.go). The earlier claim that no local listeners exist is
-  gone.
-- README's env table lists `XDG_CONFIG_HOME`, which relocates the
-  known_hosts store on every platform (knownhosts.go). It was missing from
-  the table before this pass; the entry-point list already recorded it. A
-  relative value is now ignored rather than honored: the store would
-  otherwise be written under the working directory, where a later run from
-  another directory would not find the pins and would re-TOFU. The same
-  rule applies to `XDG_DATA_HOME` (agentusage/opencode_sqlite.go), where
-  the consequence is an empty agent panel rather than a lost pin.
 - SECURITY.md states there is no dedicated disclosure contact and no
   supported-version matrix, and that `toktop update` fetches the latest
-  release. That matches selfupdate.go (Check always hits
-  `/releases/latest`, :184-186, and the named repo defaults to
-  `maci0/toktop`, :40-41; NewerThan is exact-tag inequality,
-  :217-222, so there is no channel of old majors to support). It invents no
-  reporting SLA, and the link it carries to this file resolves.
+  release. That matches selfupdate.go: `Check` always hits
+  `/releases/latest` (:184-186), the named repo defaults to `maci0/toktop`
+  (:40-41), and `NewerThan` is exact-tag inequality (:217-222), so there is
+  no channel of old majors to support. It invents no reporting SLA, and its
+  link to this file resolves.
 
 Single points of failure: the render-time sanitizer (core/sanitize.go) is the
 only control standing between all untrusted text and the terminal; every new
@@ -910,7 +900,7 @@ Recorded as threats with locations; fixes do not happen in this document:
    mode 0600, or in-process HTTP instead of a TCP port) belongs to
    sec-review.
 5. **Identification responses are decoded without a body cap** (Low-Medium,
-   new this pass): the engine-identification decoders in
+   re-verified): the engine-identification decoders in
    `json.NewDecoder(resp.Body)` take no `io.LimitReader`, unlike the poll path
    (internal/provider/provider.go, 88, 113;
    internal/provider/discover.go, 254, 308, 324). Enabling path: any process that
@@ -921,9 +911,15 @@ Recorded as threats with locations; fixes do not happen in this document:
    a slow-drip body holds the discovery goroutine until the timeout fires.
    Applying the existing 4 MiB cap to the identification decoders belongs to
    sec-review.
-6. **No per-peer ingest quotas** (Low): bounded per connection
-   (server.go) but not per peer; matters only once gap 1's exposure
-   question is settled.
+6. **Ingest slots are a count, not a per-peer quota** (Low, re-scoped this
+   pass): the endpoint refuses more than `maxInFlightEvents` 64 concurrent POST
+   bodies and advertises `Retry-After` (M30, server.go, 372-387), so a flood
+   is refused rather than absorbed. What the cap does not carry is a sender
+   identity: one local process can hold every slot, and the 65th honest sender
+   is refused alongside it. Per-peer attribution needs a peer notion this
+   endpoint does not have (it redacts non-loopback addresses to `"remote"` on
+   the audit line, M27, so even the log could not separate them). Gap 1's
+   exposure question still governs whether this matters.
 7. **Hot-reload and PATH-based tool execution** (risk 5, Low): acceptable for
    a same-user dev tool; revisit if toktop ever runs privileged. Unix-only
    for the re-exec half.
@@ -940,11 +936,12 @@ Recorded as threats with locations; fixes do not happen in this document:
    twice is the one repeat that does damage here, which is why it needs
    `dist/site.deployed`: it is a no-op rather than a second undo.
 9. **Discovery port bound missing on the shell-probe fallback** (Low, new
-   this pass): when the `/proc/net/tcp` sweep returns nothing, `Discover`
+   re-verified): when the `/proc/net/tcp` sweep returns nothing, `Discover`
    falls back to probing well-known ports through the remote shell and
    parses the remote's stdout with `strconv.Atoi`, accepting anything
-   `p > 0` (internal/remote/discover.go, 41-48). `FuzzParseDiscoveryOutput`
-   covers the `/proc/net/tcp` parser only, so the fallback is the one path
+   `p > 0` (internal/remote/discover.go, 41-48, the parse at 45).
+   `FuzzParseDiscoveryOutput` covers the `/proc/net/tcp` parser only, so the
+   fallback is the one path
    where a hostile remote can name an out-of-range forward port
    (`Discovery.Listening` -> `ForwardSet`, discover.go, 44-48). The forward
    simply fails to dial such a port, so the impact is a poisoned tunnel set
@@ -952,7 +949,7 @@ Recorded as threats with locations; fixes do not happen in this document:
    `parseNetTCP` is bounded, and extending the fuzz target to it, belongs
    to sec-review.
 10. **A watched transcript's own `cwd` decides session ownership** (Low, new
-    this pass): `owns` reads a working directory out of the session JSON
+    re-verified): `owns` reads a working directory out of the session JSON
     and compares it to the watched directory
     (agentusage/transcript.go, 263 and 307; `sessionCwd` at claude.go, 19,
     codex.go, 16). A writer of a watched store can therefore claim a
@@ -961,15 +958,21 @@ Recorded as threats with locations; fixes do not happen in this document:
     within the operator's own stores, not a boundary crossing, and the
     `ownerScanLines` cap means the scan is bounded. Belongs to sec-review if
     the attribution is meant to be authoritative.
-11. **`USER` / `USERNAME` choose the ssh login account** (Low, new this
-    pass): `currentUser` prefers them over the passwd database when an
-    `ssh://` target names no user (internal/remote/client.go, 78-89). A
-    hostile value authenticates as a different account on the target host,
-    with whatever the offered key unlocks there. The blast radius is bounded
-    by the keys the operator already offered, and every other path root in
-    this model follows `HOME`, which the same hostile environment controls;
-    treating `USER` and `HOME` as trusted same-user input belongs to
-    sec-review only if toktop is ever run with a less trusted environment.
+11. **A hostile environment still chooses the ssh login account and the
+    home path roots** (Low, narrowed this pass): `currentUser` validates
+    `USER` and `USERNAME` before use, so a value that could not be a login
+    name is skipped rather than passed to the transport (M32,
+    internal/remote/client.go, 81-104). What remains is the part validation
+    cannot see: any well-formed name is accepted, so a hostile environment
+    can still authenticate as a different account on the target, with
+    whatever the offered key unlocks there. The blast radius stays bounded
+    by the keys the operator already offered. `HOME` / `USERPROFILE` is
+    worse and is not validated at all: it relocates `~/.ssh/config`, the
+    default identity set, every built-in transcript root, the opencode
+    store, and the `~` redaction at once, and a name that passes every
+    check still moves all of them. Treating `USER` and `HOME` as trusted
+    same-user input belongs to sec-review only if toktop is ever run with a
+    less trusted environment.
 
 ## Response readiness (notes only)
 
@@ -980,6 +983,10 @@ Recorded as threats with locations; fixes do not happen in this document:
   error also suppresses 4xx rejections. Successful health checks are not
   logged (server.go). Request ids can be supplied by callers
   (server.go), so they provide correlation, not sender identity.
+  A body that trips a deadline now names which bound it broke, in the 408
+  body rather than a log line (M30, server.go, 442-458), so an operator can
+  tell a peer that stopped sending from one whose stream outlived the
+  10-minute bound without reading the source for which branch fired.
   Event bodies, notes, and token counts are not audit attributes; there is
   no credential-redaction guarantee for arbitrary caller-supplied log
   fields (server.go). The feed is bounded in-memory state
@@ -995,6 +1002,9 @@ Recorded as threats with locations; fixes do not happen in this document:
 
 - Every entry point, boundary, and mitigation line keeps its file reference so
   the next pass can diff claims against code mechanically.
+- A reference into a file that changes often names the symbol as well as the
+  line. `site/worker.js` grew 62 lines in a day and moved every citation in
+  this file; a symbol survives a comment insertion, a line number does not.
 - New entry point in code => add it here in the same change.
 - Fixed vulnerabilities move from "Gaps" into the mitigations table with the
   commit that closed them.
