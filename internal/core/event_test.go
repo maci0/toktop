@@ -90,43 +90,40 @@ func TestProbeCmp(t *testing.T) {
 	}
 }
 
-func TestInsertSorted(t *testing.T) {
+func TestAppendSorted(t *testing.T) {
 	intCmp := cmp.Compare[int]
 	var s []int
-	s = InsertSorted(append(s, 5), intCmp)
-	s = InsertSorted(append(s, 2), intCmp)
-	s = InsertSorted(append(s, 8), intCmp)
-	s = InsertSorted(append(s, 1), intCmp)
-	s = InsertSorted(append(s, 4), intCmp)
+	for _, v := range []int{5, 2, 8, 1, 4} {
+		s = AppendSorted(s, v, 8, intCmp)
+	}
 	want := []int{1, 2, 4, 5, 8}
-	if len(s) != len(want) {
-		t.Fatalf("InsertSorted got %v, want %v", s, want)
+	if !slices.Equal(s, want) {
+		t.Fatalf("AppendSorted got %v, want %v", s, want)
 	}
-	for i, v := range s {
-		if v != want[i] {
-			t.Fatalf("InsertSorted got %v, want %v", s, want)
-		}
-	}
+}
 
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("InsertSorted on empty slice must panic")
-		}
-	}()
-	InsertSorted([]int{}, intCmp)
+func TestAppendSortedTrimsToTheWindow(t *testing.T) {
+	intCmp := cmp.Compare[int]
+	var s []int
+	for _, v := range []int{5, 2, 8, 1, 4} {
+		s = AppendSorted(s, v, 3, intCmp)
+	}
+	if !slices.Equal(s, []int{4, 5, 8}) {
+		t.Fatalf("AppendSorted got %v, want the newest three [4 5 8]", s)
+	}
 }
 
 // Stability is the point of the binary search: the element lands after every
 // one equal to it, so two equal timestamps order by arrival rather than
 // swapping on each insert. Distinct operands cannot tell a stable insert from
 // an unstable one, so this inserts duplicates.
-func TestInsertSortedKeepsEqualElementsInArrivalOrder(t *testing.T) {
+func TestAppendSortedKeepsEqualElementsInArrivalOrder(t *testing.T) {
 	intCmp := cmp.Compare[int]
 	s := []int{}
 	for _, v := range []int{5, 2, 5, 2, 5, 2, 1, 5, 1} {
-		s = InsertSorted(append(s, v), intCmp)
+		s = AppendSorted(s, v, 9, intCmp)
 	}
 	if !slices.Equal(s, []int{1, 1, 2, 2, 2, 5, 5, 5, 5}) {
-		t.Fatalf("InsertSorted got %v, want []int{1 1 2 2 2 5 5 5 5}", s)
+		t.Fatalf("AppendSorted got %v, want []int{1 1 2 2 2 5 5 5 5}", s)
 	}
 }

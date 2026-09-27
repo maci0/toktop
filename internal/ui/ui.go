@@ -461,8 +461,10 @@ func aggInAt(s core.Snapshot, now time.Time) float64 {
 	return in
 }
 
-// aggBothAt sums provider rates with unattributed agent rates in one pass, so
-// the output and input halves of a snapshot cost one walk of the agent feed
+// aggBothAt sums provider rates with unattributed agent rates in one pass.
+// renderHeader and PlainTextFrame need both directions, and two separate
+// calls would each run Summarize (map + sort) over the same feed, so the
+// output and input halves of a snapshot cost one walk of the agent feed
 // rather than two.
 func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
 	return aggBoth(s, core.Summarize(s.Agents, now))
@@ -507,7 +509,7 @@ func (m Model) aggInProviders() float64 {
 }
 
 // uniqueAgents counts distinct agent names. The key is normalized like every
-// other identity field in the UI (core.AgentRates groups under NFC), so the
+// other identity field in the UI (core.Summarize groups under NFC), so the
 // same agent recorded as "café" both ways is one agent and the header agrees
 // with the feed below it.
 func uniqueAgents(events []core.AgentEvent) int {

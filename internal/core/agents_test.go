@@ -3,7 +3,6 @@ package core
 import (
 	"fmt"
 	"math"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -87,11 +86,11 @@ func TestClampEventTokens(t *testing.T) {
 	}
 }
 
-// AgentRates drives every per-agent number the dashboard prints. A known
+// Summarize.Rates drives every per-agent number the dashboard prints. A known
 // event sequence must produce exactly the rate math the UI renders: tokens
 // summed in the window, rate over the first-to-last span, single events
 // reported without a rate, and via-engine rows kept in the list.
-func TestAgentRates(t *testing.T) {
+func TestSummarizeRates(t *testing.T) {
 	now := time.Unix(1_700_000_100, 0)
 	events := []AgentEvent{
 		// Two-turn span: 80 out, 200 prompt and 25 thinking over one second.
@@ -111,7 +110,7 @@ func TestAgentRates(t *testing.T) {
 		// No tokens and no via: not activity, dropped.
 		{At: now.Add(-1 * time.Second), Agent: "idle"},
 	}
-	rates := AgentRates(events, now)
+	rates := Summarize(events, now).Rates
 	if len(rates) != 4 {
 		t.Fatalf("rates = %d entries, want 4 (claude, codex, coincident, opencode)", len(rates))
 	}
@@ -153,7 +152,7 @@ func TestAgentRates(t *testing.T) {
 // monitored engine (the engine already reports them), while unattributed
 // agents still add in. Per event, not per agent: a switch mid-window keeps
 // the unattributed slice.
-func TestAgentOwnTokPS(t *testing.T) {
+func TestSummarizeUnattributedTotals(t *testing.T) {
 	now := time.Unix(1_700_000_100, 0)
 	events := []AgentEvent{
 		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 10},
@@ -162,7 +161,11 @@ func TestAgentOwnTokPS(t *testing.T) {
 		{At: now.Add(-2 * time.Second), Agent: "codex", OutputTokens: 30, PromptTokens: 60},
 		{At: now.Add(-1 * time.Second), Agent: "codex", OutputTokens: 30, PromptTokens: 60},
 	}
-	out, in := AgentOwnTokPS(events, now)
+	var out, in float64
+	for _, r := range Summarize(events, now).Own {
+		out += r.TokPS
+		in += r.PromptPS
+	}
 	// claude own events end at -1s (the via event is excluded): 80 out / 20
 	// in over 1s. codex: 60 out / 120 in over 1s.
 	if math.Abs(out-140) > 1e-9 || math.Abs(in-140) > 1e-9 {
@@ -172,9 +175,9 @@ func TestAgentOwnTokPS(t *testing.T) {
 
 // Summarize returns both views in one walk, and a frame must be able to
 // account the whole feed in a single pass. The expected numbers here are
-// derived by hand from the fixture, not from AgentRates or AgentOwnTokPS:
-// both of those call Summarize, so comparing against them would compare
-// Summarize with itself and pass for any implementation of it.
+// derived by hand from the fixture, not from another Summarize call:
+// comparing the two views against each other would compare Summarize with
+// itself and pass for any implementation of it.
 func TestSummarizeAccountsEveryAgentInOnePass(t *testing.T) {
 	now := time.Unix(1_700_000_100, 0)
 	events := []AgentEvent{
@@ -271,15 +274,6 @@ func TestSummarizeAccountsEveryAgentInOnePass(t *testing.T) {
 	}
 	if math.Abs(out-140) > 1e-9 || math.Abs(in-140) > 1e-9 {
 		t.Errorf("own totals = %v out / %v in, want 140/140", out, in)
-	}
-	// The wrappers the frame used to call are defined in terms of Summarize;
-	// they exist so callers need one walk, not two.
-	wantOut, wantIn := AgentOwnTokPS(events, now)
-	if wantOut != out || wantIn != in {
-		t.Errorf("AgentOwnTokPS = %v/%v, want the Own totals %v/%v", wantOut, wantIn, out, in)
-	}
-	if !reflect.DeepEqual(sum.Rates, AgentRates(events, now)) {
-		t.Errorf("AgentRates disagrees with Summarize.Rates: %+v", AgentRates(events, now))
 	}
 }
 

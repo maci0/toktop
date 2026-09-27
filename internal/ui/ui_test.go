@@ -756,7 +756,7 @@ func TestUniqueAgents(t *testing.T) {
 			{Agent: ""},
 			{Agent: "gemini"},
 		}, 3},
-		// One agent spelled two ways is one agent, the way AgentRates
+		// One agent spelled two ways is one agent, the way Summarize
 		// groups them: the header count must not out-count the list.
 		{"nfc and nfd spell one agent", []core.AgentEvent{
 			{Agent: "caf\u00e9"},

@@ -292,10 +292,7 @@ func (s *Source) genEvent(now time.Time) {
 }
 
 func (s *Source) addAgent(ev core.AgentEvent) {
-	s.agents = core.InsertSorted(append(s.agents, ev), core.AgentCmp)
-	if len(s.agents) > core.AgentHistoryLen {
-		s.agents = s.agents[len(s.agents)-core.AgentHistoryLen:]
-	}
+	s.agents = core.AppendSorted(s.agents, ev, core.AgentHistoryLen, core.AgentCmp)
 }
 
 // RecordAgent lets external scripts push events into the demo feed too. It
@@ -314,10 +311,7 @@ func (s *Source) RecordAgent(ev core.AgentEvent) bool {
 }
 
 func (s *Source) addProbe(p core.ProbeSample) {
-	s.probes = core.InsertSorted(append(s.probes, p), core.ProbeCmp)
-	if len(s.probes) > core.ProbeHistoryLen {
-		s.probes = s.probes[len(s.probes)-core.ProbeHistoryLen:]
-	}
+	s.probes = core.AppendSorted(s.probes, p, core.ProbeHistoryLen, core.ProbeCmp)
 }
 
 // ProbeAll satisfies the UI prober interface by synthesizing samples now.

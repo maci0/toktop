@@ -517,10 +517,7 @@ func (c *Collector) ring(m map[string]*timedRing, key string) *timedRing {
 func (c *Collector) RecordProbe(s core.ProbeSample) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.probes = core.InsertSorted(append(c.probes, s), core.ProbeCmp)
-	if len(c.probes) > core.ProbeHistoryLen {
-		c.probes = c.probes[len(c.probes)-core.ProbeHistoryLen:]
-	}
+	c.probes = core.AppendSorted(c.probes, s, core.ProbeHistoryLen, core.ProbeCmp)
 }
 
 // providerKey is the per-provider state key: the endpoint when known, else

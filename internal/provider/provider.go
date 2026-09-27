@@ -453,42 +453,12 @@ func classify(fam map[string]float64, m *Metrics) {
 // classifiable reports whether a family name can reach any branch of classify.
 // The four substrings are exactly what those branches test for, and
 // "time_to_first_token" is covered by "token".
+// This is the pre-filter that decides whether to make the lowercased copy
+// classify's own tests run against. core.FoldASCII leaves an all-lowercase
+// Prometheus name as it found it, so the filter allocates nothing in the
+// common case.
 func classifiable(name string) bool {
-	return containsFold(name, "token") || containsFold(name, "req") ||
-		containsFold(name, "cache") || containsFold(name, "throughput")
-}
-
-// containsFold is strings.Contains with ASCII case folding and no allocation.
-// Prometheus names are ASCII, and classify's own tests run against a
-// lowercased copy; this is the pre-filter that decides whether to make one.
-func containsFold(s, sub string) bool {
-	if len(sub) == 0 {
-		return true
-	}
-	first := lowerASCII(sub[0])
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if lowerASCII(s[i]) != first {
-			continue
-		}
-		if equalFoldASCII(s[i:i+len(sub)], sub) {
-			return true
-		}
-	}
-	return false
-}
-
-func equalFoldASCII(a, b string) bool {
-	for i := 0; i < len(b); i++ {
-		if lowerASCII(a[i]) != lowerASCII(b[i]) {
-			return false
-		}
-	}
-	return true
-}
-
-func lowerASCII(c byte) byte {
-	if c >= 'A' && c <= 'Z' {
-		return c + 'a' - 'A'
-	}
-	return c
+	n := core.FoldASCII(name)
+	return strings.Contains(n, "token") || strings.Contains(n, "req") ||
+		strings.Contains(n, "cache") || strings.Contains(n, "throughput")
 }

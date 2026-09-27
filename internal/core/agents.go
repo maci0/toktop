@@ -185,18 +185,3 @@ func sortRates(r []AgentRate) {
 		return cmp.Compare(a.Agent, b.Agent)
 	})
 }
-
-// AgentRates summarizes the recent event stream, busiest first.
-func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
-	return Summarize(events, now).Rates
-}
-
-// AgentOwnTokPS is the output/prompt rate of tokens not already in an
-// engine's totals, so those tokens are not counted twice.
-func AgentOwnTokPS(events []AgentEvent, now time.Time) (outPS, inPS float64) {
-	for _, r := range Summarize(events, now).Own {
-		outPS += r.TokPS
-		inPS += r.PromptPS
-	}
-	return
-}

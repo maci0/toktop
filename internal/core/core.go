@@ -200,23 +200,22 @@ func ProbeCmp(a, b ProbeSample) int {
 	return strings.Compare(a.Model, b.Model)
 }
 
-// InsertSorted places the element just appended to s (sorted before the
-// append) at its stable position: after every element cmp reports as less
-// than or equal to it. Time is the primary key; equal timestamps then order
-// by identity so concurrent completions cannot shuffle a replay. One
-// binary search plus one shift replaces a full re-sort per event.
-func InsertSorted[T any](s []T, cmp func(a, b T) int) []T {
-	if len(s) == 0 {
-		panic("InsertSorted: empty slice, caller must append first")
-	}
-	if cmp == nil {
-		panic("InsertSorted: nil cmp")
-	}
+// AppendSorted appends item to s at its stable position, after every element
+// cmp reports as less than or equal to it, then drops whatever falls outside
+// the newest max entries. Time is the primary key; equal timestamps then
+// order by identity so concurrent completions cannot shuffle a replay. One
+// binary search plus one shift replaces a full re-sort per event, and the
+// window is trimmed in the same call, so a caller cannot keep one entry too
+// many or one too few.
+func AppendSorted[T any](s []T, item T, max int, cmp func(a, b T) int) []T {
+	s = append(s, item)
 	lastIdx := len(s) - 1
-	item := s[lastIdx]
 	insertIdx := sort.Search(lastIdx, func(j int) bool { return cmp(s[j], item) > 0 })
 	copy(s[insertIdx+1:], s[insertIdx:])
 	s[insertIdx] = item
+	if len(s) > max {
+		return s[len(s)-max:]
+	}
 	return s
 }
 

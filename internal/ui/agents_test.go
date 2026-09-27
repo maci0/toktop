@@ -63,7 +63,7 @@ func TestAgentRowsAlignRateColumn(t *testing.T) {
 		ev("a", now.Add(-3*time.Second)), ev("a", now.Add(-2*time.Second)),
 		ev("日本語エージェント", now.Add(-3*time.Second)), ev("日本語エージェント", now.Add(-2*time.Second)),
 	}
-	rows := agentRows(core.AgentRates(events, now), now)
+	rows := agentRows(core.Summarize(events, now).Rates, now)
 	if len(rows) != 2 {
 		t.Fatalf("rows = %d, want 2", len(rows))
 	}
@@ -156,7 +156,7 @@ func TestAggCountsOwnTokensWhenAgentSwitchesOntoAnEngine(t *testing.T) {
 	}
 }
 
-func TestAggAgentsOnlyUsesAgentRates(t *testing.T) {
+func TestAggAgentsOnlyUsesUnattributedRates(t *testing.T) {
 	now := time.Now()
 	s := core.Snapshot{Agents: []core.AgentEvent{
 		{At: now.Add(-2 * time.Second), Agent: "claude", Kind: "turn", OutputTokens: 30, PromptTokens: 90},
