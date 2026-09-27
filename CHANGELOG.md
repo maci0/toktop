@@ -52,6 +52,11 @@ support channel (see SECURITY.md).
 
 ### Changed
 
+- A remote's GPU row and driver versions drop when the remote stops reporting
+  a GPU. The retained vitals sample was parsed into in place, so a card that
+  went away (driver unloaded, vendor CLI uninstalled, the host turned into a
+  VM) stayed on the dashboard for the rest of the run. A dump cut short
+  before the last section still keeps the last good reading.
 - `$GAUNTLET_HOME` is honored only when it is an absolute path, like the XDG
   base directories. A relative one resolved `agents.json` against the working
   directory, where a missing file is not an error: the agents it defined

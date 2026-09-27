@@ -123,6 +123,43 @@ func TestParseVitalsPartial(t *testing.T) {
 	}
 }
 
+// The retained sample is parsed into in place, so a section the remote stops
+// reporting has to clear what the previous poll recorded. A driver that is
+// unloaded, a vendor CLI uninstalled, or a remote turned into a VM all answer
+// with an empty GPU section while the connection stays healthy, and without
+// this the stale card and its version sit on the dashboard for the rest of
+// the run.
+func TestParseVitalsEmptyGPUSectionClears(t *testing.T) {
+	s := core.SysSample{}
+	parseVitals(vitalsDump, &s)
+	if len(s.GPUs) == 0 || s.Drivers["nvidia"] == "" {
+		t.Fatalf("fixture did not record a GPU: %+v", s)
+	}
+	parseVitals(vitalsDumpFrom("1.0 1.0 1.0", "", "", "keep me", "", "", ""), &s)
+	if len(s.GPUs) != 0 {
+		t.Errorf("gpus survived an empty GPU section: %+v", s.GPUs)
+	}
+	if len(s.Drivers) != 0 {
+		t.Errorf("drivers survived an empty GPU section: %v", s.Drivers)
+	}
+	if s.CPUModel != "keep me" {
+		t.Errorf("a present non-empty section must still land: %q", s.CPUModel)
+	}
+}
+
+// The other half of the rule: a dump that stopped before the last marker
+// never reached the vendor CLI, so the last good reading stands.
+func TestParseVitalsTruncatedDumpKeepsGPUs(t *testing.T) {
+	s := core.SysSample{}
+	parseVitals(vitalsDump, &s)
+	// Five markers: sections 0..5 plus the trailing one, so gpuSection is
+	// absent and the run is treated as cut short.
+	parseVitals("\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n", &s)
+	if len(s.GPUs) == 0 || s.Drivers["nvidia"] == "" {
+		t.Errorf("a truncated dump must not drop the last GPU: %+v", s)
+	}
+}
+
 // A remote that polls fine but publishes no loadavg (macOS, hardened
 // kernels) must not zero the local load readout: Merge overlays fresh data,
 // and without the validity flag every poll would clobber local values with

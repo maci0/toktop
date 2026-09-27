@@ -57,6 +57,12 @@ func (s *Stats) instant() time.Time {
 // unlikely to appear in any of the read files.
 const sectionMark = "%toktop%"
 
+// gpuSection is the position of the GPU section in that dump: loadavg,
+// meminfo, uptime, CPU model, OS name, kernel, then the vendor CLI's output.
+// Its presence is the script's end-of-run signal, which is how parseVitals
+// tells "the remote reported no GPU" from "the dump stopped early".
+const gpuSection = 6
+
 // stalenessWindow is how long a remote sample still counts as fresh. Past it
 // the overlay is dropped rather than merged: a remote that stopped answering
 // must not freeze its last known vitals on screen indefinitely.
@@ -194,7 +200,8 @@ func (s *Stats) Merge(into *core.SysSample) {
 // corresponding fields alone.
 // It reports whether usable load readings were present; a remote whose
 // loadavg is missing or all-zero leaves the local readings in place instead
-// of zeroing them.
+// of zeroing them. The GPU section, which the script always emits, is the one
+// exception: it replaces the previous readings even when it is empty.
 func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 	sections := splitSections(out)
 	section := func(i int) string {
@@ -227,14 +234,25 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 	if kern := firstLine(section(5)); kern != "" {
 		s.Kernel = kern
 	}
-	if devs := parseGPUs(section(6)); len(devs) > 0 {
+	// The GPU section is the one a dump can legitimately deliver empty: the
+	// script emits its marker whatever the vendor CLI does, and the CLI
+	// answers nothing once the driver is unloaded, the tool is uninstalled,
+	// or the machine is a VM. An empty answer therefore replaces what the
+	// previous poll recorded instead of leaving the card and its driver on
+	// the dashboard for the rest of the run, which is what a merge into the
+	// retained sample used to do. A section that never arrived (a dump cut
+	// short before the last marker) leaves the last reading alone, like every
+	// other section.
+	if gpuSection < len(sections) {
+		devs := parseGPUs(sections[gpuSection])
 		s.GPUs = devs
-		if s.Drivers == nil {
-			s.Drivers = map[string]string{}
-		}
-		for _, dev := range devs {
-			if d := dev.Driver; d != "" {
-				s.Drivers[dev.Vendor] = d
+		s.Drivers = nil
+		if len(devs) > 0 {
+			s.Drivers = make(map[string]string, len(devs))
+			for _, dev := range devs {
+				if d := dev.Driver; d != "" {
+					s.Drivers[dev.Vendor] = d
+				}
 			}
 		}
 	}
