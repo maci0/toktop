@@ -562,7 +562,9 @@ make test-pkg PKG=./internal/ui RACE=0   # faster loop, no race detector
 ```
 
 Cross-compiles (no cgo anywhere); `make test-dist` is the same flags the
-release uses (`-trimpath -buildvcs=false -mod=readonly -buildmode=pie`):
+release uses (`-trimpath -buildvcs=false -mod=readonly -buildmode=pie`, plus
+`-s -w -buildid= -bindnow` in `-ldflags`, so the ELF binaries carry full
+RELRO):
 
 ```
 make test-dist VERSION=x.y.z    # every release platform into dist/

@@ -69,7 +69,10 @@ SITE_LOCK         := $(DIST)/site.lock
 # dist/.
 SITE_DEPLOYED     := $(DIST)/site.deployed
 SITE_ROLLED_BACK  := $(DIST)/site.rolled-back
-LDFLAGS     := -s -w -buildid= -X main.version=$(VERSION)
+# -bindnow is the Go spelling of -Wl,-z,now: without it the linux ELF ships
+# partial RELRO, because the internal linker (CGO stays off) emits DT_BIND_NOW
+# for nothing. A no-op on darwin and windows, so one LDFLAGS covers PLATFORMS.
+LDFLAGS     := -s -w -buildid= -bindnow -X main.version=$(VERSION)
 # gofmt from the selected toolchain, not a different major on PATH.
 GOFMT = $$($(GO) env GOROOT)/bin/gofmt
 
