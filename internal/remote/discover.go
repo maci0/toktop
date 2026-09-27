@@ -34,8 +34,7 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 		d.Listening = parseNetTCP(out)
 	}
 	if len(d.Listening) == 0 {
-		// An unreadable or empty /proc/net/tcp (hardened kernels hide it from
-		// unprivileged readers); fall back to probing the well-known ports.
+		// Nothing read: fall back to probing the well-known ports.
 		out, err := c.Run(ctx, probeScript(wellKnown))
 		if err != nil {
 			return nil, fmt.Errorf("port probe failed: %w", err) // unreachable host: nothing else will work either

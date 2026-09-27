@@ -266,7 +266,7 @@ func extractVersionField(body string) string {
 		}
 		return ""
 	}
-	// llama.cpp /version may answer with a bare quoted string or plain text
+	// llama.cpp /version may answer with a bare quoted string or plain text.
 	// Cheap reject for a body that is not a version at all: past this many
 	// characters the plain-text answer is not a version string either.
 	//

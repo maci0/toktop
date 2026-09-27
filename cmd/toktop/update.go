@@ -147,8 +147,7 @@ func updateErr(op string, err error) int {
 		fmt.Fprintln(os.Stderr, "toktop: interrupted")
 		return 130
 	}
-	msg := err.Error()
-	msg = core.RedactHome(msg)
+	msg := core.RedactHome(err.Error())
 	fmt.Fprintf(os.Stderr, "toktop: %s: %v\n", op, msg)
 	return 1
 }

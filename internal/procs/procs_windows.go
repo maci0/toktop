@@ -60,11 +60,10 @@ func listWindows() ([]raw, error) {
 			continue
 		}
 		args := splitWindowsArgs(p.CommandLine)
-		name := p.Name
 		r := raw{
 			pid:  p.ProcessID,
-			name: name,
-			args: append([]string{name}, args...),
+			name: p.Name,
+			args: append([]string{p.Name}, args...),
 			rss:  p.WorkingSetSize,
 		}
 		annotate(&r)

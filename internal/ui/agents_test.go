@@ -124,11 +124,12 @@ func TestAggSkipsViaEngineTokens(t *testing.T) {
 			ev("codex", -time.Second, 40, 10, ""),
 		},
 	}
-	if got := aggOutAt(s, now); got != 180 {
-		t.Errorf("aggOut = %v, want 180 (engine 100 + codex 80, claude skipped)", got)
+	out, in := aggBothAt(s, now)
+	if out != 180 {
+		t.Errorf("aggOut = %v, want 180 (engine 100 + codex 80, claude skipped)", out)
 	}
-	if got := aggInAt(s, now); got != 40 {
-		t.Errorf("aggIn = %v, want 40 (engine 20 + codex 20, claude skipped)", got)
+	if in != 40 {
+		t.Errorf("aggIn = %v, want 40 (engine 20 + codex 20, claude skipped)", in)
 	}
 }
 
@@ -148,11 +149,12 @@ func TestAggCountsOwnTokensWhenAgentSwitchesOntoAnEngine(t *testing.T) {
 				OutputTokens: 100, PromptTokens: 80, ViaEngine: "127.0.0.1:11434"},
 		},
 	}
-	if got := aggOutAt(s, now); got != 80 {
-		t.Errorf("aggOut = %v, want 80 (own 80 tok/s, via event skipped)", got)
+	out, in := aggBothAt(s, now)
+	if out != 80 {
+		t.Errorf("aggOut = %v, want 80 (own 80 tok/s, via event skipped)", out)
 	}
-	if got := aggInAt(s, now); got != 20 {
-		t.Errorf("aggIn = %v, want 20 (own 20 tok/s, via event skipped)", got)
+	if in != 20 {
+		t.Errorf("aggIn = %v, want 20 (own 20 tok/s, via event skipped)", in)
 	}
 }
 
@@ -162,11 +164,12 @@ func TestAggAgentsOnlyUsesUnattributedRates(t *testing.T) {
 		{At: now.Add(-2 * time.Second), Agent: "claude", Kind: "turn", OutputTokens: 30, PromptTokens: 90},
 		{At: now.Add(-time.Second), Agent: "claude", Kind: "turn", OutputTokens: 30, PromptTokens: 90},
 	}}
-	if got := aggOutAt(s, now); got != 60 {
-		t.Errorf("aggOut = %v, want 60", got)
+	out, in := aggBothAt(s, now)
+	if out != 60 {
+		t.Errorf("aggOut = %v, want 60", out)
 	}
-	if got := aggInAt(s, now); got != 180 {
-		t.Errorf("aggIn = %v, want 180", got)
+	if in != 180 {
+		t.Errorf("aggIn = %v, want 180", in)
 	}
 }
 

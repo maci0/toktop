@@ -18,7 +18,7 @@ var (
 	kernel32Tick      = kernel32.NewProc("GetTickCount64")
 )
 
-// osVersionInfoExW mirrors RTL_OSVERSIONINFOW.
+// osVersionInfoW mirrors RTL_OSVERSIONINFOW.
 type osVersionInfoW struct {
 	DwOSVersionInfoSize uint32
 	DwMajorVersion      uint32

@@ -30,7 +30,7 @@ func (m Model) enginesTitle(w, shown int) string {
 	return moreTitle("ENGINES", w, len(m.snap.Providers)-shown)
 }
 
-// engineStateTitle is engineStateTitle's counterpart over the healthy engines
+// engineStateTitle is enginesTitle's counterpart over the healthy engines
 // only, matching the body that skips the down ones.
 func (m Model) engineStateTitle(w, shown int) string {
 	healthy := 0

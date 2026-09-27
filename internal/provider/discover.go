@@ -188,7 +188,8 @@ func identify(ctx context.Context, base string) string {
 	if sglangInfoOK(ctx, base) {
 		return core.KindSGLang
 	}
-	if tritonReady(ctx, base) {
+	// Triton Inference Server answers the KServe v2 readiness endpoint.
+	if healthOK(ctx, base, "/v2/health/ready") {
 		return core.KindTRTLLM // Triton Inference Server (typical TRT-LLM host)
 	}
 	if probeContains(ctx, base, "/v1/health", `"version"`, `"status"`) ||
@@ -219,7 +220,7 @@ func identify(ctx context.Context, base string) string {
 		return core.KindLocalAI
 	case probeContains(ctx, base, "/", "gpustack"):
 		return core.KindGPUStack
-	case healthOK(ctx, base):
+	case healthOK(ctx, base, "/health"):
 		return core.KindLlamaCPP // llama.cpp /health answers {"status":"ok"}
 	default:
 		return core.KindOpenAI
@@ -252,16 +253,6 @@ func sglangInfoOK(ctx context.Context, base string) bool {
 		ModelPath string `json:"model_path"`
 	}
 	return json.NewDecoder(resp.Body).Decode(&body) == nil && body.ModelPath != ""
-}
-
-// tritonReady checks the KServe v2 readiness endpoint served by Triton.
-func tritonReady(ctx context.Context, base string) bool {
-	resp, err := scanGet(ctx, base+"/v2/health/ready")
-	if err != nil {
-		return false
-	}
-	resp.Body.Close()
-	return true
 }
 
 // idsLookMLX reports whether any served model id looks like an MLX build
@@ -327,8 +318,9 @@ func getOpenAIModels(ctx context.Context, base string) *modelsResp {
 	return &mr
 }
 
-func healthOK(ctx context.Context, base string) bool {
-	resp, err := scanGet(ctx, base+"/health")
+// healthOK reports whether base's health path answers at all.
+func healthOK(ctx context.Context, base, path string) bool {
+	resp, err := scanGet(ctx, base+path)
 	if err != nil {
 		return false
 	}

@@ -404,6 +404,12 @@ var eventSlots = make(chan struct{}, maxInFlightEvents)
 // between machines stays honored.
 const maxEventSkew = 2 * time.Minute
 
+// retryAfterSeconds is the delay every 503 from this endpoint advertises, in
+// whole seconds (RFC 9110 Retry-After). One constant because the refused POST
+// and the health probe must name the same wait: a client that waits what one
+// says and ignores the other retries faster than the slots free.
+const retryAfterSeconds = 1
+
 // maxEventLifetime and bodyIdleTimeout bound how long one POST may hold the
 // connection. The byte cap above limits volume, not time: a peer that sends
 // headers and then drips bytes (or goes silent mid-body) would otherwise pin
@@ -412,12 +418,6 @@ const maxEventSkew = 2 * time.Minute
 // successful read extends the deadline up to that end, so slow-but-alive
 // NDJSON streams keep working while silent ones are reaped. Both are vars so
 // tests can shrink them.
-// retryAfterSeconds is the delay every 503 from this endpoint advertises, in
-// whole seconds (RFC 9110 Retry-After). One constant because the refused POST
-// and the health probe must name the same wait: a client that waits what one
-// says and ignores the other retries faster than the slots free.
-const retryAfterSeconds = 1
-
 var (
 	maxEventLifetime = 10 * time.Minute
 	bodyIdleTimeout  = time.Minute

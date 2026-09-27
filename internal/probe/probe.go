@@ -167,6 +167,7 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 // and keeping the raw figure would read a microsecond report as nanoseconds
 // and report throughput thousands of times too high. Refusing it leaves the
 // caller on the wall-clock measurement it would use anyway.
+//
 // nanoseconds converts a wire-reported count of nanoseconds to a Duration.
 // A value outside the int64 nanosecond range, or a negative one, is not a
 // duration: multiplying it would wrap into a plausible-looking number, and

@@ -136,16 +136,13 @@ const ioAccelRefresh = 2 * time.Second
 func applyIOAccelStats(ctx context.Context, devs []core.GPUDevice) {
 	ioAccelMu.Lock()
 	defer ioAccelMu.Unlock()
-	if time.Since(ioAccelAt) < ioAccelRefresh {
-		devs[0].MemUsed = ioAccelMemUsed
-		devs[0].UtilPct = ioAccelUtil
-		return
+	if time.Since(ioAccelAt) >= ioAccelRefresh {
+		// run() caps the spawn so a hung ioreg cannot pin ioAccelMu and stall
+		// every later Sample. The caller's budget (sysmon gpuBudget) is the
+		// parent, so a cancelled Sample does not wait out runTimeout.
+		out, ok := run(ctx, "ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
+		noteIOAccel(ok, out)
 	}
-	// run() caps the spawn so a hung ioreg cannot pin ioAccelMu and stall
-	// every later Sample. The caller's budget (sysmon gpuBudget) is the
-	// parent, so a cancelled Sample does not wait out runTimeout.
-	out, ok := run(ctx, "ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
-	noteIOAccel(ok, out)
 	devs[0].MemUsed = ioAccelMemUsed
 	devs[0].UtilPct = ioAccelUtil
 }

@@ -191,7 +191,6 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 	kinds := provider.IdentifyAll(ctx, bases)
 
 	var providers []provider.Provider
-	var skipped []int
 	for i, kind := range kinds {
 		if kind != "" {
 			label := fmt.Sprintf("%s:%d", tgt.Host, rports[i])
@@ -203,14 +202,11 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 			providers = append(providers, p)
 			continue
 		}
-		skipped = append(skipped, rports[i])
-	}
-	for _, p := range skipped {
 		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
-			tgt.Host, p)
+			tgt.Host, rports[i])
 		attachLog().Warn("toktop: remote port skipped",
 			"target", logcfg.Field(targetLabel(tgt), 256),
-			"remote_port", p,
+			"remote_port", rports[i],
 			"reason", "no recognized engine API")
 	}
 	stats := &remote.Stats{Client: cli}

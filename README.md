@@ -190,9 +190,9 @@ same key. `SpecFor` is the read side: it reports the transcript
 location registered for an agent, roots as written, which is how a program
 finds out which entries a definitions file registered and which it skipped
 (the agents read by a compiled-in adapter are not reported, so a `usage` entry
-naming one is skipped on load rather than registered; use `RegisterSpec` to
+naming one is skipped on load rather than registered). Use `RegisterSpec` to
 read such an agent elsewhere. A definition does replace a compiled-in
-*definition*, pi, prime-agent and feynman. `Supported` covers every agent).
+*definition*, pi, prime-agent and feynman. `Supported` covers every agent.
 `Watch` returns
 a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
 and matches `ErrUnsupportedTool`. A sample is the total since the watcher

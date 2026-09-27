@@ -454,13 +454,6 @@ func aggOutAt(s core.Snapshot, now time.Time) float64 {
 	return out
 }
 
-// aggInAt is the input-side half of aggBothAt, for a call site needing one
-// direction without the output half.
-func aggInAt(s core.Snapshot, now time.Time) float64 {
-	_, in := aggBothAt(s, now)
-	return in
-}
-
 // aggBothAt sums provider rates with unattributed agent rates in one pass.
 // renderHeader and PlainTextFrame need both directions, and two separate
 // calls would each run Summarize (map + sort) over the same feed, so the
