@@ -145,8 +145,14 @@ const crushSessionsSinceQuery = crushSessionsQuery + `
 
 // sessions returns each database's current per-session completion and prompt
 // tokens. Watch snapshots this at attach so a continued session contributes
-// only what it adds afterwards, matching the file adapters. A missing or
-// unreadable store is not an error: most trees have never run crush.
+// only what it adds afterwards, matching the file adapters. A tree that never
+// ran crush contributes nothing: crushDBPaths only yields stores that exist.
+//
+// Any store that fails to read fails the whole call, and the result is all or
+// nothing. Skipping it instead would leave the attach baseline without that
+// store's counts, and every pre-attach session in it would be credited to this
+// attach as growth the first time it does read. A transient SQLite lock
+// therefore costs a poll, not a wrong number.
 //
 // A zero since reads every session (the attach baseline). After that, only
 // rows touched since attach: idle history is not re-scanned on every poll.

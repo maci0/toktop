@@ -163,6 +163,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A dsh session log whose record straddles a Zstandard frame boundary is read
+  as one record. The read stopped at frame boundaries and counted each half as
+  its own line, so neither parsed and both were dropped, under-reporting the
+  turn. An unterminated trailing record is now held over and re-parsed with
+  its head on the next poll, the way the plain JSONL path already did.
+- The ssh host-key store's stale-lock break no longer spins. A lock too old to
+  belong to a live process was removed and retried immediately, skipping the
+  wait deadline, so a lock that could not be unlinked kept the loop running
+  with no sleep and no way out. The break is retried only once the removal
+  actually took, and the deadline and the poll gap hold on every path.
+- A `CUDA Version:` line that appears before the `Driver Version:` line in
+  `/proc/driver/nvidia/version` is read. The scan for it was gated on the
+  driver line having already been seen, so a driver that wrote CUDA first
+  reported its version with the CUDA row silently missing.
 - An `ssh://` host-key pin store that holds no records at all is refused
   instead of read as an empty one. A file truncated to nothing, or one a backup
   or a dotfile manager restored empty, read as "nothing pinned yet" and

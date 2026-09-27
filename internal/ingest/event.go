@@ -41,18 +41,10 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// control characters before the values are stored and later rendered.
 	// Defaults come after sanitization: a value the sanitizer empties
 	// (pure escape sequences) must not slip past the fallback.
-	ev.ID = core.ClampField(core.SanitizeText(ev.ID), 128)
-	ev.Agent = core.ClampField(core.SanitizeText(ev.Agent), 64)
-	// Mixed Latin+Cyrillic/Greek names spoof a real agent in the feed
-	// ("сlaude" vs "claude"). Collapse them to the anonymous default.
-	if core.MixedScriptIdentity(ev.Agent) {
-		ev.Agent = ""
-	}
-	if ev.Agent == "" {
-		ev.Agent = "anonymous"
-	}
-	ev.Model = core.ClampField(core.SanitizeText(ev.Model), 128)
-	ev.ViaEngine = core.ClampField(core.SanitizeText(ev.ViaEngine), 128)
+	ev.ID = core.ClampField(core.SanitizeText(ev.ID), core.AgentIDMax)
+	ev.Agent = core.AgentNameField(ev.Agent)
+	ev.Model = core.ClampField(core.SanitizeText(ev.Model), core.AgentModelMax)
+	ev.ViaEngine = core.ClampField(core.SanitizeText(ev.ViaEngine), core.AgentViaMax)
 	// Free-form fields are capped so one giant event cannot dominate the
 	// retained feed, and the note gets the same treatment a locally watched
 	// working directory gets (core.ShortDir): a note naming a working
@@ -60,17 +52,17 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// path under $HOME names the account. It reaches the feed, the live
 	// dashboard and the --once --plain report, which is often redirected
 	// into a file or a journal.
-	ev.Note = core.ClampField(core.RedactHome(shortNote(core.SanitizeText(ev.Note))), 512)
+	ev.Note = core.ClampField(core.RedactHome(shortNote(core.SanitizeText(ev.Note))), core.AgentNoteMax)
 	// Token counts are unsigned quantities; negative or absurd values
 	// are junk from a misbehaving sender and must not enter the
 	// retained feed (summing MaxInt64 across events wraps the totals).
-	ev.PromptTokens = clampTokens(ev.PromptTokens)
-	ev.OutputTokens = clampTokens(ev.OutputTokens)
-	ev.ThinkingTokens = clampTokens(ev.ThinkingTokens)
+	ev.PromptTokens = core.ClampEventTokens(ev.PromptTokens)
+	ev.OutputTokens = core.ClampEventTokens(ev.OutputTokens)
+	ev.ThinkingTokens = core.ClampEventTokens(ev.ThinkingTokens)
 	switch ev.Kind {
 	case core.AgentKindTurn, core.AgentKindTool, core.AgentKindError, core.AgentKindNote:
 	default:
-		ev.Kind = core.ClampField(core.SanitizeText(strings.ToLower(ev.Kind)), 24)
+		ev.Kind = core.ClampField(core.SanitizeText(strings.ToLower(ev.Kind)), core.AgentKindMax)
 	}
 	if ev.Kind == "" {
 		ev.Kind = core.AgentKindTurn
@@ -206,14 +198,4 @@ func jsonRootKind(raw json.RawMessage) string {
 	default:
 		return "number"
 	}
-}
-
-// clampTokens refuses a count outside core.MaxEventTokens: real usage never
-// approaches the ceiling, and summing MaxInt64 values across the retained
-// feed would wrap the agent totals.
-func clampTokens(n int64) int64 {
-	if n < 0 || n > core.MaxEventTokens {
-		return 0
-	}
-	return n
 }

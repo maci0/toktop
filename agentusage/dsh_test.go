@@ -193,6 +193,38 @@ func TestDshZstdSessionLog(t *testing.T) {
 	}
 }
 
+// A record split across a frame boundary is one record. Counting each half
+// as a line would drop both and under-report the turn.
+func TestDshZstdRecordSplitAcrossFrames(t *testing.T) {
+	store := withStore(t, "dsh")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl.zstd")
+
+	w := Watch("dsh", work, time.Now())
+	if w == nil {
+		t.Fatal("dsh should be supported")
+	}
+	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\n"))
+	w.poll(nil)
+
+	whole := dshMessage(120, 9, 30)
+	cut := len(whole) / 2
+	appendBytes(t, path, zstdFrame(t, whole[:cut]))
+	w.poll(nil)
+	if got := w.Sample().Output; got != 0 {
+		t.Fatalf("output %d after a half record, want 0", got)
+	}
+
+	appendBytes(t, path, zstdFrame(t, whole[cut:]+"\n"))
+	w.poll(nil)
+	if got := w.Sample().Output; got != 120 {
+		t.Fatalf("output %d, want 120 once the record's second half landed", got)
+	}
+	if got := w.Sample().Input; got != 30 {
+		t.Fatalf("input %d, want 30", got)
+	}
+}
+
 func TestDshZstdIgnoresOtherProjects(t *testing.T) {
 	store := withStore(t, "dsh")
 	work, other := t.TempDir(), t.TempDir()

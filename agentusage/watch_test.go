@@ -15,6 +15,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // The fixtures below are the real record shapes, reduced to the fields this
@@ -837,20 +839,20 @@ func TestExpandHomeAcceptsBothSeparators(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	got := expandHome("~/rel")
+	got := core.ExpandHome("~/rel")
 	want := filepath.Join(home, "rel")
 	if got != want {
-		t.Errorf("expandHome(~/rel) = %q, want %q", got, want)
+		t.Errorf("core.ExpandHome(~/rel) = %q, want %q", got, want)
 	}
-	got = expandHome(`~\rel`)
+	got = core.ExpandHome(`~\rel`)
 	if got != want {
-		t.Errorf(`expandHome(~\rel) = %q, want %q`, got, want)
+		t.Errorf(`core.ExpandHome(~\rel) = %q, want %q`, got, want)
 	}
-	if got := expandHome("~"); got != home {
-		t.Errorf("expandHome(~) = %q, want %q", got, home)
+	if got := core.ExpandHome("~"); got != home {
+		t.Errorf("core.ExpandHome(~) = %q, want %q", got, home)
 	}
-	if got := expandHome("rel"); got != "rel" {
-		t.Errorf("expandHome(rel) = %q, want unchanged", got)
+	if got := core.ExpandHome("rel"); got != "rel" {
+		t.Errorf("core.ExpandHome(rel) = %q, want unchanged", got)
 	}
 }
 

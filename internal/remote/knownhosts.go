@@ -113,9 +113,14 @@ func lockStore(path string, fn func() error) error {
 			// cannot act on.
 			return fn()
 		}
+		// A stale lock is only retried once the break actually took. A lock
+		// that cannot be unlinked (read-only config dir, a peer recreating
+		// it between the Stat and the Remove) would otherwise keep the stale
+		// arm true and spin here with no sleep and no deadline check.
 		if info, serr := os.Stat(lock); serr == nil && time.Since(info.ModTime()) > storeLockStale {
-			_ = os.Remove(lock)
-			continue
+			if os.Remove(lock) == nil {
+				continue
+			}
 		}
 		if time.Now().After(deadline) {
 			return fmt.Errorf("%s is locked by another toktop; giving up after %s", path, storeLockWait)

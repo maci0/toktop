@@ -198,7 +198,7 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 			}
 		case "identityfile":
 			if inBlock && entry.IdentityFile == "" {
-				entry.IdentityFile = expandTilde(val)
+				entry.IdentityFile = core.ExpandHome(val)
 			}
 		}
 	}
@@ -276,26 +276,6 @@ func patternMatch(pat, s string) bool {
 	return err == nil && matched
 }
 
-func expandTilde(p string) string {
-	if p == "~" {
-		// A failed home lookup leaves p unchanged, matching the ~/ branch
-		// below, rather than expanding to an empty key path that would
-		// silently drop the credential ssh config named.
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return p
-		}
-		return home
-	}
-	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
-		home, err := os.UserHomeDir()
-		if err == nil {
-			return filepath.Join(home, p[2:])
-		}
-	}
-	return p
-}
-
 // ResolveKeyFile expands a leading tilde in file and checks that the result
 // names a regular file. --ssh-key uses this at startup so a typo or a
 // directory fails before any ssh dial, rather than as a generic auth
@@ -306,7 +286,7 @@ func expandTilde(p string) string {
 // not be used is worth more to the operator than the account name, and these
 // lines are what gets pasted into issues.
 func ResolveKeyFile(file string) (string, error) {
-	file = expandTilde(strings.TrimSpace(file))
+	file = core.ExpandHome(strings.TrimSpace(file))
 	if file == "" {
 		return "", errors.New("empty path")
 	}

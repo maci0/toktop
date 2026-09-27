@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -162,12 +163,18 @@ func parseDsh(line []byte) (values, string, bool) {
 	return v, "", true
 }
 
-// consumeZstd reads newly appended concatenated frames from off, counts
-// complete ones, and leaves a torn last frame uncommitted so the next poll
-// re-reads it whole. The read is capped at zstdTailBytes so a large append
-// batch cannot pin an unbounded buffer; leftover complete frames are
+// consumeZstd reads newly appended concatenated frames from off and counts
+// the complete records among them. A torn last frame is left uncommitted, so
+// the read is capped at zstdTailBytes and the leftover complete frames are
 // picked up on the next poll.
-func (w *Watcher) consumeZstd(f *os.File, off int64) (recs []values, complete int64, ok bool) {
+//
+// Frames are not records: one record can straddle the frame boundary this
+// read stopped at, and the window's own end can cut one too. So the
+// unterminated last segment is carried over (w.zstdCarry) and re-parsed with
+// its head next poll, the way consumeAppend holds a trailing fragment. It
+// counts only when it parses in full; committing the offset past a fragment
+// that did not would drop those bytes permanently.
+func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values, complete int64, ok bool) {
 	src, err := io.ReadAll(io.LimitReader(f, zstdTailBytes.Load()))
 	if err != nil {
 		return nil, 0, false
@@ -176,18 +183,39 @@ func (w *Watcher) consumeZstd(f *os.File, off int64) (recs []values, complete in
 	if err != nil && n == 0 {
 		return nil, 0, false
 	}
-	for line := range bytes.SplitSeq(plain, []byte("\n")) {
+	lines := slices.Collect(bytes.SplitSeq(plain, []byte("\n")))
+	head := w.zstdCarry[path]
+	w.zstdCarry[path] = nil
+	for i, line := range lines {
 		line = bytes.TrimRight(line, "\r")
-		if len(line) == 0 {
+		if i == 0 && len(head) > 0 {
+			line = append(head, line...)
+		}
+		if i < len(lines)-1 {
+			if len(line) == 0 {
+				continue
+			}
+			// Same record cap the plain JSONL path applies (consumeAppend): a
+			// frame can decompress to more than maxLineBytes, and the parser
+			// rejects it either way, so drop it and keep reading.
+			if len(line) > maxLineBytes {
+				continue
+			}
+			recs = w.collect(recs, line)
 			continue
 		}
-		// Same record cap the plain JSONL path applies (consumeAppend): a
-		// frame can decompress to more than maxLineBytes, and the parser
-		// rejects it either way, so drop it and keep reading.
-		if len(line) > maxLineBytes {
-			continue
+		// The unterminated tail. A complete record whose writer omitted the
+		// final newline still parses, so it counts; anything else waits.
+		switch {
+		case len(line) == 0:
+		case len(line) > maxLineBytes: // junk no parser accepts; drop rather than carry forever
+		default:
+			if v, cwd, parsed := w.ad.parse(line); parsed {
+				recs = w.collectValue(recs, v, cwd)
+			} else {
+				w.zstdCarry[path] = bytes.Clone(line)
+			}
 		}
-		recs = w.collect(recs, line)
 	}
 	return recs, off + int64(n), true
 }

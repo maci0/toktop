@@ -30,6 +30,8 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 type adapter struct {
@@ -153,7 +155,7 @@ func specAdapter(spec Spec) (adapter, bool) {
 	rootsFor := func(dir string) []string {
 		out := make([]string, 0, len(patterns))
 		for _, r := range patterns {
-			out = append(out, expandHome(strings.ReplaceAll(r, "{dir}", dir)))
+			out = append(out, core.ExpandHome(strings.ReplaceAll(r, "{dir}", dir)))
 		}
 		return out
 	}
@@ -294,21 +296,6 @@ func (w *Watcher) refreshAdapter() {
 	if ad, ok := specAdapter(spec); ok {
 		w.ad = ad
 	}
-}
-
-func expandHome(p string) string {
-	if p == "~" {
-		if dir, err := os.UserHomeDir(); err == nil {
-			return dir
-		}
-		return p
-	}
-	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
-		if dir, err := os.UserHomeDir(); err == nil {
-			return filepath.Join(dir, p[2:])
-		}
-	}
-	return p
 }
 
 // Supported reports whether live usage can be read for an agent.

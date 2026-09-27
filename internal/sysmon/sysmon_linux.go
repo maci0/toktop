@@ -197,8 +197,13 @@ func linuxUptime() time.Duration {
 	return ParseUptimeSecs(f[0])
 }
 
-// parseNvidiaVersion extracts "Driver Version: 550.54.14" and the trailing
-// "CUDA Version: 12.4" from /proc/driver/nvidia/version.
+// parseNvidiaVersion extracts "Driver Version: 550.54.14" and
+// "CUDA Version: 12.4" from /proc/driver/nvidia/version. The two lines are
+// read independently: the file is the kernel driver's, not ours, and it puts
+// CUDA either before or after the driver line depending on the driver build.
+// Gating the CUDA scan on the driver line already seen would drop CUDA
+// whenever it comes first, and report a driver with a silently missing CUDA
+// row.
 func parseNvidiaVersion(text string) (driver, cuda string) {
 	for line := range strings.SplitSeq(text, "\n") {
 		if _, after, ok := strings.Cut(line, "Driver Version:"); ok {
@@ -206,13 +211,9 @@ func parseNvidiaVersion(text string) (driver, cuda string) {
 				driver = fields[0]
 			}
 		}
-		// CUDA is a trailing line of its own, so the driver line is not where
-		// the search ends.
-		if driver != "" {
-			if _, after, ok := strings.Cut(line, "CUDA Version:"); ok {
-				if fields := strings.Fields(after); len(fields) > 0 {
-					cuda = fields[0]
-				}
+		if _, after, ok := strings.Cut(line, "CUDA Version:"); ok {
+			if fields := strings.Fields(after); len(fields) > 0 {
+				cuda = fields[0]
 			}
 		}
 	}

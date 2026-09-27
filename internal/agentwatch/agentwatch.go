@@ -434,35 +434,17 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	if rec == nil {
 		return
 	}
-	agent := core.ClampField(core.SanitizeText(proc.Tool), 64)
-	if core.MixedScriptIdentity(agent) {
-		agent = ""
-	}
-	if agent == "" {
-		agent = "anonymous"
-	}
 	rec.RecordAgent(core.AgentEvent{
 		At:             w.instant(),
 		ID:             sampleID(proc, cur.At),
-		Agent:          agent,
+		Agent:          core.AgentNameField(proc.Tool),
 		Kind:           core.AgentKindTurn,
-		PromptTokens:   eventTokens(prompt),
-		OutputTokens:   eventTokens(out),
-		ThinkingTokens: eventTokens(think),
-		ViaEngine:      core.ClampField(core.SanitizeText(via), 128),
-		Note:           core.ClampField(core.SanitizeText(note(dir, think, via)), 512),
+		PromptTokens:   core.ClampEventTokens(int64(prompt)),
+		OutputTokens:   core.ClampEventTokens(int64(out)),
+		ThinkingTokens: core.ClampEventTokens(int64(think)),
+		ViaEngine:      core.ClampField(core.SanitizeText(via), core.AgentViaMax),
+		Note:           core.ClampField(core.RedactHome(core.SanitizeText(note(dir, think, via))), core.AgentNoteMax),
 	})
-}
-
-// eventTokens bounds one event's token count to core.MaxEventTokens, the same
-// ceiling the HTTP ingest path applies. A transcript file's accumulators
-// saturate at MaxInt64, and such a value would land in the agent total and
-// every rate derived from it.
-func eventTokens(n int) int64 {
-	if n <= 0 || int64(n) > core.MaxEventTokens {
-		return 0
-	}
-	return int64(n)
 }
 
 // sampleID is stable for one process at one sample instant, so a retried

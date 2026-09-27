@@ -20,6 +20,8 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // disableAgent keeps the auth chain from picking up a running ssh-agent
@@ -225,18 +227,18 @@ func TestExpandTildeAcceptsBothSeparators(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	if got := expandTilde("~"); got != home {
-		t.Errorf("expandTilde(~) = %q, want %q", got, home)
+	if got := core.ExpandHome("~"); got != home {
+		t.Errorf("core.ExpandHome(~) = %q, want %q", got, home)
 	}
 	want := filepath.Join(home, "rel")
-	if got := expandTilde("~/rel"); got != want {
-		t.Errorf("expandTilde(~/rel) = %q, want %q", got, want)
+	if got := core.ExpandHome("~/rel"); got != want {
+		t.Errorf("core.ExpandHome(~/rel) = %q, want %q", got, want)
 	}
-	if got := expandTilde(`~\rel`); got != want {
-		t.Errorf(`expandTilde(~\rel) = %q, want %q`, got, want)
+	if got := core.ExpandHome(`~\rel`); got != want {
+		t.Errorf(`core.ExpandHome(~\rel) = %q, want %q`, got, want)
 	}
-	if got := expandTilde("/abs/key"); got != "/abs/key" {
-		t.Errorf("expandTilde(absolute) = %q, want unchanged", got)
+	if got := core.ExpandHome("/abs/key"); got != "/abs/key" {
+		t.Errorf("core.ExpandHome(absolute) = %q, want unchanged", got)
 	}
 }
 

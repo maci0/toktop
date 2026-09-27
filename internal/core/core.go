@@ -97,6 +97,17 @@ type ProviderSnapshot struct {
 // the other would have refused.
 const MaxEventTokens = 1 << 40
 
+// ClampEventTokens bounds one event's token count to MaxEventTokens, dropping
+// anything outside [0, MaxEventTokens] to zero. Both producers of an agent
+// event (the ingest endpoint, the local process watcher) route through it, so
+// neither can drift into accepting a count the other would refuse.
+func ClampEventTokens(n int64) int64 {
+	if n < 0 || n > MaxEventTokens {
+		return 0
+	}
+	return n
+}
+
 // Agent event kinds. Unknown values are accepted on the wire (forward
 // compatible with a harness that invents one) and render as a generic event.
 const (

@@ -38,6 +38,38 @@ type AgentRate struct {
 // show up as two rows, or be counted twice.
 func CanonicalAgent(name string) string { return norm.NFC.String(name) }
 
+// Caps on the free-form text fields of an AgentEvent. One set of constants
+// because the two producers of an event (the ingest endpoint and the local
+// process watcher) apply them independently, and a cap that drifted between
+// them would let one producer keep a field the other truncates.
+const (
+	AgentNameMax  = 64
+	AgentIDMax    = 128
+	AgentModelMax = 128
+	AgentViaMax   = 128
+	AgentNoteMax  = 512
+	AgentKindMax  = 24
+)
+
+// AgentAnonymous is the name an event carries when its agent field arrives
+// empty or unusable.
+const AgentAnonymous = "anonymous"
+
+// AgentNameField normalizes an event's agent name: sanitize, cap, then
+// collapse a mixed-script spoof ("сlaude" for "claude") and an empty result
+// to AgentAnonymous. Both producers run it, so the feed cannot hold a name
+// only one of them approved.
+func AgentNameField(s string) string {
+	s = ClampField(SanitizeText(s), AgentNameMax)
+	if MixedScriptIdentity(s) {
+		return AgentAnonymous
+	}
+	if s == "" {
+		return AgentAnonymous
+	}
+	return s
+}
+
 // AgentSummary is the agent feed accounted once: every agent's rate, plus
 // the rates of only the tokens no engine already reports.
 //

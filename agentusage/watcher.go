@@ -69,10 +69,14 @@ type Watcher struct {
 	// mtime because a coarse clock (NTFS, and Windows' lazy last-write update
 	// for an open handle) can leave two writes sharing one stamp: a file that
 	// only grew would then look untouched and its records would be lost.
-	stamps  map[string]fileStamp
-	owner   map[string]bool // file -> belongs to this working directory (cached)
-	cached  []string        // candidate files, refreshed on an interval
-	scanned time.Time
+	stamps map[string]fileStamp
+	owner  map[string]bool // file -> belongs to this working directory (cached)
+	// zstdCarry holds the unterminated trailing record of a zstd transcript,
+	// which the frame-boundary read in consumeZstd cannot tell from a
+	// complete one. Its head is prepended to the next window's first line.
+	zstdCarry map[string][]byte
+	cached    []string // candidate files, refreshed on an interval
+	scanned   time.Time
 	// Cumulative adapters need a baseline per file: usage recorded before the
 	// watcher attached belongs to a previous run.
 	base      map[string]int
@@ -186,7 +190,8 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 	w := &Watcher{
 		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now,
 		offsets: map[string]int64{}, preexisting: map[string]bool{}, stamps: map[string]fileStamp{},
-		owner: map[string]bool{}, base: map[string]int{}, baseThink: map[string]int{},
+		zstdCarry: map[string][]byte{},
+		owner:     map[string]bool{}, base: map[string]int{}, baseThink: map[string]int{},
 		baseInput: map[string]int{},
 		seen:      map[string]values{}, total: map[string]int{},
 	}
@@ -364,7 +369,7 @@ func (w *Watcher) seedBaseline(path string) {
 		ok   bool
 	)
 	if isDshZstd(path) {
-		recs, _, ok = w.consumeZstd(f, 0)
+		recs, _, ok = w.consumeZstd(path, f, 0)
 	} else {
 		recs, _, ok = w.consumeAppend(f, off)
 	}
