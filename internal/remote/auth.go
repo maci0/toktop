@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
@@ -136,6 +137,13 @@ func (p *passwordSource) authCallbacks(t Target) []ssh.AuthMethod {
 	})
 	return []ssh.AuthMethod{pw, ki}
 }
+
+// agentDialTimeout bounds the wait for the ssh-agent to answer a dial. It is
+// one constant because the bound is the contract on every platform: a wedged
+// ssh-agent (full backlog, unresponsive daemon) must not pin Connect past it,
+// or a machine with an agent configured and no agent running never reaches the
+// password prompt at all.
+const agentDialTimeout = 2 * time.Second
 
 // platformAgentSock is the platform's default agent endpoint when
 // SSH_AUTH_SOCK is unset. Unix has none; Windows OpenSSH uses a named pipe
