@@ -179,7 +179,9 @@ cleanly, on the author's OS.
 
 A `repro` job builds two shipped platforms twice, varying the output path,
 the build cache, the locale, and the timezone between passes, and fails if
-the bytes differ. It is the guard on the reproducibility flags above. Run
+the bytes differ. It is the guard on the reproducibility flags above. The tag
+push runs the same gate over that representative pair before it publishes, so
+the bytes being shipped are the bytes that were compared. Run
 `make repro-check` for the full `PLATFORMS` list before a release.
 
 ## Releases
@@ -218,3 +220,10 @@ header is stripped at compression level 6, so two builds of one source
 produce byte-identical archives. Binaries are built with `-trimpath
 -buildvcs=false -mod=readonly -buildmode=pie`. This needs GNU tar; where the
 system tar is bsdtar (macOS), install GNU tar as `gtar`.
+
+The publish step uploads every top-level file `dist/` holds, so `make release`
+first runs `dist-clean`, which deletes the regular files an earlier `make cover`
+or a previous local run left behind. Directories such as the site deploy lock
+and the nested `dist/bin` and `dist/repro` output are not touched, and
+anything named `toktop_*` or `toktop-*` is kept, so a `make -j release` cannot
+drop the SBOM another prerequisite just wrote.

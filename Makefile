@@ -364,8 +364,21 @@ check-changelog: ## verify CHANGELOG.md contains release section and link for VE
 .PHONY: release
 release: check-changelog checksums sbom ## build every release platform and SBOM into dist/ with reproducible checksums
 
+# dist/ is shared: cover writes coverage.out, vet-cross and repro-check write
+# subdirectories, and the release build writes binaries. release.yml publishes
+# every top-level file it finds there, so a coverage profile or an old note left
+# by an earlier local target would ride along as a release asset. test-dist
+# already drops $(BINARY)_*; this drops the rest. Both separators are kept so
+# the SBOM (toktop-sbom-*) survives whichever order a `make -j release` runs
+# the prerequisites in. Only regular files at depth 1 are touched, so the site
+# deploy lock (a directory) and any nested build output are left alone.
+.PHONY: dist-clean
+dist-clean: ## drop non-release files left in dist/ by earlier targets
+	@mkdir -p $(DIST)
+	@find $(DIST) -maxdepth 1 -type f ! -name '$(BINARY)[_-]*' -delete
+
 .PHONY: checksums
-checksums: buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
+checksums: dist-clean buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
 	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
 		{ echo "$(TAR) rejects --sort: deterministic packaging needs GNU tar (install it as gtar)" >&2; exit 1; }
 	@cd $(DIST) && \

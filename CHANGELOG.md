@@ -94,6 +94,13 @@ support channel (see SECURITY.md).
 - A vendor GPU CLI that moves or is removed is resolved again after ten
   minutes. A cached path was executed for the rest of the session, so a driver
   or container reinstall left the GPU row empty until the next start.
+- A release no longer publishes whatever else was in `dist/`. The publish step
+  uploads every top-level file it finds there, so a coverage profile from an
+  earlier `make cover`, or a note left by a previous local release, rode along
+  as a release asset. `make release` now purges those first.
+- The tag push compares the bytes it is about to ship. The reproducibility gate
+  only ran on pull requests and pushes to main, so a release built bytes nobody
+  had diffed; the release job now builds two platforms twice before publishing.
 - An ssh failure no longer reports the home directory. A refused key, an
   unreadable host key store or a changed host key named the absolute path it
   worked on, and `$HOME` names the account; those paths now read `~/...`, as

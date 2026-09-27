@@ -13,7 +13,10 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    # vet-cross analyzes six platforms, the race tests run both sqlite halves,
+    # and the reproducibility gate builds two platforms twice from cold build
+    # caches. 30 minutes was sized before that last step.
+    timeout-minutes: 45
     env:
       LC_ALL: C
       TZ: UTC
@@ -41,6 +44,14 @@ jobs:
         # below are built with TAGS=sqlite, so shipping without that half would
         # leave the linked driver untested in this job.
         run: make test
+
+      # The Makefile promises byte-identical artifacts from identical source.
+        # The pull-request `repro` job guards main, but a tag push runs here
+        # only, so the bytes about to be published have to be compared in the
+        # job that publishes them. A representative pair keeps this affordable;
+        # `make repro-check` covers all of PLATFORMS locally.
+      - name: reproducibility gate (linux/amd64 + windows/amd64)
+        run: make repro-check PLATFORMS="linux/amd64 windows/amd64"
 
       - name: build all platforms
         id: build
