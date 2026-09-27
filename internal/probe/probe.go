@@ -123,9 +123,13 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 	s.OK = true
 	s.Tokens = tokens
 	s.TTFTms = float64(ttft.Microseconds()) / 1000.0
+	// fitEvalDuration returns 0 when no scaling of the reported value is
+	// believable, so the divisor is taken from the result rather than from
+	// evalDur: dividing by that zero would store +Inf as the rate.
+	evalDur = fitEvalDuration(evalDur, total)
 	switch {
 	case evalDur > 0:
-		s.TokPS = float64(tokens) / fitEvalDuration(evalDur, total).Seconds()
+		s.TokPS = float64(tokens) / evalDur.Seconds()
 	case total > ttft && tokens > 0:
 		s.TokPS = float64(tokens) / (total - ttft).Seconds()
 	case tokens > 0 && total > 0:

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -970,6 +971,9 @@ func TestFitEvalDuration(t *testing.T) {
 		// A fast local engine can report longer than the HTTP round trip we
 		// measured; the raw reading stands rather than being scaled away.
 		{"nothing fits, keep raw", 10 * time.Second, 10 * time.Second},
+		// Short of the band in every unit: refused, so the caller falls back
+		// to the wall-clock measurement instead of dividing by zero.
+		{"too small in every unit", 100 * time.Millisecond, 0},
 	}
 	for _, tc := range tests {
 		if got := fitEvalDuration(tc.reported, measured); got != tc.want {
@@ -1023,5 +1027,37 @@ func TestRunOllamaTerminalFrameKeepsEngineCounts(t *testing.T) {
 	}
 	if s.TokPS <= 0 {
 		t.Errorf("tok/s = %v, want a rate from the engine's eval_duration", s.TokPS)
+	}
+}
+
+// An eval_duration no unit scaling can place in the band is refused, and the
+// rate then comes from the measured round trip. Dividing the token count by
+// that zero stored +Inf as the sample's tok/s.
+func TestRunOllamaRefusedEvalDurationUsesWallClock(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		flusher, _ := w.(http.Flusher)
+		// The first token goes out before the sleep, so the measured decode
+		// window is the sleep and not the whole exchange.
+		_, _ = w.Write([]byte(`{"response":"one","done":false}` + "\n"))
+		if flusher != nil {
+			flusher.Flush()
+		}
+		time.Sleep(200 * time.Millisecond)
+		_, _ = w.Write([]byte(`{"response":"","done":true,"eval_count":6,"eval_duration":1000000}` + "\n"))
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	if !s.OK {
+		t.Fatalf("probe failed: %+v", s)
+	}
+	if math.IsInf(s.TokPS, 0) || math.IsNaN(s.TokPS) {
+		t.Fatalf("tokps = %v, want the wall-clock rate", s.TokPS)
+	}
+	// 6 tokens over the ~200ms decode window, not the 1ms the refused
+	// reading would have claimed.
+	if s.TokPS < 5 || s.TokPS > 200 {
+		t.Errorf("tokps = %v, want a rate from the measured round trip", s.TokPS)
 	}
 }
