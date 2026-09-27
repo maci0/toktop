@@ -22,6 +22,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/maci0/toktop/internal/core"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -130,7 +131,10 @@ func origin(raw string) string {
 
 // originOf renders a URL's scheme://host:port identity. Both sides of the
 // comparison go through it, so spelling differences (default port, host
-// case, IPv6 brackets) collapse.
+// case, IPv6 brackets) collapse. Case folds ASCII only: a host label that
+// carries U+212A would fold to "k" under strings.ToLower and reach an
+// allowlist entry its producer never wrote, which is the one direction a
+// wrong fold must not err in.
 func originOf(u *url.URL) string {
 	if u == nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		return ""
@@ -144,5 +148,5 @@ func originOf(u *url.URL) string {
 			port = "80"
 		}
 	}
-	return u.Scheme + "://" + net.JoinHostPort(strings.ToLower(norm.NFC.String(u.Hostname())), port)
+	return u.Scheme + "://" + net.JoinHostPort(core.FoldASCII(norm.NFC.String(u.Hostname())), port)
 }

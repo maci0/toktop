@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/gpu"
@@ -227,7 +228,7 @@ func durationFromClock(sec, nsec int64) time.Duration {
 func parseSwapUsage(s string) (total, used uint64) {
 	last := ""
 	for tok := range strings.FieldsSeq(strings.ReplaceAll(s, "=", " ")) {
-		switch strings.ToLower(tok) {
+		switch core.FoldASCII(tok) {
 		case "total":
 			last = "total"
 			continue
@@ -258,21 +259,25 @@ func parseSwapUsage(s string) (total, used uint64) {
 // float product that overflows to +Inf converts to a platform-defined
 // integer, often zero, which would read as "no swap" instead of "full".
 func splitSizeToken(tok string) uint64 {
-	if len(tok) < 2 {
+	// The unit is one rune, not one byte: a token ending in a multi-byte
+	// rune cut at len-1 would hand ParseFloat a half-rune, and ToUpper a
+	// single invalid byte.
+	last, size := utf8.DecodeLastRuneInString(tok)
+	if size == 0 || last == utf8.RuneError || size == len(tok) {
 		return 0
 	}
-	unit := strings.ToUpper(string(tok[len(tok)-1]))
-	num, err := strconv.ParseFloat(tok[:len(tok)-1], 64)
+	unit := core.FoldASCII(string(last))
+	num, err := strconv.ParseFloat(tok[:len(tok)-size], 64)
 	if err != nil || !(num > 0) || math.IsInf(num, 0) {
 		return 0
 	}
 	var mult float64
 	switch unit {
-	case "G":
+	case "g":
 		mult = 1 << 30
-	case "M":
+	case "m":
 		mult = 1 << 20
-	case "K":
+	case "k":
 		mult = 1 << 10
 	default:
 		return 0

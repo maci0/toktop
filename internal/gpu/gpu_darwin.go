@@ -105,7 +105,7 @@ func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 		dev.Name = name
 	}
 	for k, v := range d {
-		lk := strings.ToLower(k)
+		lk := core.FoldASCII(k)
 		if lk == "vram" || (dev.MemTotal == 0 && strings.Contains(lk, "vram")) {
 			if s, ok := v.(string); ok {
 				dev.MemTotal = parseSizeString(s)
@@ -202,7 +202,7 @@ func parseSizeString(s string) uint64 {
 		return 0
 	}
 	var mult float64
-	switch strings.ToLower(strings.TrimSuffix(f[1], "B")) {
+	switch core.FoldASCII(strings.TrimSuffix(f[1], "B")) {
 	case "k":
 		mult = 1 << 10
 	case "m":

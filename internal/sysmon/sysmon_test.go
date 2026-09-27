@@ -199,3 +199,21 @@ func TestPagesToBytesSaturates(t *testing.T) {
 		t.Errorf("pagesToBytes(MaxUint64, 4096) = %d, want %d", got, want)
 	}
 }
+
+// The unit is one rune, not one byte. A token ending in a multi-byte rune
+// used to be cut at len-1, handing ParseFloat a half-rune, and a token
+// ending in an invalid byte could parse a prefix and read a size.
+func TestSplitSizeTokenIsRuneSafe(t *testing.T) {
+	if got := splitSizeToken("512.00K"); got != 512<<10 {
+		t.Errorf("512.00K = %d, want %d", got, 512<<10)
+	}
+	if got := splitSizeToken("1.5\u00a0G"); got != 0 {
+		t.Errorf("no-break space unit = %d, want 0", got)
+	}
+	if got := splitSizeToken("512.00\xff"); got != 0 {
+		t.Errorf("invalid unit byte = %d, want 0", got)
+	}
+	if got := splitSizeToken("G"); got != 0 {
+		t.Errorf("bare unit = %d, want 0", got)
+	}
+}

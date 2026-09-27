@@ -1211,3 +1211,50 @@ func TestParseTargetToleratesAbsentSSHConfig(t *testing.T) {
 		t.Errorf("resolved = %+v, want the defaults host=gpu port=22", tgt)
 	}
 }
+
+// DNS case does not change a host's identity, so the pin store keys on the
+// ASCII-folded name. Before, ssh://Box.example and ssh://box.example were two
+// entries and the second connection silently re-trusted a pinned host.
+func TestKnownHostsStoreKeysHostsCaseInsensitively(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	key := string(ssh.MarshalAuthorizedKey(testHostKeyPub(t)))
+	if err := writeKnownHosts(path, map[string]string{"box.example:22": "Box.Example:22 " + key}); err != nil {
+		t.Fatal(err)
+	}
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := store["box.example:22"]; !ok {
+		t.Fatalf("store = %v, want the pin under its folded name", store)
+	}
+	if pinKey(store["box.example:22"]) != pinKey("Box.Example:22 "+key) {
+		t.Errorf("pinKey differs across a case change, so a re-case would read as a changed host key")
+	}
+	// Two spellings of one host carrying the same key are one record, not a
+	// store to refuse over.
+	store["BOX.EXAMPLE:22"] = "BOX.EXAMPLE:22 " + key
+	if err := writeKnownHosts(path, store); err != nil {
+		t.Fatal(err)
+	}
+	again, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatalf("re-reading a store with two spellings of one host failed: %v", err)
+	}
+	if len(again) != 1 {
+		t.Errorf("store holds %d records, want 1: %v", len(again), again)
+	}
+}
+
+func testHostKeyPub(t *testing.T) ssh.PublicKey {
+	t.Helper()
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pk
+}

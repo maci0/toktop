@@ -178,6 +178,20 @@ func (c *versionCache) fetch(ctx context.Context, base string) string {
 	return c.val
 }
 
+// versionCap is the bound the plain-text branch of extractVersionField
+// applies, and every branch now shares it: the value is
+// cached for versionRefresh and re-rendered every frame, so a hostile engine
+// answering an 8 MB "version" member must not be able to hold it.
+const versionCap = 128
+
+// capVersion bounds a version string to versionCap grapheme clusters and
+// strips what a terminal would interpret in it. The engine, not the operator,
+// chooses the text. The cap counts clusters, so it never splits a multi-byte
+// rune, a combining mark, or an emoji sequence.
+func capVersion(s string) string {
+	return core.ClampField(s, versionCap)
+}
+
 // extractVersionField pulls a "version" member out of JSON-ish bodies.
 func extractVersionField(body string) string {
 	trimmed := strings.TrimSpace(body)
@@ -185,7 +199,7 @@ func extractVersionField(body string) string {
 	if json.Unmarshal([]byte(trimmed), &doc) == nil {
 		for _, key := range []string{"version", "Version"} {
 			if s, ok := doc[key].(string); ok && s != "" {
-				return s
+				return capVersion(s)
 			}
 		}
 		// nested (SGLang get_server_info)
@@ -193,7 +207,7 @@ func extractVersionField(body string) string {
 			if inner, ok := doc[sub].(map[string]any); ok {
 				for _, key := range []string{"version", "sglang_version", "vllm_version"} {
 					if s, ok := inner[key].(string); ok && s != "" {
-						return s
+						return capVersion(s)
 					}
 				}
 			}
@@ -201,14 +215,16 @@ func extractVersionField(body string) string {
 		return ""
 	}
 	// llama.cpp /version may answer with a bare quoted string or plain text
-	if trimmed == "" || len(trimmed) > 128 {
+	// Cheap reject for a body that is not a version at all: past this
+	// many bytes the plain-text answer is not a version string either.
+	if trimmed == "" || len(trimmed) > versionCap {
 		return ""
 	}
 	if strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
-		return strings.Trim(trimmed, "\"")
+		return capVersion(strings.Trim(trimmed, "\""))
 	}
 	if !strings.ContainsAny(trimmed, "{}\n") {
-		return trimmed
+		return capVersion(trimmed)
 	}
 	return ""
 }

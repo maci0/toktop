@@ -407,11 +407,21 @@ func streamReadErr(ctx context.Context, err error, tokens int) error {
 	return err
 }
 
+// engineErrorText bounds a recognized engine error. The engine chooses the
+// text, and ProbeSample keeps the last 128 samples, so an uncapped message is
+// unbounded memory held across a poll cycle and an arbitrarily wide line at
+// render time. ClampField is the cap and the terminal sanitization the
+// unrecognized-junk path below already gets from core.Snippet.
+func engineErrorText(s string) string {
+	return core.ClampField(s, core.SnippetCap)
+}
+
 // sseErrorMessage extracts an engine-reported failure from a streaming data
 // payload. Gateways disagree on the shape: {"error":{"message":…}},
 // {"error":"…"}, or other junk; null and absent mean no error. Unrecognized
-// junk is capped by core.Snippet; a recognized message passes through as
-// sent, clipped to the readout's line width at render time.
+// junk and a recognized message are both capped by core.Snippet and stripped
+// of terminal escapes; the result is clipped to the readout's line width at
+// render time.
 func sseErrorMessage(raw json.RawMessage) string {
 	if len(raw) == 0 || string(raw) == "null" {
 		return ""
@@ -420,11 +430,11 @@ func sseErrorMessage(raw json.RawMessage) string {
 		Message string `json:"message"`
 	}
 	if json.Unmarshal(raw, &obj) == nil && obj.Message != "" {
-		return obj.Message
+		return engineErrorText(obj.Message)
 	}
 	var s string
 	if json.Unmarshal(raw, &s) == nil && s != "" {
-		return s
+		return engineErrorText(s)
 	}
 	return core.Snippet(raw)
 }

@@ -290,7 +290,7 @@ func ParseRocmSMI(b []byte) []core.GPUDevice {
 		d := core.GPUDevice{Vendor: "amd", Index: index}
 		fields := raw[card]
 		for _, k := range slices.Sorted(maps.Keys(fields)) {
-			lk, val := strings.ToLower(k), flatten(fields[k])
+			lk, val := core.FoldASCII(k), flatten(fields[k])
 			switch {
 			case strings.Contains(lk, "temperature"):
 				if strings.Contains(lk, "edge") || d.MilliC == 0 {
@@ -358,7 +358,7 @@ func parseXpuMetrics(b []byte, index int) (core.GPUDevice, bool) {
 	// which of two overlapping sensors (two temperature keys, memory_size
 	// vs memory_total) wins would otherwise flip between polls.
 	for _, k := range slices.Sorted(maps.Keys(raw.Metrics)) {
-		lk := strings.ToLower(k)
+		lk := core.FoldASCII(k)
 		val := flatten(raw.Metrics[k])
 		switch {
 		case strings.Contains(lk, "temperature"):

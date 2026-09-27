@@ -61,10 +61,10 @@ func ParseTarget(raw string) (Target, error) {
 	if t.Port == 0 {
 		t.Port = 22
 	}
-	if strings.ContainsAny(t.Host, " \t\r\n\x00") {
+	if err := validTargetField(t.Host); err != nil {
 		return Target{}, fmt.Errorf("bad ssh host %q", t.Host)
 	}
-	if strings.ContainsAny(t.User, " \t\r\n\x00") {
+	if err := validTargetField(t.User); err != nil {
 		return Target{}, fmt.Errorf("bad ssh user %q", t.User)
 	}
 	return t, nil
@@ -163,20 +163,20 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 		if !ok {
 			continue
 		}
-		switch strings.ToLower(key) {
+		switch core.FoldASCII(key) {
 		case "host":
 			inBlock = false
 			negated := false
 			for pat := range strings.FieldsSeq(val) {
-				pat = strings.ToLower(pat)
+				pat = core.FoldASCII(pat)
 				if strings.HasPrefix(pat, "!") {
-					if patternMatch(strings.TrimPrefix(pat, "!"), strings.ToLower(name)) {
+					if patternMatch(strings.TrimPrefix(pat, "!"), core.FoldASCII(name)) {
 						negated = true
 						break
 					}
 					continue
 				}
-				if patternMatch(pat, strings.ToLower(name)) {
+				if patternMatch(pat, core.FoldASCII(name)) {
 					inBlock = true
 				}
 			}
@@ -247,6 +247,25 @@ func unquote(s string) string {
 		}
 	}
 	return b.String()
+}
+
+// validTargetField rejects a host or user that cannot be passed to ssh or
+// printed. Whitespace and NUL break the ssh argv; a C0 control or DEL would
+// be written to the operator's terminal by the first-use, forwarding-failure,
+// and connection-lost messages, which is a terminal escape the operator
+// never typed. A bidi override and zero-width space are not C0, so the
+// identity spoofing they enable is a separate question from this one.
+func validTargetField(s string) error {
+	// Empty is legal: an absent user means ssh's own default.
+	if strings.ContainsAny(s, " \t\r\n\x00") {
+		return errors.New("contains whitespace or newline")
+	}
+	for i := 0; i < len(s); i++ {
+		if c := s[i]; c < 0x20 || c == 0x7f {
+			return errors.New("contains a control character")
+		}
+	}
+	return nil
 }
 
 // patternMatch implements ssh_config glob matching ('*' and '?') through

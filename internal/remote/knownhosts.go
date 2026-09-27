@@ -150,6 +150,11 @@ func tofu() (ssh.HostKeyCallback, error) {
 		if strings.ContainsAny(hostname, " \t\r\n\x00") {
 			return fmt.Errorf("invalid hostname %q: contains whitespace or newline", hostname)
 		}
+		// The store is keyed case-insensitively, as DNS is: without this a
+		// target spelled ssh://Box.example and the same host spelled
+		// ssh://box.example are two entries, and the second connection
+		// silently re-trusts a host the operator already pinned.
+		storeKey := core.FoldASCII(hostname)
 		line := hostname + " " + string(ssh.MarshalAuthorizedKey(key))
 		line = strings.TrimSpace(line)
 		// The read and the write are one critical section, across processes
@@ -165,8 +170,11 @@ func tofu() (ssh.HostKeyCallback, error) {
 			if err != nil {
 				return err
 			}
-			if old, ok := store[hostname]; ok {
-				if old == line {
+			if old, ok := store[storeKey]; ok {
+				// Compare the key material, not the whole line: a pinned
+				// host whose target changed case is the same pin, not a
+				// changed key.
+				if pinKey(old) == pinKey(line) {
 					return nil
 				}
 				return fmt.Errorf(
@@ -176,7 +184,7 @@ func tofu() (ssh.HostKeyCallback, error) {
 					short(line), fingerprintOf(line),
 					path)
 			}
-			store[hostname] = line
+			store[storeKey] = line
 			if err := writeKnownHosts(path, store); err != nil {
 				return err
 			}
@@ -240,15 +248,27 @@ func readKnownHosts(path string) (map[string]string, error) {
 			return nil, malformedPin(path, n, line, err.Error())
 		}
 		record := host + " " + rest
-		if prev, dup := out[host]; dup && prev != record {
+		key := core.FoldASCII(host)
+		if prev, dup := out[key]; dup && pinKey(prev) != pinKey(record) {
 			return nil, fmt.Errorf("%s: host %s is recorded twice with different keys; refusing to pick one", path, host)
 		}
-		out[host] = record
+		out[key] = record
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("%s: holds no host records; an emptied or truncated store cannot re-trust these hosts, so restore it from a copy or delete it to pin them again on purpose", path)
 	}
 	return out, nil
+}
+
+// pinKey returns the key material of a stored record, which is everything
+// after the host field. Two records with the same pinKey are the same pin
+// however their host was spelled.
+func pinKey(record string) string {
+	_, rest, ok := strings.Cut(record, " ")
+	if !ok {
+		return record
+	}
+	return strings.TrimSpace(rest)
 }
 
 // malformedPin names the file and the line so a store that must be repaired
