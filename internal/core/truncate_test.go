@@ -74,6 +74,27 @@ func TestTruncateClustersIsWholeClusterPrefix(t *testing.T) {
 	}
 }
 
+// TailClusters is TruncateClusters from the other end, and the guarantee is
+// the same one: whatever comes back is a whole-cluster suffix, never a byte
+// slice that lands inside a rune or between a base letter and its mark.
+func TestTailClustersIsWholeClusterSuffix(t *testing.T) {
+	hostile := "\U0001F1E9\U0001F1EA" + strings.Repeat("e\u0301", 8) + "👩‍💻" + strings.Repeat("x", 16)
+	total := uniseg.GraphemeClusterCount(hostile)
+	var clusters []string
+	state := -1
+	for s := hostile; s != ""; {
+		var c string
+		c, s, _, state = uniseg.FirstGraphemeClusterInString(s, state)
+		clusters = append(clusters, c)
+	}
+	for n := 0; n <= total; n++ {
+		want := strings.Join(clusters[total-n:], "")
+		if got := TailClusters(hostile, n); got != want {
+			t.Fatalf("n=%d: TailClusters = %q, want the last %d whole clusters %q", n, got, n, want)
+		}
+	}
+}
+
 func TestClampFieldComposesToNFCAndCapsClusters(t *testing.T) {
 	if got := ClampField("cafe\u0301", 64); got != "caf\u00e9" {
 		t.Errorf("ClampField(NFD café) = %q, want NFC", got)

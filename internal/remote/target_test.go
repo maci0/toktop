@@ -34,6 +34,13 @@ func TestValidTargetField(t *testing.T) {
 		{"the C0 boundary below newline", "bad\x1fhost", "control"},
 		{"DEL", "bad\x7fhost", "control"},
 		{"a control character only after a long host", strings.Repeat("a", 200) + "\x1b", "control"},
+		{"a right-to-left override", "bad\u202ehost", "invisible"},
+		{"a left-to-right mark", "bad\u200fhost", "invisible"},
+		{"a zero-width space", "bad\u200bhost", "invisible"},
+		{"a soft hyphen", "bad\u00adhost", "invisible"},
+		{"a variation selector", "bad\ufe0fhost", "invisible"},
+		{"a tag character", "bad\U000e0061host", "invisible"},
+		{"an accented host stays legal", "équipe.example.com", ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

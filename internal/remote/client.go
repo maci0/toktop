@@ -16,7 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"golang.org/x/crypto/ssh"
 
@@ -546,6 +545,13 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 	}
 }
 
+// stderrTailClusters bounds how much of a peer's stderr is quoted into a
+// connection error. Counted in grapheme clusters, like every other retained
+// field: the last line of a Python traceback is the part the operator needs,
+// and a cut that splits an emoji or drops a combining mark mangles the one
+// line that was readable.
+const stderrTailClusters = 300
+
 func stderrTail(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -555,12 +561,7 @@ func stderrTail(s string) string {
 	if s == "" {
 		return ""
 	}
-	if len(s) > 300 {
-		s = s[len(s)-300:]
-		for len(s) > 0 && !utf8.RuneStart(s[0]) {
-			s = s[1:]
-		}
-	}
+	s = core.TailClusters(s, stderrTailClusters)
 	if s == "" {
 		return ""
 	}

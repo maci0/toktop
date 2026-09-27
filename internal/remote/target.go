@@ -62,10 +62,10 @@ func ParseTarget(raw string) (Target, error) {
 		t.Port = 22
 	}
 	if err := validTargetField(t.Host); err != nil {
-		return Target{}, fmt.Errorf("bad ssh host %q", t.Host)
+		return Target{}, fmt.Errorf("bad ssh host %q: %w", t.Host, err)
 	}
 	if err := validTargetField(t.User); err != nil {
-		return Target{}, fmt.Errorf("bad ssh user %q", t.User)
+		return Target{}, fmt.Errorf("bad ssh user %q: %w", t.User, err)
 	}
 	return t, nil
 }
@@ -254,8 +254,16 @@ func unquote(s string) string {
 // printed. Whitespace and NUL break the ssh argv; a C0 control or DEL would
 // be written to the operator's terminal by the first-use, forwarding-failure,
 // and connection-lost messages, which is a terminal escape the operator
-// never typed. A bidi override and zero-width space are not C0, so the
-// identity spoofing they enable is a separate question from this one.
+// never typed.
+//
+// Bidi controls, zero-width spaces, tag characters and variation selectors
+// are refused as well. They are not C0, but they carry no part of a host
+// name or a user name: they exist to render one string as another. A host
+// spelled with a right-to-left override is written into the trust-on-first-use
+// store and shown in the first-use prompt, the host label and the audit log
+// as the host the operator believes it to be, while the bytes ssh dials are
+// the ones on the command line. core.SanitizeText names the set, so the
+// check and the sanitizer the rest of the tree renders with cannot drift.
 func validTargetField(s string) error {
 	// Empty is legal: an absent user means ssh's own default.
 	if strings.ContainsAny(s, " \t\r\n\x00") {
@@ -265,6 +273,9 @@ func validTargetField(s string) error {
 		if c := s[i]; c < 0x20 || c == 0x7f {
 			return errors.New("contains a control character")
 		}
+	}
+	if core.SanitizeText(s) != s {
+		return errors.New("contains a bidi control, zero-width character or other invisible formatting character")
 	}
 	return nil
 }

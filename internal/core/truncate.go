@@ -37,6 +37,30 @@ func TruncateClusters(s string, n int) string {
 	return b.String()
 }
 
+// TailClusters keeps the last n grapheme clusters of s, dropping whole
+// clusters from the front. It is TruncateClusters for the ends of a string
+// worth reading rather than its start: a peer's stderr tail is where the
+// error is, and the reason it must not be a byte slice is the same. A cut at
+// a byte offset lands inside a multi-byte sequence, and trimming the partial
+// rune that leaves still lands inside a grapheme: an "e" whose U+0301
+// combining acute fell on the wrong side prints as an unaccented letter, and
+// a family emoji cut before its last element prints as a bare person. n <= 0
+// yields "".
+func TailClusters(s string, n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if uniseg.GraphemeClusterCount(s) <= n {
+		return s
+	}
+	drop := uniseg.GraphemeClusterCount(s) - n
+	state := -1
+	for ; drop > 0 && s != ""; drop-- {
+		_, s, _, state = uniseg.FirstGraphemeClusterInString(s, state)
+	}
+	return s
+}
+
 // ClampField composes s to NFC and caps it at n grapheme clusters, cutting
 // only between clusters. Identity fields (agent names, event ids) use this
 // so "café" spelled NFD (e + combining acute) and NFC (precomposed) stay one
