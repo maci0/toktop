@@ -349,6 +349,41 @@ func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	}
 }
 
+// A failed walk is the one line this package writes, and the account name is
+// in it twice: the root, and the path the walk failed on inside that root.
+// Folding only the root would leave the home directory spelled out in the
+// error beside it, and a host that installs its own logger has no fold of its
+// own to catch that. The line is a diagnostic meant to be pasted into an
+// issue, so neither value may carry the path under $HOME.
+func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
+
+	var lines bytes.Buffer
+	old := audit
+	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer func() { audit = old }()
+
+	// A store that is not there: the error names the path under $HOME the
+	// walk could not open.
+	root := filepath.Join(home, ".claude", "projects", "gone")
+	now := time.Now()
+	if got := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+		t.Fatalf("failed walk listed %v, want nothing", got)
+	}
+	got := lines.String()
+	if !strings.Contains(got, "agent transcript walk failed") {
+		t.Fatalf("the failed walk wrote no audit line:\n%s", got)
+	}
+	if strings.Contains(got, home) {
+		t.Errorf("the audit line spells out the home directory %q:\n%s", home, got)
+	}
+	if !strings.Contains(got, "root=~/.claude/projects/gone") {
+		t.Errorf("the audit line does not fold the root to ~:\n%s", got)
+	}
+}
+
 // SetLogger is the seam a host program writes its audit lines through, and
 // nil is its documented way back to the process logger. A restore that left
 // the previous logger installed would keep a handler the host has let go of

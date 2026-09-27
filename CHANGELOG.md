@@ -74,6 +74,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   another platform was copied into a log line, an issue, or a bug report whole.
   The other spelling is folded now, and a message that is exactly the home
   directory collapses to `~` whichever way it is written.
+- The audit line `agentusage` writes for a transcript walk that could not
+  finish folded the store root to `~` and left the error beside it whole, so
+  the home directory the error names (the path inside that store the walk
+  failed on) reached the line that gets pasted into an issue. A host that
+  installs its own logger through `SetLogger` had no fold of its own to catch
+  it. Both values are folded now, from one place, so the two call sites
+  cannot drift.
 - The ingest examples in the README and on the site taught the two shapes a
   harness must not copy: a key built from the clock
   (`Idempotency-Key: coder-$(date +%s)-1`), which the shell re-evaluates on

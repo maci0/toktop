@@ -84,6 +84,18 @@ func SetLogger(l *slog.Logger) {
 
 func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 
+// auditWalkFailure writes the one line a transcript walk that could not
+// finish produces. Both values on it are folded to "~": the root is the
+// store, and the error is the path the walk failed on, which is under that
+// store and names the account the same way. Folding the root alone would
+// leave the account spelled out in the value beside it, and a host that
+// installs its own logger (SetLogger) has no fold of its own to catch it.
+func auditWalkFailure(root string, err error) {
+	audit().Warn("agent transcript walk failed",
+		"root", core.RedactHome(root),
+		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+}
+
 // pruneRootListsLocked drops listings older than maxAge. A clanker (or a
 // {dir} spec) keys this map on the project path; without a bound, every tree
 // an agent ever visited during a long --agents run stays pinned after the
@@ -198,9 +210,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			// caller re-walks rather than serving this one, and the reason is
 			// audited because the only other symptom is agents reporting no
 			// tokens.
-			audit().Warn("agent transcript walk failed",
-				"root", core.RedactHome(root),
-				"error", core.Snippet([]byte(err.Error())))
+			auditWalkFailure(root, err)
 			files, fresh = nil, time.Time{}
 		}
 		return append([]string(nil), files...)
@@ -303,9 +313,7 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 				// a store that could not be walked would record "read to the
 				// end" for files the walk never reached, and the next append to
 				// one of them would be skipped.
-				audit().Warn("agent transcript walk failed",
-					"root", core.RedactHome(root),
-					"error", core.Snippet([]byte(err.Error())))
+				auditWalkFailure(root, err)
 				return nil
 			}
 			out = append(out, files...)
