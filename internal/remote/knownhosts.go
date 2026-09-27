@@ -3,7 +3,9 @@ package remote
 import (
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net"
 	"os"
@@ -87,7 +89,12 @@ const (
 // atomic on every filesystem toktop runs on, which a flock over the store
 // itself is not on Windows. A lock left by a dead process is broken once it
 // is older than storeLockStale, so the store cannot wedge.
-func lockStore(path string, fn func() error) error {
+// lockStore runs fn with an exclusive lock beside path. A lock that cannot
+// be released is reported rather than dropped: the next connect spends
+// storeLockWait on it before breaking it as stale, and an operator who never
+// learns why has no way to act. The result is named so the deferred release
+// can fold its own failure into whatever fn returned.
+func lockStore(path string, fn func() error) (err error) {
 	lock := path + storeLockSuffix
 	// The lock lives beside the store, and the store's directory is created by
 	// the write inside fn. On a first remote connect the directory does not
@@ -103,8 +110,15 @@ func lockStore(path string, fn func() error) error {
 	for {
 		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
-			f.Close()
-			defer os.Remove(lock)
+			if cerr := f.Close(); cerr != nil {
+				os.Remove(lock)
+				return fmt.Errorf("%s: cannot write the lock: %w", lock, cerr)
+			}
+			defer func() {
+				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w", lock, rerr))
+				}
+			}()
 			return fn()
 		}
 		if !os.IsExist(err) {

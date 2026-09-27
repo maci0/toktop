@@ -7,11 +7,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
 	"sync"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Watcher tails one agent's transcripts from the moment it attached.
@@ -303,6 +306,7 @@ func dirSpellings(dir string) []string {
 // watcher's roots. A symlink swapped to point outside is refused, so a
 // writable store cannot pull in a file from elsewhere.
 func (w *Watcher) openTranscript(path string) (*os.File, error) {
+	refused := false
 	for _, root := range w.rootsLocked() {
 		if root == "" {
 			continue
@@ -311,6 +315,12 @@ func (w *Watcher) openTranscript(path string) (*os.File, error) {
 		if err == nil {
 			return f, nil
 		}
+		if errors.Is(err, errOutsideRoot) {
+			refused = true
+		}
+	}
+	if refused {
+		return nil, errOutsideRoot
 	}
 	return nil, os.ErrNotExist
 }
@@ -347,6 +357,23 @@ func openUnder(root, path string) (*os.File, error) {
 
 var errOutsideRoot = errors.New("path is outside the transcript root")
 
+// errBaselineUnread names the one seedBaseline failure that carries no
+// error of its own: a decode the reader rejected without surfacing a cause.
+var errBaselineUnread = errors.New("transcript body could not be decoded")
+
+// auditBaseline records a seed that did not commit, naming the transcript
+// so the operator can find the session whose totals are overstated. A file
+// that vanished between the listing and this open is a normal race and is
+// not audited.
+func auditBaseline(path string, err error) {
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	audit().Warn("agent usage baseline could not be read; totals for this session will include its whole history",
+		"path", core.RedactHome(path),
+		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+}
+
 // baselineTailBytes bounds the seed read. Cumulative values only grow, so the
 // last one in the file is the baseline, and the tail always holds it.
 const baselineTailBytes = 256 << 10
@@ -358,20 +385,28 @@ const baselineTailBytes = 256 << 10
 // growth. consumeAppend skips the oversized line and keeps reading, and
 // a real I/O error leaves the baseline unset instead of committing a
 // partial one.
+//
+// An unset baseline is not self-announcing: the next attach's totals then
+// include the whole session, so every read failure below is audited. The
+// caller has no other way to tell a session with no prior spend from one
+// whose baseline could not be read.
 func (w *Watcher) seedBaseline(path string) {
 	f, err := w.openTranscript(path)
 	if err != nil {
+		auditBaseline(path, err)
 		return
 	}
 	defer f.Close()
 	fi, err := f.Stat()
 	if err != nil {
+		auditBaseline(path, err)
 		return
 	}
 	off := int64(0)
 	if fi.Size() > baselineTailBytes {
 		off = fi.Size() - baselineTailBytes
 		if _, err := f.Seek(off, 0); err != nil {
+			auditBaseline(path, err)
 			return
 		}
 	}
@@ -385,6 +420,7 @@ func (w *Watcher) seedBaseline(path string) {
 		recs, _, ok = w.consumeAppend(f, off)
 	}
 	if !ok {
+		auditBaseline(path, errBaselineUnread)
 		return
 	}
 	for _, v := range recs {

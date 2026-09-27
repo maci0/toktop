@@ -309,8 +309,9 @@ func Apply(ctx context.Context, rel *Release) (string, error) {
 }
 
 // applyTo is Apply with an explicit target, so the install path can be tested
-// without replacing the test binary.
-func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
+// without replacing the test binary. The results are named so the staging
+// file's cleanup can fold its own failure into the error being returned.
+func applyTo(ctx context.Context, rel *Release, self string) (installed string, err error) {
 	want := AssetName(rel.Version())
 	sumsFile := checksumsName(rel.Version())
 	assetURL, sumsURL := releaseAssets(rel)
@@ -355,9 +356,21 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 		return "", fmt.Errorf("cannot write next to %s: %w", self, err)
 	}
 	tmpName := tmp.Name()
+	// A failed update that leaves its partial download behind is reported
+	// with the failure, not swallowed: the operator otherwise sees the
+	// original error with no sign the install directory now holds an
+	// unverified file. Once the rename has succeeded there is nothing left at
+	// tmpName and the Remove is a no-op.
 	defer func() {
 		tmp.Close()
-		os.Remove(tmpName) // no-op once the rename succeeded
+		if err == nil {
+			os.Remove(tmpName) // no-op once the rename succeeded
+			return
+		}
+		if rerr := os.Remove(tmpName); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			err = errors.Join(err,
+				fmt.Errorf("left a partial download at %s that must be deleted: %w", tmpName, rerr))
+		}
 	}()
 
 	sum, err := download(ctx, assetURL, tmp)
@@ -374,7 +387,7 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 		return "", fmt.Errorf("cannot close %s: %w", tmpName, err)
 	}
 	if err := os.Chmod(tmpName, 0o755); err != nil {
-		return "", err
+		return "", fmt.Errorf("cannot make %s executable: %w", tmpName, err)
 	}
 	if err := install(tmpName, self); err != nil {
 		return "", fmt.Errorf("cannot replace %s: %w", self, err)

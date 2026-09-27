@@ -441,6 +441,21 @@ type progressBody struct {
 	rc    *http.ResponseController
 	until time.Time
 	last  time.Time // the deadline the read that failed was armed with
+	// armed records whether a deadline of ours was ever accepted. It is false
+	// on a ResponseWriter that does not support them, and then the i/o
+	// timeout that reaches the decoder is the server's own, not one of the
+	// two below, so naming either of them would be a guess.
+	armed bool
+}
+
+// arm sets the read deadline, reporting whether the writer took it. Callers
+// that must not name a deadline they never got use the result.
+func (b *progressBody) arm(deadline time.Time) error {
+	err := b.rc.SetReadDeadline(deadline)
+	if err == nil {
+		b.armed = true
+	}
+	return err
 }
 
 func (b *progressBody) Read(p []byte) (int, error) {
@@ -449,7 +464,7 @@ func (b *progressBody) Read(p []byte) (int, error) {
 		next = b.until
 	}
 	b.last = next
-	_ = b.rc.SetReadDeadline(next)
+	_ = b.arm(next)
 	return b.ReadCloser.Read(p)
 }
 
@@ -460,6 +475,9 @@ func (b *progressBody) Read(p []byte) (int, error) {
 // decode error always follows a read, and every read arms a deadline, so
 // one of the two always fired.
 func (b *progressBody) stallReason() string {
+	if !b.armed {
+		return "request stalled: the server's read timeout fired, not this endpoint's body limits"
+	}
 	if b.last.Before(b.until) {
 		return fmt.Sprintf("request stalled: no body bytes for %s", bodyIdleTimeout)
 	}
@@ -553,10 +571,13 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)
-	_ = rc.SetReadDeadline(until) // covers reads before the first progress extension
 	progress := &progressBody{ReadCloser: r.Body, rc: rc, until: until}
+	_ = progress.arm(until) // covers reads before the first progress extension
 	r.Body = http.MaxBytesReader(w, progress, maxEventBody)
 	br := bufio.NewReader(r.Body)
+	// A Peek error is not acted on here: a body that cannot be read fails the
+	// first Decode with the same cause, and the decode path already reports
+	// it. Logging it twice would bury the line that names the request.
 	if lead, _ := br.Peek(3); len(lead) == 3 && lead[0] == 0xef && lead[1] == 0xbb && lead[2] == 0xbf {
 		_, _ = br.Discard(3)
 	}

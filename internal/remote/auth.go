@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/maci0/toktop/internal/core"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/term"
@@ -206,6 +207,12 @@ var dialAgent = func(sock string) (agent.Agent, func(), error) {
 // key file, config/default keys, then the agent if one is reachable. A
 // load failure of the explicitly configured key aborts the chain: dialing
 // without it could only end in a misleading credentials-rejected error.
+//
+// A default key or the agent that fails to load is skipped rather than
+// fatal, but never silently: a key that exists and cannot be read and an
+// agent socket that refuses the connection both leave the chain weaker,
+// and the visible result is a rejection naming the host key instead. Each
+// is audited with its own cause.
 func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 	cleanup := func() {}
 	var methods []ssh.AuthMethod
@@ -215,12 +222,24 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 		methods = append(methods, m)
 	}
 	for _, p := range defaultKeyPaths() {
-		if m, _ := keyFileAuth(p, false); m != nil { // defaults are best effort
+		m, err := keyFileAuth(p, false)
+		if err != nil {
+			audit().Warn("toktop: default ssh key unusable, continuing without it",
+				"key", core.RedactHome(p),
+				"error", core.Snippet([]byte(err.Error())))
+			continue
+		}
+		if m != nil {
 			methods = append(methods, m)
 		}
 	}
 	if sock := agentSock(); sock != "" {
-		if ag, ac, err := dialAgent(sock); err == nil {
+		ag, ac, err := dialAgent(sock)
+		if err != nil {
+			audit().Warn("toktop: ssh agent unreachable, continuing without it",
+				"socket", sock,
+				"error", core.Snippet([]byte(err.Error())))
+		} else {
 			methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
 			old := cleanup
 			cleanup = func() { old(); ac() }
