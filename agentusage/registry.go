@@ -30,6 +30,12 @@ type adapter struct {
 	// parse extracts usage and the recorded working directory from one line.
 	// ok is false for lines that carry neither.
 	parse func(line []byte) (v values, cwd string, ok bool)
+	// parseFile reads a transcript that is one JSON document rewritten in
+	// place, rather than a log of lines. nil for the line-oriented stores.
+	parseFile func(data []byte) (v values, cwd string, ok bool)
+	// snapshot is set with parseFile: the file is read from the start whenever
+	// it changes, because a rewrite of the same length is not an append.
+	snapshot bool
 	// sessionCwd reads the working directory from a session header line, for
 	// agents whose usage records do not repeat it. nil when every usage line
 	// carries its own cwd.
@@ -129,6 +135,36 @@ var adapters = map[string]adapter{
 		kind:           perMessage,
 		parse:          parseKimi,
 		sessionCwdFile: kimiSessionCwd,
+	},
+	// Gemini CLI keeps one JSONL chat per session under
+	// ~/.gemini/tmp/<project>/chats. A gemini record's tokens are that turn's
+	// own counts. The project directory is named by .project_root beside chats/.
+	"gemini": {
+		roots:          func(string) []string { return []string{home(".gemini", "tmp")} },
+		suffix:         ".jsonl",
+		kind:           perMessage,
+		parse:          parseGemini,
+		sessionCwdFile: geminiSessionCwd,
+	},
+	// agy (Antigravity CLI) logs steps to transcript.jsonl under
+	// ~/.gemini/antigravity-cli. A step that carries no usage counts as
+	// nothing; the ones that do name the working directory on the record.
+	"agy": {
+		roots:      func(string) []string { return []string{home(".gemini", "antigravity-cli")} },
+		suffix:     "transcript.jsonl",
+		kind:       perMessage,
+		parse:      parseAgy,
+		sessionCwd: agySessionCwd,
+	},
+	// Grok writes one usage.json per session, rewritten in place with the
+	// session's own totals, under ~/.grok/sessions/<encoded cwd>/<id>/.
+	"grok": {
+		roots:          grokRoots,
+		suffix:         "usage.json",
+		kind:           cumulative,
+		parseFile:      parseGrokUsage,
+		snapshot:       true,
+		sessionCwdFile: grokSessionCwd,
 	},
 }
 

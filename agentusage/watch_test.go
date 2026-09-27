@@ -412,11 +412,11 @@ func TestContextMaximumAcrossTranscripts(t *testing.T) {
 }
 
 func TestUnsupportedAgentYieldsNoWatcher(t *testing.T) {
-	// gemini's transcripts on the machines checked carry no usage records.
-	if Supported("gemini") {
-		t.Fatal("gemini is not implemented yet and must not claim to be")
+	// cursor-agent is recognized by name and keeps no transcript this package reads.
+	if Supported("cursor-agent") {
+		t.Fatal("cursor-agent has no reader and must not claim to")
 	}
-	if w := Watch("gemini", t.TempDir(), time.Now()); w != nil {
+	if w := Watch("cursor-agent", t.TempDir(), time.Now()); w != nil {
 		t.Fatal("expected no watcher for an unsupported agent")
 	}
 	// A nil watcher must be safe to use, so callers never branch.
@@ -815,7 +815,7 @@ func TestProcessWatchMatchesWatch(t *testing.T) {
 		t.Fatalf("Watch and Process.Watch disagreed: %q %q vs %q %q",
 			w1.Tool(), w1.Dir(), w2.Tool(), w2.Dir())
 	}
-	if got := (Process{Tool: "gemini"}).Watch(since); got != nil {
+	if got := (Process{Tool: "cursor-agent"}).Watch(since); got != nil {
 		t.Fatal("unsupported agent must still yield no watcher")
 	}
 }

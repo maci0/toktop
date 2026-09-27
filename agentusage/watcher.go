@@ -398,6 +398,17 @@ func (w *Watcher) seedBaseline(path string) {
 		return
 	}
 	defer f.Close()
+	if w.ad.snapshot {
+		v, ok := w.snapshotValue(f)
+		if !ok {
+			auditBaseline(path, errBaselineUnread)
+			return
+		}
+		w.base[path] = v.output
+		w.baseThink[path] = v.thinking
+		w.baseInput[path] = v.input
+		return
+	}
 	fi, err := f.Stat()
 	if err != nil {
 		auditBaseline(path, err)

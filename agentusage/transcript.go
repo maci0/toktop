@@ -62,6 +62,10 @@ func (w *Watcher) readNew(path string) {
 		w.stamps[path] = stamp
 		return
 	}
+	if w.ad.snapshot {
+		w.readSnapshot(path, fi.Size(), stamp)
+		return
+	}
 	f, err := w.openTranscript(path)
 	if err != nil {
 		return // unstamped: the next poll retries instead of treating this as done
@@ -99,6 +103,44 @@ func (w *Watcher) readNew(path string) {
 		return
 	}
 	w.stamps[path] = stamp
+}
+
+// readSnapshot parses a transcript that is one document rewritten in place.
+// The offset is the file's length after a successful read, so an unchanged
+// file still short-circuits on its stamp; a rewrite is read from the start
+// even when the new text is the same length as the old.
+func (w *Watcher) readSnapshot(path string, size int64, stamp fileStamp) {
+	f, err := w.openTranscript(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	v, ok := w.snapshotValue(f)
+	if !ok {
+		return
+	}
+	w.applyRecord(path, v)
+	w.offsets[path] = size
+	w.stamps[path] = stamp
+}
+
+// snapshotValue reads one snapshot document from the start of f.
+func (w *Watcher) snapshotValue(f *os.File) (values, bool) {
+	if w.ad.parseFile == nil {
+		return values{}, false
+	}
+	if _, err := f.Seek(0, 0); err != nil {
+		return values{}, false
+	}
+	data, err := io.ReadAll(io.LimitReader(f, int64(maxLineBytes)+1))
+	if err != nil || len(data) > maxLineBytes {
+		return values{}, false
+	}
+	v, cwd, ok := w.ad.parseFile(data)
+	if !ok || (cwd != "" && !w.sameDir(cwd)) {
+		return values{}, false
+	}
+	return v, true
 }
 
 // consumeAppend reads from off to EOF, returning parsed records and the

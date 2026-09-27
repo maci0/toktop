@@ -1,0 +1,149 @@
+// Copyright (C) 2026 Marcel W. Wysocki
+// SPDX-License-Identifier: MIT
+
+package agentusage
+
+import (
+	"bytes"
+	"encoding/json"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+// Gemini CLI writes one JSONL chat per session under
+// ~/.gemini/tmp/<project>/chats. A record whose type is "gemini" carries that
+// turn's tokens. The CLI writes the same counters again once the turn's tool
+// calls finish; that second copy is the one with toolCalls, and counting it
+// would bill the turn twice. A record with no tokens is not a usage record.
+//
+// tokens.input already includes tokens.cached: the record's total is
+// input + output + thoughts, so the cached share is not added again.
+// usageMetadata is the other shape this CLI and the Gemini API have shipped,
+// with the same relationship between promptTokenCount and
+// cachedContentTokenCount.
+
+const geminiProjectFile = ".project_root"
+
+// geminiRootDepth bounds the walk from a chat log up to the project directory
+// that holds .project_root. The log sits in <project>/chats/, so two levels
+// is the layout; the bound is what keeps a missing file from walking out of
+// the store.
+const geminiRootDepth = 4
+
+func parseGemini(line []byte) (values, string, bool) {
+	return parseGeminiRecord(line)
+}
+
+func parseGeminiRecord(line []byte) (values, string, bool) {
+	line = bytes.TrimPrefix(bytes.TrimSpace(line), utf8BOM)
+	var rec struct {
+		Cwd       string          `json:"cwd"`
+		Workspace string          `json:"workspace"`
+		ToolCalls json.RawMessage `json:"toolCalls"`
+		Tokens    struct {
+			Input    int `json:"input"`
+			Output   int `json:"output"`
+			Cached   int `json:"cached"`
+			Thoughts int `json:"thoughts"`
+			Total    int `json:"total"`
+		} `json:"tokens"`
+		Usage struct {
+			PromptTokenCount        int `json:"promptTokenCount"`
+			CandidatesTokenCount    int `json:"candidatesTokenCount"`
+			ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+			CachedContentTokenCount int `json:"cachedContentTokenCount"`
+			TotalTokenCount         int `json:"totalTokenCount"`
+		} `json:"usageMetadata"`
+	}
+	if err := json.Unmarshal(line, &rec); err != nil {
+		return values{}, "", false
+	}
+	if geminiToolCallsRepeat(rec.ToolCalls) {
+		return values{}, "", false
+	}
+	cwd := rec.Cwd
+	if cwd == "" {
+		cwd = rec.Workspace
+	}
+	if v, ok := geminiTokens(rec.Tokens.Input, rec.Tokens.Output, rec.Tokens.Thoughts, rec.Tokens.Cached, rec.Tokens.Total); ok {
+		return v, cwd, true
+	}
+	if v, ok := geminiTokens(rec.Usage.PromptTokenCount, rec.Usage.CandidatesTokenCount, rec.Usage.ThoughtsTokenCount, rec.Usage.CachedContentTokenCount, rec.Usage.TotalTokenCount); ok {
+		// usageMetadata's thoughts are part of the billed output, the same
+		// fold parseQwen applies to this shape. tokens.thoughts is already
+		// outside tokens.output, which is why that branch leaves them apart.
+		v.output = satAdd(v.output, v.thinking)
+		return v, cwd, true
+	}
+	return values{}, "", false
+}
+
+// geminiTokens folds one Gemini counter set. cached is added to the prompt
+// only when the total is larger than prompt+output+thoughts by that share.
+// When the total already equals that sum, cached is inside the prompt.
+func geminiTokens(prompt, output, thoughts, cached, total int) (values, bool) {
+	in := counter(prompt)
+	out := counter(output)
+	think := counter(thoughts)
+	cache := counter(cached)
+	tot := counter(total)
+	parts := satAdd(in, satAdd(out, think))
+	if cache > 0 && tot >= satAdd(parts, cache) && tot != parts {
+		in = satAdd(in, cache)
+	}
+	v := values{output: out, thinking: think, input: in, total: tot}
+	if v.total == 0 {
+		v.total = satAdd(in, satAdd(out, think))
+	}
+	if !v.present() {
+		return values{}, false
+	}
+	return v, true
+}
+
+// geminiToolCallsRepeat reports the second copy of a turn, the one written
+// after its tool calls, which repeats the counters already on the first copy.
+func geminiToolCallsRepeat(raw json.RawMessage) bool {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) || bytes.Equal(raw, []byte("[]")) {
+		return false
+	}
+	return raw[0] == '['
+}
+
+// geminiSessionCwd reads the project directory .project_root names. The file
+// sits beside chats/, not in it, and the walk looks for the file rather than
+// counting levels.
+func geminiSessionCwd(path string) (string, bool) {
+	dir := filepath.Dir(path)
+	for range geminiRootDepth {
+		if cwd, ok := readGeminiRoot(dir); ok {
+			return cwd, true
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	return "", false
+}
+
+func readGeminiRoot(dir string) (string, bool) {
+	r, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", false
+	}
+	defer r.Close()
+	b, err := fs.ReadFile(r.FS(), geminiProjectFile)
+	if err != nil {
+		return "", false
+	}
+	cwd := strings.TrimSpace(string(bytes.TrimPrefix(b, utf8BOM)))
+	if cwd == "" {
+		return "", false
+	}
+	return cwd, true
+}

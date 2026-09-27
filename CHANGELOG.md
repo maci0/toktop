@@ -13,6 +13,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- Gemini CLI chats are read under `--agents`, from
+  `~/.gemini/tmp/<project>/chats`. A `gemini` record's `tokens` are that
+  turn's own counts, and the copy written again when its tool calls finish
+  is not counted twice. The project is the directory `.project_root` names.
+  A record that carries `usageMetadata` instead is read the same way.
+- Grok sessions are read from `usage.json` under
+  `~/.grok/sessions/<project>/<id>`. The file is that session's own totals,
+  rewritten in place, and the project directory is the one the CLI named for
+  the working directory.
+- Antigravity CLI (`agy`) transcripts under `~/.gemini/antigravity-cli` are
+  read when a step carries token counts. A step that names none contributes
+  nothing. The working directory is the one the transcript records.
+
 ### Fixed
 
 - On Windows, a process's CPU time is converted from the 100-nanosecond units

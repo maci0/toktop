@@ -72,9 +72,13 @@ still appears in the list, labelled `via <engine>`, but those tokens are not
 added on top of the engine's own numbers.
 
 Once asked for, nothing else has to be configured and the agent does not have
-to cooperate: claude, codex, qwen, copilot, kimi, pi, prime-agent, feynman,
-clanker, crush, opencode, and dsh all keep records carrying the provider's own
-counts (JSONL transcripts, except opencode and crush which keep SQLite stores).
+to cooperate: claude, codex, qwen, copilot, kimi, gemini, grok, agy, pi,
+prime-agent, feynman, clanker, crush, opencode, and dsh all keep records
+carrying the provider's own counts (JSONL transcripts, except opencode and
+crush which keep SQLite stores, and grok which rewrites one usage.json per
+session). Gemini CLI chats live under `~/.gemini/tmp`, Grok under
+`~/.grok/sessions`, and Antigravity (`agy`) under `~/.gemini/antigravity-cli`.
+An agy step that names no tokens contributes nothing.
 dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 Agents that report nothing show no rate rather than a zero.
