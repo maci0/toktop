@@ -192,7 +192,11 @@ func warnUnusedEnv(bearerFlag, demo, noIngest, agents bool, nAdd, nRemote int) {
 	// variable, so --no-ingest alone leaves the level in force. Only a demo run,
 	// which measures no engine and has no ssh target, builds no logger at all
 	// once the endpoint and the agent watch are both off.
-	if demo && noIngest && !agents && os.Getenv(logcfg.LevelEnv) != "" {
+	// Trimmed, so a variable set to whitespace reads as the unset default it
+	// resolves to, the way ParseLogLevel, logActiveConfig and warnIgnoredFrameEnv
+	// all read it. Naming a blank $TOKTOP_LOG_LEVEL as a knob in force would be
+	// the same false claim the config line avoids.
+	if demo && noIngest && !agents && strings.TrimSpace(os.Getenv(logcfg.LevelEnv)) != "" {
 		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --demo --no-ingest; no audit log is written in that run\n", logcfg.LevelEnv)
 	}
 }

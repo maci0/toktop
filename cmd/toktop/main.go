@@ -484,11 +484,14 @@ func waitForFrames(ctx context.Context, ch <-chan core.Snapshot, n int, wait tim
 // silence) through a screen reader. With jsonOut, the snapshot itself is
 // printed instead of either report, for a script reading the numbers.
 func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.Snapshot, n int, plain, jsonOut bool) int {
-	// The JSON report is unsized: it is one object, not a frame, so the
-	// terminal size and TOKTOP_COLUMNS / TOKTOP_LINES have nothing to
-	// compose and are not read.
+	// Only the visual frame is sized. The JSON report is one object and the
+	// plain report a linear list, so neither composes a frame: the terminal
+	// size and TOKTOP_COLUMNS / TOKTOP_LINES have nothing to fill, which is
+	// why validateOnceEnv and warnIgnoredFrameEnv both leave them alone in
+	// those two modes. Reading them here anyway would size a value nothing
+	// consumes.
 	w, h := 120, 38
-	if !jsonOut {
+	if !plain && !jsonOut {
 		if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= frameColumnsMin && th >= frameLinesMin {
 			w, h = min(tw, frameColumnsMax), min(th, frameLinesMax)
 		}

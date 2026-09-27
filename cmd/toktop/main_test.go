@@ -1089,6 +1089,7 @@ func TestWarnUnusedEnv(t *testing.T) {
 		{name: "log level with demo, no-ingest and agents silent", logLevel: "warn", demo: true, noIngest: true, agents: true},
 		{name: "log level with no-ingest but a collector silent", logLevel: "warn", noIngest: true},
 		{name: "log level with ingest silent", logLevel: "warn"},
+		{name: "blank log level is the unset default", logLevel: "  ", demo: true, noIngest: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
