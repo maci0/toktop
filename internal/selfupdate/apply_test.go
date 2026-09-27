@@ -81,14 +81,23 @@ func releaseServerRaw(t *testing.T, payload, sums []byte) *Release {
 	return rel
 }
 
-func TestApplyRejectsChecksumMismatch(t *testing.T) {
-	payload := []byte("#!/bin/sh\necho new\n")
-	rel := releaseServer(t, payload, strings.Repeat("0", 64))
-
+// oldBinaryTarget stages an existing install for applyTo to replace, and
+// returns its path. The pre-upgrade contents double as the assertion that a
+// failed apply left the binary alone.
+func oldBinaryTarget(t *testing.T) string {
+	t.Helper()
 	target := filepath.Join(t.TempDir(), "toktop")
 	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
 		t.Fatal(err)
 	}
+	return target
+}
+
+func TestApplyRejectsChecksumMismatch(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho new\n")
+	rel := releaseServer(t, payload, strings.Repeat("0", 64))
+
+	target := oldBinaryTarget(t)
 
 	_, err := applyTo(context.Background(), rel, target)
 	if err == nil || !strings.Contains(err.Error(), "checksum mismatch") {
@@ -111,10 +120,7 @@ func TestApplyRejectsChecksumMismatch(t *testing.T) {
 func TestApplyRejectsOversizedChecksums(t *testing.T) {
 	rel := releaseServerRaw(t, []byte("x"), bytes.Repeat([]byte("x"), 1<<20+1))
 
-	target := filepath.Join(t.TempDir(), "toktop")
-	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := oldBinaryTarget(t)
 	_, err := applyTo(context.Background(), rel, target)
 	if err == nil || !strings.Contains(err.Error(), "exceeds") {
 		t.Fatalf("oversized checksums must be refused, got %v", err)
@@ -146,10 +152,7 @@ func TestApplyReplacesTargetOnMatch(t *testing.T) {
 	h := sha256.Sum256(payload)
 	rel := releaseServer(t, payload, hex.EncodeToString(h[:]))
 
-	target := filepath.Join(t.TempDir(), "toktop")
-	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := oldBinaryTarget(t)
 
 	got, err := applyTo(context.Background(), rel, target)
 	if err != nil {
@@ -209,10 +212,7 @@ func TestApplyReadsChecksumsArchiveLabelledGzip(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target := filepath.Join(t.TempDir(), "toktop")
-	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := oldBinaryTarget(t)
 	if _, err := applyTo(context.Background(), rel, target); err != nil {
 		t.Fatalf("applyTo: %v", err)
 	}
@@ -252,10 +252,7 @@ func TestApplyTwiceLeavesTargetUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	target := filepath.Join(t.TempDir(), "toktop")
-	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	target := oldBinaryTarget(t)
 	if _, err := applyTo(context.Background(), rel, target); err != nil {
 		t.Fatal(err)
 	}

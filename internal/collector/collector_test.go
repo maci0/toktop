@@ -675,42 +675,61 @@ func TestRecordProbeKeepsChronologicalOrder(t *testing.T) {
 }
 
 // Equal timestamps must not fall back to arrival order: concurrent probe
-// completions would then shuffle the ring across replays of the same clock.
-func TestRecordProbeEqualTimestampOrdersByAddr(t *testing.T) {
-	c := New(nil, time.Second)
+// and agent completions would then shuffle the ring across replays of the
+// same clock.
+func TestRecordEqualTimestampOrdersByIdentity(t *testing.T) {
 	at := time.Unix(1_700_000_000, 0).UTC()
-	c.RecordProbe(core.ProbeSample{At: at, Addr: "http://127.0.0.1:8000", Model: "b"})
-	c.RecordProbe(core.ProbeSample{At: at, Addr: "http://127.0.0.1:11434", Model: "a"})
-	c.RecordProbe(core.ProbeSample{At: at, Addr: "http://127.0.0.1:8000", Model: "a"})
-	want := [][2]string{
-		{"http://127.0.0.1:11434", "a"},
-		{"http://127.0.0.1:8000", "a"},
-		{"http://127.0.0.1:8000", "b"},
-	}
-	if len(c.probes) != len(want) {
-		t.Fatalf("probes = %d, want %d", len(c.probes), len(want))
-	}
-	for i, p := range c.probes {
-		if p.Addr != want[i][0] || p.Model != want[i][1] {
-			t.Fatalf("probe %d = %s %s, want %s %s", i, p.Addr, p.Model, want[i][0], want[i][1])
-		}
-	}
-}
-
-func TestRecordAgentEqualTimestampOrdersByAgent(t *testing.T) {
-	c := New(nil, time.Second)
-	at := time.Unix(1_700_000_000, 0).UTC()
-	c.RecordAgent(core.AgentEvent{At: at, Agent: "codex", ID: "2"})
-	c.RecordAgent(core.AgentEvent{At: at, Agent: "claude", ID: "1"})
-	c.RecordAgent(core.AgentEvent{At: at, Agent: "claude", ID: "0"})
-	want := [][2]string{{"claude", "0"}, {"claude", "1"}, {"codex", "2"}}
-	if len(c.agents) != len(want) {
-		t.Fatalf("agents = %d, want %d", len(c.agents), len(want))
-	}
-	for i, ev := range c.agents {
-		if ev.Agent != want[i][0] || ev.ID != want[i][1] {
-			t.Fatalf("agent %d = %s %s, want %s %s", i, ev.Agent, ev.ID, want[i][0], want[i][1])
-		}
+	for _, tc := range []struct {
+		name   string
+		record func(*Collector)
+		keys   func(*Collector) [][2]string
+		want   [][2]string
+	}{
+		{
+			name: "probes order by addr then model",
+			record: func(c *Collector) {
+				c.RecordProbe(core.ProbeSample{At: at, Addr: "http://127.0.0.1:8000", Model: "b"})
+				c.RecordProbe(core.ProbeSample{At: at, Addr: "http://127.0.0.1:11434", Model: "a"})
+				c.RecordProbe(core.ProbeSample{At: at, Addr: "http://127.0.0.1:8000", Model: "a"})
+			},
+			keys: func(c *Collector) [][2]string {
+				out := make([][2]string, len(c.probes))
+				for i, p := range c.probes {
+					out[i] = [2]string{p.Addr, p.Model}
+				}
+				return out
+			},
+			want: [][2]string{
+				{"http://127.0.0.1:11434", "a"},
+				{"http://127.0.0.1:8000", "a"},
+				{"http://127.0.0.1:8000", "b"},
+			},
+		},
+		{
+			name: "agents order by agent then id",
+			record: func(c *Collector) {
+				c.RecordAgent(core.AgentEvent{At: at, Agent: "codex", ID: "2"})
+				c.RecordAgent(core.AgentEvent{At: at, Agent: "claude", ID: "1"})
+				c.RecordAgent(core.AgentEvent{At: at, Agent: "claude", ID: "0"})
+			},
+			keys: func(c *Collector) [][2]string {
+				out := make([][2]string, len(c.agents))
+				for i, ev := range c.agents {
+					out[i] = [2]string{ev.Agent, ev.ID}
+				}
+				return out
+			},
+			want: [][2]string{{"claude", "0"}, {"claude", "1"}, {"codex", "2"}},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := New(nil, time.Second)
+			tc.record(c)
+			got := tc.keys(c)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("ring = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }
 

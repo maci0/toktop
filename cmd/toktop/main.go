@@ -633,7 +633,7 @@ var toktopEnvVars = map[string]bool{
 	"TOKTOP_SSH_PASSWORD":    true,
 	"TOKTOP_COLUMNS":         true,
 	"TOKTOP_LINES":           true,
-	"TOKTOP_LOG_LEVEL":       true,
+	logcfg.LevelEnv:          true,
 	"TOKTOP_SCREENSHOT_FONT": true, // scripts/screenshot.py; this binary ignores it
 }
 

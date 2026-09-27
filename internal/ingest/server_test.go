@@ -948,8 +948,6 @@ func TestIdleKeepAliveConnsReaped(t *testing.T) {
 	}
 }
 
-// kind is attacker-shaped text like every other event field: escape
-// sequences must be stripped before the value enters the retained feed.
 func TestIngestNormalizesAgentToNFC(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
@@ -970,50 +968,31 @@ func TestIngestNormalizesAgentToNFC(t *testing.T) {
 	}
 }
 
-func TestIngestStripsBidiFromAgent(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
+func TestIngestStripsInvisibleCharsFromAgent(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want string
+	}{
+		{"bidi and zwsp", `{"agent":"clau\u200bde\u202e"}`, "claude"},
+		{"mixed script", `{"agent":"\u0441laude","output_tokens":1}`, "anonymous"},
+		// TAG LATIN SMALL LETTER D is invisible; "clau" + TAG-d + "e" must
+		// not be a second agent that looks like "claue".
+		{"tag character", "{\"agent\":\"clau\U000E0064e\"}", "claue"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &memRecorder{}
+			s := startIngest(t, rec)
 
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		`{"agent":"clau\u200bde\u202e"}`)
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 1)
-	if rec.evs[0].Agent != "claude" {
-		t.Errorf("agent = %q, want claude with bidi/zwsp stripped", rec.evs[0].Agent)
-	}
-}
-
-func TestIngestRejectsMixedScriptAgentName(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
-
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		`{"agent":"\u0441laude","output_tokens":1}`)
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 1)
-	if rec.evs[0].Agent != "anonymous" {
-		t.Errorf("agent = %q, want anonymous for mixed-script spoof of claude", rec.evs[0].Agent)
-	}
-}
-
-func TestIngestStripsTagCharsFromAgent(t *testing.T) {
-	rec := &memRecorder{}
-	s := startIngest(t, rec)
-
-	// TAG LATIN SMALL LETTER D is invisible; "clau" + TAG-d + "e" must not
-	// be a second agent that looks like "claue".
-	resp := post(t, "http://"+s.Addr()+"/v1/events",
-		"{\"agent\":\"clau\U000E0064e\"}")
-	if resp != http.StatusAccepted {
-		t.Fatalf("status = %d", resp)
-	}
-	awaitEvents(t, rec, 1)
-	if rec.evs[0].Agent != "claue" {
-		t.Errorf("agent = %q, want claue with tag character stripped", rec.evs[0].Agent)
+			resp := post(t, "http://"+s.Addr()+"/v1/events", tc.body)
+			if resp != http.StatusAccepted {
+				t.Fatalf("status = %d", resp)
+			}
+			awaitEvents(t, rec, 1)
+			if rec.evs[0].Agent != tc.want {
+				t.Errorf("agent = %q, want %q", rec.evs[0].Agent, tc.want)
+			}
+		})
 	}
 }
 

@@ -657,7 +657,7 @@ test("every answer, served or failed, reports the edge cost in Server-Timing", a
   const etag = (await call()).headers.get("etag");
   const revalidated = await call({ "if-none-match": etag });
   expect(dur(revalidated.headers.get("server-timing"))).toBeDefined();
-  const image = await imageCall("/dashboard.png", {}, { env: staticAssets() });
+  const image = await call({}, { path: "/dashboard.png", env: staticAssets() });
   expect(dur(image.headers.get("server-timing"))).toBeDefined();
   const failures = [
     await call({}, { method: "POST" }),
@@ -797,19 +797,10 @@ function assetsEnv(bodies) {
   };
 }
 
-const imageCall = (path, headers = {}, init = {}) =>
-  worker.fetch(
-    new Request(ORIGIN + path, {
-      method: init.method ?? "GET",
-      headers,
-    }),
-    init.env,
-  );
-
 test("image paths 404 without ASSETS instead of falling through to the page", async () => {
   const logs = captureLogs();
   try {
-    const res = await imageCall("/dashboard.avif");
+    const res = await call({}, { path: "/dashboard.avif" });
     expect(res.status).toBe(404);
     expect(await res.text()).not.toBe(identityBody);
     expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -830,7 +821,7 @@ test("image 404s from ASSETS are not cached as successes", async () => {
         fetch: () => new Response("missing", { status: 404 }),
       },
     };
-    const res = await imageCall("/dashboard.png", {}, { env });
+    const res = await call({}, { path: "/dashboard.png", env });
     expect(res.status).toBe(404);
     expect(res.headers.get("cache-control")).toBe("no-store");
   } finally {
@@ -861,7 +852,7 @@ test("an asset-store failure answers with the worker's own error envelope", asyn
       [missing, 404, "not found\n"],
       [failed, 502, "asset store error\n"],
     ]) {
-      const res = await imageCall("/dashboard.png", {}, { env });
+      const res = await call({}, { path: "/dashboard.png", env });
       expect(res.status).toBe(status);
       expect(await res.text()).toBe(body);
       expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -870,7 +861,7 @@ test("an asset-store failure answers with the worker's own error envelope", asyn
         expect(res.headers.get(name)).not.toBeNull();
       }
     }
-    const head = await imageCall("/dashboard.png", {}, { env: missing, method: "HEAD" });
+    const head = await call({}, { path: "/dashboard.png", env: missing, method: "HEAD" });
     expect(head.status).toBe(404);
     expect((await head.arrayBuffer()).byteLength).toBe(0);
   } finally {
@@ -880,7 +871,7 @@ test("an asset-store failure answers with the worker's own error envelope", asyn
 
 test("image paths are served from ASSETS with cache and security headers", async () => {
   const env = assetsEnv({ "/dashboard.avif": "avif-bytes" });
-  const res = await imageCall("/dashboard.avif", { "accept-encoding": "gzip, br" }, { env });
+  const res = await call({ "accept-encoding": "gzip, br" }, { path: "/dashboard.avif", env });
   expect(res.status).toBe(200);
   expect(await res.text()).toBe("avif-bytes");
   expect(res.headers.get("cache-control")).toBe(IMAGE_CACHE);
@@ -895,7 +886,7 @@ test("every dashboard URL in the HTML is served as an image asset", async () => 
   expect(paths.length).toBeGreaterThanOrEqual(5);
   const env = assetsEnv(Object.fromEntries(paths.map((p) => [p, p])));
   for (const path of paths) {
-    const res = await imageCall(path, {}, { env });
+    const res = await call({}, { path, env });
     expect(res.status).toBe(200);
     expect(await res.text()).toBe(path);
   }
@@ -915,10 +906,9 @@ test("image revalidation forwards If-None-Match without Accept-Encoding", async 
       },
     },
   };
-  const res = await imageCall(
-    "/dashboard.png",
+  const res = await call(
     { "if-none-match": '"abc"', "accept-encoding": "gzip" },
-    { env },
+    { path: "/dashboard.png", env },
   );
   expect(res.status).toBe(304);
   expect(res.headers.get("etag")).toBe('"abc"');
@@ -928,12 +918,12 @@ test("image revalidation forwards If-None-Match without Accept-Encoding", async 
 
 test("image HEAD matches GET headers with no body, POST is 405", async () => {
   const env = assetsEnv({ "/dashboard.webp": "webp-bytes" });
-  const get = await imageCall("/dashboard.webp", {}, { env });
-  const head = await imageCall("/dashboard.webp", {}, { method: "HEAD", env });
+  const get = await call({}, { path: "/dashboard.webp", env });
+  const head = await call({}, { path: "/dashboard.webp", method: "HEAD", env });
   expect(head.status).toBe(200);
   expect(head.headers.get("cache-control")).toBe(get.headers.get("cache-control"));
   expect((await head.arrayBuffer()).byteLength).toBe(0);
-  const posted = await imageCall("/dashboard.webp", {}, { method: "POST", env });
+  const posted = await call({}, { path: "/dashboard.webp", method: "POST", env });
   expect(posted.status).toBe(405);
   expect(posted.headers.get("allow")).toBe("GET, HEAD");
   expect(posted.headers.get("content-type")).toBe("text/plain; charset=utf-8");
@@ -1014,24 +1004,28 @@ test("asset failures log their status; served requests log nothing", async () =>
   const logs = captureLogs();
   try {
     const env = assetsEnv({ "/dashboard.webp": "webp-bytes" });
-    const served = await imageCall("/dashboard.webp", {}, { env });
+    const served = await call({}, { path: "/dashboard.webp", env });
     expect(served.status).toBe(200);
     expect((await call({ "cf-ray": "healthy-TOK" })).status).toBe(200);
     expect((await call({}, { path: "/health", env })).status).toBe(200);
     expect(logs.parse()).toEqual([]);
 
-    const unbound = await imageCall("/dashboard.avif", {}, { env: {} });
+    const unbound = await call({}, { path: "/dashboard.avif", env: {} });
     expect(unbound.status).toBe(404);
-    const missing = await imageCall(
-      "/dashboard.avif",
+    const missing = await call(
       {},
-      { env: { ASSETS: { fetch: () => new Response("missing", { status: 404 }) } } },
+      {
+        path: "/dashboard.avif",
+        env: { ASSETS: { fetch: () => new Response("missing", { status: 404 }) } },
+      },
     );
     expect(missing.status).toBe(404);
-    const broken = await imageCall(
-      "/dashboard.avif",
+    const broken = await call(
       {},
-      { env: { ASSETS: { fetch: () => new Response("boom", { status: 502 }) } } },
+      {
+        path: "/dashboard.avif",
+        env: { ASSETS: { fetch: () => new Response("boom", { status: 502 }) } },
+      },
     );
     expect(broken.status).toBe(502);
     expect(logs.parse()).toEqual([
