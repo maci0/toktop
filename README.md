@@ -189,7 +189,10 @@ finds out which entries a definitions file registered and which it skipped
 (the built-in agents are compiled-in adapters, not definitions, so they are
 not reported; `Supported` covers them). `Watch` returns
 a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
-and matches `ErrUnsupportedTool`. `Rate` is output
+and matches `ErrUnsupportedTool`. A sample is the total since the watcher
+attached, so a program reporting events takes the growth between two of them
+from `Sample.Delta`, which reports nothing when a transcript was rewritten
+under the watcher rather than a negative count. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
 prompt tokens. `Watcher.SetNow` replaces the clock that stamps published
 samples, so a program driving a simulated timeline gets samples stamped on

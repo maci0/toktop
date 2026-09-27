@@ -34,6 +34,47 @@ func (s Sample) Empty() bool {
 	return !values{output: s.Output, thinking: s.Thinking, total: s.Total, input: s.Input}.present()
 }
 
+// Delta is the growth between two consecutive samples: one interval's usage,
+// where a [Sample] is the total observed since the watcher attached. A caller
+// that reports events reports these, never the totals, or it bills the same
+// tokens once per poll.
+type Delta struct {
+	// Output is generated tokens since the previous sample.
+	Output int
+	// Thinking is the reasoning share of Output, under the same rules.
+	Thinking int
+	// Input is billed prompt tokens since the previous sample.
+	Input int
+	// At is when the current sample was read, whether or not anything grew, so
+	// a caller can stamp the interval the samples span.
+	At time.Time
+}
+
+// Delta returns what grew from prev to the current sample, and whether
+// anything did.
+//
+// Counters only rise between two readings of the same watcher, so a sample
+// smaller than the one before it is a transcript rewritten under the watcher:
+// the figures it replaced are ones it no longer records, and counting them as
+// growth bills the same tokens twice. That case reports no growth, which is
+// what taking the current sample as the new baseline comes to. A caller
+// passing the previous sample and keeping the current one has the whole
+// re-baselining rule:
+//
+//	if d, ok := cur.Delta(prev); ok {
+//		report(d)
+//	}
+//	prev = cur
+func (s Sample) Delta(prev Sample) (Delta, bool) {
+	d := Delta{
+		Output:   satSub(s.Output, prev.Output),
+		Thinking: satSub(s.Thinking, prev.Thinking),
+		Input:    satSub(s.Input, prev.Input),
+		At:       s.At,
+	}
+	return d, d.Output > 0 || d.Thinking > 0 || d.Input > 0
+}
+
 // Rate returns output tokens per second between two samples, and whether it
 // could be computed at all. Both samples need a timestamp: a missing one is
 // not a reading, and treating it as the zero instant would invent a rate off

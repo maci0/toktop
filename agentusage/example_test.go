@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"sync"
@@ -142,4 +143,98 @@ func ExampleSample_Empty() {
 	// Output:
 	// true
 	// false
+}
+
+func ExampleSample_Delta() {
+	t0 := time.Unix(1_000_000, 0)
+	prev := agentusage.Sample{Output: 100, Input: 80, At: t0}
+	cur := agentusage.Sample{Output: 350, Input: 200, At: t0.Add(time.Second)}
+
+	d, ok := cur.Delta(prev)
+	fmt.Println(ok, d.Output, d.Input)
+	if r, ok := agentusage.Rate(prev, cur); ok {
+		fmt.Println(int(r))
+	}
+	// Output:
+	// true 250 120
+	// 250
+}
+
+// Run reports the running total; Delta is what changed since the last report,
+// so a caller that emits events never bills the same tokens twice. A delta
+// that reports no growth is the sample to measure from next time, whatever
+// the reason: a quiet agent, or a transcript rewritten under the watcher.
+func ExampleWatcher_Run() {
+	w := agentusage.Watch("claude", "/home/me/project", time.Now())
+	if w.Err() != nil {
+		return // the agent keeps nothing this package can read
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	var prev agentusage.Sample
+	w.Run(ctx, 250*time.Millisecond, func(cur agentusage.Sample) {
+		if d, ok := cur.Delta(prev); ok {
+			fmt.Printf("%d output, %d prompt at %s\n", d.Output, d.Input, d.At.Format(time.TimeOnly))
+		}
+		prev = cur
+	})
+	// One final read after the agent has exited: the last records of a session
+	// land once the process is gone, so Run's last callback is not the end of
+	// the story.
+	if d, ok := w.Poll().Delta(prev); ok {
+		fmt.Printf("%d output, %d prompt at the end\n", d.Output, d.Input)
+	}
+}
+
+func ExampleWatcher_SetNow() {
+	w := agentusage.Watch("claude", "/home/me/project", time.Now())
+	// A frozen clock stamps every published sample with one instant, so a
+	// replayed run derives the same event ids from the same readings.
+	base := time.Date(2026, time.March, 1, 9, 0, 0, 0, time.UTC)
+	w.SetNow(func() time.Time { return base })
+}
+
+// The engine-overlap check: endpoints an engine is advertised on, and the
+// agents connected to any of them. A pid with no match is absent from the map.
+func ExampleMatchingEndpoints() {
+	engine, err := netip.ParseAddrPort("127.0.0.1:11434")
+	if err != nil {
+		return
+	}
+	for _, p := range agentusage.Discover() {
+		// The map is keyed by pid, and holds the advertised endpoint a
+		// process is connected to, not the peer's own spelling of it.
+		for _, ep := range agentusage.MatchingEndpoints([]int{p.PID}, []netip.AddrPort{engine}) {
+			fmt.Printf("%s pid %d already feeds %s\n", p.Tool, p.PID, ep)
+		}
+	}
+}
+
+func ExampleConnectedTo() {
+	engine, err := netip.ParseAddrPort("[::1]:11434")
+	if err != nil {
+		return
+	}
+	for _, p := range agentusage.Discover() {
+		// A false answer means "cannot tell", which reads as "not connected".
+		if agentusage.ConnectedTo(p.PID, []netip.AddrPort{engine}) {
+			fmt.Printf("%s pid %d is talking to the engine\n", p.Tool, p.PID)
+		}
+	}
+}
+
+func ExamplePeers() {
+	for _, p := range agentusage.Discover() {
+		for _, ep := range agentusage.Peers(p.PID) {
+			fmt.Printf("%s pid %d is connected to %s\n", p.Tool, p.PID, ep)
+		}
+	}
+}
+
+func ExampleSupported() {
+	for _, tool := range agentusage.Agents() {
+		if agentusage.Supported(tool) {
+			fmt.Println(tool)
+		}
+	}
 }

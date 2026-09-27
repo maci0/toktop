@@ -353,7 +353,11 @@ func (w *Watcher) seedBaseline(path string) {
 // Run polls until the context is canceled, calling onChange whenever the
 // observed usage changes, growth or the drop a rewritten transcript causes.
 // A caller that reports deltas should re-baseline on a sample smaller than
-// the one it last reported. It is meant to run in its own goroutine.
+// the one it last reported; [Sample.Delta] is that rule in one call. It is
+// meant to run in its own goroutine.
+//
+// every is how often the transcripts are re-read; a non-positive value uses
+// the package default (250ms).
 func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sample)) {
 	if w == nil {
 		return

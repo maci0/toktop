@@ -32,6 +32,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- `agentusage.Sample.Delta` returns the growth between two samples, and
+  whether there was any. A watcher reports the running total, so every
+  program emitting events had to difference two samples itself and decide
+  what a transcript rewritten under the watcher means; this is that rule in
+  one call, and reports no growth rather than a negative count.
+- `agentusage.Watcher.Run` documents the 250ms default it uses for a
+  non-positive poll interval, and the runnable examples now cover the
+  delta, engine-overlap, and polling calls the package had only prose for.
 - A `--add` endpoint on plain `http://` whose host is not this machine is
   named at startup, because the bearer token crosses the network in
   cleartext there.

@@ -17,6 +17,7 @@ import (
 // name is additive; removing or renaming one, or dropping a struct field, is
 // a breaking change that needs a changelog entry.
 var publicTypes = map[string][]string{
+	"Delta":   {"Output", "Thinking", "Input", "At"},
 	"Process": {"PID", "Tool", "Dir", "Started"},
 	"Sample":  {"Output", "Thinking", "Total", "Input", "At"},
 	"Spec":    {"Roots", "Suffix", "Suffixes", "Cumulative", "HeaderCwd"},
@@ -44,7 +45,7 @@ var publicFuncs = []string{
 
 var publicMethods = map[string][]string{
 	"Process": {"Watch"},
-	"Sample":  {"Empty"},
+	"Sample":  {"Delta", "Empty"},
 	"Watcher": {"Dir", "Err", "Poll", "Run", "Sample", "SetNow", "Tool"},
 }
 

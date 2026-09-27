@@ -4,9 +4,11 @@
 // Package agentusage reports the token usage AI coding agents record on disk.
 //
 // Typical use: LoadDefinitions, Discover running agents, Watch each process
-// (or Process.Watch), then Poll or Run for Sample values. EnableOpenCodeDB
-// opts into opencode's machine-wide SQLite store; crush is read whenever the
-// sqlite build tag is on.
+// (or Process.Watch), then Poll or Run for Sample values. A Sample is the
+// total since the watcher attached, so a caller reporting events takes the
+// growth from Sample.Delta. EnableOpenCodeDB opts into opencode's
+// machine-wide SQLite store; crush is read whenever the sqlite build tag is
+// on.
 //
 // An agent is read one of two ways. Transcript agents (claude, qwen, dsh,
 // clanker, copilot, codex) appear in the adapters table, each naming where

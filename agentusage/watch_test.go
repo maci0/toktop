@@ -462,6 +462,51 @@ func TestRateNeedsPositiveSpanAndGrowth(t *testing.T) {
 	}
 }
 
+// A delta is the interval a caller reports, so a rewrite under the watcher
+// (counts that went down) must not read as growth, and reasoning on its own
+// is growth a caller would otherwise drop.
+func TestDeltaReportsGrowthAndRefusesARewrite(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	prev := Sample{Output: 100, Thinking: 10, Input: 80, Total: 4000, At: t0}
+	for _, tc := range []struct {
+		name string
+		cur  Sample
+		want Delta
+		ok   bool
+	}{
+		{
+			name: "growth in every counter",
+			cur:  Sample{Output: 350, Thinking: 25, Input: 200, Total: 6000, At: t0.Add(time.Second)},
+			want: Delta{Output: 250, Thinking: 15, Input: 120, At: t0.Add(time.Second)},
+			ok:   true,
+		},
+		{
+			name: "nothing new",
+			cur:  Sample{Output: 100, Thinking: 10, Input: 80, Total: 4000, At: t0.Add(time.Second)},
+			want: Delta{At: t0.Add(time.Second)},
+		},
+		{
+			name: "reasoning without billed output is growth",
+			cur:  Sample{Output: 100, Thinking: 30, Input: 80, Total: 4000, At: t0.Add(time.Second)},
+			want: Delta{Thinking: 20, At: t0.Add(time.Second)},
+			ok:   true,
+		},
+		{
+			name: "a rewritten transcript is not negative growth",
+			cur:  Sample{Output: 40, Input: 20, At: t0.Add(time.Second)},
+			want: Delta{At: t0.Add(time.Second)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d, ok := tc.cur.Delta(prev)
+			if ok != tc.ok || d != tc.want {
+				t.Fatalf("Delta(%+v, %+v) = %+v,%v want %+v,%v",
+					prev, tc.cur, d, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
 func TestRatesRequireTwoReadings(t *testing.T) {
 	t0 := time.Unix(1_000_000, 0)
 	for name, rate := range map[string]func(Sample, Sample) (float64, bool){

@@ -426,10 +426,8 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 		return
 	}
 	w.mu.Lock()
-	out := cur.Output - t.last.Output
-	think := cur.Thinking - t.last.Thinking
-	prompt := cur.Input - t.last.Input
-	if out <= 0 && think <= 0 && prompt <= 0 {
+	d, ok := cur.Delta(t.last)
+	if !ok {
 		// Nothing new, or a transcript rewritten under us replaced the
 		// records already reported. Either way the next growth is measured
 		// from this sample, not from figures the transcripts no longer hold.
@@ -451,11 +449,11 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 		ID:             sampleID(proc, cur.At),
 		Agent:          core.AgentNameField(proc.Tool),
 		Kind:           core.AgentKindTurn,
-		PromptTokens:   core.ClampEventTokens(int64(prompt)),
-		OutputTokens:   core.ClampEventTokens(int64(out)),
-		ThinkingTokens: core.ClampEventTokens(int64(think)),
+		PromptTokens:   core.ClampEventTokens(int64(d.Input)),
+		OutputTokens:   core.ClampEventTokens(int64(d.Output)),
+		ThinkingTokens: core.ClampEventTokens(int64(d.Thinking)),
 		ViaEngine:      core.ClampField(core.SanitizeText(via), core.AgentViaMax),
-		Note:           core.ClampField(core.RedactHome(core.SanitizeText(note(dir, think, via))), core.AgentNoteMax),
+		Note:           core.ClampField(core.RedactHome(core.SanitizeText(note(dir, d.Thinking, via))), core.AgentNoteMax),
 	})
 }
 
