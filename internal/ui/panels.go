@@ -67,6 +67,12 @@ const (
 	labelCells   = 10
 	modelMinCell = 4
 	versionCells = 9
+	// minGaugeBar is the shortest bar that still reads as a bar; below it the
+	// engine row drops the gauge rather than clip the queue counts behind it.
+	// maxGaugeBar keeps the bar from swallowing a wide pane the way
+	// gaugesBody's 20-cell bars do.
+	minGaugeBar = 3
+	maxGaugeBar = 14
 )
 
 func providerBlock(p core.ProviderSnapshot, w int) []string {
@@ -106,10 +112,31 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	if !p.OK {
 		return append(block, styleBad.Render("  "+clip(shorten(core.SanitizeText(p.Err), w-3), w-3)))
 	}
-	kvg := "kv " + GaugeBar(p.KVPct, min(max(w-30, 4), 14), kvHeat)
-	stats := fmt.Sprintf("▲%s ▼%s run %d wait %d",
-		fmtRate(p.OutTokPS), fmtRate(p.InTokPS), p.Running, p.Waiting)
-	return append(block, clip("  "+kvg+" "+styleDim.Render(stats), w))
+	// The stats get first claim on the width and the kv bar takes what is
+	// left: sizing the bar from the pane alone pushed "wait 12" off the right
+	// edge of a default-width pane, so a queue backing up read as a missing
+	// value. GaugeBar spends w cells of bar plus " NN%", behind the "kv " label.
+	stats := styleDim.Render(engineStats(p, w-2))
+	if bar := min(w-2-lipgloss.Width(stats)-1-3-4, maxGaugeBar); bar >= minGaugeBar {
+		return append(block, clip("  kv "+GaugeBar(p.KVPct, bar, kvHeat)+" "+stats, w))
+	}
+	return append(block, clip("  "+stats, w))
+}
+
+// engineStats composes one engine's out rate, in rate and queue counts for a
+// row w cells wide, dropping the in rate when the row cannot carry it: the
+// header and the PROMPT chart both show fleet-wide input, while the queue
+// counts are drawn from this row and no other panel, so on the narrowest legal
+// pane the input rate is what gives way.
+func engineStats(p core.ProviderSnapshot, w int) string {
+	out := "▲" + fmtRate(p.OutTokPS)
+	in := "▼" + fmtRate(p.InTokPS)
+	queue := fmt.Sprintf("run %d wait %d", p.Running, p.Waiting)
+	parts := []string{out, in, queue}
+	if widthOf(strings.Join(parts, " ")) > w {
+		parts = []string{out, queue}
+	}
+	return strings.Join(parts, " ")
 }
 
 // gaugesBody renders the healthy engines' detail blocks, three rows each (or
@@ -233,11 +260,35 @@ func (m Model) probesTitle() string {
 	return t
 }
 
-// probeModelMin is the narrowest model column a probe row keeps, so a narrow
-// pane still names the model instead of dropping it. The successful and the
-// failed row reserve the same w-18; the floor keeps that positive on the
-// smallest legal dashboard pane.
-const probeModelMin = 8
+// probeModelMin is the fewest cells a model name is worth on a probe row: a
+// shorter cut is an ellipsis that names nothing, and the measurement beside it
+// is what the panel exists to show.
+const probeModelMin = 6
+
+// probeOutcome is what a probe row has to say: the measured rate and time to
+// first token, or the reason the probe did not land. It is measured before the
+// model name, which takes what is left and is dropped rather than pushed the
+// measurement off the right edge. A column too narrow for the spelled-out
+// form drops the unit labels rather than the numbers: the PROBES title and the
+// plain report both spell them out, and the panel is the one place the two
+// measurements are side by side.
+func probeOutcome(p core.ProbeSample, w int) string {
+	if !p.OK {
+		// Match the plain frame and ENGINES: name the failure and keep the
+		// reason. Printing 0.0/s in the same shape as a success hides why the
+		// probe did not land.
+		out := styleBad.Render("failed")
+		if msg := strings.TrimSpace(core.SanitizeText(p.Err)); msg != "" {
+			out += " " + dim(shorten(msg, max(w-24, 8)))
+		}
+		return out
+	}
+	full := fmtRate(p.TokPS) + " tok/s " + dim("ttft") + " " + fmtMs(p.TTFTms)
+	if lipgloss.Width(full) > w {
+		return fmtRate(p.TokPS) + "/s " + fmtMs(p.TTFTms)
+	}
+	return full
+}
 
 func (m Model) probesBody(w, h int) string {
 	vals := probeSeries(m.snap, w, m.chartCadence())
@@ -247,23 +298,16 @@ func (m Model) probesBody(w, h int) string {
 	shown := 0
 	for i := len(m.snap.Probes) - 1; i >= 0 && shown < 2; i-- {
 		p := m.snap.Probes[i]
-		// The floor matters on a legal narrow pane: w-18 goes to zero or
-		// below around 62 columns, and shorten("") there drops the model
-		// entirely, leaving two probe rows that name no model at all. The
-		// line is clipped to w below either way.
-		model := styleDim.Render(shorten(core.SanitizeText(p.Model), max(w-18, probeModelMin)))
-		var line string
+		outcome := probeOutcome(p, w)
+		mark := styleOK.Render("✓")
 		if !p.OK {
-			// Match the plain frame and ENGINES: name the failure and keep
-			// the reason. Printing 0.0/s in the same shape as a success
-			// hides why the probe did not land.
-			line = styleBad.Render("✗") + " " + model + " " + styleBad.Render("failed")
-			if msg := strings.TrimSpace(core.SanitizeText(p.Err)); msg != "" {
-				line += " " + dim(shorten(msg, max(w-24, 8)))
-			}
-		} else {
-			line = styleOK.Render("✓") + " " + model +
-				" " + fmtRate(p.TokPS) + " tok/s " + dim("ttft") + " " + fmtMs(p.TTFTms)
+			mark = styleBad.Render("✗")
+		}
+		line := mark + " " + outcome
+		// "✓ " and the separating space are the two cells the mark spends
+		// before the measurement starts.
+		if cells := w - 2 - lipgloss.Width(outcome) - 1; cells >= probeModelMin {
+			line = mark + " " + styleDim.Render(shorten(core.SanitizeText(p.Model), cells)) + " " + outcome
 		}
 		out.WriteString(clip(line, w) + "\n")
 		shown++

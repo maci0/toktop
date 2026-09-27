@@ -2462,3 +2462,64 @@ func TestEngineBlockNamesTheEngine(t *testing.T) {
 		t.Errorf("label repeating the kind badge printed %d times:\n%s", n, row)
 	}
 }
+
+// The queue counts and the probe measurement are drawn from one row each and
+// appear in no other panel. The kv bar used to be sized from the pane alone, so
+// at the narrowest legal dashboard the "wait" half of a backing-up queue and
+// the ttft of a probe were cut off the right edge, and the number the panel
+// exists to show was the number that went missing.
+func TestNarrowColumnsKeepTheMeasurements(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{
+			Label: "ollama", Kind: core.KindOllama, OK: true, KVPct: 14,
+			OutTokPS: 114, InTokPS: 416, Running: 2, Waiting: 3,
+		}},
+		Probes: []core.ProbeSample{{
+			At: time.Now(), Model: "llama3.1:8b-instruct-q4_K_M", OK: true, TokPS: 41.2, TTFTms: 104,
+		}},
+	}
+	// The two columns on the smallest legal dashboard: ENGINES at 38% of the
+	// pane, PROBES at what is left of it.
+	engines := minDashW*38/100 - 4
+	probes := minDashW - minDashW*38/100 - minDashW*31/100 - 4
+	engineBody, _ := m.providersBody(engines, 2)
+	engineRow := strip(engineBody)
+	for _, want := range []string{"run 2", "wait 3"} {
+		if !strings.Contains(engineRow, want) {
+			t.Errorf("engine row in a %d-cell column lost %q:\n%s", engines, want, engineRow)
+		}
+	}
+	probeRow := ""
+	for _, ln := range strings.Split(strip(m.probesBody(probes, 8)), "\n") {
+		if strings.Contains(ln, "✓") {
+			probeRow = ln
+		}
+	}
+	if probeRow == "" {
+		t.Fatalf("PROBES drew no successful probe row in a %d-cell column", probes)
+	}
+	for _, want := range []string{"41.2", "104ms"} {
+		if !strings.Contains(probeRow, want) {
+			t.Errorf("probe row in a %d-cell column lost %q:\n%s", probes, want, probeRow)
+		}
+	}
+}
+
+// The compact view's orientation line is the only place it says why it is
+// compact. It was clipped to the pane, which cut the sentence exactly where
+// the minimum it names sat ("min 62×" with the number gone), so the pane has
+// to pick a form that fits whole.
+func TestMinimalHintFitsThePane(t *testing.T) {
+	for _, w := range []int{20, 30, 40, 60, 80} {
+		m := New(Config{Version: "t"}, nil)
+		m.w, m.h, m.ready = w, 12, true
+		hint := m.minimalHint()
+		if got := lipgloss.Width(hint); got > w {
+			t.Errorf("hint is %d cells in a %d-cell pane: %q", got, w, hint)
+		}
+		if !strings.Contains(hint, "62×30") {
+			t.Errorf("hint in a %d-cell pane lost the minimum: %q", w, hint)
+		}
+	}
+}

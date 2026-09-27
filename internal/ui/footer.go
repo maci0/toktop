@@ -203,16 +203,33 @@ func (m Model) helpRows() [][2]string {
 	return rows
 }
 
+// minimalHint is the compact view's one line of orientation: it drops the
+// header and the footer, so this is all that says why the dashboard is not on
+// screen and what size it needs. The forms run longest first and the first one
+// that fits wins, because clipping the sentence cut the very minimum it exists
+// to name ("min 62×" with the number gone read as a size nobody has).
+func (m Model) minimalHint() string {
+	forms := []string{
+		fmt.Sprintf("enlarge window (min %d×%d, current %d×%d) for full dashboard", minDashW, minDashH, m.w, m.h),
+		fmt.Sprintf("enlarge window (min %d×%d) for full dashboard", minDashW, minDashH),
+		fmt.Sprintf("enlarge window to %d×%d (now %d×%d)", minDashW, minDashH, m.w, m.h),
+		fmt.Sprintf("enlarge window: %d×%d", minDashW, minDashH),
+		fmt.Sprintf("min %d×%d", minDashW, minDashH),
+	}
+	for _, f := range forms {
+		if widthOf(f) <= m.w {
+			return f
+		}
+	}
+	return shorten(forms[len(forms)-1], m.w)
+}
+
 // renderMinimal is the degraded view for panes too small for the dashboard:
 // one line per engine, plus orientation the compact layout must carry on its
 // own because the footer and header are not rendered here.
 func (m Model) renderMinimal() string {
 	var lines []string
-	hint := fmt.Sprintf("enlarge window (min %d×%d) for full dashboard", minDashW, minDashH)
-	if m.w >= 60 {
-		hint = fmt.Sprintf("enlarge window (min %d×%d, current %d×%d) for full dashboard", minDashW, minDashH, m.w, m.h)
-	}
-	lines = append(lines, dim(clip(hint, m.w)))
+	lines = append(lines, dim(m.minimalHint()))
 	// space pauses here too: without a badge a frozen strip is
 	// indistinguishable from a feed that stalled.
 	if m.paused {

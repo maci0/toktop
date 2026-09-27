@@ -465,3 +465,19 @@ func TestAgentRowsDropRecencyWithoutATimeline(t *testing.T) {
 		t.Errorf("unstamped frame claimed a live agent:\n%s", row)
 	}
 }
+
+// The recency cell is the rightmost column, so fixed-width columns spent on a
+// rate that is 11 cells wide cut "● live" off a row on the narrowest legal
+// dashboard. The columns are sized to their content; the row has to fit.
+func TestAgentRowFitsTheNarrowestFeed(t *testing.T) {
+	now := time.Now()
+	rates := []core.AgentRate{{Agent: "claude", Tokens: 310, Prompt: 42000, Last: now}}
+	w := minDashW - 4
+	row := agentRows(rates, now)[0]
+	if got := lipgloss.Width(row); got > w {
+		t.Errorf("agent row is %d cells in a %d-cell panel:\n%s", got, w, strip(row))
+	}
+	if !strings.Contains(strip(row), "live") {
+		t.Errorf("agent row lost its recency cell:\n%s", strip(row))
+	}
+}

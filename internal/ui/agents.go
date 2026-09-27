@@ -83,18 +83,28 @@ func agentSummary(rates []core.AgentRate) string {
 	return strings.Join(parts, dim("  ·  "))
 }
 
+// Column floors for the agent table: the narrowest a column is worth keeping so
+// a short row still reads as a table. The columns grow to whatever the rows
+// actually hold, so the recency cell at the right is not the one a narrow pane
+// pays for: fixed widths spent 22 cells on a rate that is 11 wide, and the row
+// was cut before the "● live" the reader is scanning for.
+const (
+	agentNameMin   = 10
+	agentRateMin   = 12
+	agentTokensMin = 8
+)
+
 // agentRows lays out one row per agent: name, rate, tokens, recency. Cells
 // are padded by visible cells (padTo/padStart), never %-Ns width verbs:
 // styled cells carry ANSI bytes whose rune counts would skew the columns.
 func agentRows(rates []core.AgentRate, now time.Time) []string {
 	names := make([]string, len(rates))
-	nameW := 10
+	rateCells := make([]string, len(rates))
+	tokCells := make([]string, len(rates))
+	sinceCells := make([]string, len(rates))
+	nameW, rateW, tokW := agentNameMin, agentRateMin, agentTokensMin
 	for i, r := range rates {
 		names[i] = core.SanitizeText(r.Agent)
-		nameW = max(nameW, lipgloss.Width(names[i]))
-	}
-	out := make([]string, 0, len(rates))
-	for i, r := range rates {
 		rate := dim("no rate yet")
 		if r.TokPS > 0 {
 			rate = styleValue.Foreground(heatColor(clamp01(r.TokPS / 60))).
@@ -124,8 +134,15 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 				since = via + "  " + since
 			}
 		}
+		rateCells[i], tokCells[i], sinceCells[i] = rate, tok, since
+		nameW = max(nameW, lipgloss.Width(names[i]))
+		rateW = max(rateW, lipgloss.Width(rate))
+		tokW = max(tokW, lipgloss.Width(tok))
+	}
+	out := make([]string, 0, len(rates))
+	for i := range rates {
 		out = append(out, "  "+padTo(styleValue.Render(names[i]), nameW)+
-			"  "+padTo(rate, 22)+"  "+padStart(tok, 18)+"  "+since)
+			"  "+padTo(rateCells[i], rateW)+"  "+padStart(tokCells[i], tokW)+"  "+sinceCells[i])
 	}
 	return out
 }
