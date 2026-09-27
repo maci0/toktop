@@ -1184,6 +1184,32 @@ func TestIdleTranscriptDropsFromTheWalkWithoutLosingCounts(t *testing.T) {
 	}
 }
 
+// A transcript that was already on disk but had gone idle before the watcher
+// attached is outside the recency window, so attach must still record where it
+// ends. Otherwise the next append is read from byte zero and the whole earlier
+// session is credited to this attach.
+func TestIdleAtAttachTranscriptIsStillSkipped(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl")
+	append_(t, path, claudeLine(work, 100))
+
+	old := time.Now().Add(-recencyWindow - time.Minute)
+	if err := os.Chtimes(path, old, old); err != nil {
+		t.Fatal(err)
+	}
+	w := Watch("claude", work, time.Now())
+	if _, tracked := w.offsets[path]; !tracked {
+		t.Fatal("a transcript idle at attach was not seeded with its end offset")
+	}
+
+	append_(t, path, claudeLine(work, 50))
+	w.poll(nil)
+	if got := w.Sample().Output; got != 50 {
+		t.Fatalf("output tokens %d, want 50: pre-attach history counted as this attach's usage", got)
+	}
+}
+
 // A foreign transcript that ages out of the walk must leave the owner/offset
 // maps, or a dashboard following one agent would pin an entry per session
 // file on the machine for the rest of the process.

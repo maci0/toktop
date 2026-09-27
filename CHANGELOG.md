@@ -25,6 +25,14 @@ support channel (see SECURITY.md).
   bytes. A checksum list proves a download arrived intact; this says what
   produced it.
 
+### Fixed
+
+- A transcript that was on disk but had gone idle for more than two minutes
+  when `--agents` attached is no longer read from its first byte. Attach now
+  records where every existing transcript ends, not only the recently written
+  ones, so the next append reports only the growth; a cumulative adapter
+  (codex) previously reported the whole session total as new output.
+
 ### Changed
 
 - `--ingest` bound to a host *name* other than `localhost` now warns about

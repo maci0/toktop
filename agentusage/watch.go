@@ -492,19 +492,29 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 		baseInput: map[string]int{},
 		seen:      map[string]values{}, total: map[string]int{},
 	}
-	// Record where existing files end before anything is counted.
-	for _, path := range w.candidates() {
+	// Record where existing files end before anything is counted. Every
+	// transcript already in the store is seeded, not only the ones written in
+	// the last recencyWindow: a session that went idle before the dashboard
+	// started is still on disk, and leaving its end unrecorded would make the
+	// next append to it be read from byte zero, crediting the whole earlier
+	// session to this attach.
+	recent := time.Now().Add(-recencyWindow)
+	for _, path := range w.attachCandidates() {
 		fi, err := os.Stat(path)
 		if err != nil {
 			continue
 		}
 		w.offsets[path] = fi.Size()
 		w.preexisting[path] = true
-		if ad.kind == cumulative {
+		if ad.kind == cumulative && fi.ModTime().After(recent) {
 			// Cumulative counters only make sense against what the session had
 			// already spent. That value is in the bytes being skipped, so it is
 			// read once here; without it the first record after attaching would
 			// become the baseline and this attach would measure zero forever.
+			// Only recent transcripts get it: a machine-wide store holds
+			// thousands, and a session idle for minutes baselining on its
+			// first post-attach record costs a few seconds of delta, not its
+			// history.
 			w.seedBaseline(path)
 		}
 	}
@@ -913,19 +923,43 @@ func walkTranscripts(root, suffix string, cutoff time.Time) []string {
 // than on every poll, and a session created in between surfaces when the
 // window expires, the same bound a non-empty listing already works under.
 func (w *Watcher) candidates() []string {
+	return w.walkCandidates(time.Now().Add(-recencyWindow), true)
+}
+
+// attachCandidates lists every transcript in the store, however long it has
+// been idle, so Watch can record where each one ends. The recency window
+// exists to bound a long run's memory; applying it at attach would leave an
+// idle session's history both unread and unskipped, and the next append to it
+// would be read from byte zero. The result never enters the shared listing
+// cache, so a polling watcher never inherits the wider set.
+func (w *Watcher) attachCandidates() []string {
+	return w.walkCandidates(time.Time{}, false)
+}
+
+// walkCandidates lists the transcripts under the adapter's roots that are
+// newer than cutoff. With cache it shares (and refreshes) the process-wide
+// listing and the watcher's own freshness window; without it the walk stands
+// alone, which is what the attach-time seed needs.
+func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 	force := w.scanned.IsZero()
-	if !force && time.Since(w.scanned) < rescanEvery {
+	if cache && !force && time.Since(w.scanned) < rescanEvery {
 		return w.cached
 	}
-	cutoff := time.Now().Add(-recencyWindow)
 	var out []string
 	for _, root := range w.ad.roots(w.dir) {
 		if root == "" {
 			continue
 		}
 		for _, suffix := range w.ad.fileSuffixes() {
-			out = append(out, listTranscripts(root, suffix, cutoff, force)...)
+			if cache {
+				out = append(out, listTranscripts(root, suffix, cutoff, force)...)
+				continue
+			}
+			out = append(out, walkTranscripts(root, suffix, cutoff)...)
 		}
+	}
+	if !cache {
+		return out
 	}
 	w.forgetIdle(out)
 	w.cached, w.scanned = out, time.Now()
@@ -953,6 +987,17 @@ func (w *Watcher) forgetIdle(live []string) {
 	if w.ad.sessionCwd == nil {
 		for path, pre := range w.preexisting {
 			if pre {
+				keep[path] = struct{}{}
+			}
+		}
+	} else {
+		// A transcript that was on disk when this watcher attached is only
+		// forgotten once it is judged to belong to another project: an
+		// unjudged one is exactly the idle session whose skip position would
+		// otherwise be lost, and reading it later from byte zero credits its
+		// whole history to this attach.
+		for path, pre := range w.preexisting {
+			if mine, judged := w.owner[path]; pre && !(judged && !mine) {
 				keep[path] = struct{}{}
 			}
 		}
