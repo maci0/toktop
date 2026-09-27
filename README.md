@@ -175,21 +175,34 @@ Only usage written after attachment is reported; existing transcript counts
 are skipped. Keep an agent generating during that window to see output.
 
 `RegisterSpec` teaches the package about an agent it was not compiled to know,
-and `UnregisterSpec` takes it back, restoring the adapter it displaced (the
-registry is process-wide, so a program that registers a fake agent in its own
-tests needs that undo). `SpecFor` is the read side: it reports the transcript
+and `UnregisterSpec` takes it back, restoring the adapter it displaced. The
+same goes for a definitions file: `LoadDefinitions` adds to the process-wide
+registry and `ResetDefinitions` drops everything it added, leaving the
+compiled-in ones. A test that loads a definitions file (or registers a fake
+agent) needs that undo, since every later test in the same binary inherits it
+otherwise. `errors.Is` matches `ErrEmptyTool` and `ErrNoRoots` on a rejected
+spec, `ErrInvalidDefinitions` on a malformed definitions file, and
+`ErrCollidingDefinitions` on two agent names in one file that reduce to the
+same key. `SpecFor` is the read side: it reports the transcript
 location registered for an agent, roots as written, which is how a program
 finds out which entries a definitions file registered and which it skipped
 (the built-in agents are compiled-in adapters, not definitions, so they are
-not reported; `Supported` covers them). `errors.Is` matches `ErrEmptyTool` and
-`ErrNoRoots` on a rejected spec, and `ErrInvalidDefinitions` on a malformed
-definitions file or colliding agent names after normalization. `Watch` returns
+not reported; `Supported` covers them). `Watch` returns
 a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
 and matches `ErrUnsupportedTool`. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
 prompt tokens. `Watcher.SetNow` replaces the clock that stamps published
 samples, so a program driving a simulated timeline gets samples stamped on
 it; transcript mtimes, `since` and the recency window stay wall time.
+
+`Agents` lists every agent name the package knows (built in, defined, or
+registered), and `Supported` says whether one of them can be read here. A
+dashboard also needs to know when an agent's tokens are already being counted
+by an engine it watches: `Peers` lists the TCP endpoints a process is
+connected to, `ConnectedTo` answers that for one process, and
+`MatchingEndpoints` maps many processes to the first of a set of endpoints each
+holds a connection to, reading the kernel's connection tables once. An empty
+result from any of them means "cannot tell", which reads as "not connected".
 
 ## What it shows
 

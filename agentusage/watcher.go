@@ -9,6 +9,11 @@
 // opts into opencode's machine-wide SQLite store; crush is read whenever the
 // sqlite build tag is on.
 //
+// The agent registry is process-wide, since one process reports one set of
+// agents. RegisterSpec and UnregisterSpec add and remove an adapter, and
+// LoadDefinitions and ResetDefinitions do the same for a definitions file, so
+// a program that teaches this package an agent can take it back out.
+//
 // Agents differ in what they print to stdout: some report token usage as they
 // stream, some only at exit, some never. They agree on something else, though,
 // which is that they keep a structured session transcript, and that transcript

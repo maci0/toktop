@@ -314,8 +314,8 @@ func TestLoadDefinitionsRejectsNFCCollisions(t *testing.T) {
 	if !errors.Is(err, ErrInvalidDefinitions) {
 		t.Fatalf("colliding names = %v, want ErrInvalidDefinitions", err)
 	}
-	if !errors.Is(err, errCollidingDefinitions) {
-		t.Fatalf("colliding names = %v, want errCollidingDefinitions", err)
+	if !errors.Is(err, ErrCollidingDefinitions) {
+		t.Fatalf("colliding names = %v, want ErrCollidingDefinitions", err)
 	}
 	if !strings.Contains(err.Error(), path) {
 		t.Fatalf("collision error = %v, want the path %q in the message", err, path)
@@ -434,5 +434,37 @@ func TestSpecForSeesLoadedDefinitions(t *testing.T) {
 	}
 	if _, ok := SpecFor("launchonly"); ok {
 		t.Error("SpecFor(never written) = true, want false")
+	}
+}
+
+// ResetDefinitions is the undo LoadDefinitions has no other way to get: the
+// loaded agents go, a built-in a file overwrote comes back as compiled, and a
+// RegisterSpec adapter is left to UnregisterSpec.
+func TestResetDefinitionsRestoresBuiltins(t *testing.T) {
+	path := writeDefs(t, `{
+		"zz-loaded": {"usage": {"roots": ["~/.loaded/sessions"]}},
+		"feynman": {"usage": {"roots": ["/replacement"]}}
+	}`)
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := SpecFor("zz-loaded"); !ok {
+		t.Fatal("loaded definition not registered")
+	}
+	ResetDefinitions()
+	t.Cleanup(ResetDefinitions)
+
+	if _, ok := SpecFor("zz-loaded"); ok {
+		t.Error("SpecFor(loaded) survived ResetDefinitions")
+	}
+	if Supported("zz-loaded") {
+		t.Error("Supported(loaded) = true after ResetDefinitions")
+	}
+	spec, ok := SpecFor("feynman")
+	if !ok || !slices.Equal(spec.Roots, []string{"~/.feynman/sessions"}) {
+		t.Errorf("SpecFor(feynman) = %+v, %t, want the compiled-in roots", spec, ok)
+	}
+	if !Supported("feynman") {
+		t.Error("Supported(feynman) = false after restoring the compiled-in definition")
 	}
 }

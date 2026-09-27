@@ -30,6 +30,12 @@ support channel (see SECURITY.md).
 - `agentusage.UnregisterSpec` removes a spec `RegisterSpec` added and restores
   the adapter it displaced, so a program (or its own tests) can take a
   registration back out of the process-wide registry.
+- `agentusage.ResetDefinitions` drops every definition `LoadDefinitions`
+  added, leaving the ones compiled into the build. It is the undo that call
+  otherwise had none of, for a test that loads a definitions file.
+- `agentusage.ErrCollidingDefinitions` names the one cause of a rejected
+  definitions file that a caller can act on differently from bad JSON: two
+  agent names in the file that reduce to the same key.
 - `agentusage.Watcher.Err` reports that a watcher `agentusage.Watch` returned
   is nil because the agent keeps nothing readable, and matches the new
   `agentusage.ErrUnsupportedTool`. It is safe on a nil `*Watcher`, like

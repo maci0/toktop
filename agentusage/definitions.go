@@ -107,12 +107,32 @@ var (
 	// The pi family keeps ordinary JSONL transcripts, so they need locations
 	// rather than adapters. They ship here so both this tool and gauntlet read
 	// them without a definitions file.
-	defs = map[string]Spec{
+	defs = builtinDefs()
+)
+
+// builtinDefs are the definitions compiled into this build, which
+// ResetDefinitions restores.
+func builtinDefs() map[string]Spec {
+	return map[string]Spec{
 		"pi":          {Roots: []string{"~/.pi/agent/sessions"}},
 		"prime-agent": {Roots: []string{"~/.prime/agent/sessions"}},
 		"feynman":     {Roots: []string{"~/.feynman/sessions"}},
 	}
-)
+}
+
+// ResetDefinitions drops every definition [LoadDefinitions] added, leaving
+// the ones compiled into this build. It is the undo that call otherwise has
+// none of, and the counterpart to [UnregisterSpec]: like it, the definitions
+// registry is process-wide, so a program (or a test in one) that teaches this
+// package an agent has to be able to take it back out.
+//
+// Agents registered with [RegisterSpec] are adapters rather than definitions
+// and are left alone; UnregisterSpec removes those.
+func ResetDefinitions() {
+	defsMu.Lock()
+	defer defsMu.Unlock()
+	defs = builtinDefs()
+}
 
 // SpecFor reports the transcript location registered for an agent, whether it
 // was compiled in (the pi family) or loaded by [LoadDefinitions], and whether
@@ -164,10 +184,12 @@ type definitionFile map[string]*struct {
 // errors are wrapped, so errors.As still recovers the parse position.
 var ErrInvalidDefinitions = errors.New("malformed agent definitions")
 
-// errCollidingDefinitions marks an agents.json holding two names that NFC
+// ErrCollidingDefinitions marks an agents.json holding two names that NFC
 // reduces to one canonical key, an overlap the per-name checks in
-// LoadDefinitions cannot see.
-var errCollidingDefinitions = errors.New("agent names collide after NFC normalization")
+// LoadDefinitions cannot see. It is wrapped inside an [ErrInvalidDefinitions]
+// error that names the file and both spellings, so a caller can tell a file
+// whose JSON is wrong from one whose agent names are, and say which.
+var ErrCollidingDefinitions = errors.New("agent names collide after NFC normalization")
 
 // LoadDefinitions reads agent definitions from a JSON file, teaching this
 // package about agents it was not compiled to know, including where they keep
@@ -185,7 +207,13 @@ var errCollidingDefinitions = errors.New("agent names collide after NFC normaliz
 // overwrite each other in defs. That overlap is refused instead: the file is
 // ambiguous about which spec the surviving key should hold, and silently
 // keeping whichever entry iterates last makes the loaded agent set depend on
-// map order. The registry is left untouched.
+// map order. The registry is left untouched. That one cause is also
+// [ErrCollidingDefinitions], so a caller can name it without reading the
+// message.
+//
+// Loading is additive per name, so a second load of the same agent replaces
+// that agent rather than adding a second copy. [ResetDefinitions] drops
+// everything this call added.
 func LoadDefinitions(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -218,7 +246,7 @@ func LoadDefinitions(path string) error {
 		}
 		if prev, dup := seen[canonical]; dup {
 			return fmt.Errorf("%w: %s: %w: %q and %q both reduce to %q",
-				ErrInvalidDefinitions, path, errCollidingDefinitions, prev, name, canonical)
+				ErrInvalidDefinitions, path, ErrCollidingDefinitions, prev, name, canonical)
 		}
 		seen[canonical] = name
 		spec := Spec{

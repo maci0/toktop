@@ -35,6 +35,7 @@ var publicFuncs = []string{
 	"Peers",
 	"Rate",
 	"RegisterSpec",
+	"ResetDefinitions",
 	"SpecFor",
 	"Supported",
 	"UnregisterSpec",
@@ -48,6 +49,7 @@ var publicMethods = map[string][]string{
 }
 
 var publicVars = []string{
+	"ErrCollidingDefinitions",
 	"ErrEmptyTool",
 	"ErrInvalidDefinitions",
 	"ErrNoRoots",

@@ -7,6 +7,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -73,6 +75,32 @@ func ExampleLoadDefinitions() {
 	err := agentusage.LoadDefinitions("/no/such/agents.json")
 	fmt.Println(err)
 	// Output: <nil>
+}
+
+// A test that loads a definitions file leaves the process-wide registry
+// changed for every later test in the same binary, so it undoes the load.
+func ExampleResetDefinitions() {
+	dir, err := os.MkdirTemp("", "agentusage-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"myagent": {"usage": {"roots": ["~/.myagent/sessions"]}}}`), 0o644); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := agentusage.LoadDefinitions(path); err != nil {
+		fmt.Println(err)
+		return
+	}
+	_, loaded := agentusage.SpecFor("myagent")
+	agentusage.ResetDefinitions()
+	_, after := agentusage.SpecFor("myagent")
+	fmt.Println(loaded, after)
+	// Output: true false
 }
 
 func ExampleRegisterSpec() {
