@@ -58,6 +58,9 @@ jobs:
             prerelease=true
           fi
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          # The publish step below globs dist/ through ${{ env.VERSION }},
+          # which reads this file, not the shell scope of this step.
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           # Platform list, checksum generation and deterministic archive
           # metadata live in the Makefile so local and CI releases cannot
           # drift apart.
