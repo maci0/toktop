@@ -24,9 +24,12 @@ const rescanEvery = time.Second
 
 // recencyWindow is how long after a transcript's last write it stays in the
 // walk. Attach still sees files that went idle just before we started (Watch
-// runs this at since≈now); after that the window slides with wall time so a
-// long-lived dashboard does not accumulate every session file ever written
-// while it ran.
+// runs this at since≈now); after that the window slides with the watcher's
+// clock so a long-lived dashboard does not accumulate every session file ever
+// written while it ran, and so a run driven by an injected clock ages the
+// window in steps it controls rather than in whatever wall time the test
+// happened to take. The mtimes it is compared against are still wall time:
+// that is the clock the filesystem records in.
 const recencyWindow = 2 * time.Minute
 
 // rootListing is one walk of a transcript store, shared by every watcher
@@ -71,6 +74,13 @@ func (a adapter) fileSuffixes() []string {
 // bypasses the shared cache so a final Poll cannot miss a file created
 // inside the last rescan window.
 //
+// now is the calling watcher's clock, and the cache is stamped with it rather
+// than a wall-clock read: a watcher driven by an injected clock decides when
+// its listings go stale, so two runs of the same seed return the same files
+// however long each took. The cache is process-wide, so a caller that mixes
+// clocks shares freshness with the others; mixing is a configuration error,
+// not a supported mode.
+//
 // Concurrent watchers of the same root share one walk, and only that walk
 // blocks: a store with thousands of files takes long enough that holding
 // rootListMu across it stalled every watcher reading an unrelated root, and
@@ -78,11 +88,10 @@ func (a adapter) fileSuffixes() []string {
 // walk therefore runs outside the map lock, with an in-flight channel as the
 // per-root claim on it. A slower empty result still cannot overwrite a newer
 // listing: only the goroutine holding the claim writes one.
-func listTranscripts(root, suffix string, cutoff time.Time, force bool) []string {
+func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []string {
 	key := rootListKey(root, suffix)
 	for {
 		rootListMu.Lock()
-		now := time.Now()
 		pruneRootListsLocked(now, rescanEvery)
 		c := rootLists[key]
 		if !force && c.walk == nil && !c.at.IsZero() && now.Sub(c.at) < rescanEvery {
@@ -110,7 +119,10 @@ func listTranscripts(root, suffix string, cutoff time.Time, force bool) []string
 		files := walkTranscripts(root, suffix, cutoff)
 
 		rootListMu.Lock()
-		rootLists[key] = rootListing{files: files, at: time.Now()}
+		// Stamped with the instant the walk started, not a second clock read:
+		// the listing's age is then a function of the caller's clock alone, so
+		// a frozen clock never expires it and a stepped one expires it in step.
+		rootLists[key] = rootListing{files: files, at: now}
 		close(done)
 		rootListMu.Unlock()
 		return append([]string(nil), files...)
@@ -147,7 +159,7 @@ func walkTranscripts(root, suffix string, cutoff time.Time) []string {
 // than on every poll, and a session created in between surfaces when the
 // window expires, the same bound a non-empty listing already works under.
 func (w *Watcher) candidates() []string {
-	return w.walkCandidates(time.Now().Add(-recencyWindow), true)
+	return w.walkCandidates(w.clock()().Add(-recencyWindow), true)
 }
 
 // attachCandidates lists every transcript in the store, however long it has
@@ -164,9 +176,15 @@ func (w *Watcher) attachCandidates() []string {
 // newer than cutoff. With cache it shares (and refreshes) the process-wide
 // listing and the watcher's own freshness window; without it the walk stands
 // alone, which is what the attach-time seed needs.
+//
+// Every instant here is the watcher's own clock, so the recency cutoff and
+// the rescan window advance together under an injected clock instead of on
+// wall time. A replay that steps the clock one poll interval at a time ages
+// the listing the same way however long the replay actually took.
 func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
+	now := w.clock()()
 	force := w.scanned.IsZero()
-	if cache && !force && time.Since(w.scanned) < rescanEvery {
+	if cache && !force && now.Sub(w.scanned) < rescanEvery {
 		return w.cached
 	}
 	var out []string
@@ -176,7 +194,7 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 		}
 		for _, suffix := range w.ad.fileSuffixes() {
 			if cache {
-				out = append(out, listTranscripts(root, suffix, cutoff, force)...)
+				out = append(out, listTranscripts(root, suffix, cutoff, now, force)...)
 				continue
 			}
 			out = append(out, walkTranscripts(root, suffix, cutoff)...)
@@ -186,7 +204,7 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 		return out
 	}
 	w.forgetIdle(out)
-	w.cached, w.scanned = out, time.Now()
+	w.cached, w.scanned = out, now
 	return out
 }
 

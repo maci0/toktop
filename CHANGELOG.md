@@ -27,6 +27,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
+  windows, instead of leaving them on the wall clock. A program driving a
+  simulated timeline stepped time forward and still read the file set a
+  full-length run would have dropped, so a replay was not reproducible.
+  Transcript mtimes and `since` stay wall time.
 - `toktop` exits 2 when every ssh target it was given fails to attach,
   instead of starting a dashboard showing only local engines with the reason
   on a stderr line the alternate screen hides.

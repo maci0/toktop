@@ -196,7 +196,10 @@ under the watcher rather than a negative count. `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
 prompt tokens. `Watcher.SetNow` replaces the clock that stamps published
 samples, so a program driving a simulated timeline gets samples stamped on
-it; transcript mtimes, `since` and the recency window stay wall time.
+it, and the recency and rescan windows age on that clock rather than on wall
+time. Transcript mtimes and `since` stay wall time, because that is the clock
+the filesystem and the session stores record in; anchor the injected clock to
+the instant the run started and the two agree.
 
 `Agents` lists every agent name the package knows (built in, defined, or
 registered), and `Supported` says whether one of them can be read here. A

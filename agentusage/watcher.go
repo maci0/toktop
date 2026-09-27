@@ -65,9 +65,10 @@ type Watcher struct {
 	// synchronous Poll both walk the same offsets and counters.
 	pollMu sync.Mutex
 
-	// now stamps the published sample. The transcript mtimes it is compared
-	// against stay wall time in every mode; only the stamp a caller turns into
-	// an event id and a feed timestamp comes from here. Guarded by mu, like
+	// now is the watcher's own clock. It stamps the published sample, which
+	// becomes an event id and a feed timestamp, and it ages the recency and
+	// rescan windows in candidates.go. The transcript mtimes those windows are
+	// compared against stay wall time in every mode. Guarded by mu, like
 	// sample: SetNow and read run on different goroutines whenever a caller
 	// sets the clock after starting Run.
 	now func() time.Time
@@ -130,7 +131,13 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 	// started is still on disk, and leaving its end unrecorded would make the
 	// next append to it be read from byte zero, crediting the whole earlier
 	// session to this attach.
-	recent := time.Now().Add(-recencyWindow)
+	//
+	// The window is anchored on since, the instant the caller passed in, not a
+	// second clock read here: the attach walk is then a function of its
+	// arguments alone, so a caller replaying a run reproduces the same set of
+	// seeded files. Callers pass the launch instant, which is what
+	// time.Now() gave them at attach.
+	recent := since.Add(-recencyWindow)
 	for _, path := range w.attachCandidates() {
 		fi, err := os.Stat(path)
 		if err != nil {
@@ -202,9 +209,13 @@ func (w *Watcher) Err() error {
 // produces the same ids and the dashboard's id window drops the duplicates
 // instead of counting them twice.
 //
-// It does not move the transcript comparisons: since, the recency window and
-// every file mtime stay wall time, because that is the clock the filesystem
-// and the session stores record in.
+// The windows this watcher applies to itself, the recency window and the
+// transcript rescan interval, follow this clock too, so a run steps them
+// instead of waiting them out. What it does not move is the other side of
+// every comparison: file mtimes and the session-store timestamps that since
+// bounds stay wall time, because that is the clock the filesystem and the
+// stores record in. Anchor the injected clock to the wall instant the run
+// started and the two agree.
 func (w *Watcher) SetNow(fn func() time.Time) {
 	if w == nil {
 		return

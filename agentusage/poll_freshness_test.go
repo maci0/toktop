@@ -66,7 +66,8 @@ func TestRootListCacheDropsExpiredKeys(t *testing.T) {
 	})
 
 	dir := t.TempDir()
-	_ = listTranscripts(dir, ".jsonl", time.Now().Add(-recencyWindow), false)
+	now := time.Now()
+	_ = listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
 
 	rootListMu.Lock()
 	_, still := rootLists["stale\x00.jsonl"]
@@ -78,10 +79,11 @@ func TestRootListCacheDropsExpiredKeys(t *testing.T) {
 
 func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 	dir := t.TempDir()
+	now := time.Now()
 	rootListMu.Lock()
 	rootLists = map[string]rootListing{
-		"stale\x00.jsonl":          {files: []string{"gone"}, at: time.Now().Add(-rescanEvery - time.Second)},
-		rootListKey(dir, ".jsonl"): {files: []string{"fresh.jsonl"}, at: time.Now()},
+		"stale\x00.jsonl":          {files: []string{"gone"}, at: now.Add(-rescanEvery - time.Second)},
+		rootListKey(dir, ".jsonl"): {files: []string{"fresh.jsonl"}, at: now},
 	}
 	rootListMu.Unlock()
 	t.Cleanup(func() {
@@ -90,7 +92,7 @@ func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 		rootListMu.Unlock()
 	})
 
-	got := listTranscripts(dir, ".jsonl", time.Now().Add(-recencyWindow), false)
+	got := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
 	if len(got) != 1 || got[0] != "fresh.jsonl" {
 		t.Fatalf("cached hit = %+v, want [fresh.jsonl]", got)
 	}
@@ -100,5 +102,42 @@ func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 	rootListMu.Unlock()
 	if still {
 		t.Fatal("expired listing still in cache after cache hit")
+	}
+}
+
+// The recency window belongs to the watcher's own clock. A caller that
+// injects one has to be able to age a transcript out by stepping time, not by
+// waiting it out: on the wall clock a replay that reaches this point within a
+// second still sees every file a full-length run would have dropped, and the
+// two runs read different session stores.
+func TestRecencyWindowFollowsInjectedClock(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	append_(t, filepath.Join(store, "session.jsonl"), claudeLine(work, 7))
+
+	origin := time.Now()
+	now := origin
+	w := Watch("claude", work, origin)
+	if w == nil {
+		t.Fatal("claude should be supported")
+	}
+	w.SetNow(func() time.Time { return now })
+
+	if got := w.candidates(); len(got) != 1 {
+		t.Fatalf("candidates at attach = %v, want the one fresh transcript", got)
+	}
+
+	// A second of wall time passes here; the clock does not move, so the
+	// listing must still be the cached one and the file still in window.
+	time.Sleep(time.Millisecond)
+	if got := w.candidates(); len(got) != 1 {
+		t.Fatalf("candidates %s after the wall clock moved = %v, want the transcript still in window", rescanEvery, got)
+	}
+
+	// Step past the window. The file's mtime is unchanged, so only a clock
+	// the watcher consults can drop it.
+	now = origin.Add(recencyWindow + time.Second)
+	if got := w.candidates(); len(got) != 0 {
+		t.Fatalf("candidates after stepping the clock past the window = %v, want none", got)
 	}
 }
