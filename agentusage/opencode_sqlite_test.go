@@ -555,3 +555,21 @@ func TestUsageQueryStartsAtSession(t *testing.T) {
 		t.Fatalf("outer loop is not session:\n%s", plan)
 	}
 }
+
+// A relative XDG_DATA_HOME is invalid per the base-directory spec. Joining
+// onto one would look for the session database under the working directory,
+// which reads as an agent that produced nothing.
+func TestOpenCodeDBPathIgnoresRelativeXDGDataHome(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	abs := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", abs)
+	if got, want := openCodeDBPath(), filepath.Join(abs, "opencode", "opencode.db"); got != want {
+		t.Fatalf("absolute XDG_DATA_HOME: got %q, want %q", got, want)
+	}
+
+	t.Setenv("XDG_DATA_HOME", "relative/data")
+	got := openCodeDBPath()
+	if !filepath.IsAbs(got) || strings.HasPrefix(got, "relative") {
+		t.Fatalf("relative XDG_DATA_HOME resolved the database to %q", got)
+	}
+}

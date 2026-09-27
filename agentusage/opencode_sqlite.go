@@ -56,9 +56,12 @@ func setOpenCodeDB(on bool) bool {
 }
 
 // openCodeDBPath locates the session database, honoring XDG_DATA_HOME the way
-// opencode itself does.
+// opencode itself does. A relative value is ignored: the XDG base-directory
+// spec calls it invalid, and joining onto it would read a database under
+// whatever directory the run started in, which reads as an agent producing
+// no tokens.
 func openCodeDBPath() string {
-	if data := os.Getenv("XDG_DATA_HOME"); data != "" {
+	if data := os.Getenv("XDG_DATA_HOME"); filepath.IsAbs(data) {
 		return filepath.Join(data, "opencode", "opencode.db")
 	}
 	dir, err := os.UserHomeDir()

@@ -522,9 +522,14 @@ Documentation claims checked against code this pass (2026-09-27):
 - README documents loopback listeners for ssh engine relays
   (client.go). The earlier claim that no local listeners exist is
   gone.
-- README's env table does not list `XDG_CONFIG_HOME`, which relocates the
-  known_hosts store on every platform (knownhosts.go, 19-28). Not a security
-  claim, so no fix is proposed here; the entry-point list records it.
+- README's env table lists `XDG_CONFIG_HOME`, which relocates the
+  known_hosts store on every platform (knownhosts.go). It was missing from
+  the table before this pass; the entry-point list already recorded it. A
+  relative value is now ignored rather than honored: the store would
+  otherwise be written under the working directory, where a later run from
+  another directory would not find the pins and would re-TOFU. The same
+  rule applies to `XDG_DATA_HOME` (agentusage/opencode_sqlite.go), where
+  the consequence is an empty agent panel rather than a lost pin.
 - SECURITY.md states there is no dedicated disclosure contact and no
   supported-version matrix, and that `toktop update` fetches the latest
   release. That matches selfupdate.go (Check always hits

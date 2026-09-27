@@ -512,6 +512,14 @@ func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, n
 		b.WriteString(" ingest=")
 		b.WriteString(f.ingest)
 	}
+	if lvl := strings.TrimSpace(os.Getenv(ingest.LogLevelEnv)); lvl != "" {
+		// The resolved level, not the raw string: "warning" and "WARN" print
+		// as warn, so the line matches what the audit log actually applies.
+		// main rejects an unparseable value, so the error case is unreachable.
+		if parsed, err := ingest.ParseLogLevel(lvl); err == nil {
+			fmt.Fprintf(&b, " log=%s", ingest.LogLevelName(parsed))
+		}
+	}
 	if f.demo {
 		b.WriteString(" demo")
 	}

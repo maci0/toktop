@@ -917,3 +917,45 @@ func TestLockStoreSerializesAndBreaksAStaleLock(t *testing.T) {
 		t.Fatal("a stale lock was not broken")
 	}
 }
+
+// A relative XDG_CONFIG_HOME is invalid per the base-directory spec, and
+// honoring one would write the host-key pin store under the working
+// directory: the store would vanish with the cwd and the next run would
+// re-TOFU. An absolute value still wins, and a relative one must not produce
+// a path under it.
+func TestDefaultKnownHostsPathXDG(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	abs := filepath.Join(t.TempDir(), "cfg")
+	t.Setenv("XDG_CONFIG_HOME", abs)
+	if got, want := defaultKnownHostsPath(), filepath.Join(abs, "toktop", "known_hosts"); got != want {
+		t.Fatalf("absolute XDG_CONFIG_HOME: got %q, want %q", got, want)
+	}
+
+	t.Setenv("XDG_CONFIG_HOME", "relative/cfg")
+	got := defaultKnownHostsPath()
+	if got == "" {
+		return // rejected outright, which is the strictest reading
+	}
+	if !filepath.IsAbs(got) || strings.HasPrefix(got, "relative") {
+		t.Fatalf("relative XDG_CONFIG_HOME placed the store at %q", got)
+	}
+}
+
+// A password read from a file keeps its trailing newline, and the server
+// would reject it as an ordinary authentication failure. A password that
+// merely ends in a space must survive.
+func TestPasswordSourceEnvTrailingNewline(t *testing.T) {
+	tgt := Target{User: "u", Host: "h", Port: 22}
+	for _, tt := range []struct{ in, want string }{
+		{"sekrit\n", "sekrit"},
+		{"sekrit\r\n", "sekrit"},
+		{" sekrit", " sekrit"},
+		{"sekrit ", "sekrit "},
+	} {
+		t.Setenv("TOKTOP_SSH_PASSWORD", tt.in)
+		pw, err := (&passwordSource{}).get(tgt)
+		if err != nil || pw != tt.want {
+			t.Errorf("get(%q) = %q, %v; want %q", tt.in, pw, err, tt.want)
+		}
+	}
+}

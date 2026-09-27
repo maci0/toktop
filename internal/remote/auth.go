@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"golang.org/x/crypto/ssh"
@@ -86,6 +87,16 @@ var interactivePassword = func(t Target) (string, error) {
 	return string(b), nil
 }
 
+// sshPasswordEnv reads TOKTOP_SSH_PASSWORD with the line ending a file-read
+// leaves behind removed: `export TOKTOP_SSH_PASSWORD=$(cat id_rsa.pass)` keeps
+// the newline, and the server would reject the password with a plain
+// "permission denied" that names nothing about the cause. Only a trailing
+// newline is stripped, so a password that genuinely ends in a space still
+// authenticates.
+func sshPasswordEnv() string {
+	return strings.TrimRight(os.Getenv("TOKTOP_SSH_PASSWORD"), "\r\n")
+}
+
 func (p *passwordSource) get(t Target) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -96,7 +107,7 @@ func (p *passwordSource) get(t Target) (string, error) {
 		return "", p.err
 	}
 	p.asked = true
-	if v := os.Getenv("TOKTOP_SSH_PASSWORD"); v != "" {
+	if v := sshPasswordEnv(); v != "" {
 		p.pw = v
 		return v, nil
 	}

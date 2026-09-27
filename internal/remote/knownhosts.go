@@ -19,8 +19,17 @@ import (
 )
 
 // knownHostsFile is the trust-on-first-use store. Overridable in tests.
-var knownHostsPath = func() string {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); dir != "" {
+//
+// XDG_CONFIG_HOME is honored only when absolute. The XDG base-directory spec
+// calls a relative value invalid, and honoring one would place the host-key
+// pin store under whatever directory the run happens to start in: the store
+// would vanish with the cwd, and a second run would re-TOFU. A relative value
+// falls through to os.UserConfigDir, which rejects it by name, so the run
+// fails at connect instead of quietly writing pins somewhere else.
+var knownHostsPath = defaultKnownHostsPath
+
+func defaultKnownHostsPath() string {
+	if dir := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(dir) {
 		return filepath.Join(dir, "toktop", "known_hosts")
 	}
 	dir, err := os.UserConfigDir()

@@ -217,6 +217,22 @@ func ParseLogLevel(s string) (slog.Level, error) {
 	}
 }
 
+// LogLevelName renders a level as the TOKTOP_LOG_LEVEL word that selects it,
+// so the startup config line and the documentation spell it the same way.
+// slog's own String() would print "WARN".
+func LogLevelName(l slog.Level) string {
+	switch {
+	case l < slog.LevelInfo:
+		return "debug"
+	case l < slog.LevelWarn:
+		return "info"
+	case l < slog.LevelError:
+		return "warn"
+	default:
+		return "error"
+	}
+}
+
 func newIngestLogger() *slog.Logger {
 	lvl, err := ParseLogLevel(os.Getenv(LogLevelEnv))
 	if err != nil {
