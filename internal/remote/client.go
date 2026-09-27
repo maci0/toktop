@@ -444,7 +444,7 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 	done := make(chan openResult, 1)
 	go func() {
 		sess, err := c.conn.NewSession()
-		done <- openResult{sess, err}
+		done <- openResult{sess: sess, err: err}
 	}()
 	timer := time.NewTimer(sessionOpenTimeout)
 	defer timer.Stop()
@@ -459,15 +459,18 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		return r.sess, r.err
 	case <-timer.C:
 		c.conn.Close()
-		r := <-done // conn.Close is what releases the parked open
+		// conn.Close is what releases the parked open; the session it may
+		// still hand back belongs to the connection that just went away.
+		r := <-done
 		if r.sess != nil {
 			r.sess.Close()
 		}
 		return nil, fmt.Errorf("ssh channel open unanswered after %s: %w", sessionOpenTimeout, context.DeadlineExceeded)
 	case <-ctx.Done():
-		// Reap in the background rather than reading the pair here: the open
-		// is still parked, and Close, which owns the connection, is what
-		// releases it. A session that lands after the drop is closed here.
+		// Shutdown: Close owns the connection and the channel with it, so
+		// there is nothing to wait for here. Reap in the background rather
+		// than reading the pair inline: the open is still parked, and Close
+		// is what releases it. A session that lands after the drop is closed.
 		go func() {
 			if r := <-done; r.sess != nil {
 				r.sess.Close()
@@ -552,7 +555,6 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 // unchecked bind can return (say) 45000 for the 40000 forward and silently
 // point one engine at another's relay. Rebind until the pick is clear.
 func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, error) {
-	var lastErr error
 	for range forwardBindAttempts {
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		if err != nil {
@@ -569,12 +571,9 @@ func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, err
 		if !clash {
 			return l, nil
 		}
-		if err := l.Close(); err != nil {
-			lastErr = err
-		}
-	}
-	if lastErr != nil {
-		return nil, lastErr
+		// The bind succeeded and is being given up, so a failure to close it
+		// is not the reason the loop below runs out of attempts.
+		l.Close()
 	}
 	return nil, fmt.Errorf("no loopback port free of the forwarded set after %d attempts", forwardBindAttempts)
 }

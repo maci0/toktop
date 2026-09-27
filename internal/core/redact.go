@@ -31,7 +31,8 @@ func RedactHome(msg string) string {
 	}
 	sep := string(filepath.Separator)
 	from, to := home+sep, "~"+sep
-	if runtime.GOOS == "windows" || runtime.GOOS == "darwin" {
+	folded := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+	if folded {
 		msg = replaceFold(msg, from, to)
 	} else {
 		msg = strings.ReplaceAll(msg, from, to)
@@ -39,7 +40,9 @@ func RedactHome(msg string) string {
 	// A message that is exactly the home directory carries the same account
 	// name as a path under it, and the separator-terminated match above leaves
 	// it untouched. A longer message ending in the home path is not rewritten.
-	if msg == home {
+	// The comparison folds too: the path above does, so on those platforms
+	// the same directory spelled in another case is still the home directory.
+	if msg == home || (folded && strings.EqualFold(msg, home)) {
 		return "~"
 	}
 	return msg

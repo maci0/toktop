@@ -209,11 +209,13 @@ func identify(ctx context.Context, base string) string {
 		return core.KindLMStudio
 	case probeContains(ctx, base, "/api/extra/version", "koboldcpp"):
 		return core.KindKoboldCPP
+	// TGI matches /info on either needle, so the two cases are one fetch each;
+	// probeContains ANDs its needles. /readyz needs one probe: the needle is
+	// lowercased before the compare, so "ok" covers every spelling.
 	case probeContains(ctx, base, "/info", `"version"`),
 		probeContains(ctx, base, "/info", "text-generation"):
 		return core.KindTGI
-	case probeContains(ctx, base, "/readyz", "OK"),
-		probeContains(ctx, base, "/readyz", "ok"):
+	case probeContains(ctx, base, "/readyz", "ok"):
 		return core.KindLocalAI
 	case probeContains(ctx, base, "/", "gpustack"):
 		return core.KindGPUStack

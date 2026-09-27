@@ -125,6 +125,11 @@ func TestParseNvidiaVersion(t *testing.T) {
 	if drv != "535.104.05" || cuda != "" {
 		t.Errorf("drv=%q cuda=%q, want driver only", drv, cuda)
 	}
+	drv, cuda = parseNvidiaVersion( // CUDA on its own trailing line
+		"NVRM: Driver Version: 535.104.05\nNVRM: CUDA Version: 12.6\n")
+	if drv != "535.104.05" || cuda != "12.6" {
+		t.Errorf("drv=%q cuda=%q, want the trailing line read", drv, cuda)
+	}
 	if drv, cuda := parseNvidiaVersion("no version data here"); drv != "" || cuda != "" {
 		t.Errorf("unrelated text parsed as %q/%q", drv, cuda)
 	}

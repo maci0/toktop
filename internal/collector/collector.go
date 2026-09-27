@@ -553,15 +553,27 @@ func providerKey(p provider.Provider) string {
 // token, so waves also never overlap per backend.
 var probeWaveGap = 500 * time.Millisecond
 
+// probeTarget pairs a probe request with the collector state key it belongs
+// to. The key is not always the request's Base: providers with no endpoint
+// (see providerKey) share Base "", so inflight and backoff bookkeeping keyed
+// on Base alone would have those providers cancel each other's waves.
+type probeTarget struct {
+	key string
+	req probe.Request
+}
+
 // ProbeAll launches one probe against every known backend, asynchronously.
 // Probes ride the Run context so shutdown cancels in-flight generations
 // instead of leaving them running for the client's full timeout.
 func (c *Collector) ProbeAll() {
 	c.mu.Lock()
-	var targets []probe.Request
+	var targets []probeTarget
 	for _, p := range c.providers {
 		if model := c.lastModel[providerKey(p)]; model != "" {
-			targets = append(targets, probe.Request{Kind: p.Kind, Base: p.Addr, Model: model})
+			targets = append(targets, probeTarget{
+				key: providerKey(p),
+				req: probe.Request{Kind: p.Kind, Base: p.Addr, Model: model},
+			})
 		}
 	}
 	ctx := c.baseCtx
@@ -577,9 +589,9 @@ func (c *Collector) ProbeAll() {
 		return
 	}
 	c.lastProbeWave = now
-	var live []probe.Request
+	var live []probeTarget
 	for _, t := range targets {
-		key := t.Base
+		key := t.key
 		if c.probeInflight[key] { // one generation per backend at a time
 			continue
 		}
@@ -596,10 +608,10 @@ func (c *Collector) ProbeAll() {
 	// wall clock (real I/O), but the sample's At must follow the collector
 	// clock or a frozen/seeded replay would carry a second timeline.
 	for _, t := range live {
-		go func(t probe.Request) {
+		go func(t probeTarget) {
 			defer func() {
 				c.probeMu.Lock()
-				delete(c.probeInflight, t.Base)
+				delete(c.probeInflight, t.key)
 				c.probeMu.Unlock()
 			}()
 			// Re-read inside the goroutine: ProbeAll can race Run's first
@@ -611,11 +623,11 @@ func (c *Collector) ProbeAll() {
 			if pctx == nil {
 				pctx = ctx
 			}
-			s := probe.Run(pctx, t)
+			s := probe.Run(pctx, t.req)
 			s.At = now
 			if s.RetryAfter > 0 {
 				c.probeMu.Lock()
-				c.probeBackoff[t.Base] = c.instant().Add(s.RetryAfter)
+				c.probeBackoff[t.key] = c.instant().Add(s.RetryAfter)
 				c.probeMu.Unlock()
 			}
 			c.RecordProbe(s)

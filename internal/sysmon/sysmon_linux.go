@@ -202,20 +202,24 @@ func linuxUptime() time.Duration {
 func parseNvidiaVersion(text string) (driver, cuda string) {
 	for line := range strings.SplitSeq(text, "\n") {
 		if _, after, ok := strings.Cut(line, "Driver Version:"); ok {
-			fields := strings.Fields(after)
-			if len(fields) > 0 {
+			if fields := strings.Fields(after); len(fields) > 0 {
 				driver = fields[0]
 			}
+		}
+		// CUDA is a trailing line of its own, so the driver line is not where
+		// the search ends.
+		if driver != "" {
 			if _, after, ok := strings.Cut(line, "CUDA Version:"); ok {
-				cfields := strings.Fields(after)
-				if len(cfields) > 0 {
-					cuda = cfields[0]
+				if fields := strings.Fields(after); len(fields) > 0 {
+					cuda = fields[0]
 				}
 			}
-			return driver, cuda
 		}
 	}
-	return "", ""
+	if driver == "" {
+		return "", ""
+	}
+	return driver, cuda
 }
 
 func sysModuleVersion(module string) string {

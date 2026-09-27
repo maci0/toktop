@@ -440,17 +440,22 @@ func fileChecksum(path string) (string, error) {
 		return "", err
 	}
 	if n > maxAssetBytes {
-		return "", fmt.Errorf("file %s exceeds %d bytes", path, int64(maxAssetBytes))
+		return "", fmt.Errorf("file %s exceeds %d bytes", path, maxAssetBytes)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-// download streams url into w and returns the hex SHA-256 of what was written.
+// download streams url into w and returns the hex SHA-256 of what was
+// written. Like fetch, it asks for identity bytes: the returned digest is
+// checked against checksums.txt over the installed binary, and a transport
+// that transparently decompressed the body would both write the wrong bytes
+// and hash bytes nobody else hashed.
 func download(ctx context.Context, url string, w io.Writer) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
 		if resp != nil {
@@ -470,7 +475,7 @@ func download(ctx context.Context, url string, w io.Writer) (string, error) {
 		return "", fmt.Errorf("%s: %w", url, err)
 	}
 	if n > maxAssetBytes {
-		return "", fmt.Errorf("%s exceeds %d bytes", url, int64(maxAssetBytes))
+		return "", fmt.Errorf("%s exceeds %d bytes", url, maxAssetBytes)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

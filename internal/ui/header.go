@@ -58,7 +58,7 @@ func (m Model) renderHeader() string {
 		headerSeg{text: inV + " " + dim("in"), shed: 20},
 	)
 
-	if up > 0 || tot > 0 {
+	if tot > 0 {
 		// "session", matching --once --plain: "up 5m" next to "2/3 engines"
 		// reads as engine uptime.
 		segs = append(segs, headerSeg{text: dim("session " + fmtDur(m.snap.Uptime)), shed: 50})

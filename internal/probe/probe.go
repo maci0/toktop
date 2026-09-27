@@ -122,7 +122,7 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 	}
 	s.OK = true
 	s.Tokens = tokens
-	s.TTFTms = float64(ttft.Microseconds()) / 1000.0
+	s.TTFTms = float64(ttft) / float64(time.Millisecond)
 	// fitEvalDuration returns 0 when no scaling of the reported value is
 	// believable, so the divisor is taken from the result rather than from
 	// evalDur: dividing by that zero would store +Inf as the rate.
@@ -315,10 +315,10 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 					ttft = time.Since(s.At)
 				}
 			}
-			for _, text := range []string{c.Delta.Reasoning, c.Delta.ReasoningContent} {
-				if text != "" {
+			for _, reason := range []string{c.Delta.Reasoning, c.Delta.ReasoningContent} {
+				if reason != "" {
 					reasoning++
-					contentBytes += len(text)
+					contentBytes += len(reason)
 				}
 			}
 		}
