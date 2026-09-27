@@ -90,6 +90,12 @@ var interactivePassword = func(t Target) (string, error) {
 	return string(b), nil
 }
 
+// PasswordEnv is the variable holding the ssh password for headless runs.
+// Exported so the startup warning that names a variable this run cannot use
+// spells it the same way as the code that reads it, the way logcfg.LevelEnv
+// is shared with the top-level command.
+const PasswordEnv = "TOKTOP_SSH_PASSWORD"
+
 // sshPasswordEnv reads TOKTOP_SSH_PASSWORD with the line ending a file-read
 // leaves behind removed: `export TOKTOP_SSH_PASSWORD=$(cat id_rsa.pass)` keeps
 // the newline, and the server would reject the password with a plain
@@ -97,7 +103,7 @@ var interactivePassword = func(t Target) (string, error) {
 // newline is stripped, so a password that genuinely ends in a space still
 // authenticates.
 func sshPasswordEnv() string {
-	return strings.TrimRight(os.Getenv("TOKTOP_SSH_PASSWORD"), "\r\n")
+	return strings.TrimRight(os.Getenv(PasswordEnv), "\r\n")
 }
 
 func (p *passwordSource) get(t Target) (string, error) {
@@ -114,9 +120,21 @@ func (p *passwordSource) get(t Target) (string, error) {
 		p.pw = v
 		return v, nil
 	}
+	// A wrapper that exports the variable empty is a misconfiguration the
+	// generic message would hide by telling the operator to set a variable
+	// they already set. Named in both branches: headless as the cause, on a
+	// terminal as the reason the prompt is asking at all.
+	_, set := os.LookupEnv(PasswordEnv)
 	if !term.IsTerminal(int(os.Stdin.Fd())) {
-		p.err = fmt.Errorf("no password available (stdin is not a terminal; set TOKTOP_SSH_PASSWORD)")
+		if set {
+			p.err = fmt.Errorf("$%s is set but empty, and stdin is not a terminal to prompt on", PasswordEnv)
+		} else {
+			p.err = fmt.Errorf("no password available (stdin is not a terminal; set %s)", PasswordEnv)
+		}
 		return "", p.err
+	}
+	if set {
+		fmt.Fprintf(os.Stderr, "toktop: $%s is set but empty; prompting for the password instead\n", PasswordEnv)
 	}
 	v, err := interactivePassword(t)
 	if err != nil {

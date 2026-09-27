@@ -509,6 +509,11 @@ $(SCRIPTS_BIN)/.stamp: scripts/requirements-dev.txt scripts/requirements.txt
 
 .PHONY: scripts-check
 scripts-check: ## black and ruff over scripts/ (same pins as CI)
+	@pin=$$(awk -F'"' '/^\[tool\.uv\]$$/ { u = 1; next } /^\[/ { u = 0 } u && /^required-version/ { print $$2 }' pyproject.toml | tr -d ' \t'); \
+		if [ "$$pin" != ">=$(UV_MIN)" ]; then \
+			echo "make scripts-check: pyproject.toml required-version '$$pin' disagrees with .uv-version '$(UV_MIN)'" >&2; \
+			exit 1; \
+		fi
 	@$(MAKE) --no-print-directory scripts-env
 	$(SCRIPTS_BIN)/black --check scripts/
 	$(SCRIPTS_BIN)/ruff check scripts/

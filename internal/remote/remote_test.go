@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"golang.org/x/term"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -1177,6 +1178,25 @@ func TestPasswordSourceEnvTrailingNewline(t *testing.T) {
 		if err != nil || pw != tt.want {
 			t.Errorf("get(%q) = %q, %v; want %q", tt.in, pw, err, tt.want)
 		}
+	}
+}
+
+// An empty $TOKTOP_SSH_PASSWORD is a wrapper that configured the run with no
+// password, not one that never mentioned it: the headless error names the
+// variable and its state instead of telling the operator to set a variable
+// they already set.
+func TestPasswordSourceEnvSetButEmpty(t *testing.T) {
+	if term.IsTerminal(int(os.Stdin.Fd())) {
+		t.Skip("stdin is a terminal; the run would prompt instead of erroring")
+	}
+	tgt := Target{User: "u", Host: "h", Port: 22}
+	t.Setenv(PasswordEnv, "")
+	_, err := (&passwordSource{}).get(tgt)
+	if err == nil {
+		t.Fatal("get() with an empty password env returned no error")
+	}
+	if !strings.Contains(err.Error(), "set but empty") {
+		t.Errorf("get() error = %v, want it to name the variable as set but empty", err)
 	}
 }
 

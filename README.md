@@ -473,7 +473,8 @@ toktop version    same as --version
 ssh://user@host   positional; monitor remote hosts (repeatable;
                   ssh://[user@]host[:port] only, no password in the URL)
 --ssh-key PATH    private key for ssh targets (overrides ~/.ssh/config;
-                  ~ is expanded; a missing file aborts at startup)
+                  ~ is expanded; a missing file or an empty value aborts at
+                  startup)
 --bearer TOKEN    bearer token sent to --add endpoints only; OmniRoute API
                   keys etc. (env: OMNIROUTE_API_KEY, then TOKTOP_BEARER;
                   an explicit --bearer, even empty, wins)
@@ -516,7 +517,7 @@ success, `1` runtime failure, `2` usage error, `130` interrupted (`--once` and
 |---|---|
 | `OMNIROUTE_API_KEY` | bearer token fallback for `--bearer` (checked first unless `--bearer` is passed) |
 | `TOKTOP_BEARER` | bearer token fallback for `--bearer` (checked after `OMNIROUTE_API_KEY`) |
-| `TOKTOP_SSH_PASSWORD` | ssh password for headless runs; otherwise an interactive prompt. A trailing newline (from `$(cat file)`) is stripped, everything else is sent as typed |
+| `TOKTOP_SSH_PASSWORD` | ssh password for headless runs; otherwise an interactive prompt. A trailing newline (from `$(cat file)`) is stripped, everything else is sent as typed. Set but empty is named rather than passed over: a headless run fails saying so, and a terminal run says it is prompting instead |
 | `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. `--once --plain` renders no sized frame, so both are named as unused and never validated |
 | `TOKTOP_LOG_LEVEL` | ingest audit log floor: `debug`, `info` (default), `warn`, or `error`; a set-but-invalid value aborts with exit code 2 |
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |

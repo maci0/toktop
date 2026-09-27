@@ -534,6 +534,34 @@ func TestUsage(t *testing.T) {
 	}
 }
 
+// The Environment block names every variable this binary reads, so --help is
+// a complete reference on its own. A knob only the README mentions is one a
+// user learns by reading source, and a new variable added to the code without
+// a row here fails this test rather than shipping undocumented.
+func TestUsageDocumentsEveryEnvVar(t *testing.T) {
+	var buf strings.Builder
+	usage(&buf)
+	got := buf.String()
+	for _, name := range []string{
+		"OMNIROUTE_API_KEY",
+		"TOKTOP_BEARER",
+		"TOKTOP_SSH_PASSWORD",
+		"TOKTOP_COLUMNS",
+		"TOKTOP_LINES",
+		"TOKTOP_LOG_LEVEL",
+		"GAUNTLET_HOME",
+		"XDG_DATA_HOME",
+		"XDG_CONFIG_HOME",
+		"GITHUB_TOKEN",
+		"SSH_AUTH_SOCK",
+		"NO_COLOR",
+	} {
+		if !strings.Contains(got, name) {
+			t.Errorf("usage() Environment block does not document $%s", name)
+		}
+	}
+}
+
 // Every flag is documented in the same long form the examples, the prose and
 // the README use, with its argument word matching the README's flag table.
 // Go's PrintDefaults would print "-add value" and a separate "-h" line, which
@@ -1542,6 +1570,34 @@ func TestResolveBearer(t *testing.T) {
 	t.Setenv("TOKTOP_BEARER", "")
 	if got := resolveBearer("", false); got != "" {
 		t.Errorf("unset = %q, want empty", got)
+	}
+}
+
+func TestValidateSSHKeyFlag(t *testing.T) {
+	tests := []struct {
+		name    string
+		set     bool
+		val     string
+		wantErr string
+	}{
+		{name: "unset is fine", val: ""},
+		{name: "a path is fine", set: true, val: "/home/u/.ssh/id_ed25519"},
+		{name: "explicit empty rejected", set: true, val: "", wantErr: "not empty"},
+		{name: "whitespace rejected", set: true, val: "   ", wantErr: "not empty"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateSSHKeyFlag(tt.set, tt.val)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("validateSSHKeyFlag(%v, %q) = %v, want nil", tt.set, tt.val, err)
+				}
+				return
+			}
+			if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("validateSSHKeyFlag(%v, %q) = %v, want %q", tt.set, tt.val, err, tt.wantErr)
+			}
+		})
 	}
 }
 

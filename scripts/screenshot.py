@@ -84,15 +84,20 @@ def resolve_fonts() -> tuple[str, str]:
         SystemExit: no usable regular-weight face was found.
     """
     if override := os.environ.get("TOKTOP_SCREENSHOT_FONT"):
-        if not Path(override).is_file():
+        pinned = Path(override)
+        if not pinned.is_file():
             print(
                 f"screenshot.py: TOKTOP_SCREENSHOT_FONT: no such file: {override}",
                 file=sys.stderr,
             )
             raise SystemExit(1)
-        sibling = override.replace("Regular", "Bold")
-        bold_path = sibling if Path(sibling).is_file() else override
-        return override, bold_path
+        # Only the file name is rewritten: a directory whose own name carries
+        # "Regular" would otherwise be turned into a path that does not exist,
+        # and the check below would fall back to the regular face for the bold
+        # one, silently rendering every bold glyph in the wrong weight.
+        bold_name = pinned.name.replace("Regular", "Bold")
+        sibling = pinned.with_name(bold_name)
+        return override, str(sibling) if sibling.is_file() else override
     regular = _search("Meslo*Nerd*[Rr]egular*.ttf") or _search("Meslo*.ttf")
     if not regular:
         print(

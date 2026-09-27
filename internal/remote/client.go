@@ -76,15 +76,22 @@ func (c *Client) setErr(err error) {
 	c.errMu.Unlock()
 }
 
+// currentUser is the login name an ssh:// target without a user is opened
+// with. USER and USERNAME are environment input like any other, so a value
+// that would fail validTargetField is skipped rather than handed to the
+// transport: sshd would reject it as an authentication failure, naming the
+// password, long after the real cause. The passwd database is the fallback,
+// and an empty result leaves ssh to its own default.
 var currentUser = func() string {
-	if u := os.Getenv("USER"); u != "" {
-		return u
-	}
-	if u := os.Getenv("USERNAME"); u != "" {
-		return u
+	for _, name := range []string{"USER", "USERNAME"} {
+		if u := os.Getenv(name); u != "" && validTargetField(u) == nil {
+			return u
+		}
 	}
 	if u, err := user.Current(); err == nil {
-		return basenameLogin(u.Username)
+		if name := basenameLogin(u.Username); validTargetField(name) == nil {
+			return name
+		}
 	}
 	return ""
 }

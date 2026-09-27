@@ -12,6 +12,7 @@ import (
 
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
+	"github.com/maci0/toktop/internal/remote"
 )
 
 // Mode and environment validation, and the warnings for flags and env vars
@@ -135,11 +136,11 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets bool) {
 // not be read in this mode, matching warnIgnoredFlags for the flag form.
 func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {
 	if demo || nRemote == 0 {
-		if os.Getenv("TOKTOP_SSH_PASSWORD") != "" {
+		if os.Getenv(remote.PasswordEnv) != "" {
 			if demo {
-				fmt.Fprintln(os.Stderr, "toktop: $TOKTOP_SSH_PASSWORD has no effect with --demo")
+				fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --demo\n", remote.PasswordEnv)
 			} else {
-				fmt.Fprintln(os.Stderr, "toktop: $TOKTOP_SSH_PASSWORD has no effect without an ssh:// target")
+				fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without an ssh:// target\n", remote.PasswordEnv)
 			}
 		}
 	}
@@ -198,6 +199,20 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 	}
 	if once && frames > core.HistoryLen {
 		return fmt.Errorf("--frames must be <= %d (chart history length), got %d", core.HistoryLen, frames)
+	}
+	return nil
+}
+
+// validateSSHKeyFlag rejects an explicitly empty --ssh-key. The flag names a
+// file, so an empty value can only be a mistake, and it is indistinguishable
+// from the flag never having been given: the run would fall back to
+// ~/.ssh/config and authenticate as a key the operator did not choose.
+// resolveBearer already makes an explicit empty --bearer override the
+// environment rather than mean "unset"; this is the same distinction, closed
+// by rejecting the value instead.
+func validateSSHKeyFlag(set bool, val string) error {
+	if set && strings.TrimSpace(val) == "" {
+		return errors.New("--ssh-key must be a path, not empty (omit the flag to use ~/.ssh/config)")
 	}
 	return nil
 }

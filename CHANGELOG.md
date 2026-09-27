@@ -31,6 +31,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - A `POST /v1/events` that times out now says which bound broke: no body bytes
   for a minute, or the 10 minute stream lifetime. Both arrived as the same
   `408` reading "request stalled", and the two need opposite fixes.
+- An explicitly empty `--ssh-key` is a usage error instead of a silent
+  fallback to `~/.ssh/config`, which authenticated with a key the operator
+  did not name. An explicit empty `--bearer` already overrode the
+  environment; a path flag now refuses the value too.
+- A `$USER` or `$USERNAME` carrying whitespace or a control character is
+  skipped as the default ssh login name, falling back to the passwd
+  database, instead of being handed to the transport and reported later as
+  an authentication failure.
 - toktop.ai answers a revalidation or a refused encoding before it builds a
   compressed copy of the page. A 304 and a 406 carry no body, and both waited
   on the brotli, zstd and gzip pipeline first. An isolate that only ever
@@ -43,6 +51,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A `TOKTOP_SSH_PASSWORD` that is set but empty is now named. A headless run
+  said "set TOKTOP_SSH_PASSWORD" to an operator who had set it, and a
+  terminal run prompted as if the variable had never been exported.
+- `TOKTOP_SCREENSHOT_FONT` picks its Bold sibling by file name only. The
+  substitution ran over the whole path, so a font under a directory whose
+  name carried "Regular" resolved to nothing and every bold glyph was
+  rendered in the regular weight.
 - `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
   windows, instead of leaving them on the wall clock. A program driving a
   simulated timeline stepped time forward and still read the file set a

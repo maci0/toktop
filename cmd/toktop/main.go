@@ -127,6 +127,10 @@ func main() {
 
 	explicit := map[string]bool{}
 	topFS.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
+	if err := validateSSHKeyFlag(explicit["ssh-key"], f.sshKey); err != nil {
+		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
+		os.Exit(2)
+	}
 	// Both halves of opencode's gate, resolved once before the config line:
 	// the sqlite build tag decides whether the driver is linked in, and
 	// --opencode-db (on unless explicitly disabled) whether it is opened.

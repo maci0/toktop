@@ -239,6 +239,21 @@ func TestCurrentUserPrefersUSERThenUSERNAME(t *testing.T) {
 	}
 }
 
+func TestCurrentUserRejectsUnusableEnvValue(t *testing.T) {
+	// A $USER carrying a space or a control character is refused the way a
+	// username parsed out of an ssh:// URL is, rather than reaching the
+	// transport and coming back as an authentication failure.
+	t.Setenv("USER", "bad user")
+	t.Setenv("USERNAME", "also bad\x07name")
+	got := currentUser()
+	if got == "bad user" || got == "also bad\x07name" {
+		t.Fatalf("currentUser = %q, want the environment values skipped", got)
+	}
+	if err := validTargetField(got); err != nil {
+		t.Errorf("currentUser = %q, which the ssh transport would reject: %v", got, err)
+	}
+}
+
 func TestBasenameLoginStripsWindowsDomain(t *testing.T) {
 	cases := map[string]string{
 		"alice":           "alice",

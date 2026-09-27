@@ -148,6 +148,15 @@ Environment (a flag always wins over the variable it mirrors):
   TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal)
   TOKTOP_LINES            --once frame height, 21-512 (default: the terminal)
   TOKTOP_LOG_LEVEL        ingest audit log floor: debug, info, warn, error
+  GAUNTLET_HOME           directory holding agents.json (--agents), default
+                          ~/.gauntlet; a relative value is ignored
+  XDG_DATA_HOME           where opencode's session database is read
+                          (--opencode-db), default ~/.local/share; a relative
+                          value is ignored
+  XDG_CONFIG_HOME         where the ssh host-key store lives, default
+                          ~/.config; a relative value is ignored
+  GITHUB_TOKEN            optional, authenticates toktop update's GitHub calls
+  SSH_AUTH_SOCK           ssh-agent socket for ssh:// targets
   NO_COLOR                recognized by the terminal renderer, as usual
 An unrecognized TOKTOP_* name is reported as a typo at startup, and one that
 cannot take effect in the chosen mode is named rather than silently ignored.
