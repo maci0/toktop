@@ -55,6 +55,13 @@ type Model struct {
 	feedDown        string    // set once the ingest endpoint has died
 	notice          string    // one-shot explanation of a key that changed nothing
 	noticeAt        time.Time
+	// sum is the agent feed accounted once for the frame being drawn. The
+	// header, charts, feed, footer and agents view each need a different
+	// slice of it, and the feed holds up to AgentHistoryLen events, so
+	// walking it per consumer cost five groupings and five NFC-normalized
+	// maps a frame. View fills it; agentSum computes on demand for a
+	// consumer called outside a frame.
+	sum *core.AgentSummary
 }
 
 // noticeTTL is how long a "that key does nothing here" explanation stays on
@@ -277,6 +284,12 @@ func (m Model) View() string {
 		// vocabulary stays monochrome terminal glyphs, no color emoji.
 		return "\n  " + styleWarn.Render("● toktop is warming up…")
 	}
+	// Account the agent feed once, before any consumer reads it.
+	m.sum = new(core.AgentSummary)
+	if len(m.snap.Agents) > 0 {
+		s := core.Summarize(m.snap.Agents, m.snapNow())
+		m.sum = &s
+	}
 	if m.help {
 		return m.renderHelp()
 	}
@@ -386,6 +399,18 @@ func frameNow(s core.Snapshot, fallback time.Time) time.Time {
 	return fallback
 }
 
+// agentSum is the frame's agent summary, computed on demand for a consumer
+// called outside View (a test, a direct render call).
+func (m Model) agentSum() core.AgentSummary {
+	if m.sum != nil {
+		return *m.sum
+	}
+	return core.Summarize(m.snap.Agents, m.snapNow())
+}
+
+// agentRates is the frame's per-agent list, busiest first.
+func (m Model) agentRates() []core.AgentRate { return m.agentSum().Rates }
+
 func aggOutAt(s core.Snapshot, now time.Time) float64 {
 	out, _ := aggBothAt(s, now)
 	return out
@@ -402,12 +427,45 @@ func aggInAt(s core.Snapshot, now time.Time) float64 {
 // renderHeader and PlainTextFrame need both directions; two separate calls
 // each run AgentRates (map + sort) over the same feed.
 func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
+	return aggBoth(s, core.Summarize(s.Agents, now))
+}
+
+// aggBoth adds a feed summary's unattributed rates to the provider totals.
+func aggBoth(s core.Snapshot, sum core.AgentSummary) (out, in float64) {
 	for _, p := range s.Providers {
 		out += p.OutTokPS
 		in += p.InTokPS
 	}
-	aOut, aIn := core.AgentOwnTokPS(s.Agents, now)
-	return out + aOut, in + aIn
+	for _, r := range sum.Own {
+		out += r.TokPS
+		in += r.PromptPS
+	}
+	return out, in
+}
+
+// aggOwn sums the unattributed agent rates a frame already accounted.
+func (m Model) aggOwn() (out, in float64) {
+	for _, r := range m.agentSum().Own {
+		out += r.TokPS
+		in += r.PromptPS
+	}
+	return
+}
+
+// aggIn is the header's input total: provider rates plus the feed's
+// unattributed share, off the frame's own walk.
+func (m Model) aggIn() float64 {
+	in := m.aggInProviders()
+	_, aIn := m.aggOwn()
+	return in + aIn
+}
+
+func (m Model) aggInProviders() float64 {
+	var in float64
+	for _, p := range m.snap.Providers {
+		in += p.InTokPS
+	}
+	return in
 }
 
 // uniqueAgents counts distinct agent names. The key is normalized like every

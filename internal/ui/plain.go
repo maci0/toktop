@@ -64,10 +64,13 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 		state += " (partial)"
 	}
 	now := frameNow(s, time.Time{})
-	outAgg, inAgg := aggBothAt(s, now)
+	// One accounting of the feed serves both the aggregate line and the
+	// per-agent list below it.
+	sum := core.Summarize(s.Agents, now)
+	outAgg, inAgg := aggBoth(s, sum)
 	fmt.Fprintf(&b, "%s · out %s tok/s · in %s tok/s",
 		state, fmtRate(outAgg), fmtRate(inAgg))
-	rates := core.AgentRates(s.Agents, now)
+	rates := sum.Rates
 	if n := len(rates); n > 0 {
 		b.WriteString(fmt.Sprintf(" · %d agents", n))
 	}
@@ -294,12 +297,17 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 // no engines.
 func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	now := frameNow(s, time.Time{})
-	outPS, inPS := core.AgentOwnTokPS(s.Agents, now)
+	sum := core.Summarize(s.Agents, now)
+	var outPS, inPS float64
+	for _, r := range sum.Own {
+		outPS += r.TokPS
+		inPS += r.PromptPS
+	}
 	b.WriteString("no inference engines detected; --add URL attaches one\n")
 	fmt.Fprintf(b, "out %s tok/s · in %s tok/s\n", fmtRate(outPS), fmtRate(inPS))
 	writeSystemPlain(b, s.Sys)
 	b.WriteString("\nAGENTS\n")
-	rates := core.AgentRates(s.Agents, now)
+	rates := sum.Rates
 	rows := 0
 	for _, r := range rates {
 		name := core.SanitizeText(r.Agent)

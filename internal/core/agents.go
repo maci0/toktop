@@ -38,14 +38,23 @@ type AgentRate struct {
 // show up as two rows, or be counted twice.
 func CanonicalAgent(name string) string { return norm.NFC.String(name) }
 
-// AgentRates summarizes the recent event stream, busiest first.
-func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
-	return agentRatesFiltered(events, now, false)
+// AgentSummary is the agent feed accounted once: every agent's rate, plus
+// the rates of only the tokens no engine already reports.
+//
+// The dashboard needs both halves in the same frame (the agent list and
+// the header aggregate), and the feed retains 512 events that each half
+// would otherwise walk, group and normalize on its own.
+type AgentSummary struct {
+	Rates []AgentRate // every agent with tokens in the window
+	Own   []AgentRate // the same, counting only unattributed tokens
 }
 
-func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []AgentRate {
+// Summarize walks the feed once and returns both views. Own is empty for an
+// agent whose every in-window event went through an engine, since that
+// agent contributes nothing to the unattributed totals.
+func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 	if len(events) == 0 {
-		return nil
+		return AgentSummary{}
 	}
 	type acc struct {
 		tokens   int64
@@ -55,13 +64,18 @@ func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []Agen
 		last     time.Time
 		via      string
 		n        int
+		// Unattributed half. Kept per event rather than per agent: an
+		// agent that connects to (or leaves) a monitored engine mid-window
+		// contributes the slice that went direct.
+		ownTokens int64
+		ownPrompt int64
+		ownFirst  time.Time
+		ownLast   time.Time
+		ownN      int
 	}
 	by := map[string]*acc{}
 	cutoff := now.Add(-AgentRateWindow)
 	for _, ev := range events {
-		if ownOnly && ev.ViaEngine != "" {
-			continue
-		}
 		if ev.At.Before(cutoff) {
 			continue
 		}
@@ -80,9 +94,21 @@ func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []Agen
 		a.last = ev.At
 		a.via = ev.ViaEngine
 		a.n++
+		if ev.ViaEngine == "" {
+			if a.ownN == 0 {
+				a.ownFirst = ev.At
+			}
+			a.ownTokens = SatAddPos(a.ownTokens, ev.OutputTokens)
+			a.ownPrompt = SatAddPos(a.ownPrompt, ev.PromptTokens)
+			a.ownLast = ev.At
+			a.ownN++
+		}
 	}
 
-	out := make([]AgentRate, 0, len(by))
+	sum := AgentSummary{
+		Rates: make([]AgentRate, 0, len(by)),
+		Own:   make([]AgentRate, 0, len(by)),
+	}
 	for name, a := range by {
 		r := AgentRate{
 			Agent:     name,
@@ -98,24 +124,45 @@ func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []Agen
 			r.TokPS = float64(a.tokens) / span
 			r.PromptPS = float64(a.prompt) / span
 		}
-		out = append(out, r)
+		sum.Rates = append(sum.Rates, r)
+		if a.ownN == 0 {
+			continue
+		}
+		o := AgentRate{
+			Agent:  name,
+			Tokens: a.ownTokens,
+			Prompt: a.ownPrompt,
+			Last:   a.ownLast,
+		}
+		if span := a.ownLast.Sub(a.ownFirst).Seconds(); a.ownN > 1 && span > 0 {
+			o.TokPS = float64(a.ownTokens) / span
+			o.PromptPS = float64(a.ownPrompt) / span
+		}
+		sum.Own = append(sum.Own, o)
 	}
-	slices.SortFunc(out, func(a, b AgentRate) int {
+	sortRates(sum.Rates)
+	sortRates(sum.Own)
+	return sum
+}
+
+func sortRates(r []AgentRate) {
+	slices.SortFunc(r, func(a, b AgentRate) int {
 		if c := cmp.Compare(b.TokPS, a.TokPS); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.Agent, b.Agent)
 	})
-	return out
+}
+
+// AgentRates summarizes the recent event stream, busiest first.
+func AgentRates(events []AgentEvent, now time.Time) []AgentRate {
+	return Summarize(events, now).Rates
 }
 
 // AgentOwnTokPS is the output/prompt rate of tokens not already in an
-// engine's totals. Skip is per event, not per agent: an agent that
-// connects to (or leaves) a monitored engine mid-window still contributes
-// the unattributed slice. The per-agent row keeps the last ViaEngine so
-// it shows who they are talking to now.
+// engine's totals, so those tokens are not counted twice.
 func AgentOwnTokPS(events []AgentEvent, now time.Time) (outPS, inPS float64) {
-	for _, r := range agentRatesFiltered(events, now, true) {
+	for _, r := range Summarize(events, now).Own {
 		outPS += r.TokPS
 		inPS += r.PromptPS
 	}

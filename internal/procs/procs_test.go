@@ -31,6 +31,12 @@ func TestExtractPort(t *testing.T) {
 		{[]string{"x", "--port", "99999999999"}, 0},
 		{[]string{"x", "--port", "-1"}, 0},
 		{[]string{"x", "--port=65535"}, 65535}, // boundary stays valid
+		{[]string{"x", "--listen-port=7001"}, 7001},
+		// An unusable value on one spelling must not hide a good one later.
+		{[]string{"x", "--http-port=abc", "--port=4242"}, 4242},
+		{[]string{"x", "--port=abc", "--http-port", "5002"}, 5002},
+		// A bare flag with no following argument is not a port.
+		{[]string{"x", "--port"}, 0},
 	}
 	for _, c := range cases {
 		if got := ExtractPort(c.args); got != c.want {

@@ -17,7 +17,7 @@ func (m Model) renderHeader() string {
 	segs := []headerSeg{{text: logo}, {text: dim("v" + m.cfg.Version), shed: 40}}
 
 	up, tot := m.upCount()
-	rates := core.AgentRates(m.snap.Agents, m.snapNow())
+	rates := m.agentRates()
 	if tot == 0 {
 		n := len(rates)
 		if n == 0 {
@@ -52,7 +52,7 @@ func (m Model) renderHeader() string {
 	}
 
 	outV := styleValue.Foreground(heatColor(norm(m.aggLast, m.aggMax))).Render("▲ " + fmtRate(m.aggLast))
-	inV := styleInfo.Render("▼ " + fmtRate(aggInAt(m.snap, m.snapNow())))
+	inV := styleInfo.Render("▼ " + fmtRate(m.aggIn()))
 	segs = append(segs,
 		headerSeg{text: outV + " " + dim("tok/s out"), shed: 10},
 		headerSeg{text: inV + " " + dim("in"), shed: 20},

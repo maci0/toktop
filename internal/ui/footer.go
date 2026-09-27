@@ -182,7 +182,7 @@ func (m Model) renderMinimal() string {
 	if m.notice != "" {
 		lines = append(lines, clip(styleWarn.Render(m.notice), m.w))
 	}
-	rates := core.AgentRates(m.snap.Agents, m.snapNow())
+	rates := m.agentRates()
 	if len(m.snap.Providers) == 0 {
 		if len(rates) == 0 {
 			if m.cfg.Agents {

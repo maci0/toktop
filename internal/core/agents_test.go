@@ -1,7 +1,9 @@
 package core
 
 import (
+	"fmt"
 	"math"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -86,5 +88,90 @@ func TestAgentOwnTokPS(t *testing.T) {
 	// in over 1s. codex: 60 out / 120 in over 1s.
 	if math.Abs(out-140) > 1e-9 || math.Abs(in-140) > 1e-9 {
 		t.Errorf("own rates = %v out / %v in, want 140/140", out, in)
+	}
+}
+
+// Summarize replaces the pair of independent walks the frame used to run,
+// so it has to agree with them exactly on both halves, and a frame must be
+// able to account the whole feed in a single pass.
+func TestSummarizeMatchesSeparateWalks(t *testing.T) {
+	now := time.Unix(1_700_000_100, 0)
+	events := []AgentEvent{
+		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 10},
+		{At: now.Add(-1 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 10},
+		{At: now.Add(-500 * time.Millisecond), Agent: "claude", ViaEngine: "127.0.0.1:11434"},
+		{At: now.Add(-2 * time.Second), Agent: "codex", OutputTokens: 30, PromptTokens: 60},
+		{At: now.Add(-1 * time.Second), Agent: "codex", OutputTokens: 30, PromptTokens: 60},
+		// One event only: reports tokens, no rate.
+		{At: now, Agent: "dsh", OutputTokens: 7, PromptTokens: 3},
+		// Outside the window entirely.
+		{At: now.Add(-2 * AgentRateWindow), Agent: "stale", OutputTokens: 999},
+		// An agent whose every in-window event went through an engine has no
+		// unattributed slice at all, so it must not appear in Own.
+		{At: now.Add(-2 * time.Second), Agent: "routed", ViaEngine: "127.0.0.1:8000", OutputTokens: 11},
+		{At: now.Add(-1 * time.Second), Agent: "routed", ViaEngine: "127.0.0.1:8000", OutputTokens: 11},
+	}
+
+	sum := Summarize(events, now)
+
+	wantRates := AgentRates(events, now)
+	if !reflect.DeepEqual(sum.Rates, wantRates) {
+		t.Errorf("Summarize.Rates = %+v, AgentRates = %+v", sum.Rates, wantRates)
+	}
+	wantOut, wantIn := AgentOwnTokPS(events, now)
+	var out, in float64
+	for _, r := range sum.Own {
+		out += r.TokPS
+		in += r.PromptPS
+	}
+	if math.Abs(out-wantOut) > 1e-9 || math.Abs(in-wantIn) > 1e-9 {
+		t.Errorf("Summarize.Own totals = %v out / %v in, AgentOwnTokPS = %v/%v", out, in, wantOut, wantIn)
+	}
+	if math.Abs(out-140) > 1e-9 || math.Abs(in-140) > 1e-9 {
+		t.Errorf("own rates = %v out / %v in, want 140/140", out, in)
+	}
+	for _, r := range sum.Own {
+		if r.Agent == "routed" {
+			t.Error("Own lists an agent whose every event went through an engine")
+		}
+	}
+}
+
+// A frame redraws once a second against a feed that retains AgentHistoryLen
+// events, so the whole accounting has to be one walk. Two walks of the same
+// slice cost two maps and two sorts; the UI reuses a single summary.
+func TestSummarizeAllocBudget(t *testing.T) {
+	now := time.Unix(1_700_000_100, 0)
+	events := make([]AgentEvent, AgentHistoryLen)
+	for i := range events {
+		events[i] = AgentEvent{
+			At: now.Add(time.Duration(i) * time.Second), ID: fmt.Sprint(i),
+			Agent:        []string{"claude", "codex", "dsh", "aider"}[i%4],
+			PromptTokens: int64(100 + i), OutputTokens: int64(20 + i%97),
+		}
+	}
+	// One pass needs: the accumulator map, one acc per distinct agent, and
+	// the two result slices. Measured at 6 on a 4-agent feed; the ceiling
+	// catches a regression back to one walk per consumer.
+	const budget = 12
+	if got := testing.AllocsPerRun(50, func() { _ = Summarize(events, now) }); got > budget {
+		t.Errorf("Summarize allocates %.0f objects over a %d-event feed, budget %d; "+
+			"the frame must account the feed in one walk", got, len(events), budget)
+	}
+}
+
+func BenchmarkSummarize(b *testing.B) {
+	now := time.Unix(1_700_000_100, 0)
+	events := make([]AgentEvent, AgentHistoryLen)
+	for i := range events {
+		events[i] = AgentEvent{
+			At: now.Add(time.Duration(i) * time.Second), ID: fmt.Sprint(i),
+			Agent:        []string{"claude", "codex", "dsh", "aider"}[i%4],
+			PromptTokens: int64(100 + i), OutputTokens: int64(20 + i%97),
+		}
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		_ = Summarize(events, now)
 	}
 }

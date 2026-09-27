@@ -15,7 +15,7 @@ func (m Model) renderFeed() string {
 	w := m.w - 4
 	_, _, feedIn := m.sectionHeights()
 	now := m.snapNow()
-	rates := core.AgentRates(m.snap.Agents, now)
+	rates := m.agentRates()
 	rows := agentRows(rates, now)
 	statsN := 0
 	if len(rows) > 0 && feedIn > 0 {

@@ -26,7 +26,7 @@ func (m Model) renderCharts() string {
 		w, outH,
 	)
 	in := panel(
-		"PROMPT "+styleInfo.Render("▼ "+fmtRate(aggInAt(m.snap, m.snapNow()))+" tok/s"),
+		"PROMPT "+styleInfo.Render("▼ "+fmtRate(m.aggIn())+" tok/s"),
 		BrailleChart(aggHist(m.snap, false, w, cad), w, 1,
 			ChartStyle{Heat: func(float64) lipgloss.Color { return cCyan }}),
 		w, 1,

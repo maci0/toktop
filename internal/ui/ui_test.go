@@ -837,6 +837,49 @@ func TestThroughputTitleAdvertisesTimescaleToggle(t *testing.T) {
 	}
 }
 
+// A frame redraws once a second against a feed retaining 512 events, and
+// the header, charts, feed, footer and agents view each need a different
+// slice of that feed's accounting. View must do it once: a consumer that
+// recomputes costs a full extra walk of the feed per frame.
+func TestFrameAccountsAgentsOnce(t *testing.T) {
+	m := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420", Agents: true}, nil)
+	m.snap = perfSnap()
+	m.w, m.h, m.ready = 120, 40, true
+
+	if m.sum != nil {
+		t.Fatal("a model built for a frame already holds a summary")
+	}
+	_ = m.View()
+	// View takes the model by value, so the summary it fills belongs to
+	// that frame alone: the model the caller kept must not carry it into
+	// the next one, where the feed and the clock have both moved on.
+	if m.sum != nil {
+		t.Error("the frame's summary escaped onto the caller's model; the next frame would draw stale rates")
+	}
+}
+
+// A consumer called outside a frame still gets correct numbers: the accessor
+// computes the same summary on demand rather than returning nothing.
+func TestAgentConsumersOutsideAFrame(t *testing.T) {
+	m := New(Config{Version: "t", Agents: true}, nil)
+	m.snap = perfSnap()
+	m.w, m.h, m.ready = 120, 40, true
+
+	got := m.agentRates()
+	want := core.Summarize(m.snap.Agents, m.snapNow()).Rates
+	if len(got) != len(want) || len(got) == 0 {
+		t.Fatalf("agentRates outside a frame = %d rows, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+	if m.sum != nil {
+		t.Error("reading rates outside a frame cached a summary on the model")
+	}
+}
+
 // The help screen is the only in-app reference: both ways of pointing
 // toktop at engines away from localhost must be discoverable there.
 func TestHelpCoversAttachModes(t *testing.T) {

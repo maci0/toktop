@@ -108,7 +108,7 @@ func agentMiniLine(r core.AgentRate) string {
 func (m Model) renderAgentsOnly() string {
 	w := m.w - 4
 	now := m.snapNow()
-	rates := core.AgentRates(m.snap.Agents, now)
+	rates := m.agentRates()
 	_, midIn, feedIn := m.sectionHeights()
 
 	rows := agentRows(rates, now)

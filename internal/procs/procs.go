@@ -193,21 +193,35 @@ func clampPct(v float64) float64 {
 	return v
 }
 
+// portFlags and portFlagsEq are the argv spellings that carry an explicit
+// listen port, as bare flags and as "flag=value". Hoisted to package
+// tables because the /proc walk calls ExtractPort for every process on
+// every poll: rebuilding these lists per argument allocated on each of the
+// thousands of iterations one walk makes.
+var (
+	portFlags   = []string{"--port", "--http-port", "--listen-port"}
+	portFlagsEq = []string{"--port=", "--http-port=", "--listen-port="}
+)
+
 // ExtractPort scans argv for explicit listen-port flags. Exported so the
 // remote ssh path can reuse the same convention for command lines gathered
 // from another host. Anything outside the TCP port range reads as absent: a
 // garbage or hostile --port must never become a tunnel target.
 func ExtractPort(args []string) int {
 	for i, a := range args {
-		for _, flag := range []string{"--port", "--http-port", "--listen-port"} {
-			if a == flag && i+1 < len(args) {
-				if p, err := strconv.Atoi(strings.TrimSpace(args[i+1])); err == nil && isPort(p) {
+		for _, flag := range portFlagsEq {
+			if after, ok := strings.CutPrefix(a, flag); ok {
+				if p, err := strconv.Atoi(after); err == nil && isPort(p) {
 					return p
 				}
 			}
-			if after, ok := strings.CutPrefix(a, flag+"="); ok {
-				if p, err := strconv.Atoi(after); err == nil && isPort(p) {
-					return p
+		}
+		if i+1 < len(args) {
+			for _, flag := range portFlags {
+				if a == flag {
+					if p, err := strconv.Atoi(strings.TrimSpace(args[i+1])); err == nil && isPort(p) {
+						return p
+					}
 				}
 			}
 		}
