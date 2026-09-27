@@ -410,15 +410,15 @@ func parseEngineAddr(addr string) (netip.AddrPort, string, error) {
 // sequences must not depend on map iteration, or equal-timestamp events
 // land in a different order across replays. Caller holds w.mu.
 func (w *Watcher) trackedList() []*tracked {
-	return slices.SortedFunc(maps.Values(w.tracked), func(a, b *tracked) int {
-		return cmp.Compare(a.proc.PID, b.proc.PID)
-	})
+	return sortTracked(slices.Collect(maps.Values(w.tracked)))
 }
 
-func sortTracked(ts []*tracked) {
+// sortTracked orders trackers by PID in place.
+func sortTracked(ts []*tracked) []*tracked {
 	slices.SortFunc(ts, func(a, b *tracked) int {
 		return cmp.Compare(a.proc.PID, b.proc.PID)
 	})
+	return ts
 }
 
 func (w *Watcher) report(t *tracked, cur agentusage.Sample) {

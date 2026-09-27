@@ -77,22 +77,17 @@ func (m Model) renderEmpty() string {
 		// after an engine appears, with no hint that snapshots are dropped.
 		lines = append(lines, "", styleWarn.Render("‖ PAUSED"))
 	}
-	// In-session next actions first: ingest is already listening, and
-	// --agents may already be on. Restart commands come after, named as
-	// such, so first-timers do not type them into the dashboard.
-	if m.cfg.Agents {
-		lines = append(lines, "", dim("watching local agents; waiting for one to report tokens"))
-	}
+	// A run with --agents never reaches this card: the no-engines branch in
+	// View hands it the agents dashboard instead, so there is no --agents hint
+	// to give here and no --agents variant of the cards below.
 	switch {
 	case m.feedDown != "":
 		lines = append(lines, "")
 		lines = append(lines, m.feedEmptyLines(m.w-8)...)
 		lines = append(lines, dim("fix the cause named above, then q and restart toktop"))
 	case m.cfg.IngestAddr != "":
-		if !m.cfg.Agents {
-			lines = append(lines, "")
-		}
 		lines = append(lines,
+			"",
 			"POST agent events to the live ingest endpoint:",
 			styleInfo.Render("  http://"+core.SanitizeText(m.cfg.IngestAddr)+"/v1/events"),
 		)
@@ -102,13 +97,9 @@ func (m Model) renderEmpty() string {
 		dim("q quit, then re-run:"),
 		"attach anything openai-compatible:",
 		styleInfo.Render("  toktop --add http://127.0.0.1:9999"),
+		"or watch coding agents on this machine:",
+		styleInfo.Render("  toktop --agents"),
 	)
-	if !m.cfg.Agents {
-		lines = append(lines,
-			"or watch coding agents on this machine:",
-			styleInfo.Render("  toktop --agents"),
-		)
-	}
 	lines = append(lines,
 		"or preview the dashboard:",
 		styleInfo.Render("  toktop --demo"),

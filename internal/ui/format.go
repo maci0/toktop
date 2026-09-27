@@ -74,7 +74,10 @@ func fmtMs(ms float64) string {
 	if !(ms > 0) || math.IsInf(ms, 0) {
 		return "-"
 	}
-	if ms >= 1000 {
+	// unitRoundTo, for the reason unitRound gives: the unit is chosen on the
+	// value as rendered, so 999.6 does not print "1000ms" one frame before
+	// 1000 prints "1.00s".
+	if ms >= unitRoundTo {
 		return fmt.Sprintf("%.2fs", ms/1000)
 	}
 	return fmt.Sprintf("%.0fms", ms)

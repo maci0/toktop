@@ -258,7 +258,7 @@ func parseSwapUsage(s string) (total, used uint64) {
 // integer, often zero, which would read as "no swap" instead of "full".
 func splitSizeToken(tok string) uint64 {
 	// The unit is one rune, not one byte: a token ending in a multi-byte
-	// rune cut at len-1 would hand ParseFloat a half-rune, and ToUpper a
+	// rune cut at len-1 would hand ParseFloat a half-rune, and FoldASCII a
 	// single invalid byte.
 	last, size := utf8.DecodeLastRuneInString(tok)
 	if size == 0 || last == utf8.RuneError || size == len(tok) {

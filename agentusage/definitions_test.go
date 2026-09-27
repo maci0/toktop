@@ -214,6 +214,24 @@ func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
 	}
 }
 
+// A definition with no root registers nothing, so it holds no canonical name.
+// Recording it in the collision index anyway let it veto a later definition
+// that does have a root, rejecting the whole file over an entry the registry
+// never sees.
+func TestLoadDefinitionsIgnoresRootlessEntryInCollisions(t *testing.T) {
+	body := `{"café": {"usage": {}},
+		"café": {"usage": {"roots": ["~/.nfc/sessions"]}}}`
+	path := writeDefs(t, body)
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatalf("LoadDefinitions = %v, want the rootless entry skipped, not a collision", err)
+	}
+	dropDefs(t, "café")
+
+	if _, ok := definedSpec("café"); !ok {
+		t.Error("the one usable definition did not register")
+	}
+}
+
 // Names with surrounding whitespace are the same agent Discover reports, and
 // a spec whose roots are all blank is not readable: Supported must not say
 // yes for an agent Watch would reject.

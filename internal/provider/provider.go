@@ -221,10 +221,10 @@ func (c *versionCache) fetch(ctx context.Context, base string) string {
 	return c.val
 }
 
-// versionCap is the bound the plain-text branch of extractVersionField
-// applies, and every branch now shares it: the value is
-// cached for versionRefresh and re-rendered every frame, so a hostile engine
-// answering an 8 MB "version" member must not be able to hold it.
+// versionCap is the bound capVersion applies, so every branch of
+// extractVersionField shares it: the value is cached for versionRefresh and
+// re-rendered every frame, so a hostile engine answering an 8 MB "version"
+// member must not be able to hold it.
 const versionCap = 128
 
 // capVersion bounds a version string to versionCap grapheme clusters and

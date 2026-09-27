@@ -190,4 +190,21 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 			t.Errorf("fmtRate(%v) = %q, want %q", tc.v, got, tc.want)
 		}
 	}
+	// fmtMs carries the same rule: the unit is chosen on the value as
+	// rendered, so 999.6 does not print "1000ms" one frame before 1000 prints
+	// "1.00s".
+	durs := []struct {
+		ms   float64
+		want string
+	}{
+		{999.4, "999ms"},
+		{999.5, "1.00s"},
+		{999.6, "1.00s"},
+		{1000, "1.00s"},
+	}
+	for _, tc := range durs {
+		if got := fmtMs(tc.ms); got != tc.want {
+			t.Errorf("fmtMs(%v) = %q, want %q", tc.ms, got, tc.want)
+		}
+	}
 }

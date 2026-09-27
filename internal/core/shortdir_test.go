@@ -22,6 +22,12 @@ func TestShortDirKeepsTheIdentifyingPart(t *testing.T) {
 		"/home/dev/project":     "dev/project",
 		"project":               "project",
 		"/":                     "/",
+		// A trailing separator is not a component: spending one of the two on
+		// the cut leaves a slash in the note.
+		"/var/log/":      "var/log",
+		"/var/log":       "var/log",
+		"/home/dev/app/": "dev/app",
+		"//":             "/",
 		// A backslash path is only a path where backslash is the separator.
 		// Elsewhere it is one filename, kept whole minus the two components
 		// the scan still finds in it.

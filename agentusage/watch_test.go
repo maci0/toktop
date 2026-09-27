@@ -1454,6 +1454,34 @@ func TestStaleRootListingIsForgotten(t *testing.T) {
 	}
 }
 
+// A walk in flight is the claim on its root, and a claim that outlives
+// rescanEvery still holds it. Pruning the placeholder would let a second
+// caller walk the same root concurrently, and the slower of the two would
+// then publish over the newer listing.
+func TestRootListPruneKeepsInflightClaim(t *testing.T) {
+	rootListMu.Lock()
+	saved := rootLists
+	rootLists = map[string]rootListing{}
+	rootListMu.Unlock()
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		rootLists = saved
+		rootListMu.Unlock()
+	})
+
+	key := rootListKey(t.TempDir(), ".jsonl")
+	walk := make(chan struct{})
+	rootListMu.Lock()
+	rootLists[key] = rootListing{at: time.Now().Add(-2 * rescanEvery), walk: walk}
+	pruneRootListsLocked(time.Now(), rescanEvery)
+	_, still := rootLists[key]
+	rootListMu.Unlock()
+
+	if !still {
+		t.Fatal("prune dropped a root listing whose walk is still in flight")
+	}
+}
+
 // A parser that panics on a transcript must not strand the watcher. Both
 // locks in read are released by defer, so a panic part-way through the file
 // walk cannot leave pollMu held with no goroutine left to unlock it: the next

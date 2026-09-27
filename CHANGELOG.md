@@ -44,6 +44,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   logger, at error level, with the bound address and the reason. It was one
   unstructured stderr line that ignored `$TOKTOP_LOG_LEVEL`, so a feed that
   stopped accepting left no line to filter for.
+- A definitions entry that names no transcript root no longer rejects the
+  whole file when a later entry reduces to the same agent name. It registered
+  nothing, so it could not hold the name either; the one usable agent was
+  lost to a collision with an entry the registry never saw.
+- A shared transcript listing whose directory walk takes longer than the
+  rescan window is no longer pruned while the walk is still running. The
+  second caller then claimed the same root, walked it too, and the slower
+  walk published over the newer listing, so a session that exists read as an
+  empty store.
+- A working directory written with a trailing separator shows its last two
+  components without the stray slash (`toktop` used to render "log/" where
+  "log" belongs).
+- A probe time of 999.6 ms reads as "1.00s" rather than "1000ms", the
+  boundary rule the count and rate formatters already follow.
 - `toktop` exits 2 when every ssh target it was given fails to attach,
   instead of starting a dashboard showing only local engines with the reason
   on a stderr line the alternate screen hides.

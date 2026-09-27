@@ -70,27 +70,29 @@ func NewSource(interval time.Duration, seed int64) *Source {
 	if interval <= 0 {
 		interval = time.Second
 	}
+	backends := []backend{
+		{label: "ollama", kind: core.KindOllama, addr: "http://127.0.0.1:11434", model: "llama3.1:8b-instruct-q4_K_M",
+			outBase: 38, inBase: 120, burstEvery: 17},
+		{label: "vllm-a100", kind: core.KindVLLM, addr: "http://127.0.0.1:8000", model: "Qwen/Qwen2.5-32B-Instruct-AWQ",
+			outBase: 210, inBase: 900, burstEvery: 11},
+		{label: "sglang-h200", kind: core.KindSGLang, addr: "http://127.0.0.1:30000", model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-FP8",
+			outBase: 340, inBase: 1500, burstEvery: 13},
+		{label: "trt-llm", kind: core.KindTRTLLM, addr: "http://127.0.0.1:8001", model: "meta-llama/Llama-3.3-70B-Instruct-engine",
+			outBase: 260, inBase: 1100, burstEvery: 19},
+		{label: "mlx-studio", kind: core.KindMLX, addr: "http://127.0.0.1:1234", model: "mlx-community/Qwen2.5-Coder-14B-4bit",
+			outBase: 46, inBase: 180, burstEvery: 23},
+	}
 	return &Source{
 		interval: interval,
 		rng:      rand.New(rand.NewPCG(uint64(seed), 0)),
 		probeRng: rand.New(rand.NewPCG(uint64(seed), probeStreamIncr)),
 		seed:     seed,
-		backends: []backend{
-			{label: "ollama", kind: core.KindOllama, addr: "http://127.0.0.1:11434", model: "llama3.1:8b-instruct-q4_K_M",
-				outBase: 38, inBase: 120, burstEvery: 17},
-			{label: "vllm-a100", kind: core.KindVLLM, addr: "http://127.0.0.1:8000", model: "Qwen/Qwen2.5-32B-Instruct-AWQ",
-				outBase: 210, inBase: 900, burstEvery: 11},
-			{label: "sglang-h200", kind: core.KindSGLang, addr: "http://127.0.0.1:30000", model: "deepseek-ai/DeepSeek-R1-Distill-Llama-70B-FP8",
-				outBase: 340, inBase: 1500, burstEvery: 13},
-			{label: "trt-llm", kind: core.KindTRTLLM, addr: "http://127.0.0.1:8001", model: "meta-llama/Llama-3.3-70B-Instruct-engine",
-				outBase: 260, inBase: 1100, burstEvery: 19},
-			{label: "mlx-studio", kind: core.KindMLX, addr: "http://127.0.0.1:1234", model: "mlx-community/Qwen2.5-Coder-14B-4bit",
-				outBase: 46, inBase: 180, burstEvery: 23},
-		},
-		histOut: map[string][]float64{},
-		histIn:  map[string][]float64{},
-		ts:      map[string][]time.Time{},
-		kv:      make([]float64, 5),
+		backends: backends,
+		histOut:  map[string][]float64{},
+		histIn:   map[string][]float64{},
+		ts:       map[string][]time.Time{},
+		// One KV slot per backend, indexed by backend position in frame.
+		kv:      make([]float64, len(backends)),
 		memPct:  52,
 		swapPct: 14,
 	}

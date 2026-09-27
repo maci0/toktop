@@ -269,7 +269,6 @@ func LoadDefinitions(path string) error {
 			return fmt.Errorf("%w: %s: %w: %q and %q both reduce to %q",
 				ErrInvalidDefinitions, path, ErrCollidingDefinitions, prev, name, canonical)
 		}
-		seen[canonical] = name
 		spec := Spec{
 			Roots:      slices.Clone(def.Usage.Roots),
 			Suffix:     def.Usage.Suffix,
@@ -278,8 +277,12 @@ func LoadDefinitions(path string) error {
 			HeaderCwd:  def.Usage.HeaderCwd,
 		}
 		if len(specRoots(spec)) == 0 {
+			// A spec with no root registers nothing, so it cannot hold a
+			// canonical name: recording it in seen would let a definition the
+			// registry never sees veto the one that does.
 			continue
 		}
+		seen[canonical] = name
 		pending = append(pending, pendingSpec{name: canonical, spec: spec})
 	}
 	defsMu.Lock()

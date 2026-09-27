@@ -88,8 +88,15 @@ func joinMissing(root string, missing []string) string {
 	return filepath.Join(parts...)
 }
 
+// lastTwoComponents keeps the last two path components. A trailing separator
+// is not a component: counting it would spend one of the two on the cut and
+// leave "log/" where "log" belongs. A path that is nothing but separators is
+// the root, which is kept whole.
 func lastTwoComponents(dir string) string {
-	dir = filepath.ToSlash(dir)
+	dir = strings.TrimRight(filepath.ToSlash(dir), `/\`)
+	if dir == "" {
+		return "/"
+	}
 	cut := 0
 	for i := len(dir) - 1; i >= 0; i-- {
 		if dir[i] == '/' || dir[i] == '\\' {

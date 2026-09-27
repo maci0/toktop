@@ -59,10 +59,14 @@ func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 // pruneRootListsLocked drops listings older than maxAge. A clanker (or a
 // {dir} spec) keys this map on the project path; without a bound, every tree
 // an agent ever visited during a long --agents run stays pinned after the
-// process is gone. Caller holds rootListMu.
+// process is gone. A key with a walk in flight is never pruned: the claim
+// outlives maxAge whenever the walk does (a store with tens of thousands of
+// files), and dropping it would let a second caller claim the same root, walk
+// it, and let the slower walk overwrite the newer listing. Caller holds
+// rootListMu.
 func pruneRootListsLocked(now time.Time, maxAge time.Duration) {
 	for k, c := range rootLists {
-		if now.Sub(c.at) >= maxAge {
+		if c.walk == nil && now.Sub(c.at) >= maxAge {
 			delete(rootLists, k)
 		}
 	}
@@ -124,9 +128,10 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			}
 		}
 		// This call owns the walk for key. The placeholder carries the current
-		// instant so the prune pass leaves it alone, and no files so a reader
-		// that arrives now takes the wait branch above rather than reading an
-		// absent result as an empty store.
+		// instant and the in-flight channel, so the prune pass leaves it alone
+		// however long the walk runs, and no files so a reader that arrives now
+		// takes the wait branch above rather than reading an absent result as an
+		// empty store.
 		done := make(chan struct{})
 		rootLists[key] = rootListing{at: now, walk: done}
 		rootListMu.Unlock()
