@@ -644,20 +644,39 @@ function serverTiming(started) {
   return `edge;dur=${Math.max(0, Date.now() - started)}`;
 }
 
+// How many lines one isolate writes for one event before it stops writing
+// them. The refusals a client can repeat at will (a wrong method, an
+// Accept-Encoding it refuses) are one request away from a log stream nobody
+// sent, and a line per request buries the asset-missing and unhandled lines an
+// operator reads. Honest traffic never reaches the cap: a 405 or a 406 next to
+// served traffic is one line, and one line still says it.
+const REFUSAL_LOG_CAP = 20;
+
+// Lines written per event in this isolate. Keyed by event name, of which there
+// is a fixed handful, so the map does not grow with traffic.
+const loggedPerEvent = new Map();
+
 // One JSON object per line, so Workers Logs can filter on a field rather than
 // parse prose, and the edge's cf-ray rides along so a failure a visitor
 // reports pivots from the line to that edge request. Only failures log: a
 // served page, its 304s and its images are the steady state, and a line per
 // visit would bury the few that name a broken deploy.
+//
+// Past the cap the line is written once more, without the request fields, and
+// it says the rest are dropped: a total nobody will read is not reported, and
+// a count that stopped counting would be worse than none.
 function logFailure(request, event, fields) {
+  const seen = (loggedPerEvent.get(event) ?? 0) + 1;
+  loggedPerEvent.set(event, seen);
+  if (seen > REFUSAL_LOG_CAP + 1) {
+    return;
+  }
+  const line =
+    seen > REFUSAL_LOG_CAP
+      ? { event, dropped_after: REFUSAL_LOG_CAP }
+      : { event, ray: request.headers.get("cf-ray") ?? "", ...fields };
   // biome-ignore lint/suspicious/noConsole: Workers Logs is the only place a failure reaches an operator.
-  console.error(
-    JSON.stringify({
-      event,
-      ray: request.headers.get("cf-ray") ?? "",
-      ...fields,
-    }),
-  );
+  console.error(JSON.stringify(line));
 }
 
 // The reason line for a failure the asset store reported. The store's own

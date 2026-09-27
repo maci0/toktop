@@ -1221,3 +1221,49 @@ test("a rejected method on either surface logs the request behind it", async () 
     logs.restore();
   }
 });
+
+// The worker's per-isolate line cap, restated here so the test reads as the
+// contract rather than a magic number: REFUSAL_LOG_CAP lines carry the
+// request, the next one announces the drop, and everything after that is
+// silent.
+const REFUSAL_LOG_CAP = 20;
+const REFUSALS = 40;
+
+test("a repeated refusal stops writing lines and says so once", async () => {
+  // A fresh isolate so the per-isolate cap starts at zero: the counters live
+  // in module state, and the tests above have already spent some of it.
+  const { default: cappedWorker } = await import("./worker.js?refusal-cap");
+  const env = staticAssets();
+  const logs = captureLogs();
+  try {
+    for (let i = 0; i < REFUSALS + 2; i += 1) {
+      const res = await cappedWorker.fetch(
+        new Request(`${ORIGIN}/`, { method: "POST", headers: { "cf-ray": "cap-TOK" } }),
+        env,
+      );
+      // The answer does not change: the cap is on the log line, not on the
+      // refusal. A client repeating it still gets its 405 every time.
+      expect(res.status).toBe(405);
+    }
+    const lines = logs.parse();
+    expect(lines).toHaveLength(REFUSAL_LOG_CAP + 1);
+    // The first REFUSAL_LOG_CAP lines carry the request, as before.
+    expect(lines[0]).toEqual({
+      event: "method-not-allowed",
+      ray: "cap-TOK",
+      method: "POST",
+      path: "/",
+      status: 405,
+      duration_ms: expect.any(Number),
+    });
+    expect(lines[REFUSAL_LOG_CAP - 1].ray).toBe("cap-TOK");
+    // The line past the cap says the rest are dropped and names no request,
+    // so a reader cannot mistake it for a failure of its own.
+    expect(lines[REFUSAL_LOG_CAP]).toEqual({
+      event: "method-not-allowed",
+      dropped_after: REFUSAL_LOG_CAP,
+    });
+  } finally {
+    logs.restore();
+  }
+});
