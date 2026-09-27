@@ -672,6 +672,67 @@ func TestClientRunTimesOutCarriesStderr(t *testing.T) {
 	}
 }
 
+// A stalled command must cost only that command. The connection also carries
+// the port forwards for every remote engine, so a vitals poll that overran its
+// deadline and took the conn down with it would turn one slow script into a
+// connection-refused on every engine the dashboard is showing. The next Run
+// must still work.
+func TestStalledCommandKeepsTheConnection(t *testing.T) {
+	withKnownHosts(t)
+	old := runTimeout
+	runTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { runTimeout = old })
+
+	srv := newTestSSHServer(t, "", 0)
+	defer srv.Close()
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+
+	if _, err := cli.Run(t.Context(), "sleep 5"); err == nil {
+		t.Fatal("the stalled command should have hit runTimeout")
+	}
+	if _, err := cli.Run(t.Context(), "echo alive"); err != nil {
+		t.Fatalf("a stalled command took the connection down with it: %v", err)
+	}
+}
+
+// A peer that never answers a channel open is not slow, it is wedged, and the
+// open deadline is the only thing that will release the parked NewSession. The
+// conn is closed there so the next poll starts on a fresh one instead of
+// stacking unanswered opens against the server's MaxSessions.
+func TestUnansweredChannelOpenClosesTheConnection(t *testing.T) {
+	withKnownHosts(t)
+	old := runTimeout
+	runTimeout = 10 * time.Second
+	t.Cleanup(func() { runTimeout = old })
+	oldOpen := sessionOpenTimeout
+	sessionOpenTimeout = 200 * time.Millisecond
+	t.Cleanup(func() { sessionOpenTimeout = oldOpen })
+
+	srv := newSilentSSHServer(t)
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+
+	start := time.Now()
+	if _, err := cli.Run(t.Context(), "true"); err == nil {
+		t.Fatal("an unanswered channel open should fail the run")
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Fatalf("the unanswered open was not bounded by sessionOpenTimeout: %s", elapsed)
+	}
+	select {
+	case <-cli.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("a wedged peer left the connection up after an unanswered channel open")
+	}
+}
+
 func TestClientPasswordAuth(t *testing.T) {
 	withKnownHosts(t)
 	srv := newTestSSHServer(t, "secret", 0) // publickey rejected

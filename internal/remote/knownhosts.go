@@ -39,11 +39,25 @@ func defaultKnownHostsPath() string {
 	return filepath.Join(dir, "toktop", "known_hosts")
 }
 
-// knownHostsMu serializes TOFU reads and writes inside this process. Handshake
-// callbacks from one connection are sequential; the mutex covers concurrent
-// connections and the file itself. It says nothing about other processes,
-// which is what lockStore is for.
-var knownHostsMu sync.Mutex
+// storeMu serializes TOFU reads and writes inside this process, per store
+// path. Handshake callbacks from one connection are sequential; the mutex
+// covers concurrent connections and the file itself. It says nothing about
+// other processes, which is what lockStore is for.
+//
+// The mutex is keyed by path so two stores cannot block each other, and every
+// holder takes it *inside* lockStore, never around it: lockStore sleeps for up
+// to storeLockWait waiting on a peer process, and a single global mutex held
+// across that sleep stalled every concurrent handshake in the process, not just
+// the one for the contended host.
+var storeMu sync.Map // path -> *sync.Mutex
+
+func storeMutex(path string) *sync.Mutex {
+	if m, ok := storeMu.Load(path); ok {
+		return m.(*sync.Mutex)
+	}
+	m, _ := storeMu.LoadOrStore(path, new(sync.Mutex))
+	return m.(*sync.Mutex)
+}
 
 // The mutex only serializes this process. Two toktop processes (a dashboard
 // and `toktop update`, or two dashboards) each snapshot the store, add a
@@ -120,9 +134,15 @@ func tofu() (ssh.HostKeyCallback, error) {
 	}
 	// Fail at Connect, not mid-handshake, if the store is unreadable.
 	// A missing file is fine; the callback creates it on first contact.
-	knownHostsMu.Lock()
+	// A read-only probe takes the same per-path mutex the writer holds, so
+	// it never observes this process half way through its own rewrite. It
+	// waits for a rewrite in progress (a read and a rename) but never for
+	// another process's lock: the store is replaced by rename, so a reader
+	// sees either the old or the new file, never a partial one.
+	mu := storeMutex(path)
+	mu.Lock()
 	_, err := readKnownHosts(path)
-	knownHostsMu.Unlock()
+	mu.Unlock()
 	if err != nil {
 		return nil, err
 	}
@@ -132,13 +152,15 @@ func tofu() (ssh.HostKeyCallback, error) {
 		}
 		line := hostname + " " + string(ssh.MarshalAuthorizedKey(key))
 		line = strings.TrimSpace(line)
-		knownHostsMu.Lock()
-		defer knownHostsMu.Unlock()
 		// The read and the write are one critical section, across processes
 		// too: a store another toktop is rewriting under the read would make
 		// this write resurrect the snapshot and drop whatever that process
-		// had just pinned.
+		// had just pinned. lockStore serializes on the lock file; the mutex
+		// is taken inside it so this process's wait for a peer never blocks
+		// the file-lock wait of another host.
 		return lockStore(path, func() error {
+			mu.Lock()
+			defer mu.Unlock()
 			store, err := readKnownHosts(path)
 			if err != nil {
 				return err
@@ -273,7 +295,7 @@ const knownHostsTempPrefix = ".known_hosts-"
 const staleTempAge = 24 * time.Hour
 
 // sweepStaleTempFiles removes staging files an earlier write did not get to
-// rename away. Callers hold knownHostsMu, so within one process only the
+// rename away. Callers hold the store's mutex, so within one process only the
 // crashed runs of earlier sessions are ever this old. Anything it cannot
 // remove is left alone.
 func sweepStaleTempFiles(dir string) {
@@ -304,7 +326,7 @@ func sweepStaleTempFiles(dir string) {
 // that window into a total loss of pins, which is a silent re-TOFU for every
 // host the operator had ever connected to.
 //
-// Callers serialize writers (knownHostsMu).
+// Callers serialize writers (the store's mutex, taken inside lockStore).
 func replaceFile(tmpName, path string) error {
 	err := os.Rename(tmpName, path)
 	if err == nil {

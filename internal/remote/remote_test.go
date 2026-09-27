@@ -8,12 +8,14 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -385,6 +387,130 @@ func TestPatternMatch(t *testing.T) {
 		if got := patternMatch(c.pat, c.s); got != c.want {
 			t.Errorf("patternMatch(%q,%q) = %v", c.pat, c.s, got)
 		}
+	}
+}
+
+// Two handshake callbacks racing on one store must both land: the read and
+// the write are a single critical section, so a writer that read a snapshot
+// before another writer's pin was in it would silently drop that pin.
+func TestTOFUConcurrentHandshakesDoNotLosePins(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	old := knownHostsPath
+	defer func() { knownHostsPath = old }()
+	knownHostsPath = func() string { return path }
+
+	cb, err := tofu()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 8
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Go(func() {
+			errs[i] = cb(fmt.Sprintf("host-%d:22", i), nil, fakePublicKey(fmt.Sprintf("k%d", i)))
+		})
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent handshake %d rejected: %v", i, err)
+		}
+	}
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(store) != n {
+		t.Fatalf("store holds %d pins, want %d: a concurrent writer was lost", len(store), n)
+	}
+}
+
+// A store another process is holding makes its own writer wait inside
+// lockStore, for up to storeLockWait. That wait must not be paid by writers to
+// a *different* store: the in-process mutex is taken inside the file lock
+// rather than around it, so a mutex held across the cross-process sleep would
+// queue every concurrent handshake in the process behind the one host whose
+// peer is slow. The bound here is well under storeLockWait, so passing means
+// the two stores never met.
+func TestTOFUStoresDoNotBlockEachOther(t *testing.T) {
+	dir := t.TempDir()
+	blocked := filepath.Join(dir, "blocked")
+	free := filepath.Join(dir, "free")
+	old := knownHostsPath
+	defer func() { knownHostsPath = old }()
+
+	// A peer process holds the first store's lock file with a current
+	// timestamp: not stale, so lockStore waits on it rather than breaking it.
+	if err := os.WriteFile(blocked+storeLockSuffix, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath = func() string { return blocked }
+	blockedCB, err := tofu()
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath = func() string { return free }
+	freeCB, err := tofu()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stalled := make(chan struct{})
+	go func() {
+		defer close(stalled)
+		// Fails with the give-up error once the peer lock ages out of
+		// storeLockStale, or succeeds early if this test releases it first.
+		// Either way the wait is the thing under test.
+		_ = blockedCB("blocked:22", nil, fakePublicKey("blocked"))
+	}()
+	// Let the writer reach the peer-lock wait before the second store's
+	// writer runs, or the test proves nothing. Head start is short and the
+	// budget below is far under storeLockWait, so the gap between the two
+	// does not have to be tuned to be decisive.
+	time.Sleep(200 * time.Millisecond)
+
+	const freeBudget = 2 * time.Second
+	done := make(chan error, 1)
+	go func() { done <- freeCB("free:22", nil, fakePublicKey("free")) }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("second store rejected: %v", err)
+		}
+	case <-time.After(freeBudget):
+		t.Fatalf("writing one store blocked a write to another for over %s", freeBudget)
+	}
+	// Release the peer so the parked writer finishes instead of running out
+	// the full storeLockWait after the test has already decided.
+	_ = os.Remove(blocked + storeLockSuffix)
+	<-stalled
+	if store, err := readKnownHosts(free); err != nil || store["free:22"] == "" {
+		t.Fatalf("the second store's pin did not land: %v", err)
+	}
+}
+
+// storeMutex is keyed by path, so one store's critical section never blocks
+// another's. A single process-wide mutex would make every store wait behind
+// whichever one happened to be writing.
+func TestStoreMutexIsPerPath(t *testing.T) {
+	dir := t.TempDir()
+	a, b := storeMutex(filepath.Join(dir, "a")), storeMutex(filepath.Join(dir, "b"))
+	if a == b {
+		t.Fatal("two store paths share one mutex")
+	}
+	if storeMutex(filepath.Join(dir, "a")) != a {
+		t.Fatal("the same store path returned a different mutex")
+	}
+
+	a.Lock()
+	defer a.Unlock()
+	done := make(chan struct{})
+	go func() { b.Lock(); b.Unlock(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("holding one store's mutex blocked another store's")
 	}
 }
 

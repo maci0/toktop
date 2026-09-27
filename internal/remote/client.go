@@ -27,6 +27,14 @@ import (
 // tests can shrink it, like bannerTimeout and the keepalive pacing below.
 var runTimeout = 15 * time.Second
 
+// sessionOpenTimeout bounds the channel-open round trip on its own, well
+// under runTimeout. A channel open is a single request that a healthy peer
+// answers in milliseconds; runTimeout is the budget for a whole command and
+// the runtimes of the script inside it. Borrowing runTimeout here meant one
+// slow channel open could hold the open for a full command budget before the
+// failure was noticed.
+var sessionOpenTimeout = 3 * time.Second
+
 // Client is one long-lived ssh connection carrying everything toktop needs
 // from a remote host: command sessions for discovery and vitals, plus direct
 // TCP channels relayed onto local listeners for engine traffic. No ssh
@@ -406,6 +414,20 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 	}
 }
 
+// openSession opens a command channel under its own deadline. The two ways it
+// can fail need different teardown:
+//
+//   - The caller's context is done. That is shutdown, and Close owns the
+//     connection. Returning without waiting leaves the parked NewSession to be
+//     released when Close closes the conn, which is the only thing that can
+//     release it anyway.
+//   - sessionOpenTimeout expired with the caller still live. A peer that does
+//     not answer a channel open at all is not slow, it is wedged (sshd out of
+//     MaxSessions, a child that will not reap). Nothing recovers that, and the
+//     parked NewSession holds a server-side session until the conn dies, so
+//     the conn is closed here. That is deliberately not the per-command
+//     runTimeout: a vitals poll that stalls must not take every forwarded
+//     engine port down with it.
 func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -419,18 +441,25 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		defer close(done)
 		sess, err = c.conn.NewSession()
 	}()
+	timer := time.NewTimer(sessionOpenTimeout)
+	defer timer.Stop()
 	select {
 	case <-done:
-		if ctx.Err() != nil {
+		if err := ctx.Err(); err != nil {
 			if sess != nil {
 				sess.Close()
 			}
-			return nil, ctx.Err()
+			return nil, err
 		}
 		return sess, err
-	case <-ctx.Done():
+	case <-timer.C:
+		if sess != nil {
+			sess.Close()
+		}
 		c.conn.Close()
-		<-done
+		<-done // conn.Close is what releases the parked open
+		return nil, fmt.Errorf("ssh channel open unanswered after %s: %w", sessionOpenTimeout, context.DeadlineExceeded)
+	case <-ctx.Done():
 		if sess != nil {
 			sess.Close()
 		}
