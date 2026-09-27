@@ -161,7 +161,9 @@ func main() {
 	// An explicit --bearer, even empty, wins so "not set" and "set to empty"
 	// stay distinct; otherwise OMNIROUTE_API_KEY then TOKTOP_BEARER.
 	if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
-		bearer.Set(tok)
+		if err := bearer.Set(tok); err != nil {
+			fmt.Fprintf(os.Stderr, "toktop: %v; the engine will be queried unauthenticated\n", err)
+		}
 		warnInsecureAdd(f.adds)
 	}
 	warnBearerFlag(explicit["bearer"], f.bearer)
@@ -196,7 +198,9 @@ func main() {
 			// The token rides only to endpoints the operator named: discovery
 			// probes every well-known port on spec, and whatever answers there
 			// must not be able to harvest the credential.
-			bearer.Allow(raw)
+			if err := bearer.Allow(raw); err != nil {
+				fmt.Fprintf(os.Stderr, "toktop: %v; requests there go unauthenticated\n", err)
+			}
 			if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p.Poll != nil {
 				providers = append(providers, p)
 			} else {
@@ -268,6 +272,15 @@ func main() {
 		if demoSrc != nil {
 			aw.SetNow(demoSrc.Now)
 		}
+		// Run has no error return, so an engine address that will not parse
+		// is reported here. Left unreported it silently double counts every
+		// agent's tokens against the engine it is already generating through.
+		aw.SetOnError(func(err error) {
+			select {
+			case feedErr <- "agent watch: " + err.Error():
+			default:
+			}
+		})
 		go aw.Run(ctx)
 	}
 

@@ -507,14 +507,17 @@ func jsonNotStream(ct string) bool {
 func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.Duration, err error) {
 	b, err := io.ReadAll(io.LimitReader(body, probeLineMax+1))
 	if err != nil {
-		return 0, 0, err
+		return 0, 0, fmt.Errorf("read response: %w", err)
 	}
 	if len(b) > probeLineMax {
 		return 0, 0, fmt.Errorf("response too large")
 	}
 	var chunk openaiChunk
-	if json.Unmarshal(b, &chunk) != nil {
-		return 0, 0, fmt.Errorf("empty stream")
+	// A body that is not the expected JSON is a different failure from a
+	// well-formed response with no content. Reporting both as "empty stream"
+	// sends the operator to inspect a model that never answered.
+	if err := json.Unmarshal(b, &chunk); err != nil {
+		return 0, 0, fmt.Errorf("decode response: %w", err)
 	}
 	if msg := sseErrorMessage(chunk.Error); msg != "" {
 		return 0, 0, fmt.Errorf("engine error: %s", msg)

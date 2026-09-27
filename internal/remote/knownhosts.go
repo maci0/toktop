@@ -312,9 +312,14 @@ func replaceFile(tmpName, path string) error {
 		return nil
 	}
 	displaced := path + ".displaced"
-	_ = os.Remove(displaced) // a leftover from a run that died mid-replace
+	if derr := os.Remove(displaced); derr != nil && !os.IsNotExist(derr) {
+		// Returning err here would blame the destination rename for a
+		// leftover this cleanup could not delete, which is a different
+		// problem with a different fix.
+		return fmt.Errorf("cannot clear leftover %s: %w", core.RedactHome(displaced), derr)
+	}
 	if derr := os.Rename(path, displaced); derr != nil && !os.IsNotExist(derr) {
-		return err
+		return fmt.Errorf("cannot move %s aside: %w", core.RedactHome(path), derr)
 	}
 	if rerr := os.Rename(tmpName, path); rerr != nil {
 		if berr := os.Rename(displaced, path); berr != nil {

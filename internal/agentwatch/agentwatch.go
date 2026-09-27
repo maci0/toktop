@@ -19,6 +19,8 @@ package agentwatch
 import (
 	"cmp"
 	"context"
+	"errors"
+	"fmt"
 	"maps"
 	"net"
 	"net/netip"
@@ -60,9 +62,15 @@ type Watcher struct {
 	// listAgents lists running agent processes. Nil means agentusage.Discover.
 	listAgents func() []agentusage.Process
 	now        func() time.Time // event stamps; nil means time.Now
+	// onError surfaces a condition the operator must see that Run cannot
+	// return. Nil disables reporting.
+	onError func(error)
 
 	mu      sync.Mutex
 	tracked map[int]*tracked
+	// engineErr is the last parse failure engineEndpoints reported, so a
+	// permanent misconfiguration is surfaced once rather than every tick.
+	engineErr string
 }
 
 // tracked is one agent process being followed.
@@ -103,6 +111,28 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 
 // instant reads the injected clock, which the record path stamps from so a
 // transcript event lands on the same timeline as the sample that carried it.
+// SetOnError installs the sink for conditions Run cannot return. Pass nil to
+// disable reporting. Call before Run.
+func (w *Watcher) SetOnError(fn func(error)) { w.onError = fn }
+
+// engineError reports err, and repeats it only when it differs from the last
+// one reported. A misconfigured engine address fails on every discovery tick,
+// so an undeduplicated report would be a permanent error banner over a
+// condition the operator has already seen.
+func (w *Watcher) engineError(err error) {
+	if err == nil {
+		return
+	}
+	w.mu.Lock()
+	repeat := w.engineErr == err.Error()
+	w.engineErr = err.Error()
+	w.mu.Unlock()
+	if repeat || w.onError == nil {
+		return
+	}
+	w.onError(err)
+}
+
 func (w *Watcher) instant() time.Time { return w.now() }
 
 // Run follows agents until the context is canceled. Call LoadDefinitions
@@ -250,7 +280,8 @@ func (w *Watcher) discover(ctx context.Context) {
 	// to its engine after it starts, and may switch engines mid-session.
 	// One table read covers every tracked pid; matching each agent against
 	// each engine separately would reread /proc/net/tcp per pair.
-	endpoints, labels := w.engineEndpoints()
+	endpoints, labels, err := w.engineEndpoints()
+	w.engineError(err)
 	matched := agentusage.MatchingEndpoints(pids, endpoints)
 	w.mu.Lock()
 	for pid, t := range w.tracked {
@@ -290,49 +321,73 @@ func (w *Watcher) stopOne(t *tracked) {
 }
 
 // engineEndpoints parses the monitored engines' advertised URLs into addresses
-// that can be compared against a process's open connections.
-func (w *Watcher) engineEndpoints() ([]netip.AddrPort, []string) {
+// that can be compared against a process's open connections. A malformed URL
+// is returned as an error: dropping it silently would leave the agent's
+// tokens counted both by the engine and by its transcript, a double count
+// with no symptom the operator could trace back to a bad address.
+func (w *Watcher) engineEndpoints() ([]netip.AddrPort, []string, error) {
 	if w.engines == nil {
-		return nil, nil
+		return nil, nil, nil
 	}
 	raw := w.engines()
 	eps := make([]netip.AddrPort, 0, len(raw))
 	labels := make([]string, 0, len(raw))
+	var bad []string
 	for _, addr := range raw {
-		ap, label, ok := parseEngineAddr(addr)
-		if !ok {
+		ap, label, err := parseEngineAddr(addr)
+		if err != nil {
+			bad = append(bad, err.Error())
+			continue
+		}
+		if ap == (netip.AddrPort{}) {
 			continue
 		}
 		eps = append(eps, ap)
 		labels = append(labels, label)
 	}
-	return eps, labels
+	if len(bad) > 0 {
+		return eps, labels, errors.New(strings.Join(bad, "; "))
+	}
+	return eps, labels, nil
 }
 
 // parseEngineAddr turns "http://127.0.0.1:11434" into an endpoint and a label.
-// A hostname that is not an address cannot be compared against a connection
-// table, so it is skipped rather than resolved: resolving would make a monitor
-// do DNS on a timer. URLs that omit the port (http://127.0.0.1, https://…)
-// use the scheme default: without it ParseAddrPort fails and an agent talking
-// to that engine would not be labelled via, so its tokens would be counted
-// twice.
-func parseEngineAddr(addr string) (netip.AddrPort, string, bool) {
+// A bare "127.0.0.1:8080" is accepted as well. A hostname that is not an
+// address is skipped, reported as the zero AddrPort and a nil error: it
+// cannot be compared against a connection table, and resolving it would make
+// a monitor do DNS on a timer. URLs that omit the port (http://127.0.0.1,
+// https://…) use the scheme default: without it ParseAddrPort fails and an
+// agent talking to that engine would not be labelled via, so its tokens would
+// be counted twice. A string carrying a scheme that will not parse is an
+// error, not a hostname: the operator wrote something malformed and needs to
+// be told which.
+func parseEngineAddr(addr string) (netip.AddrPort, string, error) {
 	host := addr
-	if u, err := url.Parse(addr); err == nil && u.Host != "" {
-		host = u.Host
-		if u.Port() == "" {
-			port := "80"
-			if u.Scheme == "https" {
-				port = "443"
+	// Only a scheme-bearing string is a URL. url.Parse rejects a bare
+	// "127.0.0.1:8080" (a colon in the first path segment), and that spelling
+	// is a documented input, so the parse is gated on the marker rather than
+	// on whether it succeeds.
+	if strings.Contains(addr, "://") {
+		u, err := url.Parse(addr)
+		if err != nil {
+			return netip.AddrPort{}, "", fmt.Errorf("engine address %q is not a URL: %w", addr, err)
+		}
+		if u.Host != "" {
+			host = u.Host
+			if u.Port() == "" {
+				port := "80"
+				if u.Scheme == "https" {
+					port = "443"
+				}
+				host = net.JoinHostPort(u.Hostname(), port)
 			}
-			host = net.JoinHostPort(u.Hostname(), port)
 		}
 	}
 	ap, err := netip.ParseAddrPort(host)
 	if err != nil {
-		return netip.AddrPort{}, "", false
+		return netip.AddrPort{}, "", nil
 	}
-	return ap, host, true
+	return ap, host, nil
 }
 
 // trackedList is the followed agents in PID order. Report and shutdown

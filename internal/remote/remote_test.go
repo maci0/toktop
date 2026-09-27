@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -988,5 +990,39 @@ func TestPasswordSourceEnvTrailingNewline(t *testing.T) {
 		if err != nil || pw != tt.want {
 			t.Errorf("get(%q) = %q, %v; want %q", tt.in, pw, err, tt.want)
 		}
+	}
+}
+
+// An unreadable ~/.ssh/config is not an absent one. Degrading to defaults
+// dials the wrong port with no key, and the operator sees a bare
+// authentication rejection with nothing pointing at the config file.
+func TestParseTargetFailsLoudOnUnreadableSSHConfig(t *testing.T) {
+	oldPath, oldRead := sshConfigPath, configReader
+	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
+	sshConfigPath = func() string { return "/home/operator/.ssh/config" }
+	configReader = func(path string) ([]byte, error) {
+		return nil, fs.ErrPermission
+	}
+
+	if _, err := ParseTarget("ssh://gpu"); err == nil {
+		t.Fatal("ParseTarget returned nil error for an unreadable ssh config, want the read failure")
+	} else if !errors.Is(err, fs.ErrPermission) {
+		t.Errorf("ParseTarget error = %v, want one wrapping fs.ErrPermission", err)
+	}
+}
+
+// An absent config is not a failure: toktop must still connect.
+func TestParseTargetToleratesAbsentSSHConfig(t *testing.T) {
+	oldPath, oldRead := sshConfigPath, configReader
+	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
+	sshConfigPath = func() string { return "/home/operator/.ssh/config" }
+	configReader = func(path string) ([]byte, error) { return nil, os.ErrNotExist }
+
+	tgt, err := ParseTarget("ssh://gpu")
+	if err != nil {
+		t.Fatalf("ParseTarget: %v", err)
+	}
+	if tgt.Port != 22 || tgt.Host != "gpu" {
+		t.Errorf("resolved = %+v, want the defaults host=gpu port=22", tgt)
 	}
 }

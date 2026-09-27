@@ -40,12 +40,37 @@ func TestSetAndApply(t *testing.T) {
 
 func TestSetRejectsCRLF(t *testing.T) {
 	t.Cleanup(func() { Set(""); resetAllowed() })
-	Set("sk-test\r\nInjected-Header: value")
-	Allow("http://x")
+	err := Set("sk-test\r\nInjected-Header: value")
+	// The refusal must be visible: dropped silently, the operator watches
+	// every engine request come back 401 with no idea why.
+	if err == nil {
+		t.Error("Set with CRLF returned nil, want a refusal the caller can report")
+	}
+	if err := Allow("http://x"); err != nil {
+		t.Fatalf("Allow: %v", err)
+	}
 	req, _ := http.NewRequest("GET", "http://x/metrics", nil)
 	Apply(req)
 	if req.Header.Get("Authorization") != "" {
 		t.Errorf("Authorization must be unset for token with CRLF, got %q", req.Header.Get("Authorization"))
+	}
+}
+
+// A base that yields no http origin is an authorization the operator gave
+// that never took effect. Reporting it distinguishes "the token was refused"
+// from "the key is wrong".
+func TestAllowRejectsBaseWithNoOrigin(t *testing.T) {
+	t.Cleanup(func() { Set(""); resetAllowed() })
+	Set("sk-test")
+	for _, base := range []string{"localhost:8000", "//host:8000", "", "://"} {
+		if err := Allow(base); err == nil {
+			t.Errorf("Allow(%q) returned nil, want a refusal the caller can report", base)
+		}
+	}
+	req, _ := http.NewRequest("GET", "http://x/metrics", nil)
+	Apply(req)
+	if got := req.Header.Get("Authorization"); got != "" {
+		t.Errorf("Authorization = %q after a refused Allow, want none", got)
 	}
 }
 

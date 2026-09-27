@@ -358,9 +358,14 @@ func install(tmpName, self string) error {
 		return os.Rename(tmpName, self)
 	}
 	displaced := self + ".old"
-	_ = os.Remove(displaced) // left by a previous update, now unlocked
+	// The previous update's .old is still locked during this one, so a failed
+	// removal is expected to be transient. Silently proceeding turns it into
+	// a rename error naming the running binary, not the undeletable .old.
+	if derr := os.Remove(displaced); derr != nil && !os.IsNotExist(derr) {
+		return fmt.Errorf("cannot remove previous update %s: %w", displaced, derr)
+	}
 	if err := os.Rename(self, displaced); err != nil {
-		return err
+		return fmt.Errorf("cannot displace %s: %w", self, err)
 	}
 	if err := os.Rename(tmpName, self); err != nil {
 		// Put the running binary back rather than leaving nothing installed.

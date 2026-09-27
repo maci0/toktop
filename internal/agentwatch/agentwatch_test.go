@@ -754,14 +754,21 @@ func TestParseEngineAddrDefaultPorts(t *testing.T) {
 		{in: "http://[::1]", want: must("[::1]:80"), label: "[::1]:80", ok: true},
 		{in: "127.0.0.1:8080", want: must("127.0.0.1:8080"), label: "127.0.0.1:8080", ok: true},
 		{in: "http://localhost:11434"}, // hostname: skip rather than DNS
+		{in: "http://[::1"},            // malformed: reported, not skipped
 	}
 	for _, tt := range tests {
-		ap, label, ok := parseEngineAddr(tt.in)
-		if ok != tt.ok {
-			t.Errorf("parseEngineAddr(%q) ok=%v, want %v", tt.in, ok, tt.ok)
+		ap, label, err := parseEngineAddr(tt.in)
+		if tt.in == "http://[::1" {
+			if err == nil {
+				t.Errorf("parseEngineAddr(%q) err=nil, want a parse error", tt.in)
+			}
 			continue
 		}
-		if !tt.ok {
+		if err != nil {
+			t.Errorf("parseEngineAddr(%q) err=%v, want nil", tt.in, err)
+			continue
+		}
+		if ap == (netip.AddrPort{}) {
 			continue
 		}
 		if ap != tt.want || label != tt.label {

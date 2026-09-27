@@ -34,7 +34,14 @@ func ParseTarget(raw string) (Target, error) {
 		return t, err
 	}
 	if t.KeyFile == "" && t.Host != "" {
-		if cfg := lookupSSHConfig(t.Host); cfg != nil {
+		cfg, cerr := lookupSSHConfig(t.Host)
+		// An unreadable config is not an absent one: falling through to
+		// defaults connects to the wrong port with the wrong key and the
+		// failure surfaces later as a bare authentication rejection.
+		if cerr != nil {
+			return Target{}, cerr
+		}
+		if cfg != nil {
 			if t.User == "" {
 				t.User = cfg.User
 			}
@@ -122,17 +129,25 @@ var sshConfigPath = func() string {
 var configReader = func(path string) ([]byte, error) { return os.ReadFile(path) }
 
 // lookupSSHConfig finds the first Host block matching name and returns the
-// values it defines. Like OpenSSH, the first obtained value wins.
-func lookupSSHConfig(name string) *sshConfigEntry {
+// values it defines. Like OpenSSH, the first obtained value wins. A config
+// that is absent yields (nil, nil); one that exists but cannot be read is an
+// error, so the caller never mistakes a permission failure for no config.
+func lookupSSHConfig(name string) (*sshConfigEntry, error) {
 	path := sshConfigPath()
 	if path == "" {
-		return nil
+		return nil, nil
 	}
 	b, err := configReader(path)
-	if err != nil || len(b) == 0 {
-		return nil
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("cannot read ssh config %s: %w", core.RedactHome(path), err)
 	}
-	return parseSSHConfig(b, name)
+	if len(b) == 0 {
+		return nil, nil
+	}
+	return parseSSHConfig(b, name), nil
 }
 
 // parseSSHConfig scans an ssh_config byte slice for the first Host block matching
@@ -242,7 +257,13 @@ func patternMatch(pat, s string) bool {
 
 func expandTilde(p string) string {
 	if p == "~" {
-		home, _ := os.UserHomeDir()
+		// A failed home lookup leaves p unchanged, matching the ~/ branch
+		// below, rather than expanding to an empty key path that would
+		// silently drop the credential ssh config named.
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return p
+		}
 		return home
 	}
 	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {

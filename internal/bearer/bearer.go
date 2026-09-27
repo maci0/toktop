@@ -11,6 +11,7 @@ package bearer
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -28,26 +29,35 @@ var (
 
 // Set stores the token applied to allowed engine requests. Tokens containing
 // CRLF or newline characters are refused to prevent HTTP header injection.
-func Set(token string) {
+// A refusal is returned, not silently downgraded to "no token": an operator
+// who supplied a credential must not watch every request come back 401
+// without being told the credential was refused.
+func Set(token string) error {
 	token = strings.TrimSpace(token)
 	if strings.ContainsAny(token, "\r\n") {
-		token = ""
+		return errors.New("bearer token contains CR or LF, refusing to send it as a header")
 	}
 	mu.Lock()
 	tok = token
 	mu.Unlock()
+	return nil
 }
 
 // Allow admits one engine base URL as a token destination: every request
 // bound for its origin may carry the Authorization header. Meant for
 // endpoints the operator pointed at explicitly (--add); discovered or
-// forwarded candidates never qualify.
-func Allow(base string) {
-	if o := origin(base); o != "" {
-		mu.Lock()
-		allowed[o] = true
-		mu.Unlock()
+// forwarded candidates never qualify. A base that yields no http/https
+// origin is reported rather than skipped, since the operator authorized that
+// destination and would otherwise get an unauthenticated 401.
+func Allow(base string) error {
+	o := origin(base)
+	if o == "" {
+		return fmt.Errorf("cannot derive an http origin from %q for bearer token use", base)
 	}
+	mu.Lock()
+	allowed[o] = true
+	mu.Unlock()
+	return nil
 }
 
 // Apply sets the Authorization header when a token is configured and the
