@@ -126,6 +126,32 @@ func TestAppleDisplayPicksVramIndependentlyOfMapOrder(t *testing.T) {
 		t.Fatalf("compound vram key: dev = %+v ok = %v", dev, ok)
 	}
 
+	// Several compound keys and no bare one: nothing overwrites the others
+	// afterwards, so the first one the map yields would fix the total for
+	// the life of the process. Sorted key order makes it the same total on
+	// every run.
+	many := map[string]any{
+		"_name":                     "Apple M3 Max",
+		"spdisplays_vram":           "36 GB",
+		"spdisplays_vram_dynamic":   "8 GB",
+		"spdisplays_vram_shared":    "18 GB",
+		"spdisplays_iodisplay_lsd":  "1",
+		"spdisplays_display_type":   "built-in",
+		"spdisplays_main":           "YES",
+		"spdisplays_rom":            "0x0",
+		"spdisplays_pixels":         "3456x2234",
+		"spdisplays_resolution":     "3456x2234",
+		"sppci_model":               "Apple M3 Max",
+		"spdisplays_vram_dynamic_2": "1 GB",
+	}
+	want = parseSizeString("36 GB")
+	for range 200 {
+		dev, ok := appleGPUFromDisplay(many)
+		if !ok || dev.MemTotal != want {
+			t.Fatalf("dev = %+v ok = %v; MemTotal must not follow map order", dev, ok)
+		}
+	}
+
 	// An unnamed entry is not a device.
 	if _, ok := appleGPUFromDisplay(map[string]any{"vram": "8 GB"}); ok {
 		t.Fatal("anonymous display accepted")

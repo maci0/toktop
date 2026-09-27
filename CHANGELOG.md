@@ -35,6 +35,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   under `--agents`, the way a relative one already was. A missing definitions
   file is not an error to load, so the directory the operator pointed at being
   empty read as in-house agents producing no tokens.
+- `--agents` follows a transcript store once, so the first process found on it
+  tails it and the rest are tracked without a reader. When that process exited,
+  the remaining processes on the same store were never given one, so a live
+  agent that shared a session store with a process that quit reported no tokens
+  at all until it was restarted. The surviving process now takes the store over.
+- On macOS, a display that reports several `vram` fields and no bare `vram` one
+  (the `spdisplays_vram*` spellings) had its total VRAM read from whichever
+  field Go's map iteration reached first, and that number is cached for the
+  life of the process. Two runs of one build on one Mac could report different
+  VRAM for the same card. The bare key still wins outright; the remaining
+  candidates are now tried in name order.
 
 ## [0.15.0] - 2026-09-27
 

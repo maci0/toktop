@@ -5,6 +5,7 @@ package gpu
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"os/exec"
 	"slices"
 	"strconv"
@@ -101,29 +102,56 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	return devs
 }
 
-// appleGPUFromDisplay decodes one SPDisplaysDataType entry. The fields are
-// picked without depending on map order: a bare vram key wins over the
-// substring match, and the first parseable candidate fills the rest, so the
-// same Mac reports the same total on every run.
+// appleGPUFromDisplay decodes one SPDisplaysDataType entry. VRAM is resolved
+// in two passes, neither of them over an unordered range: the bare vram key
+// wins outright, and the substring candidates are tried in name order. One
+// map range makes whichever of several vram-ish keys the runtime happens to
+// visit first decide a total the identity cache then holds for the life of
+// the process, so two runs of one binary on one Mac could report different
+// VRAM for the same card.
 func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 	dev := core.GPUDevice{Vendor: "apple"}
 	if name, ok := d["_name"].(string); ok {
 		dev.Name = name
 	}
-	for k, v := range d {
-		lk := core.FoldASCII(k)
-		if lk == "vram" || (dev.MemTotal == 0 && strings.Contains(lk, "vram")) {
-			if s, ok := v.(string); ok {
-				dev.MemTotal = parseSizeString(s)
+	if s, ok := vramField(d, "vram"); ok {
+		dev.MemTotal = parseSizeString(s)
+	}
+	if dev.MemTotal == 0 {
+		for _, k := range slices.Sorted(maps.Keys(d)) {
+			lk := core.FoldASCII(k)
+			if lk == "vram" || !strings.Contains(lk, "vram") {
+				continue
 			}
-		}
-		if dev.Name == "" && k == "sppci_model" {
-			if s, ok := v.(string); ok {
-				dev.Name = s
+			if s, ok := d[k].(string); ok {
+				if total := parseSizeString(s); total > 0 {
+					dev.MemTotal = total
+					break
+				}
 			}
 		}
 	}
+	if dev.Name == "" {
+		if s, ok := d["sppci_model"].(string); ok {
+			dev.Name = s
+		}
+	}
 	return dev, dev.Name != ""
+}
+
+// vramField is the string under name, matched case-insensitively the way the
+// vram substring candidates are. system_profiler's key spelling has drifted
+// across releases, so an exact lookup alone would miss a differently-cased
+// field that the old single-pass range happened to catch.
+func vramField(d map[string]any, name string) (string, bool) {
+	for k, v := range d {
+		if core.FoldASCII(k) != name {
+			continue
+		}
+		s, ok := v.(string)
+		return s, ok
+	}
+	return "", false
 }
 
 var (

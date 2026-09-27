@@ -230,7 +230,9 @@ func (w *Watcher) discover(ctx context.Context) {
 	var startCtx []context.Context
 	claimed := w.claimedStores()
 
-	// attach gives p its own watcher. follow inserts a tracker with none.
+	// attach gives p its own watcher, or hands the one it built to the
+	// tracker already in the table when that tracker has none (the handover
+	// below). follow inserts a tracker with none.
 	//
 	// A watcher counts only what is written after it attaches, so an agent
 	// already halfway through a task contributes from here on rather than
@@ -255,20 +257,30 @@ func (w *Watcher) discover(ctx context.Context) {
 		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()
 		prev, seen := w.tracked[p.PID]
-		// A follower (watch == nil) holds the PID with no watcher of its own;
-		// taking the store over replaces it, so the handover below can make
-		// progress. A watched tracker keeps its PID: two watchers tailing the
-		// same transcripts would double-count growth.
-		if seen && prev.watch != nil {
+		switch {
+		case !seen:
+			w.tracked[p.PID] = t
+		case prev.watch == nil:
+			// Handover. A follower (watch == nil) holds the PID with no
+			// watcher of its own; taking the store over replaces it, so the
+			// handover below can make progress. The tracker in the table is
+			// the one that must start reading: dropping the watch here (as a
+			// plain "already tracked" bail would) leaves a live agent with no
+			// reader and every token it writes unreported. The fields are
+			// written under the same lock stopOne and report read them under,
+			// so the goroutine started below is the only reader of a tracker
+			// that already had none.
+			prev.proc, prev.dirNote = t.proc, t.dirNote
+			prev.watch, prev.done, prev.cancel = t.watch, t.done, t.cancel
+			t = prev
+		default:
+			// A watched tracker keeps its PID: two watchers tailing the same
+			// transcripts would double-count growth.
 			w.mu.Unlock()
 			cancel()
 			return
 		}
-		w.tracked[p.PID] = t
 		w.mu.Unlock()
-		if seen {
-			w.stopOne(prev)
-		}
 		started = append(started, t)
 		startCtx = append(startCtx, tctx)
 	}
