@@ -69,14 +69,8 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 		lg = slog.New(slog.DiscardHandler)
 	}
 	s := &Server{rec: rec, now: time.Now, ln: ln, addr: ln.Addr().String(), log: lg}
-	mux := http.NewServeMux()
-	for _, e := range ingestEndpoints {
-		mux.HandleFunc(e.primary()+" "+e.path, func(w http.ResponseWriter, r *http.Request) {
-			e.handle(s, w, r)
-		})
-	}
 	s.srv = http.Server{
-		Handler:           s.wrap(mux),
+		Handler:           s.routes(),
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       idleTimeout,
 		MaxHeaderBytes:    16 << 10, // default 1 MiB; this endpoint has no large headers
@@ -86,6 +80,20 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 		ErrorLog: slog.NewLogLogger(logcfg.RedactHandler{Handler: lg.Handler()}, slog.LevelError),
 	}
 	return s, nil
+}
+
+// routes builds the served handler: the endpoint table behind the security
+// headers, the request id and the 404/405 guards. Kept apart from newServer
+// so a test drives the same chain the listener runs, not a hand-built
+// approximation of it.
+func (s *Server) routes() http.Handler {
+	mux := http.NewServeMux()
+	for _, e := range ingestEndpoints {
+		mux.HandleFunc(e.primary()+" "+e.path, func(w http.ResponseWriter, r *http.Request) {
+			e.handle(s, w, r)
+		})
+	}
+	return s.wrap(mux)
 }
 
 type ctxRequest struct{}
