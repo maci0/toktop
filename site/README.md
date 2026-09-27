@@ -51,6 +51,28 @@ in the HTML and CSS stay in `worker.js` and are stripped before the page is
 hashed, compressed, or sent. Every response carries `Vary: Accept-Encoding`,
 so caches never hand a compressed body to a client that cannot decode it.
 
+## Logs
+
+`wrangler.jsonc` turns on Cloudflare Workers observability, so `console.error`
+lands in Workers Logs. The Worker writes one JSON object per line there, and
+nothing else: a served page, its 304s and its images are the steady state, and
+a line per visit would bury the few that name a broken deploy.
+
+| `event` | means |
+| --- | --- |
+| `unhandled` | a throw reached the top of `fetch`; the client gets a plain 500 instead of the edge's opaque 1101 page |
+| `asset-missing` | the asset store answered 404 or 410 for a capture, the client gets the same `not found` either way |
+| `asset-store-error` | the asset store answered 5xx |
+| `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 while `/health` still answers `ok` |
+| `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size |
+
+Each line carries the request's `cf-ray` (empty off Cloudflare), plus the path,
+method, status or reason as the event needs. That is the pivot from a failure
+a visitor reports to the edge request behind it: filter Workers Logs on
+`event`, then search the ray in the visitor's response headers. A `405` or a
+`406` is not logged: the client did something the route does not do, the
+answer says so, and neither names a broken deploy.
+
 ## Performance budget
 
 One request for the page, no JavaScript, no webfonts, inline CSS only. The

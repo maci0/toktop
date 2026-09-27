@@ -359,8 +359,8 @@ const IDENTITY = new TextEncoder().encode(HTML);
 // means the second caller awaits the first one's work instead of repeating it.
 let representations;
 
-function pageRepresentations() {
-  representations ??= buildRepresentations().catch((err) => {
+function pageRepresentations(request) {
+  representations ??= buildRepresentations(request).catch((err) => {
     // Only completed bytes are ever cached, so a failed build has to clear
     // the slot: a rejection left in place would answer every later request
     // with the same failure until the isolate was recycled.
@@ -370,13 +370,22 @@ function pageRepresentations() {
   return representations;
 }
 
-async function buildRepresentations() {
+// The request rides along only so a dropped coding names the edge request
+// that hit it: the build is shared, so the first caller's ray is the one on
+// the line, not a claim about every request it served.
+async function buildRepresentations(request) {
   const out = [{ coding: null, bytes: IDENTITY }];
   for (const [coding, format] of COMPRESSIBLE) {
     try {
       out.push({ coding, bytes: await compressFormat(format) });
-    } catch {
-      // Runtime lacks this format.
+    } catch (err) {
+      // A runtime without the format is the ordinary case. Anything else
+      // (out of memory, a stream that dies mid-pipeline) would ship the
+      // page at its uncompressed size forever without a word, so name it.
+      logFailure(request, "coding-dropped", {
+        coding,
+        error: String(err?.message ?? err),
+      });
     }
   }
   return out;
@@ -385,8 +394,8 @@ async function buildRepresentations() {
 // Highest q the client offered, then the smallest body at that q. A Chrome
 // `gzip, deflate, br, zstd` request therefore gets brotli rather than gzip,
 // and a `br;q=0.1, gzip` request still gets gzip.
-async function representationFor(acceptEncoding) {
-  const reps = await pageRepresentations();
+async function representationFor(acceptEncoding, request) {
+  const reps = await pageRepresentations(request);
   const qByCoding = parseAcceptEncoding(acceptEncoding);
   let best = null;
   for (const rep of reps) {
@@ -435,6 +444,21 @@ function errorResponse(status, body, extraHeaders = {}) {
   });
 }
 
+// One JSON object per line, so Workers Logs can filter on a field rather than
+// parse prose, and the edge's cf-ray rides along so a failure a visitor
+// reports pivots from the line to that edge request. Only failures log: a
+// served page, its 304s and its images are the steady state, and a line per
+// visit would bury the few that name a broken deploy.
+function logFailure(request, event, fields) {
+  console.error(
+    JSON.stringify({
+      event,
+      ray: request.headers.get("cf-ray") ?? "",
+      ...fields,
+    }),
+  );
+}
+
 // The reason line for a failure the asset store reported. The store's own
 // body is not repeated: it is an HTML page that names no image path.
 function assetErrorBody(status) {
@@ -464,103 +488,135 @@ const IMAGE_PATHS = new Set([
 const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=604800";
 
 export default {
+  // Every throw below would otherwise reach the client as the edge's opaque
+  // 1101 page with nothing in Workers Logs to explain it. Name the request,
+  // the reason and how long it took, then answer with the same plain-text
+  // envelope every other failure here uses, so a client can still act on it.
   async fetch(request, env) {
-    const url = new URL(request.url);
-    if (IMAGE_PATHS.has(url.pathname)) {
-      if (request.method !== "GET" && request.method !== "HEAD") {
-        return errorResponse(405, "method not allowed", { allow: "GET, HEAD" });
-      }
-      if (!env?.ASSETS) {
-        return errorResponse(404, "not found");
-      }
-      // Images are already compressed. Clone-with-headers keeps
-      // Accept-Encoding (a forbidden header), so this is a new request
-      // that only forwards revalidation fields.
-      const assetHeaders = new Headers();
-      const noneMatch = request.headers.get("if-none-match");
-      if (noneMatch) assetHeaders.set("if-none-match", noneMatch);
-      const modifiedSince = request.headers.get("if-modified-since");
-      if (modifiedSince) assetHeaders.set("if-modified-since", modifiedSince);
-      const asset = await env.ASSETS.fetch(
-        new Request(request.url, {
-          method: request.method,
-          headers: assetHeaders,
-        }),
-      );
-      // An asset-store failure is the one answer whose body the Worker does
-      // not write: the store ships an HTML error page under its own headers.
-      // Every other status here is text/plain like /health, so a missing
-      // capture stays a one-line reason a client can act on instead of a
-      // document at an image path. The status passes through unchanged.
-      if (asset.status >= 400) {
-        return errorResponse(
-          asset.status,
-          request.method === "HEAD" ? null : assetErrorBody(asset.status),
-        );
-      }
-      const headers = new Headers(asset.headers);
-      for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
-        headers.set(name, value);
-      }
-      // Success and revalidation can be stored; a missing or failed asset
-      // must not inherit the day-long image policy or a 404 sticks.
-      if (asset.status === 200 || asset.status === 304) {
-        headers.set("cache-control", IMAGE_CACHE);
-      } else {
-        headers.set("cache-control", "no-store");
-      }
-      if (request.method === "HEAD") {
-        return new Response(null, { status: asset.status, headers });
-      }
-      return new Response(asset.body, { status: asset.status, headers });
+    const started = Date.now();
+    try {
+      return await handle(request, env);
+    } catch (err) {
+      logFailure(request, "unhandled", {
+        method: request.method,
+        path: new URL(request.url).pathname,
+        duration_ms: Date.now() - started,
+        error: String(err?.message ?? err),
+      });
+      return errorResponse(500, "internal error");
     }
+  },
+};
+
+async function handle(request, env) {
+  const url = new URL(request.url);
+  if (IMAGE_PATHS.has(url.pathname)) {
     if (request.method !== "GET" && request.method !== "HEAD") {
       return errorResponse(405, "method not allowed", { allow: "GET, HEAD" });
     }
-    if (url.pathname === "/health") {
-      // Uptime probes hit this continuously; caching it would only blur
-      // what the last probe actually saw. HEAD must carry the GET headers
-      // and no body (RFC 9110).
-      const healthBody = "ok\n";
-      const healthHeaders = {
-        "content-type": "text/plain; charset=utf-8",
-        "cache-control": "no-store",
-        "content-length": String(new TextEncoder().encode(healthBody).byteLength),
-        ...SECURITY_HEADERS,
-      };
-      if (request.method === "HEAD") {
-        return new Response(null, { headers: healthHeaders });
-      }
-      return new Response(healthBody, { headers: healthHeaders });
+    if (!env?.ASSETS) {
+      // Every image on the page is now a 404 and /health still answers ok, so
+      // this is the line that names the binding as the reason.
+      logFailure(request, "assets-unbound", { path: url.pathname });
+      return errorResponse(404, "not found");
     }
-    // One page: anything else is that page too, rather than a 404 nobody
-    // learns anything from.
-    const chosen = await representationFor(request.headers.get("accept-encoding"));
-    if (chosen == null) {
-      return errorResponse(406, request.method === "HEAD" ? null : "not acceptable", {
-        vary: VARY,
+    // Images are already compressed. Clone-with-headers keeps
+    // Accept-Encoding (a forbidden header), so this is a new request
+    // that only forwards revalidation fields.
+    const assetHeaders = new Headers();
+    const noneMatch = request.headers.get("if-none-match");
+    if (noneMatch) assetHeaders.set("if-none-match", noneMatch);
+    const modifiedSince = request.headers.get("if-modified-since");
+    if (modifiedSince) assetHeaders.set("if-modified-since", modifiedSince);
+    const asset = await env.ASSETS.fetch(
+      new Request(request.url, {
+        method: request.method,
+        headers: assetHeaders,
+      }),
+    );
+    // An asset-store failure is the one answer whose body the Worker does
+    // not write: the store ships an HTML error page under its own headers.
+    // Every other status here is text/plain like /health, so a missing
+    // capture stays a one-line reason a client can act on instead of a
+    // document at an image path. The status passes through unchanged.
+    if (asset.status >= 400) {
+      // The client sees "not found" and cannot tell a capture that was never
+      // uploaded from a store that is failing. Both are deploy-level, so both
+      // get a line: the status names which one it was.
+      logFailure(request, asset.status === 404 || asset.status === 410 ? "asset-missing" : "asset-store-error", {
+        path: url.pathname,
+        status: asset.status,
       });
+      return errorResponse(
+        asset.status,
+        request.method === "HEAD" ? null : assetErrorBody(asset.status),
+      );
     }
-    if (ifNoneMatchMatches(request.headers.get("if-none-match"))) {
-      // Revalidation answers keep the validator and policy headers but no body.
-      return new Response(null, {
-        status: 304,
-        headers: {
-          etag: ETAG,
-          "cache-control": PAGE_CACHE_CONTROL,
-          vary: VARY,
-          ...SECURITY_HEADERS,
-        },
-      });
+    const headers = new Headers(asset.headers);
+    for (const [name, value] of Object.entries(SECURITY_HEADERS)) {
+      headers.set(name, value);
     }
-    const headers = {
-      ...PAGE_HEADERS,
-      "content-length": String(chosen.bytes.byteLength),
-    };
-    if (chosen.coding) headers["content-encoding"] = chosen.coding;
+    // Success and revalidation can be stored; a missing or failed asset
+    // must not inherit the day-long image policy or a 404 sticks.
+    if (asset.status === 200 || asset.status === 304) {
+      headers.set("cache-control", IMAGE_CACHE);
+    } else {
+      headers.set("cache-control", "no-store");
+    }
     if (request.method === "HEAD") {
-      return new Response(null, { headers, encodeBody: "manual" });
+      return new Response(null, { status: asset.status, headers });
     }
-    return new Response(chosen.bytes, { headers, encodeBody: "manual" });
-  },
-};
+    return new Response(asset.body, { status: asset.status, headers });
+  }
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return errorResponse(405, "method not allowed", { allow: "GET, HEAD" });
+  }
+  if (url.pathname === "/health") {
+    // Uptime probes hit this continuously; caching it would only blur
+    // what the last probe actually saw. HEAD must carry the GET headers
+    // and no body (RFC 9110).
+    const healthBody = "ok\n";
+    const healthHeaders = {
+      "content-type": "text/plain; charset=utf-8",
+      "cache-control": "no-store",
+      "content-length": String(new TextEncoder().encode(healthBody).byteLength),
+      ...SECURITY_HEADERS,
+    };
+    if (request.method === "HEAD") {
+      return new Response(null, { headers: healthHeaders });
+    }
+    return new Response(healthBody, { headers: healthHeaders });
+  }
+  // One page: anything else is that page too, rather than a 404 nobody
+  // learns anything from.
+  const chosen = await representationFor(
+    request.headers.get("accept-encoding"),
+    request,
+  );
+  if (chosen == null) {
+    return errorResponse(406, request.method === "HEAD" ? null : "not acceptable", {
+      vary: VARY,
+    });
+  }
+  if (ifNoneMatchMatches(request.headers.get("if-none-match"))) {
+    // Revalidation answers keep the validator and policy headers but no body.
+    return new Response(null, {
+      status: 304,
+      headers: {
+        etag: ETAG,
+        "cache-control": PAGE_CACHE_CONTROL,
+        vary: VARY,
+        ...SECURITY_HEADERS,
+      },
+    });
+  }
+  const headers = {
+    ...PAGE_HEADERS,
+    "content-length": String(chosen.bytes.byteLength),
+  };
+  if (chosen.coding) headers["content-encoding"] = chosen.coding;
+  if (request.method === "HEAD") {
+    return new Response(null, { headers, encodeBody: "manual" });
+  }
+  return new Response(chosen.bytes, { headers, encodeBody: "manual" });
+}

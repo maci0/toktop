@@ -478,60 +478,75 @@ const imageCall = (path, headers = {}, init = {}) =>
   );
 
 test("image paths 404 without ASSETS instead of falling through to the page", async () => {
-  const res = await imageCall("/dashboard.avif");
-  expect(res.status).toBe(404);
-  expect(await res.text()).not.toBe(identityBody);
-  expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
-  expect(res.headers.get("cache-control")).toBe("no-store");
-  for (const name of SECURITY_HEADER_NAMES) {
-    expect(res.headers.get(name)).not.toBeNull();
-  }
-});
-
-test("image 404s from ASSETS are not cached as successes", async () => {
-  const env = {
-    ASSETS: {
-      fetch: () => new Response("missing", { status: 404 }),
-    },
-  };
-  const res = await imageCall("/dashboard.png", {}, { env });
-  expect(res.status).toBe(404);
-  expect(res.headers.get("cache-control")).toBe("no-store");
-});
-
-test("an asset-store failure answers with the worker's own error envelope", async () => {
-  const missing = {
-    ASSETS: {
-      fetch: () =>
-        Promise.resolve(
-          new Response("<html><body>not here</body></html>", {
-            status: 404,
-            headers: { "content-type": "text/html" },
-          }),
-        ),
-    },
-  };
-  const failed = {
-    ASSETS: {
-      fetch: () => Promise.resolve(new Response("boom", { status: 502 })),
-    },
-  };
-  for (const [env, status, body] of [
-    [missing, 404, "not found\n"],
-    [failed, 502, "asset store error\n"],
-  ]) {
-    const res = await imageCall("/dashboard.png", {}, { env });
-    expect(res.status).toBe(status);
-    expect(await res.text()).toBe(body);
+  const logs = captureLogs();
+  try {
+    const res = await imageCall("/dashboard.avif");
+    expect(res.status).toBe(404);
+    expect(await res.text()).not.toBe(identityBody);
     expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     expect(res.headers.get("cache-control")).toBe("no-store");
     for (const name of SECURITY_HEADER_NAMES) {
       expect(res.headers.get(name)).not.toBeNull();
     }
+  } finally {
+    logs.restore();
   }
-  const head = await imageCall("/dashboard.png", {}, { env: missing, method: "HEAD" });
-  expect(head.status).toBe(404);
-  expect((await head.arrayBuffer()).byteLength).toBe(0);
+});
+
+test("image 404s from ASSETS are not cached as successes", async () => {
+  const logs = captureLogs();
+  try {
+    const env = {
+      ASSETS: {
+        fetch: () => new Response("missing", { status: 404 }),
+      },
+    };
+    const res = await imageCall("/dashboard.png", {}, { env });
+    expect(res.status).toBe(404);
+    expect(res.headers.get("cache-control")).toBe("no-store");
+  } finally {
+    logs.restore();
+  }
+});
+
+test("an asset-store failure answers with the worker's own error envelope", async () => {
+  const logs = captureLogs();
+  try {
+    const missing = {
+      ASSETS: {
+        fetch: () =>
+          Promise.resolve(
+            new Response("<html><body>not here</body></html>", {
+              status: 404,
+              headers: { "content-type": "text/html" },
+            }),
+          ),
+      },
+    };
+    const failed = {
+      ASSETS: {
+        fetch: () => Promise.resolve(new Response("boom", { status: 502 })),
+      },
+    };
+    for (const [env, status, body] of [
+      [missing, 404, "not found\n"],
+      [failed, 502, "asset store error\n"],
+    ]) {
+      const res = await imageCall("/dashboard.png", {}, { env });
+      expect(res.status).toBe(status);
+      expect(await res.text()).toBe(body);
+      expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+      expect(res.headers.get("cache-control")).toBe("no-store");
+      for (const name of SECURITY_HEADER_NAMES) {
+        expect(res.headers.get(name)).not.toBeNull();
+      }
+    }
+    const head = await imageCall("/dashboard.png", {}, { env: missing, method: "HEAD" });
+    expect(head.status).toBe(404);
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
+  } finally {
+    logs.restore();
+  }
 });
 
 test("image paths are served from ASSETS with cache and security headers", async () => {
@@ -604,4 +619,94 @@ test("image HEAD matches GET headers with no body, POST is 405", async () => {
   expect(posted.headers.get("allow")).toBe("GET, HEAD");
   expect(posted.headers.get("content-type")).toBe("text/plain; charset=utf-8");
   expect(posted.headers.get("cache-control")).toBe("no-store");
+});
+
+// Failure paths write one JSON line to console.error (Workers Logs). Captured
+// rather than printed so the assertions can read the lines back and the run
+// stays quiet.
+function captureLogs() {
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => lines.push(args.join(" "));
+  return {
+    parse: () => lines.map((line) => JSON.parse(line)),
+    restore: () => {
+      console.error = original;
+    },
+  };
+}
+
+test("an unhandled throw answers 500 and logs the request that caused it", async () => {
+  const logs = captureLogs();
+  try {
+    const env = {
+      ASSETS: { fetch: () => Promise.reject(new Error("asset store unreachable")) },
+    };
+    const res = await worker.fetch(
+      new Request(`${ORIGIN}/dashboard.png`, {
+        headers: { "cf-ray": "9a1b2c3d4e5f-TOK" },
+      }),
+      env,
+    );
+    expect(res.status).toBe(500);
+    expect(await res.text()).toBe("internal error");
+    expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
+    expect(res.headers.get("cache-control")).toBe("no-store");
+    for (const name of SECURITY_HEADER_NAMES) {
+      expect(res.headers.get(name)).not.toBeNull();
+    }
+    const [line] = logs.parse();
+    expect(line.event).toBe("unhandled");
+    expect(line.ray).toBe("9a1b2c3d4e5f-TOK");
+    expect(line.method).toBe("GET");
+    expect(line.path).toBe("/dashboard.png");
+    expect(line.error).toBe("asset store unreachable");
+    expect(typeof line.duration_ms).toBe("number");
+  } finally {
+    logs.restore();
+  }
+});
+
+test("asset failures log their status; served requests log nothing", async () => {
+  const logs = captureLogs();
+  try {
+    const env = assetsEnv({ "/dashboard.webp": "webp-bytes" });
+    const served = await imageCall("/dashboard.webp", {}, { env });
+    expect(served.status).toBe(200);
+    expect((await call({ "cf-ray": "healthy-TOK" })).status).toBe(200);
+    expect((await call({}, { path: "/health" })).status).toBe(200);
+    expect(logs.parse()).toEqual([]);
+
+    const unbound = await imageCall("/dashboard.avif", {}, { env: {} });
+    expect(unbound.status).toBe(404);
+    const missing = await imageCall(
+      "/dashboard.avif",
+      {},
+      { env: { ASSETS: { fetch: () => new Response("missing", { status: 404 }) } } },
+    );
+    expect(missing.status).toBe(404);
+    const broken = await imageCall(
+      "/dashboard.avif",
+      {},
+      { env: { ASSETS: { fetch: () => new Response("boom", { status: 502 }) } } },
+    );
+    expect(broken.status).toBe(502);
+    expect(logs.parse()).toEqual([
+      { event: "assets-unbound", ray: "", path: "/dashboard.avif" },
+      {
+        event: "asset-missing",
+        ray: "",
+        path: "/dashboard.avif",
+        status: 404,
+      },
+      {
+        event: "asset-store-error",
+        ray: "",
+        path: "/dashboard.avif",
+        status: 502,
+      },
+    ]);
+  } finally {
+    logs.restore();
+  }
 });
