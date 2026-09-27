@@ -37,12 +37,23 @@ func crushDB(t *testing.T, dir string, sessions map[string][3]int64) {
 		updated_at INTEGER NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
+	// One transaction for the whole fixture. In autocommit each INSERT is
+	// its own durable commit, so a 2000-session fixture cost 2000 fsyncs and
+	// pushed TestCrushSinceQueryCanUseUpdatedAtIndex past the suite timeout.
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback() //nolint:errcheck // committed below; rollback is the error path
 	for id, v := range sessions {
-		if _, err := db.Exec(
+		if _, err := tx.Exec(
 			`INSERT INTO sessions (id, completion_tokens, prompt_tokens, updated_at) VALUES (?, ?, ?, ?)`,
 			id, v[0], v[1], v[2]); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }
 

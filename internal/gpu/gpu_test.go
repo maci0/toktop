@@ -2,8 +2,13 @@ package gpu
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,8 +288,157 @@ func TestSample(t *testing.T) {
 	}
 }
 
-func TestSampleCanceledContext(t *testing.T) {
+// A caller that cancels (the UI tearing down, the sysmon budget spent) must
+// not pay runTimeout per vendor, and must not report a device the canceled
+// sample never got to read. The fake CLI is present on PATH, so a Sample that
+// ignored the cancellation would block for the full timeout and leave the
+// marker behind.
+func TestSampleCanceledContextSkipsVendorCLIs(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "cli-ran")
+	fake := filepath.Join(dir, "toktop-fake-smi")
+	script := "#!/bin/sh\ntouch " + marker + "\n" + nvidiaCSV
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stubTools(t, func(string) (string, error) { return fake, nil })
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	_ = Sample(ctx)
+	start := time.Now()
+	devs := Sample(ctx)
+	if elapsed := time.Since(start); elapsed >= runTimeout {
+		t.Errorf("canceled Sample took %s: it waited out the %s vendor timeout", elapsed, runTimeout)
+	}
+	if _, err := os.Stat(marker); err == nil {
+		t.Error("canceled Sample still spawned a vendor CLI")
+	}
+	for _, d := range devs {
+		if strings.Contains(d.Name, "RTX") {
+			t.Errorf("canceled Sample reported a device the canceled CLI never returned: %+v", d)
+		}
+	}
+}
+
+// The same stub with a live context must produce the device, so the
+// cancellation assertions above cannot pass by the fake CLI simply never
+// being reached.
+func TestSampleReadsVendorCLIOutput(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "toktop-fake-smi")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\ncat <<'CSV'\n"+nvidiaCSV+"CSV\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	stubTools(t, func(string) (string, error) { return fake, nil })
+
+	var nvidia []core.GPUDevice
+	for _, d := range Sample(t.Context()) {
+		if d.Vendor == "nvidia" {
+			nvidia = append(nvidia, d)
+		}
+	}
+	if len(nvidia) != 3 {
+		t.Fatalf("nvidia devices = %d, want the 3 rows the fake CLI printed: %+v", len(nvidia), nvidia)
+	}
+	if nvidia[0].Name != "NVIDIA GeForce RTX 4090" || nvidia[2].Name != "Some, Name With Commas" {
+		t.Errorf("nvidia devices = %+v, want the printed rows in order", nvidia)
+	}
+}
+
+// Sample merges three vendors sampled concurrently, so the merge order is not
+// the order the CLIs finished in. The host supplies whatever GPUs it has,
+// which on a build machine is none: this pins the sort against a known
+// three-vendor set so the ordering is checked on every machine.
+func TestSampleOrdersVendorsAndIndices(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	dir := t.TempDir()
+	// xpu-smi is called twice, once per subcommand; the discovery listing and
+	// the per-device metrics are different documents.
+	write := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		if err := os.WriteFile(p, []byte(body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	// The heredoc terminator must be alone on its line, so the document
+	// needs a trailing newline.
+	cat := func(doc string) string { return "cat <<'OUT'\n" + strings.TrimRight(doc, "\n") + "\nOUT\n" }
+	// Intel's indices sort ahead of nvidia's on purpose: only the vendor rank
+	// may decide the order, and a plain index sort would get it wrong.
+	paths := map[string]string{
+		"nvidia-smi": write("nvidia-smi", "#!/bin/sh\n"+cat(
+			"1, Fake NVIDIA B, 65, 1, 2, 98, 350, 550.0\n"+
+				"0, Fake NVIDIA A, 65, 1, 2, 98, 350, 550.0\n")),
+		"rocm-smi": write("rocm-smi", "#!/bin/sh\n"+cat(rocmFakeJSON)),
+		"xpu-smi":  write("xpu-smi", "#!/bin/sh\ncase \"$1\" in\ndiscovery) "+cat(xpuFakeDiscovery)+";;\n*) "+cat(xpuFakeMetrics)+";;\nesac\n"),
+	}
+	stubTools(t, func(name string) (string, error) {
+		p, ok := paths[name]
+		if !ok {
+			return "", exec.ErrNotFound
+		}
+		return p, nil
+	})
+
+	// The host's own /sys/class/drm cards come back too, and this machine may
+	// have any number of them, so pick out the fakes by what only they carry.
+	var got []string
+	for _, d := range Sample(t.Context()) {
+		switch {
+		case strings.HasPrefix(d.Name, "Fake NVIDIA"):
+			got = append(got, "nvidia/"+d.Name)
+		case d.Vendor == "amd" && d.MemUsed == rocmFakeUsed:
+			got = append(got, fmt.Sprintf("amd/card%d", d.Index))
+		case strings.HasPrefix(d.Name, "Fake Intel"):
+			got = append(got, fmt.Sprintf("intel/%d", d.Index))
+		}
+	}
+	want := []string{"nvidia/Fake NVIDIA A", "nvidia/Fake NVIDIA B", "amd/card0", "amd/card1",
+		"intel/0", "intel/1"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("vendor/index order = %v, want %v", got, want)
+	}
+}
+
+const rocmFakeUsed = 17179869184
+
+const xpuFakeMetrics = `{"device_id":"0","metrics":{
+	"gpu_utilization":{"values":[63.5]},
+	"gpu_temperature":{"values":[58]},
+	"memory_used":{"values":[1024]},
+	"gpu_power":{"values":[180.5]}}}`
+
+const rocmFakeJSON = `{"card0":{"Temperature (Sensor edge) (C)":"52.0",
+	"VRAM Total Used Memory (B)":"17179869184","VRAM Total Memory (B)":"68719486736","GPU use (%)":"87"},
+	"card1":{"Temperature (Sensor edge) (C)":"52.0",
+	"VRAM Total Used Memory (B)":"17179869184","VRAM Total Memory (B)":"34359738368","GPU use (%)":"87"}}`
+
+const xpuFakeDiscovery = `{"devices":[
+	{"device_id":1,"device_name":"Fake Intel B"},
+	{"device_id":0,"device_name":"Fake Intel A"}]}`
+
+// stubTools points every vendor CLI lookup at fn and clears the process-wide
+// tool cache, which otherwise keeps a hit (or an unexpired miss) for the
+// rest of the test binary's life.
+func stubTools(t *testing.T, fn func(string) (string, error)) {
+	t.Helper()
+	const names = "nvidia-smi\000rocm-smi\000xpu-smi"
+	orig := lookPath
+	clear := func() {
+		for _, n := range strings.Split(names, "\x00") {
+			tools.Delete(n)
+		}
+	}
+	clear()
+	lookPath = fn
+	t.Cleanup(func() { lookPath = orig; clear() })
 }
