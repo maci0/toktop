@@ -1,6 +1,26 @@
 // Copyright (C) 2026 Marcel W. Wysocki
 // SPDX-License-Identifier: MIT
 
+// Package agentusage reports the token usage AI coding agents record on disk.
+//
+// An agent is read one of two ways. Transcript agents (claude, qwen, dsh,
+// clanker, copilot, codex) appear in the adapters table, each naming where
+// its logs live under a working directory and how one line becomes a Sample.
+// RegisterSpec adds one this package does not ship with, and LoadDefinitions
+// reads the same declaration from a JSON file, DefinitionsPath being the
+// default location.
+//
+// Database agents are registered as sources instead: crush is built in,
+// opencode is added by EnableOpenCodeDB because its store is machine-wide
+// and the operator opts into it.
+//
+// Discover finds the agent processes running now, and Watch reads the
+// transcripts of the one working in a directory, so a caller can take a
+// Sample on an interval without knowing which agent is underneath.
+//
+// The crush and opencode sources need a SQLite driver, so they exist only
+// under the sqlite build tag. Without it the package still compiles, and
+// Supported reports those agents unreadable.
 package agentusage
 
 import (

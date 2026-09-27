@@ -13,7 +13,7 @@ import (
 // not a measurement: it is clamped to absent, the same rule the generic
 // walker applies, so a corrupted or hostile line cannot subtract from a total.
 func parseClaude(line []byte) (values, string, bool) {
-	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
+	line = bytes.TrimPrefix(line, utf8BOM)
 	var rec struct {
 		Type    string `json:"type"`
 		Cwd     string `json:"cwd"`

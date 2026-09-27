@@ -194,7 +194,7 @@ func LoadDefinitions(path string) error {
 		}
 		return fmt.Errorf("agent definitions %s: %w", path, err)
 	}
-	data = bytes.TrimPrefix(data, []byte("\xef\xbb\xbf"))
+	data = bytes.TrimPrefix(data, utf8BOM)
 	var file definitionFile
 	if err := json.Unmarshal(data, &file); err != nil {
 		return fmt.Errorf("%w: %s: %w", ErrInvalidDefinitions, path, err)

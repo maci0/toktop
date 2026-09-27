@@ -11,7 +11,7 @@ import (
 // parseQwen reads one line of a qwen-code chat transcript. Usage is recorded
 // per assistant message, and thinking tokens are output tokens too.
 func parseQwen(line []byte) (values, string, bool) {
-	line = bytes.TrimPrefix(line, []byte("\xef\xbb\xbf"))
+	line = bytes.TrimPrefix(line, utf8BOM)
 	var rec struct {
 		Type  string `json:"type"`
 		Cwd   string `json:"cwd"`
