@@ -211,10 +211,9 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 			continue
 		}
 		x := total - offset
+		// No clamp needed: x is in (0, total] and cum[w] == total, so the
+		// predicate holds at j = w-1 and Search cannot return w.
 		j := sort.Search(w, func(j int) bool { return cum[j+1] >= x })
-		if j >= w {
-			j = w - 1
-		}
 		if sums[j] == nil {
 			sums[j] = make([]float64, nEngines)
 			cnts[j] = make([]int, nEngines)

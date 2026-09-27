@@ -16,6 +16,25 @@ import (
 )
 
 // row 2 is identity and sensors (cpu, os, drivers, temps).
+
+// shownCPUTemps is how many core temperature readings either renderer prints;
+// the rest become a "+N more" count in the dashboard and are dropped by the
+// text report, which has no width to fit them in.
+const shownCPUTemps = 4
+
+// tempLabelWidth caps a sensor label in the dashboard. The text report does not
+// cap: a terminal wraps, so the full field stays readable there.
+const tempLabelWidth = 7
+
+// cpuTempLabel is a sensor's label as both renderers show it: the first
+// comma-separated field, with the separator Fields needed dropped after the
+// split. Trimming before the width cap matters in the dashboard, which
+// shortens: capping "coretemp," to 7 cells and trimming the comma afterwards
+// rendered six cells of label where seven had been budgeted.
+func cpuTempLabel(label string) string {
+	return strings.TrimSuffix(strings.Fields(label + ",")[0], ",")
+}
+
 func (m Model) renderSystem() string {
 	w := m.w - 4
 	sy := m.snap.Sys
@@ -47,14 +66,13 @@ func (m Model) renderSystem() string {
 	cpuTemps := sysCPUTemps(sy)
 	shownTemps := 0
 	for _, t := range cpuTemps {
-		if shownTemps >= 4 {
+		if shownTemps >= shownCPUTemps {
 			break
 		}
 		// Labels come from local sysfs and (for remote hosts) parsed vendor
 		// tooling output; they pass the terminal sanitizer like every other
 		// externally sourced string.
-		label := shorten(core.SanitizeText(strings.Fields(t.Label + ",")[0]), 7)
-		label = strings.TrimSuffix(label, ",")
+		label := shorten(core.SanitizeText(cpuTempLabel(t.Label)), tempLabelWidth)
 		c := tempColor(float64(t.MilliC) / 1000)
 		ident = append(ident, dim(label+" ")+
 			lipgloss.NewStyle().Bold(true).Foreground(c).Render(fmtTempC(t.MilliC)))

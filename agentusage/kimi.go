@@ -87,7 +87,9 @@ const kimiStateBytes = 1 << 20
 // os.Root so a state.json swapped for a symlink out of the session directory
 // is refused the same way a transcript symlink is.
 func kimiSessionCwd(wirePath string) (string, bool) {
-	session := filepath.Dir(filepath.Dir(wirePath))
+	// <workDirKey>/<session>/agents/<agentId>/wire.jsonl: three parents up is
+	// the session, which is where state.json sits beside agents/.
+	session := filepath.Dir(filepath.Dir(filepath.Dir(wirePath)))
 	r, err := os.OpenRoot(session)
 	if err != nil {
 		return "", false

@@ -199,11 +199,11 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 	}
 	shown := 0
 	for _, t := range sysCPUTemps(sy) {
-		if shown >= 4 {
+		if shown >= shownCPUTemps {
 			break
 		}
 		b.WriteString(fmt.Sprintf("temp %s %s\n",
-			core.SanitizeText(strings.TrimSuffix(strings.Fields(t.Label + ",")[0], ",")),
+			core.SanitizeText(cpuTempLabel(t.Label)),
 			fmtTempC(t.MilliC)))
 		shown++
 	}

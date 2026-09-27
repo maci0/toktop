@@ -128,17 +128,17 @@ fi
 true`
 }
 
-// defaultPollEvery is the sampling period Run falls back to when the caller
-// passes a non-positive one. A zero or negative period would otherwise make
-// time.NewTicker panic on the first tick.
-const defaultPollEvery = 5 * time.Second
+// DefaultPollEvery is the sampling period Run uses when the caller passes a
+// non-positive one, and what callers pass when they want no opinion. A
+// zero or negative period would otherwise make time.NewTicker panic.
+const DefaultPollEvery = 5 * time.Second
 
 // Run polls until ctx is done or the connection it samples dies: past a drop
 // every poll fails, so continuing would only burn a round trip apiece on a
 // corpse for the rest of the process.
 func (s *Stats) Run(ctx context.Context, every time.Duration) {
 	if every <= 0 {
-		every = defaultPollEvery
+		every = DefaultPollEvery
 	}
 	t := time.NewTicker(every)
 	defer t.Stop()

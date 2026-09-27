@@ -189,14 +189,23 @@ func githubAssetURL(raw string) bool {
 	return githubDownloadHost(u.Hostname())
 }
 
+// maxReleaseJSON bounds the release metadata body. It is a few hundred bytes
+// of decoded struct; a megabyte is a mistake or an attack, and either way
+// should not be read into memory to be rejected.
+const maxReleaseJSON = 4 << 20
+
+// maxRedirects caps the hop count of a download, so a redirect loop between
+// GitHub's own hosts still ends.
+const maxRedirects = 10
+
 // githubRedirect refuses hops off GitHub's download hosts, including
 // http downgrades and SSRF via a hostile browser_download_url. Replaces
 // the client's default policy, so it also caps the hop count. It also strips
 // the Authorization header on hops off api.github.com so GITHUB_TOKEN never
 // leaks to CDN or storage hosts.
 func githubRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) >= 10 {
-		return errors.New("stopped after 10 redirects")
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
 	}
 	if req.URL.Scheme != "https" || req.URL.User != nil || !githubDownloadHost(req.URL.Hostname()) {
 		return fmt.Errorf("refusing redirect to %s", req.URL.Redacted())
@@ -252,7 +261,7 @@ func Check(ctx context.Context, repo string) (*Release, error) {
 		return nil, fmt.Errorf("github returned %s for %s", resp.Status, latest)
 	}
 	var rel Release
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<20)).Decode(&rel); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseJSON)).Decode(&rel); err != nil {
 		return nil, fmt.Errorf("cannot parse github release from %s: %w", latest, err)
 	}
 	if rel.TagName == "" {

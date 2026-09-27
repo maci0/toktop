@@ -330,9 +330,6 @@ func decodeZstdPrefix(src []byte) (plain []byte, consumed int, err error) {
 		plain = append(plain, out...)
 		off += n
 	}
-	if len(plain) == 0 {
-		return nil, off, nil
-	}
 	return plain, off, nil
 }
 

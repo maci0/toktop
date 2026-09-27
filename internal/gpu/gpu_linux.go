@@ -41,7 +41,7 @@ var amdCards struct {
 func amdCardDirs() []string {
 	amdCards.Lock()
 	defer amdCards.Unlock()
-	if time.Since(amdCards.at) < toolRetry {
+	if core.Age(time.Now(), amdCards.at) < toolRetry {
 		return amdCards.dirs
 	}
 	amdCards.dirs = findAmdCards(defaultDrmRoot)

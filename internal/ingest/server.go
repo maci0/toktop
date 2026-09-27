@@ -46,6 +46,16 @@ type Server struct {
 // endpoint is localhost-bound by default but can be exposed via --ingest.
 var idleTimeout = 2 * time.Minute
 
+// readHeaderTimeout bounds a request's header read: a peer that opens a
+// connection and sends nothing would otherwise hold a goroutine until
+// IdleTimeout, a minute and a half after it stopped doing anything.
+const readHeaderTimeout = 5 * time.Second
+
+// maxHeaderBytes is the request-header budget, below net/http's 1 MiB
+// default: an event POST carries headers only, so the headroom would be
+// another attacker's room.
+const maxHeaderBytes = 16 << 10
+
 // New binds addr and returns a server that Serve will accept on. The listen
 // happens here so Addr reports the actual bound port (including :0) before
 // Serve runs.
@@ -71,9 +81,9 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 	s := &Server{rec: rec, now: time.Now, ln: ln, addr: ln.Addr().String(), log: lg}
 	s.srv = http.Server{
 		Handler:           s.routes(),
-		ReadHeaderTimeout: 5 * time.Second,
+		ReadHeaderTimeout: readHeaderTimeout,
 		IdleTimeout:       idleTimeout,
-		MaxHeaderBytes:    16 << 10, // default 1 MiB; this endpoint has no large headers
+		MaxHeaderBytes:    maxHeaderBytes,
 		// net/http interpolates conn.RemoteAddr into panic and handshake
 		// lines. That is the same peer address logcfg.Remote redacts: personal
 		// data when --ingest is bound off loopback.
