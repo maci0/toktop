@@ -71,7 +71,9 @@ type Model struct {
 const noticeTTL = 6 * time.Second
 
 // probeTimeout is how long the "probing…" marker waits for its first result
-// before giving up, measured on wall time so a pause cannot pin it.
+// before giving up, measured on the display clock so a paused frame holds the
+// marker until it is resumed. Generous enough to cover a slow first token on a
+// cold model.
 const probeTimeout = 15 * time.Second
 
 // setNotice sets the transient footer explanation for a key press that had no

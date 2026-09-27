@@ -321,12 +321,20 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	rows := 0
 	for _, r := range rates {
 		name := core.SanitizeText(r.Agent)
-		recency := "idle " + fmtDur(now.Sub(r.Last).Truncate(time.Second))
-		if now.Sub(r.Last) < 3*time.Second {
+		recency := ""
+		switch d, how := agentIdle(now, r.Last); how {
+		case recencyLive:
 			recency = "live"
+		case recencyIdle:
+			recency = "idle " + fmtDur(d)
 		}
 		if r.ViaEngine != "" {
-			recency = "via " + core.SanitizeText(r.ViaEngine) + " " + recency
+			via := "via " + core.SanitizeText(r.ViaEngine)
+			if recency == "" {
+				recency = via
+			} else {
+				recency = via + " " + recency
+			}
 		}
 		line := name
 		switch {

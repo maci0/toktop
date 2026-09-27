@@ -441,3 +441,41 @@ func TestAgentsFocusFrameFitsPane(t *testing.T) {
 		}
 	}
 }
+
+// A frame with no timeline has no present to measure an agent against.
+// now.Sub(last) would then be a negative span of billions of years, every
+// threshold comparison passes, and every agent reads "live" for a snapshot
+// that knows nothing about when it was taken. The recency cell is dropped
+// instead: silence about the present is not a claim about it. A stamp in the
+// future is a sender clock running ahead, not an agent that just reported.
+func TestAgentIdleRefusesAnUntimedFrame(t *testing.T) {
+	real := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	for _, tc := range []struct {
+		name      string
+		now, last time.Time
+		want      recency
+	}{
+		{"recent", real, real.Add(-time.Second), recencyLive},
+		{"idle", real, real.Add(-90 * time.Second), recencyIdle},
+		{"zero now", time.Time{}, real, recencyUnknown},
+		{"zero last", real, time.Time{}, recencyUnknown},
+		{"both zero", time.Time{}, time.Time{}, recencyUnknown},
+		{"future last", real, real.Add(time.Minute), recencyIdle},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if d, got := agentIdle(tc.now, tc.last); got != tc.want {
+				t.Errorf("agentIdle = (%v, %v), want %v", d, got, tc.want)
+			}
+		})
+	}
+}
+
+// The guard has to reach the rendered cells, not just the helper: --once
+// --plain is the path that can be handed an unstamped snapshot, and it must
+// not claim every agent is live.
+func TestAgentRowsDropRecencyWithoutATimeline(t *testing.T) {
+	rates := []core.AgentRate{{Agent: "claude", Tokens: 10, Last: time.Now()}}
+	if row := strip(agentRows(rates, time.Time{})[0]); strings.Contains(row, "live") {
+		t.Errorf("unstamped frame claimed a live agent:\n%s", row)
+	}
+}

@@ -15,6 +15,44 @@ import (
 // before the rest collapse into a count.
 const maxSummaryAgents = 3
 
+// agentLiveWindow is how recently an agent must have reported for its recency
+// cell to read "live" rather than an idle span. Below it the idle string would
+// render as "idle 0s", which reads as stalled rather than current.
+const agentLiveWindow = 3 * time.Second
+
+// agentIdle is how long ago an agent last reported, and how that recency
+// should read: recencyLive inside agentLiveWindow, recencyIdle past it, and
+// recencyUnknown when the frame cannot say.
+//
+// A zero on either side is unknown: a snapshot with no At, which --once can
+// receive from a caller that did not stamp one, measures every agent against
+// a span of billions of years, negative, and every threshold comparison passes,
+// so the whole feed would read live for a frame that knows nothing about the
+// present. A last stamped in the future is a sender whose clock runs ahead, not
+// an agent that just reported, so it is idle at zero rather than live.
+func agentIdle(now, last time.Time) (time.Duration, recency) {
+	if now.IsZero() || last.IsZero() {
+		return 0, recencyUnknown
+	}
+	if d := now.Sub(last); d < 0 {
+		return 0, recencyIdle
+	} else if d < agentLiveWindow {
+		return d, recencyLive
+	}
+	return now.Sub(last), recencyIdle
+}
+
+// How an agent's recency cell reads. The three states are distinct because
+// "recent" and "not recent" are claims about a timeline, and having no timeline
+// is a third thing that must not be reported as either.
+type recency uint8
+
+const (
+	recencyUnknown recency = iota
+	recencyLive
+	recencyIdle
+)
+
 // agentSummary renders the rates as one line, for a panel title.
 func agentSummary(rates []core.AgentRate) string {
 	if len(rates) == 0 {
@@ -71,12 +109,20 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 		if r.Thinking > 0 {
 			tok += dim(" " + fmtCount(r.Thinking) + " think")
 		}
-		since := dim("idle " + fmtDur(now.Sub(r.Last).Truncate(time.Second)))
-		if now.Sub(r.Last) < 3*time.Second {
+		var since string
+		switch d, how := agentIdle(now, r.Last); how {
+		case recencyLive:
 			since = styleOK.Render("● live")
+		case recencyIdle:
+			since = dim("idle " + fmtDur(d))
 		}
 		if r.ViaEngine != "" {
-			since = dim("via "+shorten(core.SanitizeText(r.ViaEngine), 18)) + "  " + since
+			via := dim("via " + shorten(core.SanitizeText(r.ViaEngine), 18))
+			if since == "" {
+				since = via
+			} else {
+				since = via + "  " + since
+			}
 		}
 		out = append(out, "  "+padTo(styleValue.Render(names[i]), nameW)+
 			"  "+padTo(rate, 22)+"  "+padStart(tok, 18)+"  "+since)
