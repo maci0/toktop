@@ -177,7 +177,10 @@ func main() {
 		os.Exit(2)
 	}
 
-	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(remoteTargets), opencodeOn)
+	// targets, not remoteTargets: parseTargets collapsed the repeated
+	// spellings of one host, so counting the raw arguments reported more
+	// ssh connections than the run opened.
+	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(targets), opencodeOn)
 
 	// Only when --ingest was given explicitly should an unusable listen
 	// address abort the run; the default-enabled endpoint degrades gracefully.

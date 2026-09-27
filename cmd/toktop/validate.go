@@ -30,11 +30,11 @@ func warnIgnoredFlags(set map[string]bool, demo, once, plain, agents, noIngest b
 	}
 	if set["frames"] && !once {
 		fmt.Fprintln(os.Stderr, "toktop: --frames has no effect without --once")
-	}
-	if set["frames"] && plain {
+	} else if set["frames"] && plain {
 		// The plain report renders the last snapshot as a linear list; there
 		// is no chart for the earlier frames to fill, so the count only buys
-		// the wait before it.
+		// the wait before it. Gated on once so a --frames --plain run with no
+		// --once is not also told how --once would use it.
 		fmt.Fprintln(os.Stderr, "toktop: --frames only sets how long --once waits with --plain; the text report renders the last snapshot")
 	}
 	if set["plain"] && !once {
