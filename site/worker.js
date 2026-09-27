@@ -238,7 +238,7 @@ const HTML = htmlForWire(`<!doctype html>
       <source type="image/avif" srcset="${HERO_AVIF_SRCSET}" sizes="${HERO_SIZES}">
       <source type="image/webp" srcset="${HERO_WEBP_SRCSET}" sizes="${HERO_SIZES}">
       <img src="/dashboard.png" width="1920" height="1126"
-           alt="toktop dashboard: five local engines with throughput and KV-cache pressure, GPU vitals, two answered probes, and three coding agents"
+           alt="toktop dashboard: five local inference engines with throughput, context length and KV-cache pressure, probe time-to-first-token beside them, a GPU and host strip, and an agent feed reporting two coding agents"
            fetchpriority="high">
     </picture>
   </figure>
