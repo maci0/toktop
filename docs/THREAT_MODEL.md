@@ -410,7 +410,12 @@ ports that are then exposed on local loopback (client.go).
   on every `toktop update` check when set (selfupdate.go).
 - *Tampering*: known_hosts store is plain text in the user config dir, mode
   0600 in a 0700 dir (knownhosts.go); a same-user writer can reset pins.
-  Writes are serialized (knownHostsMu) and go through a temp file plus rename.
+  Writes are serialized within and across processes (knownHostsMu plus a
+  `known_hosts.lock` held across the whole read-modify-write) and go through
+  a temp file plus rename, with the directory entry flushed so a crash cannot
+  revert to the previous store. A record that does not parse, or a host
+  recorded twice with different keys, fails the read: neither is skipped,
+  since skipping turns corruption or an appended line into a forced re-TOFU.
 
 **B5 (build/runtime, both replacement channels):**
 - *Elevation of privilege*: swapping the exe file converts Unix hot-reload
@@ -478,7 +483,7 @@ Controls verified in code, with the threats they cover:
 | M9: Non-finite rejection in metrics (per-value and family-sum overflow guard) and vendor CSV/JSON coercion | poisoned counters/rates propagating through history (B2 tampering) | provider.go; gpu.go; collector counter-reset clamp collector.go |
 | M10: Probes request 32 tokens, Ollama `think=false`, OpenAI `n=1`; streaming readers stop after 32 observed content/reasoning units or 1 KiB decoded content/reasoning, with 16 KiB scanner and 128 KiB stream limits. Non-stream OpenAI JSON over 16 KiB is rejected. Reported token counts trusted only up to 128; fixed prompt, model-id cap 256, embed/rerank filtering, and 429/503 backoff 15s–5m | Limits client work and reduces B2 compute/spend amplification; request parameters and closing a response do not guarantee that a backend stops generation or billing | internal/probe/probe.go |
 | M11: Poll/scan/probe timeouts (700ms/1.5s/30s) + context-bounded requests | hung-engine DoS (B2/B3) | discover.go; provider.go; probe.go |
-| M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, serialized writes, temp-file plus rename | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect | knownhosts.go |
+| M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, writes serialized within and across processes (mutex plus `known_hosts.lock` over the whole read-modify-write, stale locks broken), temp-file plus rename with the directory entry flushed, and unparsable or conflicting-duplicate records failing the read | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect, in one process or two; corruption or an appended line read as a shorter store, forcing a re-TOFU | knownhosts.go |
 | M13: Banner deadline lifted only on complete version line; 15s command timeout; keepalive with bounded probe waits; SupportedAlgorithms (no ssh-rsa SHA-1 / DSA); forwardDialTimeout 8s | trickle/silent-peer hangs (B3 DoS); weak host-key algorithms; hung tunnel dial (B3b) | client.go |
 | M14: Local-only defaults: forward listeners on 127.0.0.1, ingest on 127.0.0.1:8420 | accidental network exposure (B1 widening; B3b stays local) | client.go; main.go |
 | M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | endpoints.go |

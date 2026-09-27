@@ -27,7 +27,8 @@ directory, so a username in the path is not rendered.
 Nothing about usage, agents or engines. The only files toktop writes are:
 
 - `$XDG_CONFIG_HOME/toktop/known_hosts` (mode 0600): ssh host keys, trust on
-  first use, for `ssh://` targets only.
+  first use, for `ssh://` targets only. `known_hosts.lock` sits beside it
+  while a host key is being added and is removed when the write finishes.
 - The binary itself, when `toktop update` replaces it in place.
 
 Agent events live in memory for the life of the process. There is no history

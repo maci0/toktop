@@ -731,3 +731,131 @@ func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
 		t.Fatalf("directory = %v, want %v", names, want)
 	}
 }
+
+// A store that does not parse must fail the read, not read as a shorter one.
+// Skipping the bad line would turn corruption into a forced re-TOFU for that
+// host, which is the one outcome the store exists to prevent.
+func TestReadKnownHostsRejectsUnparsableRecords(t *testing.T) {
+	key := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey("good"))))
+	cases := map[string]string{
+		"truncated line":   "h:22 ssh-ed25519",
+		"host with no key": "h:22",
+		"garbage key":      "h:22 ssh-ed25519 not-base64!!!",
+		"wrong key type":   "h:22 ssh-ed25519 AAAA",
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "known_hosts")
+			// A valid record alongside the bad one: the read must fail on the
+			// bad one rather than quietly returning the good one alone.
+			content := "ok:22 " + key + "\n" + body + "\n"
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := readKnownHosts(path); err == nil {
+				t.Fatalf("readKnownHosts accepted a store containing %q", body)
+			} else if !strings.Contains(err.Error(), path) {
+				t.Errorf("error should name the file, got: %v", err)
+			}
+		})
+	}
+}
+
+// A host pinned twice with different keys must not resolve to whichever line
+// came last: appending one line to the file would otherwise override an
+// existing pin without rewriting it. The same record twice is harmless and
+// must keep reading, so a migration that concatenated the file is not fatal.
+func TestReadKnownHostsRejectsConflictingDuplicateHost(t *testing.T) {
+	dir := t.TempDir()
+	first := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey("first"))))
+	second := strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey("second"))))
+
+	path := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(path, []byte("h:22 "+first+"\nh:22 "+second+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := readKnownHosts(path); err == nil {
+		t.Fatal("readKnownHosts picked one of two conflicting pins for h:22")
+	}
+
+	dup := filepath.Join(dir, "duplicated")
+	if err := os.WriteFile(dup, []byte("h:22 "+first+"\nh:22 "+first+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := readKnownHosts(dup)
+	if err != nil {
+		t.Fatalf("an identical duplicate must not fail the read: %v", err)
+	}
+	if len(store) != 1 {
+		t.Fatalf("store = %v, want one host", store)
+	}
+}
+
+// A store another process holds must not be written from a stale snapshot:
+// the read and the write are one critical section, so the lock is taken
+// around both and released after, and a lock left by a dead process is broken
+// rather than wedging the store forever.
+func TestLockStoreSerializesAndBreaksAStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(path, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A live lock holder keeps the store busy; a second acquisition must wait
+	// and then run once the first releases, not interleave with it.
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		_ = lockStore(path, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	ran := make(chan struct{})
+	go func() {
+		_ = lockStore(path, func() error { close(ran); return nil })
+	}()
+	select {
+	case <-ran:
+		t.Fatal("a second writer ran while the store was locked")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-ran:
+	case <-time.After(storeLockWait + storeLockPoll*20):
+		t.Fatal("the second writer never got the lock after the first released")
+	}
+
+	// The lock is released on the way out, so the next acquisition is uncontended.
+	if err := lockStore(path, func() error { return nil }); err != nil {
+		t.Fatalf("uncontended lock failed: %v", err)
+	}
+	if _, err := os.Stat(path + storeLockSuffix); !os.IsNotExist(err) {
+		t.Errorf("the lock file outlived the critical section: %v", err)
+	}
+
+	// A lock older than the stale age belongs to a process that died holding
+	// it. It must be broken, not waited on until the timeout.
+	stale := time.Now().Add(-2 * storeLockStale)
+	lock := path + storeLockSuffix
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(lock, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	ran = make(chan struct{})
+	go func() {
+		_ = lockStore(path, func() error { close(ran); return nil })
+	}()
+	select {
+	case <-ran:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a stale lock was not broken")
+	}
+}

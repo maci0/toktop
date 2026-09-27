@@ -42,6 +42,15 @@ support channel (see SECURITY.md).
   records where every existing transcript ends, not only the recently written
   ones, so the next append reports only the growth; a cumulative adapter
   (codex) previously reported the whole session total as new output.
+- A host key store whose record does not parse, or that records one host twice
+  with different keys, is refused instead of read as a shorter store. Skipping
+  the bad line turned corruption, or a line appended to the file, into a
+  silent re-TOFU for that host on the next connect.
+- Two `toktop` processes adding hosts at once no longer lose a pin. The ssh
+  host key store takes a lock file around the whole read-and-write, not just
+  the write, and a lock left behind by a killed process is broken rather than
+  waited on. The store's rename is flushed to disk, so a crash cannot revert
+  to the previous one and drop the pin just added.
 
 ### Fixed
 
