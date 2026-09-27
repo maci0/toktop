@@ -10,6 +10,7 @@ import (
 
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/gpu"
+	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/sysmon"
 )
 
@@ -181,14 +182,14 @@ func (s *Stats) poll(ctx context.Context) {
 		if s.failedPolls == 1 {
 			s.failedSince = s.instant()
 			audit().Warn("toktop: remote vitals poll failed",
-				"target", logField(s.Client.Target.UserHost(), 256),
-				"error", logField(err.Error(), 256))
+				"target", logcfg.RedactedField(s.Client.Target.UserHost(), 256),
+				"error", logcfg.RedactedField(err.Error(), 256))
 		}
 		return
 	}
 	if s.failedPolls > 0 {
 		audit().Info("toktop: remote vitals poll recovered",
-			"target", logField(s.Client.Target.UserHost(), 256),
+			"target", logcfg.RedactedField(s.Client.Target.UserHost(), 256),
 			"failed_polls", s.failedPolls,
 			"outage", s.instant().Sub(s.failedSince).Round(time.Second))
 	}

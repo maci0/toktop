@@ -159,6 +159,23 @@ var linearChannel = func() [256]float64 {
 	return t
 }()
 
+// parseHexRGB splits a "#rrggbb" color into its three 0..255 channels. ok is
+// false for any other encoding (256-color names, #rgb, #rrggbbaa), which every
+// caller here passes through or treats as already visible rather than
+// guessing at its channels. The one place the three color consumers agree on
+// what counts as hex, so a second spelling cannot drift from this one.
+func parseHexRGB(c lipgloss.Color) (r, g, b uint64, ok bool) {
+	s := string(c)
+	if len(s) != 7 || s[0] != '#' {
+		return 0, 0, 0, false
+	}
+	v, err := strconv.ParseUint(s[1:], 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return v >> 16 & 0xff, v >> 8 & 0xff, v & 0xff, true
+}
+
 // relLuminance computes the WCAG 2.x relative luminance of a #rrggbb hex
 // color. ok is false for any other encoding (256-color names): callers must
 // treat those as already visible rather than guessing at their brightness.
@@ -167,17 +184,13 @@ var linearChannel = func() [256]float64 {
 // luminance inline from linearChannel, so a per-column parse would be wasted
 // work.
 func relLuminance(c lipgloss.Color) (lum float64, ok bool) {
-	s := string(c)
-	if len(s) != 7 || s[0] != '#' {
+	r, g, b, ok := parseHexRGB(c)
+	if !ok {
 		return 0, false
 	}
-	v, err := strconv.ParseUint(s[1:], 16, 32)
-	if err != nil {
-		return 0, false
-	}
-	return 0.2126*linearChannel[v>>16&0xff] +
-		0.7152*linearChannel[v>>8&0xff] +
-		0.0722*linearChannel[v&0xff], true
+	return 0.2126*linearChannel[r] +
+		0.7152*linearChannel[g] +
+		0.0722*linearChannel[b], true
 }
 
 // baseLum is cBase's luminance, which is constant: the fade compares every

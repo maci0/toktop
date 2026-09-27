@@ -346,7 +346,7 @@ func (s *Server) Serve() error {
 	if err != nil && s.log != nil {
 		s.log.Error("toktop: ingest stopped",
 			"addr", s.addr,
-			"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256))
+			"error", logcfg.RedactedField(err.Error(), 256))
 	}
 	return err
 }
@@ -503,7 +503,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		sw := &statusWriter{ResponseWriter: w}
 		http.Error(sw, msg, status)
 		if sw.err != nil {
-			extra = append(extra, "response_error", logcfg.Field(logcfg.RedactAddrs(sw.err.Error()), 256))
+			extra = append(extra, "response_error", logcfg.RedactedField(sw.err.Error(), 256))
 		}
 		done(status, n, stored, msg, extra...)
 	}
@@ -705,7 +705,7 @@ func (r streamResult) decodeFailure(err error, keyed bool) streamResult {
 	if _, ok := errors.AsType[*net.OpError](err); ok {
 		r.status = http.StatusBadRequest
 		r.msg = clientJSONError(err)
-		r.extra = []any{"body_error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256)}
+		r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), 256)}
 		return r
 	}
 	r.status, r.msg = http.StatusBadRequest, clientJSONError(err)

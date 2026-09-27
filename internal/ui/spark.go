@@ -3,7 +3,6 @@ package ui
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -52,18 +51,14 @@ const hexDigits = "0123456789abcdef"
 // fadeColor blends a hex color toward black by factor f (0..1). Non-hex
 // colors pass through untouched.
 func fadeColor(c lipgloss.Color, f float64) string {
-	s := string(c)
-	if !strings.HasPrefix(s, "#") || len(s) != 7 {
-		return s
-	}
-	v, err := strconv.ParseUint(s[1:], 16, 32)
-	if err != nil {
-		return s
+	r, g, b, ok := parseHexRGB(c)
+	if !ok {
+		return string(c)
 	}
 	return formatHexRGB(
-		uint64(float64(v>>16&0xff)*f),
-		uint64(float64(v>>8&0xff)*f),
-		uint64(float64(v&0xff)*f),
+		uint64(float64(r)*f),
+		uint64(float64(g)*f),
+		uint64(float64(b)*f),
 	)
 }
 
@@ -91,22 +86,16 @@ const minGraphicContrast = 3.0
 // the floor at all (non-hex encodings, colors darker than the background)
 // come back at full strength rather than half-hidden.
 func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
-	s := string(c)
-	if !strings.HasPrefix(s, "#") || len(s) != 7 {
+	r0, g0, b0, ok := parseHexRGB(c)
+	if !ok {
 		return c
 	}
-	v, err := strconv.ParseUint(s[1:], 16, 32)
-	if err != nil {
-		return c
-	}
-	r0 := float64(v >> 16 & 0xff)
-	g0 := float64(v >> 8 & 0xff)
-	b0 := float64(v & 0xff)
+	rf, gf, bf := float64(r0), float64(g0), float64(b0)
 
 	lumOf := func(factor float64) (float64, uint64, uint64, uint64) {
-		r := uint64(r0 * factor)
-		g := uint64(g0 * factor)
-		b := uint64(b0 * factor)
+		r := uint64(rf * factor)
+		g := uint64(gf * factor)
+		b := uint64(bf * factor)
 		lum := 0.2126*linearChannel[r] + 0.7152*linearChannel[g] + 0.0722*linearChannel[b]
 		return lum, r, g, b
 	}

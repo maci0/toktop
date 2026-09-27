@@ -178,6 +178,12 @@ func RedactAddrs(s string) string {
 	return remoteAddrPat.ReplaceAllStringFunc(s, Remote)
 }
 
+// RedactedField is [Field] on text that carries a peer address, which an error
+// from the ssh or http stacks does: the fold has to run before the cap and the
+// collapse, or a redacted address could be split across two lines by a payload
+// after it.
+func RedactedField(s string, n int) string { return Field(RedactAddrs(s), n) }
+
 // RedactHandler rewrites slog messages the way Remote rewrites the audit
 // line's remote attribute. http.Server.ErrorLog is a *log.Logger, so the
 // peer address arrives as text in the message, not as a structured attr.

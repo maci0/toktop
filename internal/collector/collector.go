@@ -370,15 +370,18 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	for i, r := range results {
 		ps, changes := c.providerSnapshot(c.providers[i], r, now, byPort)
 		for _, change := range changes {
-			switch {
-			case change.kind == changeSlow:
-				slow = append(slow, change)
-			case change.kind == changeFast:
-				fast = append(fast, change)
-			case ps.Err != "":
+			// One bucket per kind, and every kind is listed: a new boundary
+			// chooses its log level here rather than falling through to a
+			// default that quietly reports it at the wrong one.
+			switch change.kind {
+			case changeDown:
 				failed = append(failed, change)
-			default:
+			case changeUp:
 				recovered = append(recovered, change)
+			case changeSlow:
+				slow = append(slow, change)
+			case changeFast:
+				fast = append(fast, change)
 			}
 		}
 		snap.Providers = append(snap.Providers, ps)

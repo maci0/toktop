@@ -63,11 +63,20 @@ func githubToken() (string, error) {
 // an attack, and either way should not fill the disk. Var so tests can shrink it.
 var maxAssetBytes int64 = 256 << 20
 
+// maxChecksumsArchive bounds the checksums tarball as it is fetched. A release
+// ships one small text file inside it, so anything near this is a mistake or an
+// attack.
+const maxChecksumsArchive = 1 << 20
+
 // maxChecksumsDecoded bounds decompressed checksums-archive bytes. The
-// compressed fetch is already 1 MiB; without a decoded cap a gzip bomb
-// inside that envelope would expand while the tar walker skipped non-
+// compressed fetch is already maxChecksumsArchive; without a decoded cap a gzip
+// bomb inside that envelope would expand while the tar walker skipped non-
 // matching members.
 const maxChecksumsDecoded = 2 << 20
+
+// maxChecksumsListing bounds the checksums.txt member itself, which every
+// other member of the archive is skipped past.
+const maxChecksumsListing = 1 << 20
 
 // Release is the subset of a GitHub release that matters here. The asset
 // members are the only ones decoded: size and content_type are left out
@@ -308,7 +317,7 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 		return "", fmt.Errorf("release %s asset URL is not a GitHub download", rel.TagName)
 	}
 
-	archive, err := fetch(ctx, sumsURL, 1<<20)
+	archive, err := fetch(ctx, sumsURL, maxChecksumsArchive)
 	if err != nil {
 		return "", fmt.Errorf("cannot fetch checksums: %w", err)
 	}
@@ -600,7 +609,7 @@ func ChecksumListing(archive []byte) (string, error) {
 		if filepath.Base(h.Name) != "checksums.txt" {
 			continue
 		}
-		body, err := io.ReadAll(io.LimitReader(tr, 1<<20))
+		body, err := io.ReadAll(io.LimitReader(tr, maxChecksumsListing))
 		if err != nil {
 			return "", err
 		}
