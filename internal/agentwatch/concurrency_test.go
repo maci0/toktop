@@ -71,3 +71,45 @@ func TestConcurrentDiscoveryChurnAndReporting(t *testing.T) {
 	}
 	_ = core.AgentEvent{}
 }
+
+// SetNow and SetOnError write the two fields every tracker's goroutine reads
+// while it stamps an event, and the report path is on a tracker goroutine of
+// its own. A caller that installs a clock after Run has started (an embedder
+// pinning a timeline when the first event arrives, a demo handing over its
+// simulated clock late) therefore writes the clock field under the running
+// goroutines' feet. -race over this is the check that both writes take
+// clockMu.
+func TestSetNowAndOnErrorWhileReporting(t *testing.T) {
+	work, transcript := claudeHome(t)
+	w, _, tr := followClaude(t, work)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	read := make(chan struct{})
+	go func() {
+		defer close(read)
+		tr.watch.Run(ctx, time.Millisecond, func(s agentusage.Sample) { w.report(tr, s) })
+	}()
+
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		for i := range 200 {
+			appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 100+i))
+			time.Sleep(200 * time.Microsecond)
+		}
+	})
+	wg.Go(func() {
+		for i := range 400 {
+			w.SetNow(func() time.Time { return time.Unix(0, int64(i)) })
+			w.SetOnError(func(error) {})
+			time.Sleep(200 * time.Microsecond)
+		}
+	})
+	wg.Wait()
+	cancel()
+	select {
+	case <-read:
+	case <-time.After(30 * time.Second):
+		t.Fatal("the tracker goroutine did not return after cancel")
+	}
+}

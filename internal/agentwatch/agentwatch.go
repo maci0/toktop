@@ -59,7 +59,14 @@ type Watcher struct {
 	readEvery     time.Duration
 	// listAgents lists running agent processes. Nil means agentusage.Discover.
 	listAgents func() []agentusage.Process
-	now        func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
+
+	// clockMu guards the two fields SetNow and SetOnError write. Their reads
+	// are not confined to Run's goroutine: every tracker runs its own reader
+	// goroutine, and report stamps each event from the clock on that
+	// goroutine, so an unguarded write races every tracker still following an
+	// agent.
+	clockMu sync.Mutex
+	now     func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
 	// onError surfaces a condition the operator must see that Run cannot
 	// return. Nil disables reporting.
 	onError func(error)
@@ -101,7 +108,9 @@ func New(rec core.AgentRecorder, engines Engines) *Watcher {
 	}
 }
 
-// SetNow overrides the clock used to stamp recorded events. Call before Run.
+// SetNow overrides the clock used to stamp recorded events. Safe to call
+// while Run is going: the write is taken under the same lock every tracker's
+// goroutine reads it under.
 // Demo mode passes the simulated clock so transcript-derived events stay on
 // the seeded timeline. Attach "since" for database-backed agents stays wall
 // time: session stores record real timestamps, not the simulated ones.
@@ -109,12 +118,19 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
 	}
+	w.clockMu.Lock()
 	w.now = fn
+	w.clockMu.Unlock()
 }
 
 // SetOnError installs the sink for conditions Run cannot return. Pass nil to
-// disable reporting. Call before Run.
-func (w *Watcher) SetOnError(fn func(error)) { w.onError = fn }
+// disable reporting. Safe to call while Run is going, for the same reason
+// SetNow is: the write is taken under the lock engineError reads it under.
+func (w *Watcher) SetOnError(fn func(error)) {
+	w.clockMu.Lock()
+	w.onError = fn
+	w.clockMu.Unlock()
+}
 
 // engineError reports err, and repeats it only when it differs from the last
 // one reported. A misconfigured engine address fails on every discovery tick,
@@ -136,15 +152,38 @@ func (w *Watcher) engineError(err error) {
 	repeat := w.engineErr == err.Error()
 	w.engineErr = err.Error()
 	w.mu.Unlock()
-	if repeat || w.onError == nil {
+	if repeat {
 		return
 	}
-	w.onError(err)
+	w.reportError(err)
+}
+
+// reportError hands err to the installed sink, if there is one. The sink is
+// read under clockMu and called with it released: it is caller-supplied and
+// may reach back into this watcher.
+func (w *Watcher) reportError(err error) {
+	w.clockMu.Lock()
+	fn := w.onError
+	w.clockMu.Unlock()
+	if fn != nil {
+		fn(err)
+	}
 }
 
 // instant reads the injected clock, which the record path stamps from so a
 // transcript event lands on the same timeline as the sample that carried it.
-func (w *Watcher) instant() time.Time { return w.now() }
+// The clock is read under clockMu and called with it released, so a
+// caller-supplied clock that re-enters the watcher cannot deadlock against
+// this accessor.
+func (w *Watcher) instant() time.Time {
+	w.clockMu.Lock()
+	fn := w.now
+	w.clockMu.Unlock()
+	if fn == nil {
+		return time.Now()
+	}
+	return fn()
+}
 
 // Run follows agents until the context is canceled. Load the agent
 // definitions (agentusage.LoadDefinitions, as main does) before Run so a

@@ -2550,3 +2550,41 @@ func TestRefusedPostAuditsInFlightDepth(t *testing.T) {
 	pw.Close()
 	<-stalled
 }
+
+// SetNow writes the clock every handler stamps a missing or far-future
+// event timestamp with, and the handlers are one goroutine per connection,
+// none of which start when Serve does. A caller that installs a clock after
+// the endpoint is live (a demo handing over its simulated clock late) would
+// write the field under those goroutines' feet. -race over this is the check
+// that both sides of instant take nowMu.
+func TestSetNowWhileServing(t *testing.T) {
+	rec := &memRecorder{}
+	s, err := newServer("127.0.0.1:0", rec, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveIngest(t, s)
+	url := "http://" + s.Addr() + "/v1/events"
+
+	stop := make(chan struct{})
+	set := make(chan struct{})
+	go func() {
+		defer close(set)
+		for i := 0; ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			s.SetNow(func() time.Time { return time.Unix(0, int64(i)) })
+			time.Sleep(100 * time.Microsecond)
+		}
+	}()
+	for i := range 200 {
+		if code := post(t, url, `{"agent":"coder","output_tokens":1}`); code != http.StatusAccepted {
+			t.Fatalf("post %d: status %d", i, code)
+		}
+	}
+	close(stop)
+	<-set
+}

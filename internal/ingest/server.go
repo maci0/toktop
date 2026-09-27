@@ -20,6 +20,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"golang.org/x/text/unicode/norm"
@@ -31,12 +32,16 @@ import (
 // Server accepts POST /v1/events (single object or newline-delimited stream)
 // and GET or HEAD /healthz.
 type Server struct {
-	rec  core.AgentRecorder
-	now  func() time.Time // event stamps; defaults to time.Now. I/O deadlines stay wall-clock.
-	srv  http.Server
-	ln   net.Listener
-	addr string
-	log  *slog.Logger
+	rec core.AgentRecorder
+	// nowMu guards now, which every request goroutine reads through instant
+	// and SetNow writes. Without it a SetNow after Serve started would race
+	// the handler stamping the event in flight.
+	nowMu sync.RWMutex
+	now   func() time.Time // event stamps; defaults to time.Now. I/O deadlines stay wall-clock.
+	srv   http.Server
+	ln    net.Listener
+	addr  string
+	log   *slog.Logger
 }
 
 // idleTimeout reaps keep-alive connections that sit between requests. Without
@@ -311,18 +316,24 @@ func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // SetNow overrides the clock used to stamp events that arrive without a
 // timestamp and to clamp far-future stamps. Request timeouts still use
-// wall time. Call before Serve. Demo mode passes the simulated clock so
-// harness POSTs stay on the seeded timeline.
+// wall time. Safe to call while Serve is running: the write is taken under
+// the same lock every handler reads it under. Demo mode passes the simulated
+// clock so harness POSTs stay on the seeded timeline.
 func (s *Server) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
 	}
+	s.nowMu.Lock()
 	s.now = fn
+	s.nowMu.Unlock()
 }
 
 func (s *Server) instant() time.Time {
-	if s.now != nil {
-		return s.now()
+	s.nowMu.RLock()
+	fn := s.now
+	s.nowMu.RUnlock()
+	if fn != nil {
+		return fn()
 	}
 	return time.Now()
 }

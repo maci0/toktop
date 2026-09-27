@@ -126,6 +126,11 @@ var audit = logcfg.Logger
 // records the start of an outage once and its end once, rather than one line
 // per poll. A run lasting days would otherwise write a line every interval
 // for a tool that was uninstalled hours ago.
+//
+// An entry is never removed. The keys are the vendor CLIs this build looks
+// up, so the table is bounded at a handful, and dropping an entry on recovery
+// loses a failure a concurrent poll had just recorded: the next failure reads
+// as a fresh outage and the log says a tool failed twice for one run of it.
 var runState sync.Map // tool path -> *toolRun
 
 type toolRun struct {
@@ -170,7 +175,6 @@ func noteRunOK(path string) {
 	t.failed = false
 	downFor := time.Since(t.since)
 	t.mu.Unlock()
-	runState.Delete(path)
 	audit().Info("toktop: gpu vendor tool answering again",
 		"tool", logcfg.Field(path, 256),
 		"down_for", downFor.Round(time.Second))
