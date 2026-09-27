@@ -403,6 +403,12 @@ const maxEventSkew = 2 * time.Minute
 // successful read extends the deadline up to that end, so slow-but-alive
 // NDJSON streams keep working while silent ones are reaped. Both are vars so
 // tests can shrink them.
+// retryAfterSeconds is the delay every 503 from this endpoint advertises, in
+// whole seconds (RFC 9110 Retry-After). One constant because the refused POST
+// and the health probe must name the same wait: a client that waits what one
+// says and ignores the other retries faster than the slots free.
+const retryAfterSeconds = 1
+
 var (
 	maxEventLifetime = 10 * time.Minute
 	bodyIdleTimeout  = time.Minute
@@ -420,6 +426,7 @@ type progressBody struct {
 	io.ReadCloser
 	rc    *http.ResponseController
 	until time.Time
+	last  time.Time // the deadline the read that failed was armed with
 }
 
 func (b *progressBody) Read(p []byte) (int, error) {
@@ -427,8 +434,24 @@ func (b *progressBody) Read(p []byte) (int, error) {
 	if next.After(b.until) {
 		next = b.until
 	}
+	b.last = next
 	_ = b.rc.SetReadDeadline(next)
 	return b.ReadCloser.Read(p)
+}
+
+// stallReason names the bound a 408 broke on. The idle window and the
+// absolute lifetime are separate conditions with opposite fixes (send
+// sooner, send less), and they both surface as the same i/o timeout, so a
+// bare "request stalled" leaves the sender to guess which one it hit.
+func (b *progressBody) stallReason() string {
+	switch {
+	case b.last.IsZero():
+		return "request stalled before any read was armed"
+	case b.last.Before(b.until):
+		return fmt.Sprintf("request stalled: no body bytes for %s", bodyIdleTimeout)
+	default:
+		return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", maxEventLifetime)
+	}
 }
 
 // handleHealth answers the liveness probe. Plain text like every other
@@ -444,7 +467,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 		// The same Retry-After the refused POSTs carry: a 503 that names no
 		// delay leaves a client to invent one, and the slot frees as soon as a
 		// stalled body gives up.
-		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 		w.WriteHeader(http.StatusServiceUnavailable)
 		fmt.Fprintf(w, "degraded: %d/%d event streams in flight; events are being refused\n", in, cap(eventSlots))
 		return
@@ -495,7 +518,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	case eventSlots <- struct{}{}:
 		defer func() { <-eventSlots }()
 	default:
-		w.Header().Set("Retry-After", "1")
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
 		armWrite()
 		// in_flight beside the cap, so a run of these says how close the
 		// endpoint is to refusing everything rather than only that it did:
@@ -507,7 +530,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	}
 	until := time.Now().Add(maxEventLifetime)
 	_ = rc.SetReadDeadline(until) // covers reads before the first progress extension
-	r.Body = http.MaxBytesReader(w, &progressBody{ReadCloser: r.Body, rc: rc, until: until}, maxEventBody)
+	progress := &progressBody{ReadCloser: r.Body, rc: rc, until: until}
+	r.Body = http.MaxBytesReader(w, progress, maxEventBody)
 	br := bufio.NewReader(r.Body)
 	if lead, _ := br.Peek(3); len(lead) == 3 && lead[0] == 0xef && lead[1] == 0xbb && lead[2] == 0xbf {
 		_, _ = br.Discard(3)
@@ -564,7 +588,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if errors.Is(err, os.ErrDeadlineExceeded) {
-				fail(http.StatusRequestTimeout, "request stalled")
+				fail(http.StatusRequestTimeout, progress.stallReason())
 				return
 			}
 			if maxBytes, ok := errors.AsType[*http.MaxBytesError](err); ok {

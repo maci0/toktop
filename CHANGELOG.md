@@ -28,6 +28,9 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- A `POST /v1/events` that times out now says which bound broke: no body bytes
+  for a minute, or the 10 minute stream lifetime. Both arrived as the same
+  `408` reading "request stalled", and the two need opposite fixes.
 - toktop.ai answers a revalidation or a refused encoding before it builds a
   compressed copy of the page. A 304 and a 406 carry no body, and both waited
   on the brotli, zstd and gzip pipeline first. An isolate that only ever

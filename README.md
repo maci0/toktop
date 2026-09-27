@@ -288,7 +288,8 @@ recorded within the last 15 minutes) decodes fine and stores nothing, so the
 two counts differ
 on a retry after a lost 202. The same pair is on the POST's log line.
 Other statuses: `400` for malformed JSON or a bad `ts`, `408` when a stream
-stalls mid-body, and `413` past the 1 MiB body cap. `503` with
+stalls mid-body (the body names which bound broke: no bytes for a minute, or
+the 10 minute lifetime), and `413` past the 1 MiB body cap. `503` with
 `Retry-After: 1` means 64 bodies were already decoding, which is a pile-up
 and not a fault: wait the named second and resend the same request, under the
 same `Idempotency-Key` if it had one. A POST carrying an

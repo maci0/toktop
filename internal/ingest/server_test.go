@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"testing/iotest"
@@ -1159,6 +1160,45 @@ func TestIngestReapsStalledBody(t *testing.T) {
 	}
 }
 
+// The idle window and the absolute lifetime are opposite fixes (send sooner
+// versus send less) and both surface as the same i/o timeout, so the 408 body
+// has to say which bound broke: a bare "request stalled" leaves the sender to
+// guess which one its own client hit.
+func TestIngestStallNamesTheBoundThatBroke(t *testing.T) {
+	t.Run("idle window", func(t *testing.T) {
+		oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
+		maxEventLifetime, bodyIdleTimeout = time.Minute, 150*time.Millisecond
+		t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
+
+		s := startIngest(t, &memRecorder{})
+		conn := startPost(t, s.Addr())
+		defer conn.Close()
+		sendChunk(t, conn, `{"agent":"slow"`)
+		resp := readResponse(t, conn, 5*time.Second)
+		if !strings.Contains(resp, "150ms") {
+			t.Errorf("408 body names no idle bound: %q", resp)
+		}
+		if strings.Contains(resp, "lifetime") {
+			t.Errorf("408 blames the lifetime, not the idle window: %q", resp)
+		}
+	})
+
+	t.Run("absolute lifetime", func(t *testing.T) {
+		oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
+		maxEventLifetime, bodyIdleTimeout = 150*time.Millisecond, time.Minute
+		t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
+
+		s := startIngest(t, &memRecorder{})
+		conn := startPost(t, s.Addr())
+		defer conn.Close()
+		sendChunk(t, conn, `{"agent":"slow"`)
+		resp := readResponse(t, conn, 5*time.Second)
+		if !strings.Contains(resp, "lifetime") {
+			t.Errorf("408 body names no lifetime bound: %q", resp)
+		}
+	})
+}
+
 // A slow but progressing NDJSON stream stays under the idle deadline and
 // must be accepted in full.
 func TestIngestAcceptsSlowProgressingStream(t *testing.T) {
@@ -2261,6 +2301,64 @@ func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 	<-stalled
 	if code := post(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder","output_tokens":1}`); code != http.StatusAccepted {
 		t.Fatalf("status after the stalled request ended = %d, want 202", code)
+	}
+}
+
+// A sender that waits what the health probe says must not retry faster than
+// the refused POSTs make it, so the two 503s advertise one delay.
+func TestEveryRefusalCarriesTheSameRetryAfter(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
+
+	pr, pw := io.Pipe()
+	stalled := make(chan struct{})
+	go func() {
+		defer close(stalled)
+		defer pw.Close()
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
+		if err != nil {
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+	defer func() { pw.Close(); <-stalled }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(eventSlots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(eventSlots) == 0 {
+		t.Fatal("stalled POST never reached the decode loop")
+	}
+
+	want := strconv.Itoa(retryAfterSeconds)
+	for _, target := range []struct {
+		method, path string
+	}{
+		{http.MethodGet, "/healthz"},
+		{http.MethodPost, "/v1/events"},
+	} {
+		req, err := http.NewRequest(target.method, "http://"+s.Addr()+target.path,
+			strings.NewReader(`{"agent":"coder","output_tokens":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusServiceUnavailable {
+			t.Fatalf("%s %s = %d, want 503", target.method, target.path, resp.StatusCode)
+		}
+		if got := resp.Header.Get("Retry-After"); got != want {
+			t.Errorf("%s %s Retry-After = %q, want %q", target.method, target.path, got, want)
+		}
 	}
 }
 
