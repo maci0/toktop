@@ -72,6 +72,7 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "system_profiler", "SPDisplaysDataType", "-json")
 	cmd.WaitDelay = pipeGrace // a hung profiler must not hold the caller past its deadline
+	groupKill(cmd)            // the profiler is a wrapper whose children must not outlive it
 	out, err := cmd.Output()
 	if err != nil {
 		return nil

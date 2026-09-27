@@ -122,6 +122,13 @@ support channel (see SECURITY.md).
   reported success now records `dist/site.deployed` and a rollback moves it to
   `dist/site.rolled-back`, so a second rollback finds nothing of this tree's
   to undo, says so, and exits 0 without calling wrangler.
+- A tool toktop shells out for a deadline no longer leaves what it spawned
+  running past the deadline. The GPU vendor CLIs, the macOS process listing,
+  and the macOS agent discovery tools each run on a poll, and the kill that
+  fires when a tool hangs reached only the process toktop started: a
+  grandchild was reparented to init and kept running, one more per poll for as
+  long as the dashboard was up. Each of those commands now runs in its own
+  process group and is killed as a group.
 - `make site-rollback` waits for `/health` before it reports success, the way
   `make site-deploy` already did. A rollback that restored a Worker which
   never came up exited 0, so the only signal that the site was down was a

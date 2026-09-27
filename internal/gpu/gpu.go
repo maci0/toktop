@@ -87,6 +87,7 @@ func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
 	defer cancel()
 	cmd := exec.CommandContext(c, path, args...)
 	cmd.WaitDelay = pipeGrace
+	groupKill(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, false
