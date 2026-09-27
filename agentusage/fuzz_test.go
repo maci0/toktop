@@ -9,7 +9,8 @@ import (
 )
 
 // FuzzParseAgentLines drives every per-agent transcript line parser
-// (parseClaude, parseQwen, parseCodex, parseDsh and the two session-cwd readers) with
+// (parseClaude, parseQwen, parseCodex, parseDsh, parseKimi and the two
+// session-cwd readers) with
 // arbitrary bytes. Transcripts are files on disk whose records embed whatever
 // the model and its tools ingested, so a corrupted or hostile line must not be
 // able to poison a reading: no counter is ever negative (they are summed)

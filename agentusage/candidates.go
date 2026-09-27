@@ -345,7 +345,7 @@ func (w *Watcher) forgetIdle(live []string) {
 			keep[path] = struct{}{}
 		}
 	}
-	if w.ad.sessionCwd == nil {
+	if !w.ad.perFileOwner() {
 		for path, pre := range w.preexisting {
 			if pre {
 				keep[path] = struct{}{}

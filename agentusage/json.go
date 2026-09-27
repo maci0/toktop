@@ -58,6 +58,9 @@ var (
 	inputKeys = map[string]bool{
 		"input_tokens": true, "inputtokens": true, "prompt_tokens": true,
 		"prompttokens": true, "prompttokencount": true, "input": true,
+		// Kimi Code CLI's own spelling of the three prompt shares, so a
+		// definition pointed at one of its logs reads what the agent read.
+		"inputother": true, "inputcacheread": true, "inputcachecreation": true,
 	}
 	// Fields naming the working directory a record belongs to.
 	cwdKeys = map[string]bool{
