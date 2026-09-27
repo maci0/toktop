@@ -13,6 +13,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Changed
+
+- The feed panel's error line is rendered as the message arrives, and its
+  badge now reads "feed error" rather than "ingest down". The agent watch
+  reports through the same channel, so a monitored engine address that will
+  not parse was being shown as an ingest outage with a "restart toktop to
+  restore ingest" remedy that would not fix it.
+
+### Fixed
+
+- `toktop` exits 2 when every ssh target it was given fails to attach,
+  instead of starting a dashboard showing only local engines with the reason
+  on a stderr line the alternate screen hides.
+- A monitored engine address that fails, recovers, and fails again is
+  reported to the operator again. The first report silenced every recurrence
+  of the same message, including one that appeared after a real recovery.
+
 ### Added
 
 - A `--add` endpoint on plain `http://` whose host is not this machine is

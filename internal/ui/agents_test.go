@@ -252,8 +252,8 @@ func TestAgentsOnlyFeedMirrorsIngestStatus(t *testing.T) {
 	if strings.Contains(out, "POST http://127.0.0.1:8420") {
 		t.Errorf("agents-only dead ingest still advertised:\n%s", out)
 	}
-	if !strings.Contains(out, "ingest down") {
-		t.Errorf("agents-only missing ingest-down after feed death:\n%s", out)
+	if !strings.Contains(out, "feed error") {
+		t.Errorf("agents-only missing the feed-error badge after the feed died:\n%s", out)
 	}
 }
 

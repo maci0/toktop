@@ -1015,7 +1015,7 @@ func TestEmptyStateNamesIngestDown(t *testing.T) {
 		for _, agents := range []bool{false, true} {
 			m := New(Config{Version: "t", Agents: agents, IngestAddr: "127.0.0.1:8420"}, nil)
 			m.w, m.h, m.ready = width, minDashH, true
-			nm, _ := m.Update(feedDownMsg("http: Server closed"))
+			nm, _ := m.Update(feedDownMsg("ingest stopped: http: Server closed"))
 			m = nm.(Model)
 			out := strip(m.View())
 			for _, want := range []string{"ingest stopped", "http: Server closed", "restart toktop", "q quit"} {
@@ -1504,7 +1504,7 @@ func TestFeedDeathSurfacesInDashboard(t *testing.T) {
 		t.Fatalf("live feed lost its POST hint:\n%s", out)
 	}
 
-	feedErr <- "http: Server closed"
+	feedErr <- "ingest stopped: http: Server closed"
 	cmds := batchCmds(init)
 	if len(cmds) == 0 {
 		t.Fatal("Init returned no commands")
@@ -1526,7 +1526,7 @@ func TestFeedDeathSurfacesInDashboard(t *testing.T) {
 	}
 	nm, again := m.Update(got)
 	m = nm.(Model)
-	if m.feedDown != "http: Server closed" {
+	if m.feedDown != "ingest stopped: http: Server closed" {
 		t.Fatalf("feedDownMsg not recorded: %q", m.feedDown)
 	}
 	if again == nil {
@@ -1537,7 +1537,7 @@ func TestFeedDeathSurfacesInDashboard(t *testing.T) {
 	if strings.Contains(out, "POST http://127.0.0.1:8420") {
 		t.Errorf("dead endpoint still advertised:\n%s", out)
 	}
-	for _, want := range []string{"ingest down", "ingest stopped: http: Server closed"} {
+	for _, want := range []string{"feed error", "ingest stopped: http: Server closed"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("dashboard missing %q after feed death:\n%s", want, out)
 		}

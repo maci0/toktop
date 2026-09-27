@@ -87,7 +87,7 @@ func (m Model) renderEmpty() string {
 	case m.feedDown != "":
 		lines = append(lines, "")
 		lines = append(lines, m.feedEmptyLines(m.w-8)...)
-		lines = append(lines, dim("q quit, then restart toktop to restore ingest"))
+		lines = append(lines, dim("fix the cause named above, then q and restart toktop"))
 	case m.cfg.IngestAddr != "":
 		if !m.cfg.Agents {
 			lines = append(lines, "")

@@ -188,8 +188,9 @@ func (m Model) renderAgentsOnly() string {
 		feed = append(feed, m.feedEmptyLines(w)...)
 		if m.feedDown != "" {
 			// The line above says why; this is the way out, and the agents
-			// view has no setup card to carry it.
-			feed = append(feed, dim("q quit, then restart toktop to restore ingest"))
+			// view has no setup card to carry it. It names no subsystem: the
+			// remedy differs by cause, and the message above names the cause.
+			feed = append(feed, dim("fix the cause named above, then q and restart toktop"))
 		}
 	}
 

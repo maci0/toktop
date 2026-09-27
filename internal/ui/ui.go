@@ -26,10 +26,13 @@ type Config struct {
 	// Agents reports that local agent watching (--agents) is on: only then
 	// may empty-feed guidance promise that running agents are picked up.
 	Agents bool
-	// FeedErr receives one message if the ingest endpoint dies after startup.
+	// FeedErr receives one message the first time the agent event stream
+	// degrades after startup: the ingest endpoint dying, or the agent watch
+	// refusing to read a monitored engine's address. Every message names its
+	// own subsystem, because it is rendered verbatim in the feed panel.
 	// nil (or silent) means it is up: stderr is invisible under the alternate
 	// screen, so without this in-band signal the UI would advertise a dead
-	// endpoint forever.
+	// endpoint forever, or silently double-count against a bad address.
 	FeedErr <-chan string
 }
 
@@ -52,7 +55,7 @@ type Model struct {
 	aggLast         float64 // most recent aggregate output rate across engines
 	chartCompressed bool
 	probeReq        time.Time // manual probe awaiting its first result
-	feedDown        string    // set once the ingest endpoint has died
+	feedDown        string    // set once the agent event stream has degraded
 	notice          string    // one-shot explanation of a key that changed nothing
 	noticeAt        time.Time
 	// sum is the agent feed accounted once for the frame being drawn. The

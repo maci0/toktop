@@ -52,7 +52,11 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 		add("  " + styleWarn.Render("(paused)"))
 	}
 	if m.feedDown != "" {
-		add("  " + styleBad.Render("✗ ingest down"))
+		// Not "ingest down": the feed channel carries whatever took the agent
+		// event stream down, and a bad engine address reaches it beside a
+		// perfectly healthy ingest endpoint. The badge names the condition,
+		// not the subsystem the message itself identifies.
+		add("  " + styleBad.Render("✗ feed error"))
 	}
 	if statsN == 0 {
 		if s := agentSummary(rates); s != "" {
@@ -68,12 +72,18 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 }
 
 // feedEmptyLines is the empty AGENT FEED body: which knob fills this panel
-// is invisible from a bare "empty", and a dead ingest's reason is otherwise
+// is invisible from a bare "empty", and a dead feed's reason is otherwise
 // only on stderr, hidden under the alternate screen.
+//
+// The reason is rendered as it arrives. Every producer names its own
+// subsystem (main sends "ingest stopped: …" and "agent watch: …"), so a
+// prefix added here would name the ingest endpoint for a failure that has
+// nothing to do with it, and send the operator to restart a dashboard whose
+// endpoint is answering.
 func (m Model) feedEmptyLines(w int) []string {
 	switch {
 	case m.feedDown != "":
-		reason := clip(shorten(core.SanitizeText("ingest stopped: "+m.feedDown), w), w)
+		reason := clip(shorten(core.SanitizeText(m.feedDown), w), w)
 		return []string{styleBad.Render(reason)}
 	case m.cfg.Agents:
 		return []string{dim("no agent activity yet: agents running locally are picked up automatically")}

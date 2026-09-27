@@ -5,6 +5,7 @@ package agentwatch
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/netip"
 	"os"
@@ -786,5 +787,22 @@ func TestReportMixedScriptToolName(t *testing.T) {
 	}
 	if events[0].Agent != "anonymous" {
 		t.Errorf("Agent = %q, want %q for mixed-script name", events[0].Agent, "anonymous")
+	}
+}
+
+func TestEngineErrorRepeatsAfterRecovery(t *testing.T) {
+	w := New(nil, func() []string { return nil })
+	var got []string
+	w.SetOnError(func(err error) { got = append(got, err.Error()) })
+	bad := errors.New(`engine address "http://" is not a URL`)
+
+	w.engineError(bad)
+	w.engineError(bad) // still broken every tick: one report
+	w.engineError(nil) // a clean tick: the condition went away
+	w.engineError(bad) // and came back
+
+	want := []string{bad.Error(), bad.Error()}
+	if !slices.Equal(got, want) {
+		t.Errorf("reported %q, want %q", got, want)
 	}
 }

@@ -216,6 +216,16 @@ func main() {
 		}
 
 		var sysWrap func() core.SysSample
+		// A target that fails while others attach is a degraded run, not a
+		// failed one, and the reason is already on stderr. But when every
+		// target the operator named failed, the dashboard that comes up shows
+		// local engines only, and the one line explaining why is hidden under
+		// the alt screen: a typo'd host looks exactly like a host with no
+		// engines running. That is the same reasoning the --ingest branch
+		// below applies to an explicit listen address, so it gets the same
+		// treatment: refuse to start rather than start into a silent
+		// substitution.
+		attached, lastAttachErr := 0, error(nil)
 		for _, tgt := range targets {
 			// Only when set: an empty flag must keep the IdentityFile
 			// resolved from ~/.ssh/config by ParseTarget.
@@ -225,8 +235,10 @@ func main() {
 			rp, rsys, rerr := attachRemote(ctx, tgt)
 			if rerr != nil {
 				fmt.Fprintf(os.Stderr, "toktop: %v\n", rerr)
+				lastAttachErr = rerr
 				continue
 			}
+			attached++
 			providers = append(providers, rp...)
 			prev := sysWrap
 			sysWrap = func() core.SysSample {
@@ -241,6 +253,10 @@ func main() {
 			}
 			fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n",
 				len(rp), tgt.Host)
+		}
+		if len(targets) > 0 && attached == 0 {
+			fmt.Fprintf(os.Stderr, "toktop: no ssh target could be attached; last error: %v\n", lastAttachErr)
+			os.Exit(2)
 		}
 
 		engineAddrs = func() []string {
@@ -312,8 +328,12 @@ func main() {
 			go func() {
 				if err := srv.Serve(); err != nil {
 					fmt.Fprintf(os.Stderr, "toktop: ingest stopped: %v\n", err)
+					// The UI renders the message verbatim, so it names its
+					// own subsystem here: the same channel carries the agent
+					// watch's failures, and an unprefixed one read as a feed
+					// outage no matter what had actually stopped.
 					select { // the alt screen hides stderr; tell the UI too
-					case feedErr <- err.Error():
+					case feedErr <- "ingest stopped: " + err.Error():
 					default:
 					}
 				}

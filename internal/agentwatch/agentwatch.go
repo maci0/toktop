@@ -120,11 +120,19 @@ func (w *Watcher) SetOnError(fn func(error)) { w.onError = fn }
 // one reported. A misconfigured engine address fails on every discovery tick,
 // so an undeduplicated report would be a permanent error banner over a
 // condition the operator has already seen.
+//
+// A clean tick clears the latch, so a condition that recovers and then comes
+// back is reported again. Without that, an address fixed at runtime (a
+// gateway that finished starting, a forward that reconnected) and broken
+// again an hour later would be silenced by the first report: the operator
+// fixed it, saw the banner go, and is never told it is back.
 func (w *Watcher) engineError(err error) {
+	w.mu.Lock()
 	if err == nil {
+		w.engineErr = ""
+		w.mu.Unlock()
 		return
 	}
-	w.mu.Lock()
 	repeat := w.engineErr == err.Error()
 	w.engineErr = err.Error()
 	w.mu.Unlock()
