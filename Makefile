@@ -537,6 +537,28 @@ endef
 # not move the documented command leaves an operator logging in with, and then
 # deploying, a version the tree does not test against. Deploy-only, so a
 # rollback keeps working on a tree whose docs have moved.
+# ci.yml spells out go test / go vet / staticcheck instead of calling the
+# targets above, so every tag those targets pass has to be written on the
+# workflow line too. The zone tag is the one that bites: without it a test
+# binary resolves time.Local against the host's zone files, which is the
+# fallback the released binaries no longer have, so a test that passes under
+# `make test` can fail in CI on a runner without them, and neither run is the
+# artifact. Same shape as the biome schema and wrangler checks: a workflow
+# line that has drifted fails here, locally, before a push.
+#
+# Comment lines and step names are skipped: a comment or a `name:` may
+# mention a command it is not running. Every other line naming a go
+# toolchain command must carry the tag.
+WORKFLOWS := $(wildcard .github/workflows/*.yml)
+.PHONY: check-ci-tags
+check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not carry the zone tag
+	@missing=$$(awk '/^[[:space:]]*#/ || /^[[:space:]]*-?[[:space:]]*name:/ { next } /(^|[[:space:]])(go (test|vet|tool staticcheck)|staticcheck)[[:space:]]/ && $$0 !~ /$(ZONE_TAG)/ { print "  " FILENAME ":" FNR ": " $$0 }' $(WORKFLOWS)); \
+	if [ -n "$$missing" ]; then \
+		echo "make check-ci-tags: these workflow lines run go without -tags $(ZONE_TAG), so they analyze and test a different binary than 'make check' and 'make test':" >&2; \
+		echo "$$missing" >&2; \
+		exit 1; \
+	fi
+
 .PHONY: check-wrangler-doc
 check-wrangler-doc:
 	@grep -Fq 'wrangler@$(WRANGLER) login' CONTRIBUTING.md || { \
@@ -634,6 +656,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 
 .PHONY: check
 check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)
+	@$(MAKE) --no-print-directory check-ci-tags
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
 			echo "needs gofmt (run 'make fmt'):" >&2; echo "$$unformatted" >&2; exit 1; \

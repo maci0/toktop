@@ -167,6 +167,7 @@ weight, so a recapture that blows the budget fails there.
 | `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick` and `avifenc`) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command names the Makefile's `WRANGLER` pin (`site-deploy` runs it) |
+| `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
@@ -203,7 +204,14 @@ darwin/amd64, darwin/arm64, windows/amd64 and windows/arm64. Each
 cross-compile job also runs `go vet ./...` and staticcheck under its
 GOOS/GOARCH, so platform-specific files get the same static analysis as
 the host build. Both halves of the sqlite tag gate (`agentusage` with and
-without `-tags sqlite`) are vetted and staticchecked everywhere. Everything
+without `-tags sqlite`) are vetted and staticchecked everywhere. Those `go`
+lines are written out in ci.yml instead of calling the Makefile targets, so
+each carries the tags the targets pass, `timetzdata` above all: a test binary
+without the embedded zone database resolves `time.Local` against the host's
+zone files, which is the fallback the released binaries no longer have, and
+after that `make test` and CI are testing two different programs.
+`make check-ci-tags` fails on any such line that lost the tag; it runs in
+`make check` and in the Linux leg of the test job. Everything
 except the three-OS test matrix and the cross-compile job is one command
 locally:
 
