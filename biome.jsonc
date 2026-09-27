@@ -2,7 +2,9 @@
 // the repo, and it shipped with no analyzer at all, so the edge code that sets
 // every response header ran unchecked. The version pin lives in the Makefile
 // (BIOME), which CI and `make site-lint` both read, so a local run and a remote
-// run cannot pick different rule sets.
+// run cannot pick different rule sets. `make site-lint` fails when the version
+// here and the BIOME_VERSION it pins disagree, so a bump that moved only one of
+// the two does not land.
 {
   "$schema": "https://biomejs.dev/schemas/2.5.14/schema.json",
   // The jsonc entries are the site config and this file: they are the only

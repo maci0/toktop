@@ -47,7 +47,8 @@ GOVULNCHECK := golang.org/x/vuln/cmd/govulncheck@v1.7.0
 SBOM_TOOL   := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
 # bunx, not a package.json: the Worker ships with no npm dependencies, and a
 # manifest plus lockfile would exist only to pin this one linter.
-BIOME       := @biomejs/biome@2.5.14
+BIOME_VERSION := 2.5.14
+BIOME         := @biomejs/biome@$(BIOME_VERSION)
 # Cloudflare deploy tool for site/. Deploying with whatever `wrangler` a
 # machine happens to have installed (or a bare `cf deploy`) makes the upload
 # depend on PATH, so the pin is named here and every deploy path reads it.
@@ -431,8 +432,16 @@ require-bun:
 site-check: require-bun ## bun test the Cloudflare Worker in site/ (CI parity)
 	bun test site/
 
+# biome.jsonc names the schema of the version BIOME_VERSION pins, so the pin
+# appears twice in the tree. The guard is what keeps the two from disagreeing
+# after a bump: an editor would check the old rules while the gate enforced the
+# new ones, and nothing else reads the schema URL.
 .PHONY: site-lint
 site-lint: require-bun ## biome format-check and lint the files biome.jsonc includes, at the BIOME pin (CI parity)
+	@grep -Fq '"$$schema": "https://biomejs.dev/schemas/$(BIOME_VERSION)/schema.json"' biome.jsonc || { \
+		echo "make site-lint: the biome.jsonc schema URL does not name biome $(BIOME_VERSION); the pin and the schema must move together" >&2; \
+		exit 1; \
+	}
 	bunx $(BIOME) check
 
 .PHONY: site-fmt
@@ -527,10 +536,13 @@ require-uv: ## fail unless uv is on PATH at or above UV_MIN
 		echo "make: uv is not on PATH (need >= $(UV_MIN); pins are scripts/requirements-dev.txt)" >&2; \
 		exit 1; \
 	}
-	@have=$$(uv --version | awk '{print $$2}'); \
-	$(UV_TOO_OLD); \
+# Definition and call in one shell: a second recipe line is a second shell,
+# uv_too_old is undefined there, "command not found" is a false condition, and
+# the version floor then passed anything.
+	@$(UV_TOO_OLD); \
+	have=$$(uv --version | awk '{print $$2}'); \
 	if uv_too_old "$$have"; then \
-		echo "make scripts-check: uv $$have on PATH, need >= $(UV_MIN) (CI installs $(UV_MIN))" >&2; \
+		echo "make scripts-env: uv $$have on PATH, need >= $(UV_MIN) (CI installs $(UV_MIN))" >&2; \
 		exit 1; \
 	fi
 
