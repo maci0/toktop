@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 
 	"github.com/klauspost/compress/zstd"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // dsh's default session log is concatenated independent Zstandard frames
@@ -184,8 +186,20 @@ func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values
 		return nil, 0, false
 	}
 	plain, n, err := decodeZstdPrefix(src)
-	if err != nil && n == 0 {
-		return nil, 0, false
+	if err != nil {
+		if n == 0 {
+			return nil, 0, false
+		}
+		// A complete frame failed to decode partway into the window. The
+		// frames before it are good and the offset stops at the bad one, so
+		// the walk stays in sync; what is lost is every record from here on,
+		// on this poll and every poll after it, because the same frame is
+		// read again. Nothing downstream can tell that from an idle session,
+		// so the frame is named.
+		audit().Warn("agent transcript frame failed to decode",
+			"path", core.RedactHome(path),
+			"offset", off+int64(n),
+			"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 	}
 	head := w.zstdCarry[path]
 	w.zstdCarry[path] = nil
@@ -253,7 +267,17 @@ func (w *Watcher) ownsZstd(path string, f *os.File) (mine, decided bool) {
 	if n == 0 {
 		return false, false
 	}
-	plain, consumed, _ := decodeZstdPrefix(buf[:n])
+	plain, consumed, derr := decodeZstdPrefix(buf[:n])
+	if derr != nil && consumed > 0 {
+		// A session cannot be attributed to a directory when a frame in the
+		// middle of the window will not decode. The header was still read, so
+		// the answer is reported as not mine rather than as unknown, and the
+		// frame is named so the reason is not invisible.
+		audit().Warn("agent transcript frame failed to decode",
+			"path", core.RedactHome(path),
+			"offset", consumed,
+			"error", core.RedactHome(core.Snippet([]byte(derr.Error()))))
+	}
 	if consumed == 0 {
 		return false, false
 	}

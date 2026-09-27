@@ -158,7 +158,9 @@ const crushSessionsSinceQuery = crushSessionsQuery + `
 // nothing. Skipping it instead would leave the attach baseline without that
 // store's counts, and every pre-attach session in it would be credited to this
 // attach as growth the first time it does read. A transient SQLite lock
-// therefore costs a poll, not a wrong number.
+// therefore costs a poll, not a wrong number. A store that does not exist is
+// not a failure at all; one that exists and will not read is audited, because
+// reporting nothing for it forever is what an idle agent looks like.
 //
 // A zero since reads every session (the attach baseline). After that, only
 // rows touched since attach: idle history is not re-scanned on every poll.
@@ -177,6 +179,9 @@ func (crushDBSource) sessions(dirs []string, since time.Time) (map[string]map[st
 func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, bool) {
 	db, err := openReadOnly(path)
 	if err != nil {
+		if !storeAbsent(path) {
+			auditStoreRead("crush", path, err)
+		}
 		return nil, false
 	}
 	defer db.Close()
@@ -193,6 +198,9 @@ func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, 
 	}
 	rows, err := db.QueryContext(ctx, query, args...)
 	if err != nil {
+		if !storeAbsent(path) {
+			auditStoreRead("crush", path, err)
+		}
 		return nil, false
 	}
 	defer rows.Close()
@@ -202,6 +210,7 @@ func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, 
 		var id string
 		var n, in sql.NullInt64
 		if err := rows.Scan(&id, &n, &in); err != nil {
+			auditStoreRead("crush", path, err)
 			return nil, false
 		}
 		c := sessionCounts{output: counter(n.Int64), input: counter(in.Int64)}
@@ -210,6 +219,7 @@ func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, 
 		}
 	}
 	if err := rows.Err(); err != nil {
+		auditStoreRead("crush", path, err)
 		return nil, false
 	}
 	return out, true

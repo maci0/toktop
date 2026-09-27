@@ -963,6 +963,66 @@ func TestForwardDialTimesOutOnSilentPeer(t *testing.T) {
 	}
 }
 
+// A forward that cannot reach the remote engine used to close the local socket
+// with the reason dropped: the dashboard then showed the local engine refusing
+// a connection it never made, and nothing said why. The audit line is the only
+// record, and one per poll for a permanently down engine would bury it, so
+// repeat failures inside the interval are throttled to none.
+func TestForwardFailureIsAuditedAndThrottled(t *testing.T) {
+	withKnownHosts(t)
+	old := forwardDialTimeout
+	forwardDialTimeout = 100 * time.Millisecond
+	t.Cleanup(func() { forwardDialTimeout = old })
+	buf := captureAudit(t)
+
+	srv := newSilentSSHServer(t)
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	defer cli.Close()
+
+	fwd, err := cli.Forward([]int{1})
+	if err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	laddr := net.JoinHostPort("127.0.0.1", strconv.Itoa(fwd[1]))
+
+	drain := func() {
+		c, err := net.Dial("tcp", laddr)
+		if err != nil {
+			t.Fatalf("local forward dial: %v", err)
+		}
+		defer c.Close()
+		c.SetReadDeadline(time.Now().Add(2 * time.Second))
+		if _, err := c.Read(make([]byte, 1)); err == nil {
+			t.Fatal("hung remote Dial left the local connection open")
+		}
+	}
+	drain()
+
+	// The relay goroutine writes the line after the local socket closes, so
+	// wait for it rather than racing the scheduler.
+	var got []string
+	for deadline := time.Now().Add(2 * time.Second); len(got) == 0; {
+		if time.Now().After(deadline) {
+			t.Fatal("no forward failure line in the audit log: " + buf.String())
+		}
+		time.Sleep(10 * time.Millisecond)
+		got = linesWith(buf, "ssh forward failed")
+	}
+	if !strings.Contains(got[0], "forwarded_port=1") {
+		t.Fatalf("forward failure line = %q, want the forwarded port named", got[0])
+	}
+
+	buf.Reset()
+	drain()
+	time.Sleep(100 * time.Millisecond)
+	if again := linesWith(buf, "ssh forward failed"); len(again) != 0 {
+		t.Fatalf("second failure inside the interval wrote %d line(s), want 0: %v", len(again), again)
+	}
+}
+
 // connLost tags connection-death errors so callers can distinguish a dead
 // tunnel from a transient hiccup; the original cause must stay unwrappable.
 func TestConnLostClassification(t *testing.T) {

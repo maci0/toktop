@@ -8,6 +8,7 @@ package agentusage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -148,11 +149,16 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 	if o.path == "" || len(dirs) == 0 {
 		return values{}, false
 	}
-	// mode=ro leaves the database alone; a missing or unreadable one is an
-	// answer ("nothing to report"), not an error worth surfacing, since most
-	// machines running this have no opencode at all.
+	// mode=ro leaves the database alone; a missing one is an answer ("nothing
+	// to report"), not an error worth surfacing, since most machines running
+	// this have no opencode at all. A store that is present and unreadable is
+	// a different thing: it reports nothing forever, which the dashboard
+	// renders as an idle agent, so it is audited.
 	db, err := openReadOnly(o.path)
 	if err != nil {
+		if !storeAbsent(o.path) {
+			auditStoreRead("opencode", o.path, err)
+		}
 		return values{}, false
 	}
 	defer db.Close()
@@ -174,6 +180,9 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 	var out, thinking, total, input sql.NullInt64
 	row := db.QueryRowContext(ctx, usageQueryFor(len(dirs)), args...)
 	if err := row.Scan(&out, &thinking, &total, &input); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) && !storeAbsent(o.path) {
+			auditStoreRead("opencode", o.path, err)
+		}
 		return values{}, false
 	}
 	v := values{

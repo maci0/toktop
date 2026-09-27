@@ -63,6 +63,13 @@ type Client struct {
 
 	connectedAt   time.Time     // when the handshake finished, for the drop line's uptime
 	keepaliveDone chan struct{} // closed when the keepalive goroutine exits
+
+	// forwardWarnMu guards forwardWarnAt, which holds the unix nanosecond of
+	// the last audited failure per forwarded port. A remote engine that is
+	// down for the length of a run then reports at forwardWarnInterval
+	// instead of once per dashboard poll.
+	forwardWarnMu sync.Mutex
+	forwardWarnAt map[int]int64
 }
 
 // Done fires when the connection drops for any reason, including Close.
@@ -673,15 +680,64 @@ func (c *Client) relay(l net.Listener, rport int) {
 			defer cancel()
 			remote, derr := c.conn.DialContext(ctx, "tcp", target)
 			if derr != nil {
+				// A forward that cannot reach the remote engine closes the
+				// local socket with the reason lost, so the dashboard shows
+				// the local engine refusing a connection it never made. The
+				// rate limit keeps a permanently down engine from writing one
+				// line per poll.
+				c.auditForwardFailure(rport, derr)
 				return
 			}
 			defer remote.Close()
 			piped := make(chan struct{}, 2)
-			go func() { io.Copy(remote, local); piped <- struct{}{} }()
-			go func() { io.Copy(local, remote); piped <- struct{}{} }()
+			go func() {
+				_, cerr := io.Copy(remote, local)
+				if cerr != nil {
+					c.auditForwardFailure(rport, cerr)
+				}
+				piped <- struct{}{}
+			}()
+			go func() {
+				_, cerr := io.Copy(local, remote)
+				if cerr != nil {
+					c.auditForwardFailure(rport, cerr)
+				}
+				piped <- struct{}{}
+			}()
 			<-piped
 		}(local)
 	}
+}
+
+// forwardWarnInterval is the shortest gap between two forwarded-port failure
+// lines for the same port. The relay is entered once per local connection, and
+// the dashboard opens one per poll, so an unthrottled line would be one per
+// poll for as long as the remote engine stayed down.
+const forwardWarnInterval = time.Minute
+
+// auditForwardFailure records that a forwarded port could not be piped, at
+// most once per forwardWarnInterval per port. The port and the remote target
+// name what failed; the cause is the transport's own error, because "dial
+// tcp: connection refused" and "connection lost" call for different fixes and
+// the local dashboard reports both as a refused connection.
+func (c *Client) auditForwardFailure(rport int, err error) {
+	now := time.Now().UnixNano()
+	c.forwardWarnMu.Lock()
+	last := c.forwardWarnAt[rport]
+	if last != 0 && now-last < int64(forwardWarnInterval) {
+		c.forwardWarnMu.Unlock()
+		return
+	}
+	if c.forwardWarnAt == nil {
+		c.forwardWarnAt = make(map[int]int64)
+	}
+	c.forwardWarnAt[rport] = now
+	c.forwardWarnMu.Unlock()
+	audit().Warn("toktop: ssh forward failed",
+		"target", logField(c.Target.userHost(), 256),
+		"port", c.Target.Port,
+		"forwarded_port", rport,
+		"error", logField(err.Error(), 256))
 }
 
 // closeListeners reclaims every local forward listener (and thereby its relay

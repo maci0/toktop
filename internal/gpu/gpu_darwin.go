@@ -5,6 +5,7 @@ package gpu
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os/exec"
 	"slices"
@@ -83,13 +84,18 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 		noteRunFailure("system_profiler", err)
 		return nil
 	}
-	noteRunOK("system_profiler")
 	var doc struct {
 		Displays []map[string]any `json:"SPDisplaysDataType"`
 	}
-	if json.Unmarshal(out, &doc) != nil {
+	// Decoded before the tool is marked healthy. A profiler that exits 0 with
+	// output this build cannot read is not a working profiler, and clearing
+	// the recorded failure first would report "system_profiler answering
+	// again" and then leave the Mac with no GPU row for the whole session.
+	if uerr := json.Unmarshal(out, &doc); uerr != nil {
+		noteRunFailure("system_profiler", fmt.Errorf("output is not SPDisplaysDataType JSON: %w", uerr))
 		return nil
 	}
+	noteRunOK("system_profiler")
 	var devs []core.GPUDevice
 	for _, d := range doc.Displays {
 		dev, ok := appleGPUFromDisplay(d)

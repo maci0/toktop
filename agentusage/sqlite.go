@@ -7,9 +7,14 @@ package agentusage
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"strings"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 
 	_ "modernc.org/sqlite" // pure Go driver: no cgo, so cross-compilation still works
 )
@@ -79,4 +84,25 @@ func openReadOnly(path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	db.SetMaxIdleConns(1)
 	return db, nil
+}
+
+// storeAbsent reports whether a store that failed to read is simply not there.
+// A machine without the agent installed has no database, and that is an answer
+// rather than a fault worth a log line. Any other cause is not: a store that
+// exists and cannot be read reports no usage forever, which reads on the
+// dashboard exactly like an idle agent.
+func storeAbsent(path string) bool {
+	_, err := os.Stat(path)
+	return errors.Is(err, fs.ErrNotExist)
+}
+
+// auditStoreRead records a read failure against a store that does exist. It
+// names the agent and the store so the operator can tell a corrupt or
+// permission-denied database from an idle agent, and keeps the driver's message
+// as the cause rather than restating the failure without it.
+func auditStoreRead(agent, path string, err error) {
+	audit().Warn("agent usage store read failed",
+		"agent", agent,
+		"path", core.RedactHome(path),
+		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 }

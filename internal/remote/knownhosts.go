@@ -411,7 +411,16 @@ func replaceFile(tmpName, path string) error {
 		}
 		return rerr
 	}
-	_ = os.Remove(displaced)
+	if rerr := os.Remove(displaced); rerr != nil && !os.IsNotExist(rerr) {
+		// The new store is in place, so this is not a failed write and the
+		// caller must not be told the write failed. It is not nothing
+		// either: readKnownHosts falls back to the displaced copy whenever
+		// the store itself is missing, so a leftover nobody could delete
+		// would be handed back as the operator's pins on some later run.
+		audit().Warn("toktop: known_hosts backup left behind",
+			"path", logField(displaced, 256),
+			"error", logField(rerr.Error(), 256))
+	}
 	core.SyncDir(filepath.Dir(path))
 	return nil
 }

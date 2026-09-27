@@ -551,6 +551,19 @@ func TestLoadAgentDefs(t *testing.T) {
 			t.Fatalf("defined agent missing from %v", agentusage.Agents())
 		}
 	})
+
+	t.Run("no home directory is an error, not a silent skip", func(t *testing.T) {
+		t.Setenv("GAUNTLET_HOME", "")
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		err := loadAgentDefs()
+		if err == nil {
+			t.Fatal("loadAgentDefs() = nil, want an error when the home directory cannot be found")
+		}
+		if !strings.Contains(err.Error(), "home directory") {
+			t.Fatalf("loadAgentDefs() = %v, want the cause named", err)
+		}
+	})
 }
 
 func TestUsage(t *testing.T) {

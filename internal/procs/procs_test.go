@@ -1,11 +1,14 @@
 package procs
 
 import (
+	"bytes"
 	"errors"
+	"log/slog"
 	"math"
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -443,6 +446,80 @@ func TestSnapshotErrorThrottled(t *testing.T) {
 	if calls != 1 {
 		t.Fatalf("error was not throttled by refreshMin: calls = %d, want 1", calls)
 	}
+}
+
+// A listing error with nothing cached returns an empty slice, which the UI
+// renders as a blank process panel. A host that can never list (no PowerShell
+// on Windows, no /proc) is indistinguishable from a host running no engines
+// unless the failure is recorded, so the first such failure is audited and a
+// later one that has a snapshot to fall back on is not.
+func TestSnapshotErrorAuditedWhenNoCache(t *testing.T) {
+	orig := platformList
+	t.Cleanup(func() { platformList = orig })
+
+	buf := &syncBuffer{}
+	oldAudit := audit
+	audit = func() *slog.Logger {
+		return slog.New(slog.NewTextHandler(buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+	t.Cleanup(func() { audit = oldAudit })
+
+	fail := errors.New("no PowerShell implementation present")
+	platformList = func() ([]raw, error) { return nil, fail }
+	s := NewSampler()
+	s.refreshMin = 0
+	if got := s.SnapshotAt(time.Now()); len(got) != 0 {
+		t.Fatalf("snapshot with no cache = %+v, want empty", got)
+	}
+	line := buf.String()
+	if !strings.Contains(line, "process listing failed") {
+		t.Fatalf("no audit line for a listing with no fallback: %s", line)
+	}
+	if !strings.Contains(line, "no PowerShell") {
+		t.Fatalf("audit line lost the cause: %s", line)
+	}
+
+	// With a snapshot to fall back on, the failure is a transient blip and
+	// the throttled sweep that returns stale processes must stay quiet.
+	buf.Reset()
+	platformList = func() ([]raw, error) {
+		return []raw{annotateRaw(raw{pid: 42, name: "ollama", args: []string{"ollama", "serve"}})}, nil
+	}
+	_ = s.SnapshotAt(time.Now())
+	platformList = func() ([]raw, error) { return nil, fail }
+	if got := s.SnapshotAt(time.Now()); len(got) != 1 {
+		t.Fatalf("snapshot after a failure = %+v, want the last good one", got)
+	}
+	if line := buf.String(); strings.Contains(line, "process listing failed") {
+		t.Fatalf("a failure with a snapshot to return was audited: %s", line)
+	}
+}
+
+// syncBuffer is the bytes.Buffer the audit logger writes through, with the
+// lock a plain one lacks. A sweep runs on the calling goroutine, so nothing
+// writes concurrently here, but the handler is shared with whatever the
+// package's own goroutines log.
+type syncBuffer struct {
+	mu sync.Mutex
+	b  bytes.Buffer
+}
+
+func (s *syncBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.Write(p)
+}
+
+func (s *syncBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.b.String()
+}
+
+func (s *syncBuffer) Reset() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.b.Reset()
 }
 
 // The Windows lister names a PowerShell that must exist on the host. Which of

@@ -109,6 +109,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- Failures that reported "nothing happened" now reach the audit log. A crush
+  or opencode store that exists and cannot be read, a dsh transcript frame
+  that will not decode, a process listing with no last good snapshot, a
+  tunneled port that cannot be dialed, and a known_hosts backup that could
+  not be deleted each wrote one line naming the resource and the cause
+  instead of leaving a blank panel or a quiet agent behind. A store that is
+  simply not installed stays silent: that is an answer, not a fault.
+
+- `--agents` under a stripped environment (no home directory, no absolute
+  `GAUNTLET_HOME`) now names the cause and exits 2 instead of starting with
+  every in-house agent missing from the watch.
+
 - `--probe` under `--demo` ran off the wall clock, so a run carrying a seed
   and an origin stopped replaying. Auto-probe fired from a real ticker while
   every other value came off the simulated timeline, so how many probe waves

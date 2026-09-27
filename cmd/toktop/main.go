@@ -640,10 +640,15 @@ func warnUnknownEnv() {
 // case; a malformed or unreadable one is returned so the caller can refuse to
 // start: agents silently missing from the watch look exactly like agents
 // doing nothing.
+//
+// An empty path is the home directory lookup failing inside DefinitionsPath.
+// It is an error, not an absent file: without the path no agents file is read
+// at all, and a startup that says nothing about it leaves the operator looking
+// at a watch that reports no in-house agents for the whole run.
 func loadAgentDefs() error {
 	path := agentusage.DefinitionsPath()
 	if path == "" {
-		return nil
+		return errors.New("cannot locate agents.json: no home directory and no absolute GAUNTLET_HOME")
 	}
 	return agentusage.LoadDefinitions(path)
 }

@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // Info is one sampled process relevant to engine discovery or accounting.
@@ -100,6 +101,16 @@ type Sampler struct {
 	cached     []Info
 }
 
+// audit builds the process logger for the lines this package writes. A var so
+// a test can point it at a handler it can read; the only call site is a
+// listing that has no last good snapshot to fall back on, so building it per
+// call costs nothing.
+var audit = logcfg.Logger
+
+// logField prepares a value for an audit attribute the way the remote and
+// ingest packages do: one line, home folded, capped.
+func logField(s string, n int) string { return logcfg.Field(logcfg.RedactAddrs(s), n) }
+
 // NewSampler returns a Sampler with the platform's default refresh window.
 // A caller that lists processes more than once in a run should share one
 // sampler: the underlying listing is throttled, and the CPU tick deltas it
@@ -155,7 +166,19 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	s.sweeping = false
 	defer s.mu.Unlock()
 	if err != nil {
-		return slices.Clone(s.cached) // last good snapshot; a transient listing error is not "no processes"
+		// Last good snapshot; a transient listing error is not "no
+		// processes". With nothing cached yet the returned slice is empty,
+		// which renders as a permanently blank process panel. A host whose
+		// process table cannot be read at all (no PowerShell on Windows, a
+		// /proc mount that is not there) then looks exactly like a host with
+		// no engines running, so that case is recorded. The listing is
+		// already throttled to one sweep per refreshMin, which bounds this
+		// line the same way the sweep itself is bounded.
+		if len(s.cached) == 0 {
+			audit().Warn("toktop: process listing failed, no snapshot to fall back on",
+				"error", logField(err.Error(), 256))
+		}
+		return slices.Clone(s.cached)
 	}
 
 	var dt float64
