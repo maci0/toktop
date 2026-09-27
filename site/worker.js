@@ -352,10 +352,25 @@ async function compressFormat(format) {
 
 const IDENTITY = new TextEncoder().encode(HTML);
 
+// The in-flight build, or the finished one. A promise, not the resolved
+// value: a cold isolate interleaves concurrent requests at every await, so a
+// value-only cache is a check-then-act that lets a whole burst of them run
+// the compression pipeline together. Assigning the promise synchronously
+// means the second caller awaits the first one's work instead of repeating it.
 let representations;
 
-async function pageRepresentations() {
-  if (representations) return representations;
+function pageRepresentations() {
+  representations ??= buildRepresentations().catch((err) => {
+    // Only completed bytes are ever cached, so a failed build has to clear
+    // the slot: a rejection left in place would answer every later request
+    // with the same failure until the isolate was recycled.
+    representations = undefined;
+    throw err;
+  });
+  return representations;
+}
+
+async function buildRepresentations() {
   const out = [{ coding: null, bytes: IDENTITY }];
   for (const [coding, format] of COMPRESSIBLE) {
     try {
@@ -364,7 +379,6 @@ async function pageRepresentations() {
       // Runtime lacks this format.
     }
   }
-  representations = out;
   return out;
 }
 

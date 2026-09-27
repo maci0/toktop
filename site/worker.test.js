@@ -53,8 +53,11 @@ test("compression starts in a request and only completed bytes are reused", asyn
     const bytes = new Uint8Array(await first.arrayBuffer());
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
     expect(new Uint8Array(await concurrent.arrayBuffer())).toEqual(bytes);
+    // One build for the pair, not one each: the cache holds the in-flight
+    // promise, so the concurrent request awaited this one's compression
+    // instead of starting a second pipeline.
     const afterFirst = constructions;
-    expect(afterFirst).toBe(6);
+    expect(afterFirst).toBe(3);
     const second = await freshWorker.fetch(request());
     expect(new Uint8Array(await second.arrayBuffer())).toEqual(bytes);
     expect(constructions).toBe(afterFirst);
