@@ -761,10 +761,11 @@ ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests
 	@$(MAKE) test RACE=1
 
 .PHONY: pr
-pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + scripts-check + repro-check-pair
+pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + check-wrangler-doc + scripts-check + repro-check-pair
 	@$(MAKE) ci
 	@$(MAKE) site-lint
 	@$(MAKE) site-check
+	@$(MAKE) check-wrangler-doc
 	@$(MAKE) scripts-check
 	@$(MAKE) repro-check-pair
 

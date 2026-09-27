@@ -169,7 +169,7 @@ weight, so a recapture that blows the budget fails there.
 | `make cover` | coverage summary per package into `dist/` |
 | `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
-| `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `scripts-check` + `repro-check-pair` |
+| `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
 | `make tidy` | run `go mod tidy` to clean up go.mod and go.sum |
@@ -181,7 +181,7 @@ weight, so a recapture that blows the budget fails there.
 | `make site-check` | `bun test site/` |
 | `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick`, `avifenc`, and the pinned `bun`) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
-| `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command names the Makefile's `WRANGLER` pin (`site-deploy` runs it) |
+| `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
@@ -240,7 +240,9 @@ both sqlite tag halves), `make site-lint` (biome formatter and linter over the
 Worker and the jsonc configs, at the `BIOME` pin in the Makefile, config in
 `biome.jsonc`; run
 `make site-fmt` to apply the formatter), `make site-check`
-(`bun test site/`), `make scripts-check`, and `make repro-check-pair`.
+(`bun test site/`), `make check-wrangler-doc` (the wrangler pin in the
+Makefile against the login and deploy commands the docs name),
+`make scripts-check`, and `make repro-check-pair`.
 `scripts-check` installs the exact versions in
 `scripts/requirements-dev.txt` into an isolated env under `dist/`
 (`make scripts-env`, black, ruff, mypy, plus the renderer deps). Pure-Python pins
