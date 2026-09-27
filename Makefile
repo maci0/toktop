@@ -44,6 +44,15 @@ SBOM_TOOL   := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
 # bunx, not a package.json: the Worker ships with no npm dependencies, and a
 # manifest plus lockfile would exist only to pin this one linter.
 BIOME       := @biomejs/biome@2.5.14
+# Cloudflare deploy tool for site/. Deploying with whatever `wrangler` a
+# machine happens to have installed (or a bare `cf deploy`) makes the upload
+# depend on PATH, so the pin is named here and every deploy path reads it.
+WRANGLER    := 4.126.0
+# The Worker answers /health with `ok`; site-deploy polls it until the new
+# version is serving or gives up.
+SITE_HEALTH_URL   := https://toktop.ai/health
+SITE_HEALTH_TRIES := 6
+SITE_HEALTH_WAIT  := 10
 LDFLAGS     := -s -w -buildid= -X main.version=$(VERSION)
 # gofmt from the selected toolchain, not a different major on PATH.
 GOFMT = $$($(GO) env GOROOT)/bin/gofmt
@@ -216,31 +225,49 @@ govulncheck: ## run govulncheck at the GOVULNCHECK pin (same pin as CI)
 	$(GO) run $(GOVULNCHECK) ./...
 	$(GO) run $(GOVULNCHECK) -tags sqlite ./...
 
-.PHONY: site-check
-site-check: ## bun test the Cloudflare Worker in site/ (CI parity)
+# Every site-* target depends on this: .bun-version is what CI installs
+# (bun-version-file), so a local run cannot check or deploy the site with
+# a different runtime than the merge gate did.
+.PHONY: require-bun
+require-bun:
 	@command -v bun >/dev/null 2>&1 || { \
-		echo "make site-check: bun is not on PATH (see .bun-version)" >&2; \
+		echo "make: bun is not on PATH (see .bun-version)" >&2; \
 		exit 1; \
 	}
 	@want=$$(tr -d ' \t\r\n' < .bun-version); have=$$(bun --version); \
-		if [ "$$have" != "$$want" ]; then \
-			echo "make site-check: bun $$have on PATH, .bun-version pins $$want" >&2; \
-			exit 1; \
-		fi
+	if [ "$$have" != "$$want" ]; then \
+		echo "make: bun $$have on PATH, .bun-version pins $$want" >&2; \
+		exit 1; \
+	fi
+
+.PHONY: site-check
+site-check: require-bun ## bun test the Cloudflare Worker in site/ (CI parity)
 	bun test site/
 
 .PHONY: site-lint
-site-lint: ## biome-lint site/ at the BIOME pin (CI parity)
-	@command -v bun >/dev/null 2>&1 || { \
-		echo "make site-lint: bun is not on PATH (see .bun-version)" >&2; \
-		exit 1; \
-	}
-	@want=$$(tr -d ' \t\r\n' < .bun-version); have=$$(bun --version); \
-		if [ "$$have" != "$$want" ]; then \
-			echo "make site-lint: bun $$have on PATH, .bun-version pins $$want" >&2; \
-			exit 1; \
-		fi
+site-lint: require-bun ## biome-lint site/ at the BIOME pin (CI parity)
 	bunx $(BIOME) lint site/
+
+# The site's only deployment step, and its undo. The /health poll is the
+# post-release verification, so an upload that never went live fails here
+# instead of being discovered by a visitor.
+.PHONY: site-deploy
+site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wait for /health
+	cd site && bunx wrangler@$(WRANGLER) deploy
+	@for i in $$(seq 1 $(SITE_HEALTH_TRIES)); do \
+		if [ "$$(curl -fsS --max-time 10 $(SITE_HEALTH_URL))" = "ok" ]; then \
+			echo "$(SITE_HEALTH_URL) answered ok after $${i} attempt(s)"; \
+			exit 0; \
+		fi; \
+		echo "attempt $$i/$(SITE_HEALTH_TRIES): no ok from $(SITE_HEALTH_URL)"; \
+		sleep $(SITE_HEALTH_WAIT); \
+	done; \
+	echo "deploy finished but $(SITE_HEALTH_URL) never answered ok; roll back with 'make site-rollback'" >&2; \
+	exit 1
+
+.PHONY: site-rollback
+site-rollback: require-bun ## roll the site Worker back to the version before the last deploy
+	cd site && bunx wrangler@$(WRANGLER) rollback
 
 .PHONY: fmt
 fmt: ## rewrite all Go files with gofmt (including simplifications)

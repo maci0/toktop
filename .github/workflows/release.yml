@@ -53,7 +53,6 @@ jobs:
             echo "refusing to release from tag '$GITHUB_REF_NAME'" >&2
             exit 1
           fi
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           prerelease=false
           if [[ "${VERSION%%+*}" == *-* ]]; then
             prerelease=true
@@ -89,6 +88,11 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ steps.build.outputs.prerelease == 'true' }}
           fail_on_unmatched_files: true
+          # Every artifact `make release` puts in dist/ and nothing else: the
+          # PLATFORMS binaries, the checksums tarball, the SBOM. Naming them
+          # here would duplicate the Makefile's platform list, and a platform
+          # added there would build, checksum and then never be published,
+          # with fail_on_unmatched_files silent about it.
           files: |
             dist/toktop_${{ env.VERSION }}_linux_amd64
             dist/toktop_${{ env.VERSION }}_linux_arm64

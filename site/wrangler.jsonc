@@ -1,5 +1,7 @@
-// Deploy with `bunx wrangler@4.126.0 deploy` (or `cf deploy`) from this directory.
-// The site is a single Worker, so there is nothing else to configure.
+// Deployed by `make site-deploy` from the repo root, which pins the wrangler
+// version in the Makefile and polls /health afterwards. `make site-rollback`
+// undoes a deploy. The site is a single Worker, so there is nothing else to
+// configure.
 {
   "name": "toktop-site",
   "main": "worker.js",

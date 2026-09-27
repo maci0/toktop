@@ -129,6 +129,8 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make scripts-check` | black and ruff over `scripts/` (same pins as CI) |
 | `make site-lint` | biome over `site/` at the Makefile `BIOME` pin (CI parity) |
 | `make site-check` | `bun test site/` |
+| `make site-deploy` | deploy the site Worker at the `WRANGLER` pin, then poll `/health` |
+| `make site-rollback` | roll the site Worker back to the version before the last deploy |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |

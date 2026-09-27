@@ -2,9 +2,16 @@
 
 One Worker, one page, no build step.
 
-```sh
-bunx wrangler@4.126.0 deploy  # from this directory; pin, not whatever npm returns today
 ```
+make site-deploy    # from the repo root: deploy, then wait for /health to answer ok
+make site-rollback  # undo the last deploy, back to the version before it
+```
+
+Both targets pin the wrangler version (the Makefile's `WRANGLER`, read by the
+target) and the bun version (`.bun-version`, the same file CI installs), so a
+deploy cannot depend on whatever happens to be on the operator's PATH. Deploy
+credentials come from the environment (`CLOUDFLARE_API_TOKEN`, or a `wrangler`
+login already on the machine); nothing about them is written to this repo.
 
 `worker.js` holds the HTML: it is a template literal, so there is nothing to
 bundle. The Worker answers `/health` with `ok` for uptime checks, serves the
