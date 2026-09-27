@@ -398,22 +398,34 @@ check-changelog: ## verify CHANGELOG.md contains release section and link for VE
 	@$(CHECK_VERSION)
 	@$(CHECK_CHANGELOG)
 
+# sbom first: checksums.txt has to cover the SBOM, or a downloaded SBOM is the
+# one release asset with nothing to verify it against.
 .PHONY: release
-release: check-changelog checksums sbom ## build every release platform and SBOM into dist/ with reproducible checksums
+release: check-changelog sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
 
 # dist/ is shared: cover writes coverage.out, vet-cross and repro-check write
 # subdirectories, and the release build writes binaries. release.yml publishes
 # every top-level file it finds there, so a coverage profile or an old note left
 # by an earlier local target would ride along as a release asset. test-dist
-# already drops $(BINARY)_*; this drops the rest. Both separators are kept so
-# the SBOM (toktop-sbom-*) survives whichever order a `make -j release` runs
-# the prerequisites in. Only regular files at depth 1 are touched, so the site
-# deploy lock (a directory) and any nested build output are left alone.
+# already drops this version's binaries; this drops the rest. The keep patterns
+# name $(VERSION) rather than the bare prefix, so a `make release` of one version
+# cannot checksum and publish another version's leftover, and both separators are
+# kept so the SBOM (toktop-sbom-*) survives whichever order a `make -j release`
+# runs the prerequisites in. The tarball is a packaging output, not a release
+# input: keeping it would fold yesterday's archive into today's checksums.txt,
+# which the tar step is about to overwrite. Only regular files at depth 1 are
+# touched, so the site deploy lock (a directory) and any nested build output are
+# left alone.
 .PHONY: dist-clean
-dist-clean: ## drop non-release files left in dist/ by earlier targets
+dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 	@mkdir -p $(DIST)
-	@find $(DIST) -maxdepth 1 -type f ! -name '$(BINARY)[_-]*' -delete
+	@find $(DIST) -maxdepth 1 -type f ! -name '$(BINARY)_$(VERSION)_*' ! -name '$(BINARY)-sbom-$(VERSION)*' -delete
+	@rm -f $(DIST)/$(BINARY)_$(VERSION)_checksums.tar.gz
 
+# The SBOM is named with a `-` where the binaries use `_`, so it needs its own
+# glob: the `$(BINARY)_*` list below would otherwise skip it. `make release`
+# runs `sbom` first; run on its own, the glob matches nothing and the list is
+# the binaries alone.
 .PHONY: checksums
 checksums: dist-clean buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
 	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
@@ -423,7 +435,7 @@ checksums: dist-clean buildinfo ## checksum the dist/ binaries into a byte-repro
 		if [ "$$1" = "$(BINARY)_*" ]; then \
 			echo "make: no $(BINARY)_* binaries in $(DIST)" >&2; exit 1; \
 		fi && \
-		set -- $$(printf '%s\n' "$$@" | sort) && \
+		set -- $$(printf '%s\n' "$$@" $$(ls -1 $(BINARY)-sbom-* 2>/dev/null || true) | sort) && \
 		if command -v sha256sum >/dev/null 2>&1; then \
 			sha256sum "$$@" > checksums.txt && sha256sum -c checksums.txt; \
 		else \
@@ -472,25 +484,42 @@ buildinfo: test-dist ## record the toolchain, commit, and flags behind dist/ int
 	} > $(DIST)/$(BINARY)_$(VERSION)_buildinfo.txt
 
 # The flags above promise byte-identical output; nothing tested that promise.
-# Build each platform twice with everything the Makefile neutralizes varied
-# between the passes: output path, build cache, locale, and timezone. A
-# timestamp leak or a surviving absolute path shows up as a diff, not as a
-# coincidence of one machine. diffoscope explains a failure when it is
-# installed; the diff itself is the verdict either way.
+# Build each platform twice and diff. The one input still free to leak is the
+# directory the compiler reads the source from, so pass b builds a copy of the
+# tree at a different absolute path; a surviving source path shows up as a
+# diff, not as a coincidence of one machine. Each pass also gets its own
+# GOCACHE, so neither can be answered out of the other's build cache. LC_ALL,
+# TZ, GOTOOLCHAIN, GOAMD64 and GOARM64 are already pinned globally above, so
+# re-setting them inside a pass would vary nothing. diffoscope explains a
+# failure when it is installed; the diff itself is the verdict either way.
+#
+# The copy is the working tree as it stands, not HEAD, so a dirty checkout is
+# compared with itself. $(DIST) is excluded so tar does not walk into the tree
+# it is writing; .scratch and .gauntlet are gitignored developer state that no
+# build step reads.
 .PHONY: repro-check
-repro-check: ## build every release platform twice under different path, cache, locale, and TZ, then diff
+repro-check: ## build every release platform twice, from two different source paths, then diff
 	@$(CHECK_VERSION)
 	@rm -rf $(DIST)/repro
+	@mkdir -p $(DIST)/repro/src-b
+	@$(TAR) --exclude=./$(DIST) --exclude=./.git --exclude=./.scratch --exclude=./.gauntlet -cf - . | \
+		$(TAR) -C $(DIST)/repro/src-b -xf -
+	@test -f $(DIST)/repro/src-b/go.mod || { \
+		echo "make: repro-check could not stage a source copy under $(DIST)/repro/src-b" >&2; \
+		exit 1; \
+	}
 	@for target in $(PLATFORMS); do \
 		goos=$${target%/*}; goarch=$${target#*/}; ext=""; \
 		if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
 		name="$(BINARY)_$(VERSION)_$${goos}_$${goarch}$${ext}"; \
 		for pass in a b; do \
 			mkdir -p $(DIST)/repro/$$pass/$${goos}_$${goarch} $(DIST)/repro/cache-$$pass; \
-			env LC_ALL=C TZ=UTC GOCACHE=$(CURDIR)/$(DIST)/repro/cache-$$pass \
+			if [ "$$pass" = a ]; then src=$(CURDIR); else src=$(CURDIR)/$(DIST)/repro/src-b; fi; \
+			( cd "$$src" && \
+				env GOCACHE=$(CURDIR)/$(DIST)/repro/cache-$$pass \
 				GOOS=$$goos GOARCH=$$goarch CGO_ENABLED=0 \
 				$(GO) build $(GOTAGS) $(GO_BUILDFLAGS) -ldflags "$(LDFLAGS)" \
-				-o $(DIST)/repro/$$pass/$${goos}_$${goarch}/$$name $(CMD) || exit 1; \
+				-o $(CURDIR)/$(DIST)/repro/$$pass/$${goos}_$${goarch}/$$name $(CMD) ) || exit 1; \
 		done; \
 		a=$(DIST)/repro/a/$${goos}_$${goarch}/$$name; \
 		b=$(DIST)/repro/b/$${goos}_$${goarch}/$$name; \

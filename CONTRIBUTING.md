@@ -155,7 +155,7 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
-| `make repro-check` | build every release platform twice, varying path, cache, locale, and TZ, then diff |
+| `make repro-check` | build every release platform twice, from two different source paths and two different build caches, then diff |
 | `make repro-check-pair` | the same gate over `REPRO_PLATFORMS`, the pair the PR gate and the release job both build twice |
 
 ## Before opening a PR
@@ -193,9 +193,14 @@ Keep platform-specific code behind build tags or runtime checks; the
 cross-compile job catches code that only builds, or only vets and lints
 cleanly, on the author's OS.
 
-A `repro` job builds two shipped platforms twice, varying the output path,
-the build cache, the locale, and the timezone between passes, and fails if
-the bytes differ. It is the guard on the reproducibility flags above, and
+A `repro` job builds two shipped platforms twice and fails if the bytes
+differ. The second pass builds a copy of the working tree staged under
+`dist/repro/src-b`, so the two passes read the same source from different
+absolute paths, and each pass gets its own `GOCACHE`. That is what puts
+`-trimpath` under test: locale, timezone, toolchain, and instruction-set
+baselines are already pinned globally in the Makefile, so varying them
+again inside a pass would vary nothing. It is the guard on the
+reproducibility flags above, and
 `make pr` runs it over the same pair, so a reproducibility failure shows up
 before the push rather than after it. The release job runs
 `make repro-check-pair` over that same pair, since neither job lists the
@@ -224,7 +229,10 @@ Push a tag `v*`: GitHub Actions tests (both halves of the sqlite tag gate),
 cross-compiles every platform, generates checksums, a buildinfo manifest, and
 a CycloneDX SBOM, and attaches binaries to the release. The buildinfo file
 records the commit, toolchain, and flags behind the bytes, so a rebuild
-attempt has something to match; it is listed in checksums.txt too. Versions with a prerelease suffix, such as
+attempt has something to match; it is listed in checksums.txt too, as is
+the SBOM. `make dist-clean` keeps only the files the current `VERSION`
+publishes, so a leftover binary, SBOM, or tarball from an earlier local
+`make release` cannot be checksummed and shipped with this one. Versions with a prerelease suffix, such as
 `v0.6.0-rc.1`, are marked as prereleases and excluded from the stable
 `toktop update` channel. Hyphens in build metadata do not mark a prerelease.
 The host-platform artifact is smoke-tested
