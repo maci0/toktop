@@ -99,6 +99,15 @@ support channel (see SECURITY.md).
   so `url=$(toktop update --check)` is a URL whether or not this build is
   already current. The "New release" and "is current" lines moved to stderr,
   where the update help already said progress belonged.
+- `toktop update` reads the checksums tar.gz the way the file is, not through
+  a transport coding. A host that served it with a `Content-Encoding: gzip`
+  of its own had the archive's own gzip stripped before the checksum list was
+  read, so the update failed with `gzip: invalid header` on a release that was
+  perfectly good.
+- The agent feed API section of the README names the `503` and its
+  `Retry-After: 1` that a POST gets while 64 bodies are already decoding.
+  The cap was described only in the release notes, so a sender reading the
+  endpoint contract had no status to handle and no backoff to honor.
 - A probe no longer reports throughput thousands of times too high when an
   engine's `eval_duration` is plausible only in microseconds or milliseconds
   and the decode itself is fast. The unit fit kept the raw value whenever

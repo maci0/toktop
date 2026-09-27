@@ -21,15 +21,13 @@ func NewOllama(base string) Provider {
 
 func (o *Ollama) poll(ctx context.Context) (*Metrics, error) {
 	m := &Metrics{}
-	// expires_at is not decoded: nothing reads it, and a time.Time field
-	// makes a daemon (or a proxy in front of one) that spells it as epoch
-	// seconds, an empty string, or a date without an offset fail the whole
+	// expires_at and size are not decoded: nothing reads either, and a field
+	// a daemon (or a proxy in front of one) spells its own way fails the whole
 	// decode, losing the model list and the version with it.
 	var ps struct {
 		Models []struct {
 			Name     string `json:"name"`
 			Model    string `json:"model"`
-			Size     uint64 `json:"size"`
 			SizeVRAM uint64 `json:"size_vram"`
 		} `json:"models"`
 	}

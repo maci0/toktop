@@ -109,8 +109,6 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	w.now = fn
 }
 
-// instant reads the injected clock, which the record path stamps from so a
-// transcript event lands on the same timeline as the sample that carried it.
 // SetOnError installs the sink for conditions Run cannot return. Pass nil to
 // disable reporting. Call before Run.
 func (w *Watcher) SetOnError(fn func(error)) { w.onError = fn }
@@ -133,6 +131,8 @@ func (w *Watcher) engineError(err error) {
 	w.onError(err)
 }
 
+// instant reads the injected clock, which the record path stamps from so a
+// transcript event lands on the same timeline as the sample that carried it.
 func (w *Watcher) instant() time.Time { return w.now() }
 
 // Run follows agents until the context is canceled. Call LoadDefinitions

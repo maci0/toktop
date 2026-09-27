@@ -506,7 +506,11 @@ func TestStoreMutexIsPerPath(t *testing.T) {
 	a.Lock()
 	defer a.Unlock()
 	done := make(chan struct{})
-	go func() { b.Lock(); b.Unlock(); close(done) }()
+	go func() {
+		b.Lock()
+		defer b.Unlock()
+		close(done)
+	}()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):

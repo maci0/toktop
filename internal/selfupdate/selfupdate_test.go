@@ -156,12 +156,10 @@ func TestApplyRejectsNonGitHubAssetURL(t *testing.T) {
 		struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
-			Size int64  `json:"size"`
 		}{Name: AssetName("9.9.9"), URL: "https://evil.example/asset"},
 		struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
-			Size int64  `json:"size"`
 		}{Name: checksumsName("9.9.9"), URL: "https://evil.example/checksums"},
 	)
 	if _, err := applyTo(t.Context(), rel, t.TempDir()+"/toktop"); err == nil ||

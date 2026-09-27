@@ -261,7 +261,10 @@ the stream is decoded, where `accepted` is what the wire carried and
 in the window) decodes fine and stores nothing, so the two counts differ
 on a retry after a lost 202. The same pair is on the POST's log line.
 Other statuses: `400` for malformed JSON or a bad `ts`, `408` when a stream
-stalls mid-body, and `413` past the 1 MiB body cap. A POST carrying an
+stalls mid-body, and `413` past the 1 MiB body cap. `503` with
+`Retry-After: 1` means 64 bodies were already decoding, which is a pile-up
+and not a fault: wait the named second and resend the same request, under the
+same `Idempotency-Key` if it had one. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
 refused with `403`, so a web page cannot forge rows into a running
 dashboard. Wrong methods on these paths answer `405` with `Allow` and a

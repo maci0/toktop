@@ -48,14 +48,16 @@ var maxAssetBytes int64 = 256 << 20
 // matching members.
 const maxChecksumsDecoded = 2 << 20
 
-// Release is the subset of a GitHub release that matters here.
+// Release is the subset of a GitHub release that matters here. The asset
+// members are the only ones decoded: size and content_type are left out
+// rather than carried unread, so a value spelled as a string or a float by
+// some proxy cannot fail the whole decode and take the release down with it.
 type Release struct {
 	TagName string `json:"tag_name"`
 	HTMLURL string `json:"html_url"`
 	Assets  []struct {
 		Name string `json:"name"`
 		URL  string `json:"browser_download_url"`
-		Size int64  `json:"size"`
 	} `json:"assets"`
 }
 
@@ -377,11 +379,17 @@ func install(tmpName, self string) error {
 	return nil
 }
 
+// fetch reads a release asset whole, refusing one past limit. It asks for
+// identity bytes: the asset is a tar.gz whose gzip framing belongs to the
+// file, and a host that also labels the body Content-Encoding: gzip would
+// otherwise have the transport decompress it, handing ChecksumListing a plain
+// tar it cannot read.
 func fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("Accept-Encoding", "identity")
 	resp, err := client.Do(req)
 	if err != nil {
 		if resp != nil {

@@ -50,9 +50,9 @@ file, no cache and no database. If you want the feed to disappear, quit.
   `*.githubusercontent.com` over HTTPS.
 - **The ingest endpoint** accepts events pushed to it. It binds
   `127.0.0.1:8420` by default, authenticates nobody, and prints a warning
-  when bound anywhere else. The `/v1/events` body is `agent`, `model`, token
-  counts, a timestamp and a free-form note, all of which are stored in
-  memory and rendered on your terminal.
+  when bound anywhere else. The `/v1/events` body is `id`, `agent`, `model`,
+  `kind`, token counts, a timestamp, `via_engine` and a free-form note, all
+  of which are stored in memory and rendered on your terminal.
 
 The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or

@@ -133,7 +133,6 @@ func TestApplyRefusesReleaseWithoutChecksums(t *testing.T) {
 	rel.Assets = append(rel.Assets, struct {
 		Name string `json:"name"`
 		URL  string `json:"browser_download_url"`
-		Size int64  `json:"size"`
 	}{Name: AssetName("9.9.9"), URL: "http://127.0.0.1:1/asset"})
 
 	if _, err := Apply(context.Background(), rel); err == nil ||
@@ -178,6 +177,51 @@ func TestApplyReplacesTargetOnMatch(t *testing.T) {
 	matches, _ := filepath.Glob(filepath.Join(filepath.Dir(target), ".toktop-update-*"))
 	if len(matches) != 0 {
 		t.Fatalf("temp files left behind: %v", matches)
+	}
+}
+
+// A host that serves the checksums tar.gz with a Content-Encoding: gzip of
+// its own must not have the transport peel the file's gzip framing off: the
+// bytes ChecksumListing reads are the file, not a transport encoding on it.
+func TestApplyReadsChecksumsArchiveLabelledGzip(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho new\n")
+	h := sha256.Sum256(payload)
+	archive := checksumsArchive(t, hex.EncodeToString(h[:])+"  "+AssetName("9.9.9")+"\n")
+
+	allowTestAssetURLs(t)
+	mux := http.NewServeMux()
+	mux.HandleFunc("/asset", func(w http.ResponseWriter, r *http.Request) { w.Write(payload) })
+	mux.HandleFunc("/checksums", func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Accept-Encoding"); got != "identity" {
+			t.Errorf("Accept-Encoding = %q, want identity", got)
+		}
+		w.Header().Set("Content-Encoding", "gzip")
+		w.Write(archive)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	body := `{"tag_name":"v9.9.9","assets":[
+		{"name":"` + AssetName("9.9.9") + `","browser_download_url":"` + srv.URL + `/asset"},
+		{"name":"` + checksumsName("9.9.9") + `","browser_download_url":"` + srv.URL + `/checksums"}]}`
+	rel := &Release{}
+	if err := json.Unmarshal([]byte(body), rel); err != nil {
+		t.Fatal(err)
+	}
+
+	target := filepath.Join(t.TempDir(), "toktop")
+	if err := os.WriteFile(target, []byte("old binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := applyTo(context.Background(), rel, target); err != nil {
+		t.Fatalf("applyTo: %v", err)
+	}
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(payload) {
+		t.Fatalf("binary not replaced: %q", got)
 	}
 }
 
