@@ -161,9 +161,12 @@ Every externally reachable input, with its code location:
    internal/ingest), `GAUNTLET_HOME` (agentusage/definitions.go; honored
    only when absolute, so a relative value cannot pull definitions from the
    working directory, and it is named as ignored at startup under `--agents`),
-   `XDG_CONFIG_HOME` (internal/remote/knownhosts.go, 31-34),
+   `XDG_CONFIG_HOME` (internal/remote/knownhosts.go, 19-28; honored only
+   when absolute, and a relative value is named as ignored at startup when
+   an `ssh://` target would have read it),
    `XDG_DATA_HOME` (agentusage/opencode_sqlite.go, only when
-   `--opencode-db` is on, which it is by default with `--agents`), and
+   `--opencode-db` is on, which it is by default with `--agents`; a
+   relative value is named as ignored at startup, like `GAUNTLET_HOME`), and
    `TOKTOP_SCREENSHOT_FONT` (scripts/screenshot.py
    only; the binary ignores it).
    Three more shape where toktop connects or what it reads, and were missing
@@ -418,7 +421,9 @@ Deployment surface:
   SSH password: env or TTY prompt (auth.go), held in memory, used only
   for password and keyboard-interactive mechanisms. Keys: read from disk or
   agent, sign locally. `GITHUB_TOKEN`: env, sent only to api.github.com
-  (selfupdate.go). Rotation points: none; all credentials are static
+  (selfupdate.go), with a trailing newline stripped and any other line break
+  refused by name (a header value cannot carry one). Rotation points: none;
+  all credentials are static
   for the life of the run.
 - **B5: build -> runtime.** Two channels replace the executing image:
   hot-reload on Unix trusts that whoever can change the exe file is authorized

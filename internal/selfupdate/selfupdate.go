@@ -40,6 +40,24 @@ import (
 // DefaultRepo is the GitHub repository releases are fetched from.
 const DefaultRepo = "maci0/toktop"
 
+// TokenEnv is the optional environment variable authenticating the GitHub
+// API calls `toktop update` makes, past the anonymous rate limit.
+const TokenEnv = "GITHUB_TOKEN"
+
+// githubToken reads that variable. A trailing newline, which
+// `export GITHUB_TOKEN=$(cat token)` leaves behind, is stripped: the same
+// rule sshPasswordEnv applies in internal/remote, and for the same reason,
+// since a header value carrying one is refused by net/http with an error
+// naming the transport rather than the variable. A line break anywhere else
+// cannot be sent as a header at all, so the variable is named here.
+func githubToken() (string, error) {
+	tok := strings.TrimRight(os.Getenv(TokenEnv), "\r\n")
+	if strings.ContainsAny(tok, "\r\n") {
+		return "", fmt.Errorf("$%s contains a line break; the token file must hold the token alone", TokenEnv)
+	}
+	return tok, nil
+}
+
 // maxAssetBytes bounds a download. A release binary that large is a mistake or
 // an attack, and either way should not fill the disk. Var so tests can shrink it.
 var maxAssetBytes int64 = 256 << 20
@@ -190,7 +208,11 @@ func Check(ctx context.Context, repo string) (*Release, error) {
 		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+	tok, err := githubToken()
+	if err != nil {
+		return nil, err
+	}
+	if tok != "" {
 		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := client.Do(req)

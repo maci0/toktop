@@ -102,6 +102,35 @@ func warnIgnoredGauntletHome(agents bool) {
 	}
 }
 
+// warnIgnoredXDGHome names an $XDG_DATA_HOME or $XDG_CONFIG_HOME that is set
+// but not a path DefinitionsPath-style consumers can use. Both readers honor
+// the variable only when it is absolute, so a relative value silently falls
+// back to the default directory: opencode's session database is read from
+// ~/.local/share (agents that generated tokens report none) and the ssh
+// trust-on-first-use store from ~/.config. Nothing else would report it.
+//
+// Each variable is named only where it would have been read: XDG_DATA_HOME
+// with the opencode database open (f.agents && --opencode-db, resolved),
+// XDG_CONFIG_HOME with an ssh:// target to connect to. Without one, the
+// variable cannot take effect, and the rule GAUNTLET_HOME follows above
+// names only a --agents run for the same reason.
+func warnIgnoredXDGHome(opencodeDB, sshTargets bool) {
+	for _, e := range [...]struct {
+		name string
+		read bool
+	}{
+		{"XDG_DATA_HOME", opencodeDB},
+		{"XDG_CONFIG_HOME", sshTargets},
+	} {
+		if !e.read {
+			continue
+		}
+		if v := os.Getenv(e.name); v != "" && !filepath.IsAbs(v) {
+			fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q and reading the default directory\n", e.name, v)
+		}
+	}
+}
+
 // warnUnusedEnv names secret and log-level variables that are set but will
 // not be read in this mode, matching warnIgnoredFlags for the flag form.
 func warnUnusedEnv(bearerFlag, demo, noIngest bool, nAdd, nRemote int) {

@@ -252,6 +252,53 @@ func TestCheck(t *testing.T) {
 	}
 }
 
+// The token read from the environment must be what a header can carry: a
+// trailing newline from `$(cat token)` is stripped, and a line break
+// anywhere else is named instead of reaching net/http as an invalid header.
+func TestCheckSendsUsableTokenOnly(t *testing.T) {
+	orig := client.Transport
+	defer func() { client.Transport = orig }()
+
+	for _, tc := range []struct {
+		name     string
+		token    string
+		wantAuth string
+		wantErr  bool
+	}{
+		{name: "unset sends no token"},
+		{name: "trailing newline is stripped", token: "ghp_x\n", wantAuth: "Bearer ghp_x"},
+		{name: "plain token is sent", token: "ghp_x", wantAuth: "Bearer ghp_x"},
+		{name: "interior newline is refused", token: "ghp_x\nghp_y", wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(TokenEnv, tc.token)
+			var got string
+			client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				got = req.Header.Get("Authorization")
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Status:     "200 OK",
+					Body:       io.NopCloser(strings.NewReader(`{"tag_name":"v1.2.3"}`)),
+					Header:     make(http.Header),
+				}, nil
+			})
+			_, err := Check(context.Background(), "maci0/toktop")
+			if tc.wantErr {
+				if err == nil || !strings.Contains(err.Error(), TokenEnv) {
+					t.Fatalf("Check() err = %v, want an error naming $%s", err, TokenEnv)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Check() err = %v", err)
+			}
+			if got != tc.wantAuth {
+				t.Fatalf("Authorization = %q, want %q", got, tc.wantAuth)
+			}
+		})
+	}
+}
+
 func TestFileChecksumRejectsOversized(t *testing.T) {
 	orig := maxAssetBytes
 	maxAssetBytes = 10

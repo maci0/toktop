@@ -29,6 +29,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - A monitored engine address that fails, recovers, and fails again is
   reported to the operator again. The first report silenced every recurrence
   of the same message, including one that appeared after a real recovery.
+- A relative `XDG_DATA_HOME` is named at startup while opencode's session
+  database is read, and a relative `XDG_CONFIG_HOME` with an `ssh://` target,
+  the way a relative `GAUNTLET_HOME` already was. Both fell back to the
+  default directory in silence, so the paths they named were never used.
+- `toktop update` strips a trailing newline from `GITHUB_TOKEN` (what
+  `export GITHUB_TOKEN=$(cat token)` leaves behind) and refuses one that
+  appears anywhere in the value, instead of letting the request fail on an
+  invalid header that named the transport rather than the variable.
 
 ### Added
 

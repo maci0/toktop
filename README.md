@@ -506,10 +506,10 @@ success, `1` runtime failure, `2` usage error, `130` interrupted (`--once` and
 | `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. `--once --plain` renders no sized frame, so both are named as unused and never validated |
 | `TOKTOP_LOG_LEVEL` | ingest audit log floor: `debug`, `info` (default), `warn`, or `error`; a set-but-invalid value aborts with exit code 2 |
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |
-| `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit |
+| `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows |
-| `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored |
-| `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and a run on Linux with one fails at connect |
+| `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
+| `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with an `ssh://` target; a run on Linux with one fails at connect |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset |
 | `NO_COLOR` | strips terminal styling when set to any value (honored by the renderer) |
 
@@ -536,7 +536,8 @@ not reported as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without
 `--add`, `$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and
 `$TOKTOP_LOG_LEVEL` with `--no-ingest` are named as unused, matching the
 flag warnings, as is a `GAUNTLET_HOME` that is not an absolute path under
-`--agents`. Out-of-range flag values (`--interval 0`, `--interval` below
+`--agents`, a relative `XDG_DATA_HOME` while opencode's database is read, and
+a relative `XDG_CONFIG_HOME` with an `ssh://` target. Out-of-range flag values (`--interval 0`, `--interval` below
 50ms or above 1h, negative `--probe`, `--probe` above 86400, `--frames < 1`
 or above 180 with `--once`, an empty `--repo`, a malformed or duplicated
 `--add` or

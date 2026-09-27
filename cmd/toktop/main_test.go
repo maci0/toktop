@@ -403,6 +403,50 @@ func TestWarnIgnoredGauntletHome(t *testing.T) {
 	}
 }
 
+// An XDG base directory that cannot be used is named at startup wherever it
+// would have been read: the same rule GAUNTLET_HOME follows, applied to the
+// two variables that otherwise fall back to a default directory in silence.
+func TestWarnIgnoredXDGHome(t *testing.T) {
+	abs := filepath.Join(string(filepath.Separator), "srv", "xdg")
+	tests := []struct {
+		name       string
+		opencodeDB bool
+		sshTarget  bool
+		dataHome   string
+		configHome string
+		wantStderr []string
+	}{
+		{name: "unset passes", opencodeDB: true, sshTarget: true},
+		{name: "absolute passes", opencodeDB: true, sshTarget: true, dataHome: abs, configHome: abs},
+		{name: "relative data home is named", opencodeDB: true, dataHome: "share", wantStderr: []string{"$XDG_DATA_HOME"}},
+		{name: "relative config home is named", sshTarget: true, configHome: "cfg", wantStderr: []string{"$XDG_CONFIG_HOME"}},
+		{
+			name: "both are named", opencodeDB: true, sshTarget: true,
+			dataHome: "share", configHome: "cfg", wantStderr: []string{"$XDG_DATA_HOME", "$XDG_CONFIG_HOME"},
+		},
+		{name: "data home unread without the opencode database", sshTarget: true, dataHome: "share"},
+		{name: "config home unread without an ssh target", opencodeDB: true, configHome: "cfg"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("XDG_DATA_HOME", tt.dataHome)
+			t.Setenv("XDG_CONFIG_HOME", tt.configHome)
+			got := captureStderr(t, func() { warnIgnoredXDGHome(tt.opencodeDB, tt.sshTarget) })
+			if len(tt.wantStderr) == 0 {
+				if got != "" {
+					t.Fatalf("warnIgnoredXDGHome() printed %q, want silence", got)
+				}
+				return
+			}
+			for _, want := range tt.wantStderr {
+				if !strings.Contains(got, want) {
+					t.Fatalf("warnIgnoredXDGHome() printed %q, want mention of %q", got, want)
+				}
+			}
+		})
+	}
+}
+
 // writeAgentsJSON points GAUNTLET_HOME at a temp dir holding the given file
 // body ("" writes nothing, leaving agents.json absent).
 func writeAgentsJSON(t *testing.T, body string) string {
