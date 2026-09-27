@@ -4,8 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -147,5 +151,82 @@ func TestEngineOutageClearsTheSlowRun(t *testing.T) {
 	<-ch
 	if got := countLines(logs, "engine poll back to normal"); got != 0 {
 		t.Fatalf("latency recovery lines = %d, want 0 after an outage:\n%s", got, logs.String())
+	}
+}
+
+// probeBackend is a generation endpoint a test drives: it answers 500 until
+// broken is cleared, then one streaming answer probe.Run can read.
+type probeBackend struct {
+	broken atomic.Bool
+}
+
+func (b *probeBackend) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
+	if b.broken.Load() {
+		http.Error(w, "model unloaded", http.StatusServiceUnavailable)
+		return
+	}
+	w.Header().Set("Content-Type", "application/x-ndjson")
+	io.WriteString(w, `{"response":"one","done":false}`+"\n"+
+		`{"response":"two","done":true,"eval_count":2,"eval_duration":1000000}`+"\n")
+}
+
+// An unattended --probe tick on an engine that will not generate is a
+// dependency failure nothing else records: the PROBES pane shows it for the
+// frame it is drawn on and the engine keeps answering its polls. The audit log
+// gets the start of the run once, and its end once.
+func TestProbeFailuresAreAuditedOnce(t *testing.T) {
+	oldGap := probeWaveGap
+	probeWaveGap = 0
+	t.Cleanup(func() { probeWaveGap = oldGap })
+
+	backend := &probeBackend{}
+	backend.broken.Store(true)
+	srv := httptest.NewServer(backend)
+	defer srv.Close()
+
+	c := New([]provider.Provider{(&fakeProvider{label: "engine", addr: srv.URL}).asProvider()}, time.Second)
+	c.lastModel[srv.URL] = "m"
+	logs := captureAudit(t)
+
+	wave := func() {
+		c.ProbeAll()
+		waitFor(t, func() bool {
+			c.probeMu.Lock()
+			defer c.probeMu.Unlock()
+			return len(c.probeInflight) == 0
+		}, "probe never cleared")
+	}
+	for range 3 {
+		wave()
+	}
+	if got := countLines(logs, "probe failed"); got != 1 {
+		t.Fatalf("failure lines = %d, want 1 for three failing waves:\n%s", got, logs.String())
+	}
+	for _, want := range []string{"engine=engine", "model=m", "duration=", "reason=", "model unloaded"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("failure line does not carry %s:\n%s", want, logs.String())
+		}
+	}
+
+	backend.broken.Store(false)
+	// The 503 above armed the Retry-After backoff, and a wave inside it is
+	// skipped without reaching the engine. The test waits the backout out
+	// rather than the 15 seconds it names.
+	c.probeMu.Lock()
+	c.probeBackoff = nil
+	c.probeMu.Unlock()
+	for range 2 {
+		wave()
+	}
+	if got := countLines(logs, "probe answering again"); got != 1 {
+		t.Fatalf("recovery lines = %d, want 1:\n%s", got, logs.String())
+	}
+	if !strings.Contains(logs.String(), "down_for=") {
+		t.Errorf("recovery line does not carry how long the failures ran:\n%s", logs.String())
+	}
+	// A wave that keeps answering is the steady state, not a transition: a
+	// line per --probe tick is the noise this latch exists to prevent.
+	if got := countLines(logs, "probe failed"); got != 1 {
+		t.Fatalf("failure lines = %d, want the recovery not to re-arm the latch:\n%s", got, logs.String())
 	}
 }

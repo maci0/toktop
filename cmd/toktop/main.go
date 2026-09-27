@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -320,13 +321,30 @@ func main() {
 				os.Exit(2)
 			}
 			fmt.Fprintf(os.Stderr, "toktop: ingest disabled (%v)\n", err)
+			// The dashboard comes up without the event feed the operator asked
+			// for by default, and the only reason for it lives under the alt
+			// screen: a run that silently ingests nothing looks exactly like a
+			// run whose agents post nothing.
+			logcfg.Logger().Warn("toktop: ingest disabled",
+				"addr", logcfg.Field(f.ingest, 256),
+				"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256))
 		} else {
 			feedAddr = srv.Addr()
 			if demoSrc != nil {
 				srv.SetNow(demoSrc.Now)
 			}
+			// The address the endpoint actually bound, not the one the config
+			// line asked for: a --ingest on port 0 names an ephemeral port only
+			// this run knows. Without it the audit log holds the request and no
+			// way to post to what answered it.
+			logcfg.Logger().Info("toktop: ingest listening", "addr", logcfg.Field(feedAddr, 256))
 			if routableBind(feedAddr) {
 				fmt.Fprintf(os.Stderr, "toktop: warning: ingest endpoint %s accepts unauthenticated events from any reachable peer\n", feedAddr)
+				// The one state change in the run that widens who can write to
+				// this machine's feed, and the only record of it was a stderr
+				// line the alt screen hides for the life of the run.
+				logcfg.Logger().Warn("toktop: ingest bound off loopback",
+					"addr", logcfg.Field(feedAddr, 256))
 			}
 			go func() {
 				if err := srv.Serve(); err != nil {
@@ -546,62 +564,97 @@ func outputStatus(err error) int {
 	return 1
 }
 
-// logActiveConfig writes one startup line of the knobs that will actually
-// apply. Secrets are named as set/unset, never printed. The live dashboard
-// hides stderr under the alt screen; --once and a journal after quit keep it.
-// opencodeOn is the resolved gate, not the flag: a build without the sqlite
-// driver reads no opencode database however the flag is set.
-func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, nRemote int, opencodeOn bool) {
-	var b strings.Builder
-	b.WriteString("toktop: interval=")
-	b.WriteString(f.interval.String())
+// configLog is where the startup config record goes. A var so a test can read
+// it, the same reason attach.go has attachLog.
+var configLog = logcfg.Logger
+
+// configFlag is one knob of the startup line: the name the audit record gives
+// it, the value it takes, and whether the stderr line prints it bare. A knob
+// not in force is absent from the list, so the prose line and the audit record
+// are rendered from one derivation and cannot name different things.
+type configFlag struct {
+	key   string
+	value string
+	bare  bool
+}
+
+// activeConfig resolves the knobs that will actually apply. Secrets are named
+// as set/unset, never carried. opencodeOn is the resolved gate, not the flag: a
+// build without the sqlite driver reads no opencode database however the flag
+// is set.
+func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, opencodeOn bool) []configFlag {
+	cfg := []configFlag{{key: "interval", value: f.interval.String()}}
 	if f.noIngest {
-		b.WriteString(" ingest=off")
+		cfg = append(cfg, configFlag{key: "ingest", value: "off"})
 	} else {
-		b.WriteString(" ingest=")
-		b.WriteString(f.ingest)
+		cfg = append(cfg, configFlag{key: "ingest", value: f.ingest})
 	}
 	if lvl := strings.TrimSpace(os.Getenv(logcfg.LevelEnv)); lvl != "" {
 		// The resolved level, not the raw string: "warning" and "WARN" print
 		// as warn, so the line matches what the audit log actually applies.
 		// main rejects an unparseable value, so the error case is unreachable.
 		if parsed, err := logcfg.ParseLogLevel(lvl); err == nil {
-			fmt.Fprintf(&b, " log=%s", logcfg.LogLevelName(parsed))
+			cfg = append(cfg, configFlag{key: "log", value: logcfg.LogLevelName(parsed)})
 		}
 	}
 	if f.demo {
-		b.WriteString(" demo")
+		cfg = append(cfg, configFlag{key: "demo", bare: true})
 	}
 	if f.agents {
-		b.WriteString(" agents")
+		cfg = append(cfg, configFlag{key: "agents", bare: true})
 		if opencodeOn {
-			b.WriteString(" opencode-db")
+			cfg = append(cfg, configFlag{key: "opencode-db", bare: true})
 		}
 	}
 	if f.once {
-		b.WriteString(" once")
+		cfg = append(cfg, configFlag{key: "once", bare: true})
 		// Only the report that is actually rendered is named: --json
 		// replaces the text report, so a line reading "once plain json"
 		// claims a knob is in force that the run ignored.
 		if f.plain && !f.jsonOut {
-			b.WriteString(" plain")
+			cfg = append(cfg, configFlag{key: "plain", bare: true})
 		}
 		if f.jsonOut {
-			b.WriteString(" json")
+			cfg = append(cfg, configFlag{key: "json", bare: true})
 		}
 	}
 	if f.probeSecs > 0 {
-		fmt.Fprintf(&b, " probe=%ds", f.probeSecs)
+		cfg = append(cfg, configFlag{key: "probe", value: fmt.Sprintf("%ds", f.probeSecs)})
 	}
 	if nRemote > 0 && !f.demo {
-		fmt.Fprintf(&b, " ssh=%d", nRemote)
+		cfg = append(cfg, configFlag{key: "ssh", value: strconv.Itoa(nRemote)})
 	}
 	if nAdd > 0 && !f.demo {
 		if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
-			b.WriteString(" bearer=set")
+			cfg = append(cfg, configFlag{key: "bearer", value: "set"})
 		}
 	}
+	return cfg
+}
+
+// logActiveConfig writes the knobs of the run twice: as the startup line on w,
+// and as one record in the audit log. The live dashboard hides stderr under the
+// alt screen, and every other subsystem (the collector, the ssh client, the
+// agent watch, the ingest endpoint) audits there, so a run whose config never
+// reaches the audit log is a run nobody can reconstruct from it: the record
+// says which interval, which endpoints and which log floor produced the lines
+// around it.
+func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, nRemote int, opencodeOn bool) {
+	cfg := activeConfig(f, explicit, nAdd, nRemote, opencodeOn)
+	var b strings.Builder
+	b.WriteString("toktop:")
+	attrs := make([]any, 0, len(cfg))
+	for _, c := range cfg {
+		if c.bare {
+			fmt.Fprintf(&b, " %s", c.key)
+			attrs = append(attrs, c.key, true)
+			continue
+		}
+		fmt.Fprintf(&b, " %s=%s", c.key, c.value)
+		attrs = append(attrs, c.key, logcfg.Field(c.value, 128))
+	}
 	fmt.Fprintln(w, b.String())
+	configLog().Info("toktop: config", attrs...)
 }
 
 // toktopEnvVars are the TOKTOP_* names this process recognizes. Most are

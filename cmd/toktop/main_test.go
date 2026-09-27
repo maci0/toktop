@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1561,7 +1562,21 @@ func TestValidateIngestAddr(t *testing.T) {
 	}
 }
 
+// swapConfigLog points the config audit record at a buffer the test can read,
+// and returns the func that puts the process logger back.
+func swapConfigLog(w io.Writer) func() {
+	prev := configLog
+	configLog = func() *slog.Logger {
+		return slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	}
+	return func() { configLog = prev }
+}
+
 func TestLogActiveConfig(t *testing.T) {
+	// The prose line is what these subtests read; the audit record is read
+	// only where a subtest asks for it, so the rest goes nowhere.
+	configLog = func() *slog.Logger { return slog.New(slog.DiscardHandler) }
+	t.Cleanup(func() { configLog = logcfg.Logger })
 	isolateToktopEnv(t)
 	t.Setenv("OMNIROUTE_API_KEY", "")
 	t.Setenv("TOKTOP_BEARER", "")
@@ -1656,6 +1671,44 @@ func TestLogActiveConfig(t *testing.T) {
 		logActiveConfig(&buf, f, map[string]bool{}, 0, 0, false)
 		if got := buf.String(); strings.Contains(got, "opencode-db") {
 			t.Fatalf("logActiveConfig() = %q, want no opencode-db when the gate did not resolve", got)
+		}
+	})
+	// The live dashboard hides stderr under the alt screen, so the startup
+	// line alone is gone the moment the run reaches steady state. The audit
+	// record is the copy that outlives it, and it has to carry the same knobs
+	// as fields: a run cannot be reconstructed from prose.
+	t.Run("knobs reach the audit log as fields", func(t *testing.T) {
+		t.Setenv(logcfg.LevelEnv, "warning")
+		var auditBuf bytes.Buffer
+		restore := swapConfigLog(&auditBuf)
+		t.Cleanup(restore)
+		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:0", agents: true}
+		logActiveConfig(io.Discard, f, map[string]bool{}, 0, 2, true)
+		got := auditBuf.String()
+		for _, want := range []string{
+			"level=INFO", `msg="toktop: config"`,
+			"interval=1s", "ingest=127.0.0.1:0", "log=warn",
+			"agents=true", "opencode-db=true", "ssh=2",
+		} {
+			if !strings.Contains(got, want) {
+				t.Errorf("audit record %q, want %s", got, want)
+			}
+		}
+	})
+	// A secret reaches neither copy: an audit record naming a bearer value is a
+	// credential on disk, and the record outlives the run.
+	t.Run("bearer stays unnamed in the audit record", func(t *testing.T) {
+		var auditBuf bytes.Buffer
+		restore := swapConfigLog(&auditBuf)
+		t.Cleanup(restore)
+		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", bearer: "sk-secret"}
+		logActiveConfig(io.Discard, f, map[string]bool{"bearer": true}, 1, 0, false)
+		got := auditBuf.String()
+		if strings.Contains(got, "sk-secret") {
+			t.Fatalf("audit record leaked bearer: %q", got)
+		}
+		if !strings.Contains(got, "bearer=set") {
+			t.Fatalf("audit record %q, want bearer=set", got)
 		}
 	})
 }

@@ -92,6 +92,7 @@ type Collector struct {
 	lastProbeWave time.Time  // wave gate: see probeWaveGap
 	probeInflight map[string]bool
 	probeBackoff  map[string]time.Time
+	probeDown     map[string]*probeDownState
 
 	// clockMu guards the two fields SetNow writes together. Reads are not
 	// confined to the collector's own goroutines: the proc poller calls procFn,
@@ -141,6 +142,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		slow:          map[string]time.Time{},
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
+		probeDown:     map[string]*probeDownState{},
 		now:           time.Now,
 		started:       now,
 	}
@@ -728,10 +730,76 @@ var probeWaveGap = 500 * time.Millisecond
 // probeTarget pairs a probe request with the collector state key it belongs
 // to. The key is not always the request's Base: providers with no endpoint
 // (see providerKey) share Base "", so inflight and backoff bookkeeping keyed
-// on Base alone would have those providers cancel each other's waves.
+// on Base alone would have those providers cancel each other's waves. The
+// label rides along because the audit line names the engine the way every
+// other line does, and the key is an endpoint that need not read as one.
 type probeTarget struct {
-	key string
-	req probe.Request
+	key   string
+	label string
+	req   probe.Request
+}
+
+// probeDownState latches one engine's failing probes, so the audit log records
+// the start of a run of failures once and its end once. A --probe tick on a
+// broken engine would otherwise write a line every interval for as long as the
+// operator is away, and a line per wave is the same noise an outage produces on
+// the poll path, which is latched for exactly this reason.
+type probeDownState struct {
+	mu     sync.Mutex
+	failed bool
+	since  time.Time
+}
+
+// auditProbe writes the transition lines for one engine's probe outcome. It
+// says nothing about a probe that kept answering: a line per wave would be a
+// line per --probe tick on a healthy fleet, and the pane already shows the
+// measurement a successful probe exists to make.
+func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Duration) {
+	c.probeMu.Lock()
+	d, ok := c.probeDown[t.key]
+	if !ok {
+		d = &probeDownState{}
+		c.probeDown[t.key] = d
+	}
+	c.probeMu.Unlock()
+
+	d.mu.Lock()
+	// since is read before the latch clears, so the recovery line reports how
+	// long the failures ran rather than the time since the zero instant.
+	since := d.since
+	first := false
+	if s.OK {
+		first = !since.IsZero()
+		d.failed, d.since = false, time.Time{}
+	} else {
+		first = !d.failed
+		if first {
+			d.since = time.Now()
+		}
+		d.failed = true
+	}
+	d.mu.Unlock()
+
+	lg := audit()
+	attrs := []any{
+		"engine", logcfg.Field(t.label, 128),
+		"addr", logcfg.Field(t.req.Base, 256),
+		"model", logcfg.Field(t.req.Model, 128),
+	}
+	if s.OK {
+		if first {
+			attrs = append(attrs, "down_for", time.Since(since).Round(time.Second))
+			lg.Info("toktop: probe answering again", attrs...)
+		}
+		return
+	}
+	if !first {
+		return
+	}
+	attrs = append(attrs,
+		"duration", took.Round(time.Millisecond),
+		"reason", logcfg.Field(s.Err, 256))
+	lg.Warn("toktop: probe failed", attrs...)
 }
 
 // ProbeAll launches one probe against every known backend, asynchronously.
@@ -744,8 +812,9 @@ func (c *Collector) ProbeAll() {
 		key := providerKey(p)
 		if model := c.lastModel[key]; model != "" {
 			targets = append(targets, probeTarget{
-				key: key,
-				req: probe.Request{Kind: p.Kind, Base: p.Addr, Model: model},
+				key:   key,
+				label: p.Label,
+				req:   probe.Request{Kind: p.Kind, Base: p.Addr, Model: model},
 			})
 		}
 	}
@@ -796,6 +865,7 @@ func (c *Collector) ProbeAll() {
 			if pctx == nil {
 				pctx = ctx
 			}
+			started := time.Now()
 			s := probe.Run(pctx, t.req)
 			s.At = now
 			if s.RetryAfter > 0 {
@@ -803,6 +873,10 @@ func (c *Collector) ProbeAll() {
 				c.probeBackoff[t.key] = c.instant().Add(s.RetryAfter)
 				c.probeMu.Unlock()
 			}
+			// The wall clock, not the collector's: the sample's At follows the
+			// seeded timeline a demo pins, and an elapsed time measured against
+			// that one is not a duration the operator ran.
+			c.auditProbe(t, s, time.Since(started))
 			c.RecordProbe(s)
 		}(t)
 	}

@@ -30,6 +30,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- The run's active configuration is audited as one record at startup, beside
+  the line stderr already carried. The dashboard hides stderr under the alt
+  screen, so the startup line was the one piece of a run's configuration that
+  did not outlive it: the audit log named the engine failures, the ssh losses
+  and the agent-walk errors of a run without saying which interval, which
+  endpoints and which log floor produced them. The same record names the
+  address the ingest endpoint actually bound, which an `--ingest` on port 0
+  leaves the requested line unable to say, and a run whose endpoint stayed
+  disabled is now audited with the reason rather than with stderr alone.
+- A probe that fails is audited, latched per engine: one line when the failures
+  start, one when a probe answers again, and nothing for a probe that keeps
+  answering. A generation is the most expensive request `toktop` issues, and a
+  failing one was visible only on the PROBES pane, for the frame it happened to
+  be drawn on: an unattended `--probe` tick on an engine that will not generate
+  left no trace once the dashboard was closed, and the engine kept answering
+  its polls, so the collector's engine lines never named it. The failure line
+  carries the model, the wall time the generation took and the engine's reason.
 - `make release-verify VERSION=x.y.z` fetches every asset a published version
   holds back from GitHub and re-verifies each digest against that release's
   own `checksums.txt`, so a short, empty, or unlisted asset fails here rather
