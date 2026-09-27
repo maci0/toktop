@@ -58,6 +58,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   substitution ran over the whole path, so a font under a directory whose
   name carried "Regular" resolved to nothing and every bold glyph was
   rendered in the regular weight.
+- A host-key pin store left under `known_hosts.displaced` by a toktop killed
+  between the two renames a Windows install makes is read back instead of read
+  as no pins at all, which re-trusted every host the operator had connected to.
+- `toktop update` on Windows restores an installed binary left under
+  `toktop.exe.old` by a killed update before replacing it. The gap left a host
+  with no binary to run the update that would have fixed it.
 - `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
   windows, instead of leaving them on the wall clock. A program driving a
   simulated timeline stepped time forward and still read the file set a

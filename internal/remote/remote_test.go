@@ -1032,6 +1032,73 @@ func TestReadKnownHostsRejectsConflictingDuplicateHost(t *testing.T) {
 	}
 }
 
+// replaceFile moves the old store aside before renaming the new one in, on the
+// platforms that cannot rename over an existing file. A kill between the two
+// renames leaves the pins under the displaced name and no store at all, and
+// reading the missing store as empty would re-trust every host the operator
+// had ever connected to. The displaced copy is the only record those pins
+// survive in, so the read has to find it.
+func TestReadKnownHostsRecoversDisplacedStore(t *testing.T) {
+	withKnownHosts(t)
+	path := knownHostsPath()
+	key := fakePublicKey("remembered")
+	line := "h:22 " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	if err := os.WriteFile(displacedPath(path), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatalf("a displaced store must be read back: %v", err)
+	}
+	if store["h:22"] == "" {
+		t.Fatalf("the displaced pin was lost: %v", store)
+	}
+
+	// The pins must be enforced, not merely returned: a host presenting a
+	// different key is still refused, and presenting the pinned one is not
+	// re-pinned as a first contact.
+	cb, err := tofu()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cb("h:22", nil, fakePublicKey("changed")); err == nil {
+		t.Fatal("a displaced store accepted a changed host key")
+	}
+	if err := cb("h:22", nil, key); err != nil {
+		t.Fatalf("the displaced pin was not honored: %v", err)
+	}
+	// A successful connect rewrites the store, so recovery is a one-time
+	// read and the pin is served by a whole store from here on. Whether the
+	// displaced copy is cleared depends on which replaceFile branch ran, and
+	// that is not this test's business: the pin must survive either way.
+	again, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again["h:22"] == "" {
+		t.Fatalf("the recovered pin did not survive the rewrite: %v", again)
+	}
+}
+
+// A displaced store that does not parse is a store that lost its records.
+// Falling back to it and finding nothing there either would re-trust every
+// host, so the read fails and names the file an operator has to look at.
+func TestReadKnownHostsRejectsDisplacedStoreWithNoRecords(t *testing.T) {
+	withKnownHosts(t)
+	path := knownHostsPath()
+	if err := os.WriteFile(displacedPath(path), []byte("\n \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readKnownHosts(path)
+	if err == nil {
+		t.Fatal("readKnownHosts accepted a displaced store holding no host records")
+	}
+	if !strings.Contains(err.Error(), displacedPath(path)) {
+		t.Errorf("error should name the displaced file, got: %v", err)
+	}
+}
+
 // A store that parses to nothing is a store that lost its records, not a store
 // nobody has written to: every writer emits the host it just pinned, so a
 // file with no record line in it is truncated or emptied. Reading that as an

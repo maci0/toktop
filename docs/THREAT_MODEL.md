@@ -78,7 +78,15 @@ What is worth stealing, corrupting, or denying:
   `UserConfigDir` would pick. This is the only state toktop keeps across runs
   and nothing in this repository backs it up: a lost, truncated or emptied
   store is a total loss of pins, and a read that cannot be trusted now fails
-  loudly instead of re-trusting every host.
+  loudly instead of re-trusting every host. The two writes that can end a
+  store half-finished (a kill between the two renames `replaceFile` makes on
+  Windows) leave the previous pins beside the store under `.displaced`, and
+  `readKnownHosts` reads that copy back rather than reading a missing store as
+  no pins at all; the same window in the self-update leaves the installed
+  binary under `.old`, which the next install restores before replacing it
+  (internal/selfupdate/selfupdate.go, restoreDisplaced). A store lost with no
+  `.displaced` beside it is a manual repair: restore the file, or delete it to
+  pin the hosts again on purpose.
 - **Binary integrity**: the running executable is replaceable by design twice
   over: hot-reload on Unix (internal/selfreload/exec_unix.go) and
   `toktop update` (cmd/toktop/update.go). Whoever controls either channel

@@ -325,9 +325,6 @@ func TestApplySweepsTempFilesLeftByAKilledRun(t *testing.T) {
 // first. The path that does that must still end with the new binary in place
 // and the old one out of the way.
 func TestInstallDisplacesTheRunningBinary(t *testing.T) {
-	if runtime.GOOS != "windows" {
-		t.Skip("only Windows displaces the running binary")
-	}
 	dir := t.TempDir()
 	self := filepath.Join(dir, "toktop.exe")
 	if err := os.WriteFile(self, []byte("old"), 0o755); err != nil {
@@ -337,7 +334,7 @@ func TestInstallDisplacesTheRunningBinary(t *testing.T) {
 	if err := os.WriteFile(next, []byte("new"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := install(next, self); err != nil {
+	if err := installDisplacing(next, self); err != nil {
 		t.Fatal(err)
 	}
 	body, err := os.ReadFile(self)
@@ -346,5 +343,70 @@ func TestInstallDisplacesTheRunningBinary(t *testing.T) {
 	}
 	if _, err := os.Stat(self + ".old"); err != nil {
 		t.Fatalf("the displaced binary should be kept until the next update: %v", err)
+	}
+}
+
+// The two-rename install has a window between moving the binary aside and
+// renaming the new one in, and a kill inside it leaves the binary displaced
+// with nothing at the path it is installed under. On Unix the window does not
+// exist, so this state is only ever reached on Windows, but reaching it leaves
+// a host that cannot run `toktop update` to fix itself, so the next install
+// has to put the binary back.
+func TestInstallDisplacingRecoversABinaryLeftDisplaced(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "toktop.exe")
+	displaced := self + displacedSuffix
+	// The state a killed update leaves: the old binary under the displaced
+	// name, and nothing at the installed path.
+	if err := os.WriteFile(displaced, []byte("old"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	next := filepath.Join(dir, "next.exe")
+	if err := os.WriteFile(next, []byte("new"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installDisplacing(next, self); err != nil {
+		t.Fatal(err)
+	}
+	body, err := os.ReadFile(self)
+	if err != nil || string(body) != "new" {
+		t.Fatalf("installed %q (%v), want the new binary", body, err)
+	}
+	// The recovered binary became the one displaced by this update, so a
+	// host that lost its binary to a killed update ends up with a working
+	// one rather than only a downloadable release.
+	if got, err := os.ReadFile(displaced); err != nil || string(got) != "old" {
+		t.Fatalf("displaced binary = %q (%v), want the recovered one", got, err)
+	}
+}
+
+// An update that completed, or one that never started, has no displaced
+// binary to recover. Restoring must be a no-op then, or it would replace a
+// correctly installed binary with whatever an earlier update left behind.
+func TestRestoreDisplacedLeavesACompleteInstallAlone(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "toktop.exe")
+	displaced := self + displacedSuffix
+	if err := os.WriteFile(self, []byte("current"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(displaced, []byte("stale"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := restoreDisplaced(self, displaced); err != nil {
+		t.Fatal(err)
+	}
+	if body, err := os.ReadFile(self); err != nil || string(body) != "current" {
+		t.Fatalf("binary = %q (%v), want the installed one", body, err)
+	}
+}
+
+// Nothing installed and nothing displaced is a first install, not a failed
+// recovery, and must not report an error the operator cannot act on.
+func TestRestoreDisplacedWithNothingToRecover(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "toktop.exe")
+	if err := restoreDisplaced(self, self+displacedSuffix); err != nil {
+		t.Fatalf("restoreDisplacing on a first install: %v", err)
 	}
 }

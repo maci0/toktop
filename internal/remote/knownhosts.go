@@ -230,11 +230,31 @@ func tofu() (ssh.HostKeyCallback, error) {
 func readKnownHosts(path string) (map[string]string, error) {
 	b, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
-		return map[string]string{}, nil
+		// A store that is gone but has a displaced copy beside it was not
+		// deleted: replaceFile renames the old store aside on Windows and
+		// renames the new one in, and a kill between the two leaves the pins
+		// under the displaced name. Reading the missing path as "nothing
+		// pinned" would re-trust every host the operator had connected to.
+		//
+		// One level, not a recursive call: a store that was never written has
+		// neither file, and asking for its displaced copy in turn would build
+		// an unbounded ".displaced.displaced..." name looking for pins that
+		// were never there.
+		b, err = os.ReadFile(displacedPath(path))
+		if os.IsNotExist(err) {
+			return map[string]string{}, nil
+		}
+		path = displacedPath(path)
 	}
 	if err != nil {
 		return nil, err
 	}
+	return parseKnownHosts(path, b)
+}
+
+// parseKnownHosts turns store bytes into pins, naming path in every error so
+// a store that must be repaired by hand says which file it is looking at.
+func parseKnownHosts(path string, b []byte) (map[string]string, error) {
 	out := map[string]string{}
 	for n, raw := range strings.Split(string(b), "\n") {
 		line := strings.TrimSpace(raw)
@@ -350,6 +370,15 @@ func sweepStaleTempFiles(dir string) {
 	}
 }
 
+// displacedSuffix names the copy replaceFile moves the old store to before
+// renaming the new one in. readKnownHosts reads it back when the store itself
+// is gone, so a kill between the two renames costs nothing.
+const displacedSuffix = ".displaced"
+
+// displacedPath is where a store's previous contents live while the new ones
+// are being renamed in.
+func displacedPath(path string) string { return path + displacedSuffix }
+
 // replaceFile renames tmpName over path.
 //
 // Unix rename replaces atomically and is tried first. Windows refuses to
@@ -358,7 +387,8 @@ func sweepStaleTempFiles(dir string) {
 // renames then leaves the previous pins on disk under the displaced name
 // instead of no store at all. Removing the destination outright would turn
 // that window into a total loss of pins, which is a silent re-TOFU for every
-// host the operator had ever connected to.
+// host the operator had ever connected to. readKnownHosts is what makes that
+// leftover recoverable rather than merely present.
 //
 // Callers serialize writers (the store's mutex, taken inside lockStore).
 func replaceFile(tmpName, path string) error {
@@ -367,7 +397,7 @@ func replaceFile(tmpName, path string) error {
 		core.SyncDir(filepath.Dir(path))
 		return nil
 	}
-	displaced := path + ".displaced"
+	displaced := displacedPath(path)
 	if derr := os.Remove(displaced); derr != nil && !os.IsNotExist(derr) {
 		// Returning err here would blame the destination rename for a
 		// leftover this cleanup could not delete, which is a different

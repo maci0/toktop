@@ -397,6 +397,8 @@ func sweepStaleTemps(dir string) {
 // running. Windows refuses to replace a running image but does allow renaming
 // it out of the way first, so that is what happens there; the displaced file
 // is removed on the next update, since it is still locked during this one.
+// A kill between those two renames leaves the binary displaced, and the next
+// run puts it back before installing over it (restoreDisplaced).
 //
 // The caller's fsync covered the download, not the rename: flushing the
 // directory is what makes the new binary survive a crash, and without it an
@@ -407,15 +409,40 @@ func sweepStaleTemps(dir string) {
 // release checksum before any rename and by restoring the displaced binary
 // when the second rename fails; the installed file itself is not reverted.
 func install(tmpName, self string) error {
-	dir := filepath.Dir(self)
 	if runtime.GOOS != "windows" {
 		if err := os.Rename(tmpName, self); err != nil {
 			return err
 		}
-		core.SyncDir(dir)
+		core.SyncDir(filepath.Dir(self))
 		return nil
 	}
-	displaced := self + ".old"
+	return installDisplacing(tmpName, self)
+}
+
+// displacedSuffix names the copy installDisplacing moves the installed binary
+// to before renaming the new one in.
+const displacedSuffix = ".old"
+
+// installDisplacing is the two-rename install used where rename cannot replace
+// a running image. It is separate from install so the sequence can be tested
+// on every platform rather than only on the one that needs it.
+//
+// A kill between the two renames leaves the binary under the displaced name
+// and nothing at the original path, which is worse here than for the host-key
+// pin store: a store can be rebuilt by hand, but a host with no binary cannot
+// run `toktop update` to replace one, so the next run restores the displaced
+// file before it does anything else.
+func installDisplacing(tmpName, self string) error {
+	displaced := self + displacedSuffix
+	// Recovery comes first, and its ordering is the whole point: when a
+	// killed update left the binary displaced, that file is the only copy of
+	// the installed binary, so removing a leftover first would delete the
+	// install this run exists to recover. A leftover from a *completed*
+	// update is stale, but then the binary is at the installed path and
+	// restoreDisplaced does nothing, leaving the removal below to clear it.
+	if err := restoreDisplaced(self, displaced); err != nil {
+		return err
+	}
 	// The previous update's .old is still locked during this one, so a failed
 	// removal is expected to be transient. Silently proceeding turns it into
 	// a rename error naming the running binary, not the undeletable .old.
@@ -432,7 +459,26 @@ func install(tmpName, self string) error {
 		}
 		return err
 	}
-	core.SyncDir(dir)
+	core.SyncDir(filepath.Dir(self))
+	return nil
+}
+
+// restoreDisplaced renames a binary left at the displaced path by a killed
+// update back to where it belongs. It is a no-op unless that path is missing
+// and the displaced one is not: an update that never started, or one that
+// completed, leaves nothing to recover and must not have a stale file put
+// under a path that is already correct.
+func restoreDisplaced(self, displaced string) error {
+	if _, err := os.Stat(self); !os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.Rename(displaced, self); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("cannot restore %s from %s: %w", core.RedactHome(self), core.RedactHome(displaced), err)
+	}
+	core.SyncDir(filepath.Dir(self))
 	return nil
 }
 
