@@ -94,6 +94,47 @@ func TestDemoRunReplaysByteForByte(t *testing.T) {
 	}
 }
 
+// --probe must not put the demo run back on the wall clock. Auto-probe on a
+// simulated source is armed on the source and fired by its frames, so a run
+// carrying a seed, an origin and a probe cadence still renders the same
+// bytes, waves and their stamps included.
+func TestDemoAutoProbeReplaysByteForByte(t *testing.T) {
+	const frames = 40
+	render := func() string {
+		s := demo.NewSource(50*time.Millisecond, 7)
+		origin, err := parseOrigin("2026-01-02T03:04:05Z")
+		if err != nil {
+			t.Fatalf("parseOrigin: %v", err)
+		}
+		s.SetOrigin(origin)
+		s.ProbeEvery(time.Second)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		ch := make(chan core.Snapshot, frames)
+		go s.Run(ctx, ch)
+		cfg := ui.Config{Version: "test", Demo: true, DemoSeed: s.Seed(), DemoOrigin: origin, PollEvery: 50 * time.Millisecond}
+		var b strings.Builder
+		for i := 0; i < frames; i++ {
+			out, err := ui.JSONFrame(cfg, <-ch)
+			if err != nil {
+				t.Fatalf("frame %d: %v", i, err)
+			}
+			b.WriteString(out)
+		}
+		return b.String()
+	}
+	a, b := render(), render()
+	if a != b {
+		t.Fatalf("two auto-probed runs of one seed and origin diverged:\nfirst:\n%s\nsecond:\n%s", a, b)
+	}
+	// The cadence has to have produced something, or the replay above would
+	// pass on a run that never probed. 40 frames at 50ms is 2s of simulated
+	// time, so a 1s cadence runs two waves over the five simulated backends.
+	if n := strings.Count(a, `"ttft_ms"`); n < 10 {
+		t.Fatalf("auto-probe produced %d probe samples, want two waves of five", n)
+	}
+}
+
 // An unpinned run has no origin to report: the field is omitted rather than
 // rendered as a zero time, which would read as a pinned 0001-01-01.
 func TestJSONOmitsUnpinnedDemoOrigin(t *testing.T) {

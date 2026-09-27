@@ -522,7 +522,9 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 --opencode-db     with --agents: read opencode's SQLite session database
                   (default on; needs a build with the sqlite tag; pass
                   --opencode-db=false to skip it)
---probe N         auto-probe every N seconds (0=off, max 86400)
+--probe N         auto-probe every N seconds (0=off, max 86400; with
+                  --demo, every N simulated seconds, so the run still
+                  replays)
 --interval D      poll interval (Go duration such as 1s or 500ms; default 1s;
                   min 50ms, max 1h; nonzero values require a unit)
 --ingest ADDR     agent event listen address, host:port
@@ -590,6 +592,10 @@ cmp run-a.json run-b.json
 
 Without `--origin` the timeline starts at the wall clock, so the values repeat
 and the timestamps do not; the JSON report then omits `demo_origin`.
+
+`--probe` keeps that promise under `--demo`: the auto-probe cadence is
+simulated too, so how many probe waves ran and the instant each is stamped
+follow the run rather than how long the process took.
 
 ## Environment variables
 

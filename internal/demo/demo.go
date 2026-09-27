@@ -56,6 +56,12 @@ type Source struct {
 	kv     []float64
 	nextEv time.Time
 	nextPr time.Time
+	// probeEvery is the simulated auto-probe cadence, zero when off, and
+	// nextUIProbe the simulated instant the next wave is due. The wave is
+	// fired by frame, not by a wall-clock ticker, so a replay's wave count is
+	// a function of the frames elapsed.
+	probeEvery  time.Duration
+	nextUIProbe time.Time
 
 	memPct  float64
 	swapPct float64
@@ -153,6 +159,12 @@ func (s *Source) stepAt(now time.Time) core.Snapshot {
 		s.start = now
 		s.nextEv = now.Add(2 * s.interval)
 		s.nextPr = now.Add(4 * s.interval)
+		// Armed on the origin, not one cadence out, so the first wave lands
+		// with the first frame the way the wall-clock ticker fired one
+		// straight away when the dashboard came up.
+		if s.probeEvery > 0 {
+			s.nextUIProbe = now
+		}
 	}
 	s.now = now
 	s.mu.Unlock()
@@ -209,6 +221,14 @@ func (s *Source) frame(now time.Time) {
 	if now.After(s.nextPr) {
 		s.genProbe(now)
 		s.nextPr = now.Add(time.Duration(6+s.rng.IntN(6)) * s.interval)
+	}
+	// Auto-probe waves ride the simulated clock, so the wave count and every
+	// sample's instant are functions of the frames elapsed. A cadence shorter
+	// than the poll interval catches up in a loop rather than leaving the
+	// schedule behind the timeline.
+	for s.probeEvery > 0 && !now.Before(s.nextUIProbe) {
+		s.probeAllLocked(now)
+		s.nextUIProbe = s.nextUIProbe.Add(s.probeEvery)
 	}
 	s.t += s.interval.Seconds()
 	for i, b := range s.backends {
@@ -320,13 +340,34 @@ func (s *Source) addProbe(p core.ProbeSample) {
 	s.probes = core.AppendSorted(s.probes, p, core.ProbeHistoryLen, core.ProbeCmp)
 }
 
+// ProbeEvery arms the simulated auto-probe cadence: a wave is fired at every
+// d of simulated time, from the frame that crosses the boundary. It is what
+// --probe drives in demo mode; without it the cadence would sit on a
+// wall-clock ticker and two runs of one seed would disagree on how many waves
+// ran and on the instant each one is stamped, so the run would not replay.
+// A non-positive d turns auto-probe off. Call it before Run.
+func (s *Source) ProbeEvery(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.start.IsZero() {
+		panic("demo: ProbeEvery after the first frame")
+	}
+	s.probeEvery = max(d, 0)
+	s.nextUIProbe = time.Time{}
+}
+
 // ProbeAll satisfies the UI prober interface by synthesizing samples now.
 // It draws from probeRng, not the frame stream: a wave the operator fires
 // half a tick early must not move every value the next frame reports.
 func (s *Source) ProbeAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	at := s.stamp()
+	s.probeAllLocked(s.stamp())
+}
+
+// probeAllLocked synthesizes one wave of samples stamped at. Caller holds
+// s.mu.
+func (s *Source) probeAllLocked(at time.Time) {
 	for i := range s.backends {
 		s.addProbe(s.synthProbe(s.probeRng, s.backends[i], at, 60, 180, 0.3, 1))
 	}

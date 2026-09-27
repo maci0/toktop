@@ -49,7 +49,7 @@ var (
 func registerFlags() *cliFlags {
 	flagsOnce.Do(func() {
 		topFS.BoolVar(&cli.demo, "demo", false, "run against a simulated fleet instead of real backends")
-		topFS.IntVar(&cli.probeSecs, "probe", 0, fmt.Sprintf("auto-probe every N seconds (0=off, max %d)", probeSecsMax))
+		topFS.IntVar(&cli.probeSecs, "probe", 0, fmt.Sprintf("auto-probe every N seconds (0=off, max %d; with --demo, every N simulated seconds)", probeSecsMax))
 		topFS.DurationVar(&cli.interval, "interval", time.Second, "poll interval as a Go duration such as 1s or 500ms (min 50ms, max 1h)")
 		topFS.StringVar(&cli.ingest, "ingest", "127.0.0.1:8420", "agent event ingest listen address (host:port)")
 		topFS.BoolVar(&cli.noIngest, "no-ingest", false, "disable the agent event HTTP endpoint")

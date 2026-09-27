@@ -133,6 +133,62 @@ func TestRunReplaysIdenticallyFromOneSeed(t *testing.T) {
 	})
 }
 
+// Auto-probe is a simulated schedule, not a wall-clock ticker: two sources
+// stepped at the same instants must run the same number of waves and stamp
+// them at the same simulated instants. Driven from the real clock the wave
+// count and every wave's stamp followed how long the process happened to
+// take, and the run stopped replaying from its seed.
+func TestProbeEveryIsSimulated(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	replay := func() core.Snapshot {
+		s := NewSource(time.Second, 7)
+		s.SetOrigin(t0)
+		s.ProbeEvery(3 * time.Second)
+		var last core.Snapshot
+		for i := range 10 {
+			last = s.stepAt(t0.Add(time.Duration(i) * time.Second))
+		}
+		return last
+	}
+	a, b := replay(), replay()
+	if !reflect.DeepEqual(a, b) {
+		t.Fatalf("auto-probe replays diverged:\n%+v\n%+v", a.Probes, b.Probes)
+	}
+	// One wave every 3s over frames at 0s..9s, each covering every backend.
+	waves := map[time.Time]int{}
+	for _, p := range a.Probes {
+		waves[p.At]++
+	}
+	for _, at := range []time.Time{t0, t0.Add(3 * time.Second), t0.Add(6 * time.Second), t0.Add(9 * time.Second)} {
+		if waves[at] == 0 {
+			t.Fatalf("no auto-probe wave stamped %v; got %v", at, waves)
+		}
+	}
+	// Every wave stamps a simulated instant, never wall time.
+	for _, p := range a.Probes {
+		if p.At.Before(t0) || p.At.After(t0.Add(9*time.Second)) {
+			t.Fatalf("probe stamped %v, outside the simulated timeline %v..%v", p.At, t0, t0.Add(9*time.Second))
+		}
+	}
+}
+
+// A cadence shorter than the poll interval has to catch up rather than leave
+// the schedule behind the timeline, or the later frames would stop probing.
+func TestProbeEveryShorterThanInterval(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	s := NewSource(4*time.Second, 7)
+	s.SetOrigin(t0)
+	s.ProbeEvery(time.Second)
+	s.stepAt(t0)
+	if got, want := len(s.probes), len(s.backends); got != want {
+		t.Fatalf("first frame fired %d samples, want one wave of %d", got, want)
+	}
+	s.stepAt(t0.Add(4 * time.Second))
+	if got, want := len(s.probes), 5*len(s.backends); got != want {
+		t.Fatalf("second frame fired %d samples, want four waves of %d", got, len(s.backends))
+	}
+}
+
 // A timeline that already has stamped history cannot be moved under it, so
 // SetOrigin refuses rather than leaving the caller believing it took.
 func TestSetOriginAfterFirstFramePanics(t *testing.T) {
@@ -144,6 +200,20 @@ func TestSetOriginAfterFirstFramePanics(t *testing.T) {
 		}
 	}()
 	s.SetOrigin(time.Unix(0, 0))
+}
+
+// The probe cadence arms on the origin, so a source that has already stepped
+// a frame cannot take one: the wave it is asking for would sit outside the
+// run the stamped history records.
+func TestProbeEveryAfterFirstFramePanics(t *testing.T) {
+	s := NewSource(time.Second, 7)
+	s.stepAt(time.Unix(1_700_000_000, 0))
+	defer func() {
+		if recover() == nil {
+			t.Fatal("ProbeEvery after the first frame did not panic")
+		}
+	}()
+	s.ProbeEvery(time.Second)
 }
 
 // ProbeAll that wins the race with the first frame must pin the origin Run

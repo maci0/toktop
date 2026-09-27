@@ -109,6 +109,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `--probe` under `--demo` ran off the wall clock, so a run carrying a seed
+  and an origin stopped replaying. Auto-probe fired from a real ticker while
+  every other value came off the simulated timeline, so how many probe waves
+  ran, and the instant each one was stamped, followed how long the process
+  happened to take: two runs of `--demo --seed 7 --origin ... --probe 1`
+  printed the same numbers under different probe timestamps. The cadence is
+  simulated too now, armed on the demo source and fired by the frame that
+  crosses the boundary, so the wave count and every wave's stamp are
+  functions of the run and the two replays are identical again. A live run
+  still probes off the clock, which is what a real engine measures.
+
 - Diagnostics on Windows left the account name in any home path spelled with
   `/`. Redaction matched the home against the platform separator only, and
   Windows names one directory with either separator, so a path reaching a

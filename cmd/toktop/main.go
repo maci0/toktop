@@ -236,6 +236,14 @@ func main() {
 		if !origin.IsZero() {
 			demoSrc.SetOrigin(origin)
 		}
+		// Armed before Run, which the cadence can no longer be added to
+		// afterwards. A wall-clock ticker here instead would make how many
+		// waves ran, and the instant each is stamped, a function of how long
+		// the process happened to take, and the seed plus origin would stop
+		// replaying the run.
+		if f.probeSecs > 0 {
+			demoSrc.ProbeEvery(time.Duration(f.probeSecs) * time.Second)
+		}
 		go demoSrc.Run(ctx, ch)
 		prober = demoSrc.ProbeAll
 		recorder = demoSrc
@@ -262,10 +270,10 @@ func main() {
 		go col.Run(ctx, ch)
 		prober = col.ProbeAll
 		recorder = col
-	}
 
-	if f.probeSecs > 0 && prober != nil {
-		startProbeTicker(ctx, prober, time.Duration(f.probeSecs)*time.Second)
+		if f.probeSecs > 0 {
+			startProbeTicker(ctx, prober, time.Duration(f.probeSecs)*time.Second)
+		}
 	}
 
 	// Agents running on this machine, read from the transcripts they already
