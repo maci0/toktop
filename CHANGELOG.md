@@ -35,6 +35,33 @@ support channel (see SECURITY.md).
   `agentusage.ErrUnsupportedTool`. It is safe on a nil `*Watcher`, like
   `Tool` and `Dir`.
 
+### Changed
+
+- `--ingest` bound to a host *name* other than `localhost` now warns about
+  the unauthenticated endpoint, as a literal non-loopback address always
+  has; a loopback address or `localhost` stays quiet.
+- A successful `POST /v1/events` answers `{"accepted":N,"stored":M}` and its
+  log line carries `stored` too, so a sender (or an operator reading stderr)
+  can see that a replayed id decoded and stored nothing.
+- toktop.ai's section nav links `Run`, the first-run command block that had an
+  anchor but no link.
+- The `ssh://` discovery sweep sends at most the first 4096 bytes of each
+  remote process's command line, which is all an engine match reads.
+- The `DEMO` tag names the seed the run drew from (`DEMO seed 42`), and
+  `--once --plain --demo` leads with `[demo seed 42]`. A demo frame is
+  reproducible from that seed alone, so the frame has to carry it.
+- A malformed event line in an NDJSON POST names the body offset it failed at,
+  so the offending line is findable in a long stream.
+- A dashboard image that the asset store cannot serve answers with the site's
+  own `text/plain` error body instead of the store's HTML error page.
+- Ingested events are deduplicated through an id index instead of a scan of
+  the retained window, which normalized every retained id under the lock the
+  emit path needs. A sender posting a large stream no longer pays a full
+  window walk per line.
+- Intel GPU metrics run one process per device concurrently, each with its own
+  timeout. On a multi-device node the last device used to start only after
+  three timeout windows had elapsed and could be dropped by them.
+
 ### Fixed
 
 - An ssh failure no longer reports the home directory. A refused key, an
@@ -81,36 +108,6 @@ support channel (see SECURITY.md).
   totals, the same way the file itself now says. The dashboard records no
   negative growth, so the next reading is measured from what the transcripts
   actually hold.
-
-### Changed
-
-- `--ingest` bound to a host *name* other than `localhost` now warns about
-  the unauthenticated endpoint, as a literal non-loopback address always
-  has; a loopback address or `localhost` stays quiet.
-- A successful `POST /v1/events` answers `{"accepted":N,"stored":M}` and its
-  log line carries `stored` too, so a sender (or an operator reading stderr)
-  can see that a replayed id decoded and stored nothing.
-- toktop.ai's section nav links `Run`, the first-run command block that had an
-  anchor but no link.
-- The `ssh://` discovery sweep sends at most the first 4096 bytes of each
-  remote process's command line, which is all an engine match reads.
-- The `DEMO` tag names the seed the run drew from (`DEMO seed 42`), and
-  `--once --plain --demo` leads with `[demo seed 42]`. A demo frame is
-  reproducible from that seed alone, so the frame has to carry it.
-- A malformed event line in an NDJSON POST names the body offset it failed at,
-  so the offending line is findable in a long stream.
-- A dashboard image that the asset store cannot serve answers with the site's
-  own `text/plain` error body instead of the store's HTML error page.
-- Ingested events are deduplicated through an id index instead of a scan of
-  the retained window, which normalized every retained id under the lock the
-  emit path needs. A sender posting a large stream no longer pays a full
-  window walk per line.
-- Intel GPU metrics run one process per device concurrently, each with its own
-  timeout. On a multi-device node the last device used to start only after
-  three timeout windows had elapsed and could be dropped by them.
-
-### Fixed
-
 - An `agentusage` session whose first header line was larger than the owner
   scan's old 4 MiB cap but no larger than the record path accepts stopped
   being read for the life of the dashboard: the scan returned "undecided",

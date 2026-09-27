@@ -186,7 +186,12 @@ the bytes differ. It is the guard on the reproducibility flags above. Run
 
 Versions are 0.x: the CLI flags, the ingest `/v1/events` body, and the
 `agentusage` Go API may change without a major bump. Move the Unreleased
-section in [CHANGELOG.md](CHANGELOG.md) under the new version before tagging.
+section in [CHANGELOG.md](CHANGELOG.md) under the new version before tagging,
+and leave an empty `## [Unreleased]` stub behind. `make check-changelog`
+enforces this on the tag push: the release build fails unless the section and
+its `[version]:` compare link both exist, the link ends at the tag being cut,
+and nothing is left under Unreleased. Run it locally with
+`make check-changelog VERSION=0.15.0` before you tag.
 
 The source stamp is empty. `make build` writes `dev` via `-ldflags
 -X main.version=...`; a release tag writes the version with the `v` prefix
