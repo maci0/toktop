@@ -217,8 +217,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case len(m.snap.Providers) == 0:
 				m.setNotice("p: no engines to probe")
 			default:
-				go m.cfg.Prober()
+				// A command, not a bare goroutine: the program owns this
+				// task's lifetime, so a held key (terminals repeat key
+				// events) queues dispatches the program can account for
+				// instead of spawning an untracked goroutine per press.
+				prober := m.cfg.Prober
 				m.probeReq = m.clock
+				return m, func() tea.Msg {
+					prober()
+					return nil // no result to fold back into the model
+				}
 			}
 			return m, nil
 		case "t", "T":

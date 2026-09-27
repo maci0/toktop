@@ -129,10 +129,14 @@ func TestUpdateKeyMap(t *testing.T) {
 	}
 
 	n := probes.Load()
-	key("p") // the prober fires on its own goroutine
-	deadline := time.Now().Add(time.Second)
-	for probes.Load() == n && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
+	probe := key("p")
+	if probe == nil {
+		t.Fatal("p with engines attached must return a probe command")
+	}
+	// The dispatch is a program command, so the test runs it rather than
+	// waiting on a goroutine it cannot see.
+	if msg := probe(); msg != nil {
+		t.Errorf("probe command produced %v, want no message", msg)
 	}
 	if got := probes.Load(); got != n+1 {
 		t.Errorf("p fired %d probes, want 1", got-n)
@@ -201,8 +205,13 @@ func testHelpOverlayMutesActionKeys(t *testing.T) {
 		t.Error("space did not pause after help closed")
 	}
 	for i, k := range []string{"p", "P"} {
-		key(k)
-		synctest.Wait()
+		// p dispatches through a program command, so the test runs it: there
+		// is no detached goroutine left to wait on.
+		probe := key(k)
+		if probe == nil {
+			t.Fatalf("%s after help closed returned no probe command", k)
+		}
+		probe()
 		if got := probes.Load(); got != int32(i+1) {
 			t.Errorf("%s after help closed: probes = %d, want %d", k, got, i+1)
 		}

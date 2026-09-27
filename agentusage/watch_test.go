@@ -1255,3 +1255,51 @@ func TestStaleRootListingIsForgotten(t *testing.T) {
 		t.Fatal("stale root listing still cached after another walk")
 	}
 }
+
+// A parser that panics on a transcript must not strand the watcher. Both
+// locks in read are released by defer, so a panic part-way through the file
+// walk cannot leave pollMu held with no goroutine left to unlock it: the next
+// Poll would block forever, and with it every caller sharing the tracker.
+func TestPanickingParserDoesNotWedgeWatcher(t *testing.T) {
+	store := withStore(t, "codex")
+	adaptersMu.Lock()
+	orig := adapters["codex"]
+	ad := orig
+	ad.sessionCwd = nil
+	ad.parse = func([]byte) (values, string, bool) { panic("malformed record") }
+	adapters["codex"] = ad
+	adaptersMu.Unlock()
+	t.Cleanup(func() {
+		adaptersMu.Lock()
+		adapters["codex"] = orig
+		adaptersMu.Unlock()
+	})
+
+	w := Watch("codex", t.TempDir(), time.Now())
+	path := filepath.Join(store, "session.jsonl")
+	appendRaw(t, path, codexTokens(30, 60))
+
+	func() {
+		defer func() {
+			if recover() == nil {
+				t.Error("panicking parser did not reach the caller")
+			}
+		}()
+		w.poll(nil)
+	}()
+
+	// The watcher is still usable: the next read has to take pollMu, walk the
+	// store, and return. Before, it blocked forever on a lock the panic left
+	// held, taking the tracker that owned it down with it.
+	w.ad = orig
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Poll()
+	}()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watcher wedged after a parser panic: pollMu never released")
+	}
+}

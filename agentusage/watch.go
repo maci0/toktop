@@ -754,7 +754,22 @@ func (w *Watcher) Sample() Sample {
 }
 
 func (w *Watcher) poll(onChange func(Sample)) {
+	s, grew := w.read()
+	// Callback after read has released pollMu: onChange may Poll (final read,
+	// tests), and holding the lock across it deadlocks that path.
+	if grew && onChange != nil {
+		onChange(s)
+	}
+}
+
+// read takes one reading and publishes it, reporting the new sample only when
+// the observed usage grew. Both mutexes are released by defer, so a panic
+// raised while parsing an agent's transcript cannot leave a watcher holding
+// pollMu for the rest of the dashboard's life with no goroutine left to
+// unlock it.
+func (w *Watcher) read() (Sample, bool) {
 	w.pollMu.Lock()
+	defer w.pollMu.Unlock()
 	var out, thinking, total, input int
 	if w.source.present() {
 		// The provider is resolved per poll rather than trusted from attach:
@@ -764,13 +779,11 @@ func (w *Watcher) poll(onChange func(Sample)) {
 		// so the sample stays where it was instead of jumping.
 		src, ok := sourceFor(w.tool)
 		if !ok {
-			w.pollMu.Unlock()
-			return
+			return Sample{}, false
 		}
 		v, ok := w.readSource(src)
 		if !ok {
-			w.pollMu.Unlock()
-			return
+			return Sample{}, false
 		}
 		out, thinking, total, input = v.output, v.thinking, v.total, v.input
 	} else {
@@ -790,18 +803,12 @@ func (w *Watcher) poll(onChange func(Sample)) {
 		}
 	}
 	w.mu.Lock()
+	defer w.mu.Unlock()
 	grew := out > w.sample.Output || total > w.sample.Total || thinking > w.sample.Thinking || input > w.sample.Input
 	if grew {
 		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: time.Now()}
 	}
-	s := w.sample
-	w.mu.Unlock()
-	w.pollMu.Unlock()
-	// Callback after pollMu: onChange may Poll (final read, tests), and
-	// holding the lock across it deadlocks that path.
-	if grew && onChange != nil {
-		onChange(s)
-	}
+	return w.sample, grew
 }
 
 // pollEvery is how often a transcript is re-read. It bounds how stale a live
