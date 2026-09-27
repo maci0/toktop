@@ -45,7 +45,7 @@ func SatUint(v float64) uint64 {
 // SatAddU64 adds two counts saturating at MaxUint64: the rule every counter
 // sum in the tree follows, because a wrapped sum reads as no CPU used at all,
 // a small allocation, or a plausible-looking byte count a remote host never
-// measured. Agent token totals saturate at MaxInt64 (SatAddPos) and agentusage
+// measured. Agent token totals saturate at MaxInt64 (satAddPos) and agentusage
 // saturates at its own token ceiling, so those carry their own helpers.
 func SatAddU64(a, b uint64) uint64 {
 	if b > math.MaxUint64-a {
@@ -69,11 +69,11 @@ func MulSatU64(a, b uint64) uint64 {
 	return a * b
 }
 
-// SatAddPos adds two non-negative counts, saturating at MaxInt64. Agent token
+// satAddPos adds two non-negative counts, saturating at MaxInt64. Agent token
 // totals accumulate one event per retained sample from several producers,
 // some of which report whatever their transcript file happened to hold, so
 // the sum must not wrap to a negative total.
-func SatAddPos(a, b int64) int64 {
+func satAddPos(a, b int64) int64 {
 	if a < 0 {
 		a = 0
 	}

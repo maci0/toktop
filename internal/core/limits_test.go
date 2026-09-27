@@ -90,8 +90,8 @@ func TestSatAddPos(t *testing.T) {
 		{1 << 40, 1 << 40, 1 << 41},
 	}
 	for _, tc := range tests {
-		if got := SatAddPos(tc.a, tc.b); got != tc.want {
-			t.Errorf("SatAddPos(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		if got := satAddPos(tc.a, tc.b); got != tc.want {
+			t.Errorf("satAddPos(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
 		}
 	}
 }

@@ -61,7 +61,7 @@ const AgentAnonymous = "anonymous"
 // only one of them approved.
 func AgentNameField(s string) string {
 	s = ClampField(SingleLine(s), AgentNameMax)
-	if s == "" || MixedScriptIdentity(s) {
+	if s == "" || mixedScriptIdentity(s) {
 		return AgentAnonymous
 	}
 	return s
@@ -117,9 +117,9 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			a = &acc{first: ev.At}
 			by[agent] = a
 		}
-		a.tokens = SatAddPos(a.tokens, ev.OutputTokens)
-		a.prompt = SatAddPos(a.prompt, ev.PromptTokens)
-		a.thinking = SatAddPos(a.thinking, ev.ThinkingTokens)
+		a.tokens = satAddPos(a.tokens, ev.OutputTokens)
+		a.prompt = satAddPos(a.prompt, ev.PromptTokens)
+		a.thinking = satAddPos(a.thinking, ev.ThinkingTokens)
 		// The feed is not ordered by time: the remote ingest endpoint
 		// accepts any ts, and a producer's clock can step. Track the
 		// extremes rather than the last event walked, or a single
@@ -138,8 +138,8 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			} else if ev.At.Before(a.ownFirst) {
 				a.ownFirst = ev.At
 			}
-			a.ownTokens = SatAddPos(a.ownTokens, ev.OutputTokens)
-			a.ownPrompt = SatAddPos(a.ownPrompt, ev.PromptTokens)
+			a.ownTokens = satAddPos(a.ownTokens, ev.OutputTokens)
+			a.ownPrompt = satAddPos(a.ownPrompt, ev.PromptTokens)
 			if ev.At.After(a.ownLast) {
 				a.ownLast = ev.At
 			}

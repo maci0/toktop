@@ -155,8 +155,8 @@ func TestMixedScriptIdentity(t *testing.T) {
 		{"empty", "", false},
 	}
 	for _, tc := range cases {
-		if got := MixedScriptIdentity(tc.in); got != tc.want {
-			t.Errorf("%s: MixedScriptIdentity(%q) = %v, want %v", tc.name, tc.in, got, tc.want)
+		if got := mixedScriptIdentity(tc.in); got != tc.want {
+			t.Errorf("%s: mixedScriptIdentity(%q) = %v, want %v", tc.name, tc.in, got, tc.want)
 		}
 	}
 }

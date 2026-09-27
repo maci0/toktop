@@ -110,12 +110,12 @@ func SingleLine(s string) string {
 	return strings.Join(strings.Fields(SanitizeText(s)), " ")
 }
 
-// MixedScriptIdentity reports a name that mixes Latin letters with Cyrillic
+// mixedScriptIdentity reports a name that mixes Latin letters with Cyrillic
 // or Greek. Those alphabets supply lookalikes for Latin (Cyrillic с vs c),
 // so "сlaude" would render next to a real "claude" as the same agent.
 // Homoglyphs inside one script are left alone; this is the mixed-script
-// impersonation that ingest and similar identity fields can actually use.
-func MixedScriptIdentity(s string) bool {
+// impersonation an identity field can actually use.
+func mixedScriptIdentity(s string) bool {
 	var latin, lookalike bool
 	for _, r := range s {
 		switch {

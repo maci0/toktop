@@ -75,26 +75,26 @@ func FuzzSatCoerce(f *testing.F) {
 		// additions must stay non-negative and must saturate rather than
 		// wrap, whatever the producers reported.
 		a, b, c := int64(SatInt(v)), int64(SatInt(w)), int64(SatInt(x))
-		sum := SatAddPos(SatAddPos(SatAddPos(a, b), c), c)
+		sum := satAddPos(satAddPos(satAddPos(a, b), c), c)
 		if sum < 0 {
-			t.Fatalf("SatAddPos summed %v, %v, %v into %d", v, w, x, sum)
+			t.Fatalf("satAddPos summed %v, %v, %v into %d", v, w, x, sum)
 		}
 		// Where the four terms cannot overflow between them, the chain is
 		// the plain sum: no wrapping, no dropped sample.
 		const noOverflow = math.MaxInt64 / 8
 		if a <= noOverflow && b <= noOverflow && c <= noOverflow {
 			if want := a + b + 2*c; sum != want {
-				t.Fatalf("SatAddPos chain = %d, want the exact sum %d for %v, %v, %v", sum, want, v, w, x)
+				t.Fatalf("satAddPos chain = %d, want the exact sum %d for %v, %v, %v", sum, want, v, w, x)
 			}
 		}
-		if SatAddPos(math.MaxInt64, 1) != math.MaxInt64 {
-			t.Fatal("SatAddPos(MaxInt64, 1) wrapped")
+		if satAddPos(math.MaxInt64, 1) != math.MaxInt64 {
+			t.Fatal("satAddPos(MaxInt64, 1) wrapped")
 		}
-		if SatAddPos(math.MaxInt64, math.MaxInt64) != math.MaxInt64 {
-			t.Fatal("SatAddPos(MaxInt64, MaxInt64) wrapped")
+		if satAddPos(math.MaxInt64, math.MaxInt64) != math.MaxInt64 {
+			t.Fatal("satAddPos(MaxInt64, MaxInt64) wrapped")
 		}
-		if SatAddPos(-1, -1) != 0 {
-			t.Fatal("SatAddPos kept negative inputs negative")
+		if satAddPos(-1, -1) != 0 {
+			t.Fatal("satAddPos kept negative inputs negative")
 		}
 	})
 }
