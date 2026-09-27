@@ -54,6 +54,12 @@ const probeContentBytes = probeTokens * 32
 // max_tokens) from being rescaled away.
 const evalDurationBandDiv = 4
 
+// maxEvalDuration is the longest decode an engine can honestly report. A probe
+// asks for a few hundred tokens, so a reading past this is a malformed count
+// rather than a slow host, and fitEvalDuration's fallback (the measured round
+// trip) describes it better than the value does.
+const maxEvalDuration = 24 * time.Hour
+
 // probeLineMax is the largest SSE/NDJSON frame we will buffer. A 32-token
 // completion plus wrapper JSON is hundreds of bytes; a megabyte line is
 // the engine ignoring the cap in one shot, and bufio.Scanner only applies
@@ -158,6 +164,22 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 // and keeping the raw figure would read a microsecond report as nanoseconds
 // and report throughput thousands of times too high. Refusing it leaves the
 // caller on the wall-clock measurement it would use anyway.
+// nanoseconds converts a wire-reported count of nanoseconds to a Duration.
+// A value outside the int64 nanosecond range, or a negative one, is not a
+// duration: multiplying it would wrap into a plausible-looking number, and
+// fitEvalDuration would then rescale that into the plausible band and report
+// a throughput the engine never claimed. A value beyond maxEvalDuration is
+// representable but no decode ran that long: left in place it survives
+// fitEvalDuration's "longer than the whole round trip" branch and the sample
+// reports a token rate near zero. Zero sends the caller to its wall-clock
+// measurement instead.
+func nanoseconds(n int64) time.Duration {
+	if n <= 0 || n > int64(maxEvalDuration/time.Nanosecond) {
+		return 0
+	}
+	return time.Duration(n) * time.Nanosecond
+}
+
 func fitEvalDuration(reported, total time.Duration) time.Duration {
 	if reported <= 0 || total <= 0 {
 		return reported
@@ -241,7 +263,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		if chunk.Done {
 			if chunk.EvalCount > 0 {
 				reported = chunk.EvalCount
-				evalDur = time.Duration(chunk.EvalDuration) * time.Nanosecond
+				evalDur = nanoseconds(chunk.EvalDuration)
 			}
 			break
 		}

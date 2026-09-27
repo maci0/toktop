@@ -1102,3 +1102,41 @@ func TestRunOllamaRefusedEvalDurationUsesWallClock(t *testing.T) {
 		t.Errorf("tokps = %v, want a rate from the measured round trip", s.TokPS)
 	}
 }
+
+// An eval_duration past the int64 nanosecond range, and a negative one, are
+// not durations. Scaling them by time.Nanosecond wraps into a small positive
+// value that fitEvalDuration then places in the band, so the sample reported a
+// rate from a number the engine never sent.
+func TestRunOllamaOutOfRangeEvalDurationUsesWallClock(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"overflows nanoseconds", "9223372036854775807"},
+		{"negative", "-1000000"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/x-ndjson")
+				flusher, _ := w.(http.Flusher)
+				_, _ = w.Write([]byte(`{"response":"one","done":false}` + "\n"))
+				if flusher != nil {
+					flusher.Flush()
+				}
+				time.Sleep(200 * time.Millisecond)
+				_, _ = w.Write([]byte(`{"response":"","done":true,"eval_count":6,"eval_duration":` + tc.raw + "}\n"))
+			}))
+			defer srv.Close()
+
+			s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+			if !s.OK {
+				t.Fatalf("probe failed: %+v", s)
+			}
+			// Same bound as the refused-reading case: the rate has to come
+			// from the measured decode window, not from the wrapped value.
+			if s.TokPS < 5 || s.TokPS > 200 {
+				t.Errorf("tokps = %v, want a rate from the measured round trip", s.TokPS)
+			}
+		})
+	}
+}
