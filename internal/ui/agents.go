@@ -163,15 +163,24 @@ func (m Model) renderAgentsOnly() string {
 		rows = append(rows, dim("  waiting for an agent to report tokens…"))
 	}
 
+	// Optional parts join only while they fit: an over-wide title stretches
+	// the whole frame past the pane (same rule as feedTitle).
 	title := "AGENTS"
-	if hint := dim("  local, read from their own session logs"); m.w >= 78 {
-		title += hint
+	add := func(part string) {
+		if lipgloss.Width(title)+lipgloss.Width(part) <= w {
+			title += part
+		}
 	}
-	if !m.probeReq.IsZero() {
-		title += "  " + styleWarn.Render("● probing…")
+	if hint := dim("  local, read from their own session logs"); m.w >= 78 {
+		add(hint)
+	}
+	// This view has no PROBES panel, so the title is where a probe lands: the
+	// badge alone left p with no outcome anywhere on screen.
+	if r := m.probeReadout(); r != "" {
+		add("  " + r)
 	}
 	if len(rows) > midIn && midIn > 0 {
-		title += "  " + dim(fmt.Sprintf("+%d more", len(rows)-midIn))
+		add("  " + dim(fmt.Sprintf("+%d more", len(rows)-midIn)))
 	}
 
 	feed := feedLines(m.snap.Agents, feedIn, w)

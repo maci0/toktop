@@ -276,6 +276,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setNotice("a: no engines to switch to")
 				return m, nil
 			}
+			// The compact strip draws no panels to swap, so the focus flip
+			// would change nothing on screen. Same rule as the hidden keys
+			// in renderMinimal: say so rather than read as a dropped key.
+			if m.w < minDashW || m.h < minDashH {
+				m.setNotice("a: enlarge window, there are no panels to swap here")
+				return m, nil
+			}
 			m.focusAgents = !m.focusAgents
 			return m, nil
 		case "?", "h", "H":

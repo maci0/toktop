@@ -1849,6 +1849,36 @@ func TestProbeKeyNoopsWithoutEngines(t *testing.T) {
 	})
 }
 
+// The compact strip has no panels to swap, so a silent focus flip reads as a
+// dropped key. It answers instead, like the other keys with nothing to act on.
+func TestFocusKeyExplainsItselfOnCompactPane(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.w, m.h, m.ready = 40, 10, true
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	nm, _ := m.Update(keyMsg("a"))
+	m = nm.(Model)
+	if m.focusAgents {
+		t.Error("a swapped focus on a pane with no panels to swap")
+	}
+	if !strings.Contains(strip(m.View()), "enlarge window") {
+		t.Errorf("compact pane did not explain the no-op key:\n%s", strip(m.View()))
+	}
+}
+
+// A probe fired from the compact strip has no PROBES panel to report into, so
+// the strip carries the result itself.
+func TestProbeResultShownOnCompactPane(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready = 40, 10, true
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Probes:    []core.ProbeSample{{At: time.Now(), Model: "llama3", TokPS: 42, TTFTms: 310, OK: true}},
+	}
+	if out := strip(m.View()); !strings.Contains(out, "probe 310ms 42.0 tok/s") {
+		t.Errorf("compact pane missing probe result:\n%s", out)
+	}
+}
+
 func TestHelpFitsCompactPane(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	m.help, m.w, m.h, m.ready = true, 40, 10, true
@@ -1954,6 +1984,31 @@ func TestProbeFeedbackInAgentsView(t *testing.T) {
 	out := strip(m.View())
 	if !strings.Contains(out, "probing") {
 		t.Errorf("renderAgentsOnly missing probing indicator:\n%s", out)
+	}
+}
+
+// The agents view has no PROBES panel, so a probe that lands there is only
+// visible in the title. Without it, p leaves nothing on screen at all.
+func TestProbeResultShownInAgentsViewTitle(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready, m.focusAgents = 100, 36, true, true
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Probes: []core.ProbeSample{{
+			At:     time.Now(),
+			Model:  "llama3",
+			TokPS:  42,
+			TTFTms: 310,
+			OK:     true,
+		}},
+	}
+	if out := strip(m.View()); !strings.Contains(out, "probe 310ms 42.0 tok/s") {
+		t.Errorf("renderAgentsOnly missing probe result:\n%s", out)
+	}
+
+	m.snap.Probes[0].OK = false
+	if out := strip(m.View()); !strings.Contains(out, "probe failed") {
+		t.Errorf("renderAgentsOnly missing failed probe:\n%s", out)
 	}
 }
 

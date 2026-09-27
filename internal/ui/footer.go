@@ -206,8 +206,8 @@ func (m Model) renderMinimal() string {
 	if m.paused {
 		lines = append(lines, clip(styleWarn.Render("‖ PAUSED"), m.w))
 	}
-	if !m.probeReq.IsZero() {
-		lines = append(lines, clip(styleWarn.Render("● probing…"), m.w))
+	if r := m.probeReadout(); r != "" {
+		lines = append(lines, clip(r, m.w))
 	}
 	// The compact foot is one clipped line wide, too narrow to carry a notice
 	// beside the keys; the body is the only place it fits.

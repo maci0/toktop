@@ -97,6 +97,24 @@ func satAddU64(a, b uint64) uint64 {
 	return a + b
 }
 
+// probeReadout is the one-line outcome of the last probe, for the views that
+// have no PROBES panel to carry it: while a probe is pending it is the same
+// badge, after that the measured ttft and rate, or the failure. Empty when
+// nothing has been measured, so a view with no probes yet says nothing.
+func (m Model) probeReadout() string {
+	if !m.probeReq.IsZero() {
+		return styleWarn.Render("● probing…")
+	}
+	last, ok := m.lastProbe()
+	if !ok {
+		return ""
+	}
+	if !last.OK {
+		return styleBad.Render("probe failed")
+	}
+	return dim("probe") + " " + fmtMs(last.TTFTms) + " " + styleOK.Render(fmtRate(last.TokPS)+" tok/s")
+}
+
 func (m Model) probesTitle() string {
 	t := "PROBES"
 	if !m.probeReq.IsZero() {
