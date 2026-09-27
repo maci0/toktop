@@ -263,10 +263,17 @@ func (w *Watcher) forgetCounts(path string) {
 	delete(w.baseInput, path)
 }
 
+// dropFile also releases the zstd carry. A carry is the unterminated tail of a
+// transcript whose bytes are already committed, so it is a per-file buffer the
+// rest of the bookkeeping does not index: without this delete a long run kept
+// one per aged-out transcript, each up to maxLineBytes, and a path that
+// reappeared would have the stale tail prepended to a file that never wrote
+// it.
 func (w *Watcher) dropFile(path string) {
 	delete(w.stamps, path)
 	delete(w.offsets, path)
 	delete(w.owner, path)
 	delete(w.preexisting, path)
+	delete(w.zstdCarry, path)
 	w.forgetCounts(path)
 }

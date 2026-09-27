@@ -1347,6 +1347,29 @@ func TestForeignIdleTranscriptIsForgotten(t *testing.T) {
 	}
 }
 
+// dropFile is the one place a path leaves every per-file map. A zstd carry it
+// left behind would pin a tail buffer (up to maxLineBytes) for the rest of the
+// run, and a transcript that reappeared at the same path would have bytes it
+// never wrote prepended to its first record.
+func TestDropFileReleasesZstdCarry(t *testing.T) {
+	store := withStore(t, "dsh")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl.zstd")
+
+	w := Watch("dsh", work, time.Now())
+	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\n"))
+	appendBytes(t, path, zstdFrame(t, `{"type":"assistant/mes`)) // torn, unterminated
+	w.poll(nil)
+	if len(w.zstdCarry[path]) == 0 {
+		t.Fatal("an unterminated tail was not carried over, so the drop below proves nothing")
+	}
+
+	w.dropFile(path)
+	if carry, ok := w.zstdCarry[path]; ok {
+		t.Fatalf("dropFile left a %d byte carry behind", len(carry))
+	}
+}
+
 // A shared transcript listing that no watcher has refreshed must leave the
 // process-wide cache. Clanker (and {dir} specs) key it on the project path,
 // so a dashboard that follows agents through many trees would otherwise pin
