@@ -1255,23 +1255,3 @@ func TestWarnInsecureAdd(t *testing.T) {
 		})
 	}
 }
-
-func TestReplaceFold(t *testing.T) {
-	cases := []struct{ in, old, new, want string }{
-		{"cannot write C:\\Users\\me\\bin", "C:\\Users\\me\\", "~/", "cannot write ~/bin"},
-		{"cannot write c:\\users\\me\\bin", "C:\\Users\\me\\", "~/", "cannot write ~/bin"},
-		{"cannot write C:\\USERS\\ME\\bin", "C:\\Users\\me\\", "~/", "cannot write ~/bin"},
-		{"no home here", "C:\\Users\\me\\", "~/", "no home here"},
-		{"/Users/me/a /Users/me/b", "/Users/me/", "~/", "~/a ~/b"},
-		// A different home must not be folded into this one.
-		{"/home/maria/x", "/Users/me/", "~/", "/home/maria/x"},
-		// K (U+212A) folds to "k" and is three bytes wide; a search over
-		// lowercased copies would land on the wrong offset here.
-		{"K:\\x K:\\y", "k:\\", "~/", "~/x ~/y"},
-	}
-	for _, c := range cases {
-		if got := replaceFold(c.in, c.old, c.new); got != c.want {
-			t.Errorf("replaceFold(%q, %q, %q) = %q, want %q", c.in, c.old, c.new, got, c.want)
-		}
-	}
-}

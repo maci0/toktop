@@ -140,7 +140,11 @@ func main() {
 
 	if f.agents {
 		if err := loadAgentDefs(); err != nil {
-			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
+			// Every LoadDefinitions failure names the file it read, which
+			// lives under $HOME unless GAUNTLET_HOME says otherwise, so the
+			// home is folded to "~": this line is the only record of what is
+			// wrong with the file, and it gets pasted into issues.
+			fmt.Fprintf(os.Stderr, "toktop: %s\n", core.RedactHome(err.Error()))
 			os.Exit(2)
 		}
 	}

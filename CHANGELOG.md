@@ -37,6 +37,16 @@ support channel (see SECURITY.md).
 
 ### Fixed
 
+- An ssh failure no longer reports the home directory. A refused key, an
+  unreadable host key store or a changed host key named the absolute path it
+  worked on, and `$HOME` names the account; those paths now read `~/...`, as
+  a failed `toktop update` already did. A malformed agent definitions file
+  reports the same way.
+- `toktop ssh://a help` and `toktop ssh://a version` say the subcommand must
+  come first again, and `toktop help version extra` points at the screen that
+  would have answered it.
+- The help overlay is no longer built through a clipping helper that no longer
+  exists; opening `?` on a small pane rendered nothing.
 - A transcript that was on disk but had gone idle for more than two minutes
   when `--agents` attached is no longer read from its first byte. Attach now
   records where every existing transcript ends, not only the recently written

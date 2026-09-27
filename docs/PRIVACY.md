@@ -58,6 +58,11 @@ The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or
 `remote`. Event fields are not logged.
 
+Diagnostics name the file that failed, but the home directory is rewritten to
+`~` first: an absolute path under `$HOME` names the account, and these lines
+are what gets pasted into issues. An `ssh://` target is reported as you typed
+it, since that host and user are the ones you pointed toktop at.
+
 ## The website
 
 [toktop.ai](../site/worker.js) is one static page. It sets no cookies, runs

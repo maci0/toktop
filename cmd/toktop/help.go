@@ -62,7 +62,9 @@ func isHelpArg(arg string) bool {
 }
 
 // runHelp implements `toktop help [topic]`. Unknown topics are a usage error
-// so a typo does not dump the top-level screen and look like success.
+// so a typo does not dump the top-level screen and look like success. A topic
+// names the command whose help applies, so the extra-argument message points
+// at the screen that would have answered it.
 func runHelp(out io.Writer, args []string) int {
 	if len(args) == 0 || isHelpArg(args[0]) || args[0] == "help" {
 		if len(args) > 1 {

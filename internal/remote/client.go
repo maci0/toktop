@@ -135,7 +135,20 @@ func (c *handshakeConn) Read(b []byte) (int, error) {
 // in order: explicit key file, config/default keys, agent, then a password
 // (TOKTOP_SSH_PASSWORD first, else an interactive prompt when stdin is a
 // TTY). Host keys are trust-on-first-use with change detection.
+//
+// The failure is folded to a plain error with the home directory rewritten to
+// "~": a refused key, an unreadable store or a changed host key all report
+// the path they worked on, and that path names the account. The caller
+// prints the message; nothing branches on its type.
 func Connect(ctx context.Context, t Target) (*Client, error) {
+	c, err := dial(ctx, t)
+	if err != nil {
+		return nil, errors.New(core.RedactHome(err.Error()))
+	}
+	return c, nil
+}
+
+func dial(ctx context.Context, t Target) (*Client, error) {
 	methods, cleanup, err := t.authMethods()
 	if err != nil {
 		return nil, err

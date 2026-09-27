@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Target is one ssh-reachable host to monitor, fully resolved: explicit URL
@@ -256,6 +258,10 @@ func expandTilde(p string) string {
 // names a regular file. --ssh-key uses this at startup so a typo or a
 // directory fails before any ssh dial, rather than as a generic auth
 // rejection after discovery has already run.
+//
+// A stat failure is folded to a plain error with the home directory
+// rewritten to "~", like Connect: the key path is under $HOME, and the reason
+// it could not be read is worth more to the operator than the account name.
 func ResolveKeyFile(file string) (string, error) {
 	file = expandTilde(strings.TrimSpace(file))
 	if file == "" {
@@ -263,7 +269,7 @@ func ResolveKeyFile(file string) (string, error) {
 	}
 	fi, err := os.Stat(file)
 	if err != nil {
-		return "", err
+		return "", errors.New(core.RedactHome(err.Error()))
 	}
 	if !fi.Mode().IsRegular() {
 		return "", fmt.Errorf("%s is not a regular file", file)

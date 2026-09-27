@@ -278,6 +278,64 @@ func TestResolveKeyFile(t *testing.T) {
 	})
 }
 
+// A key path and a host-key store path both sit under $HOME, so every
+// diagnostic naming one names the account. Operators paste these into issues;
+// the reason has to survive that, the path must not.
+func TestSshDiagnosticsOmitHomeDirectory(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if got, err := os.UserHomeDir(); err != nil || got != home {
+		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
+	}
+	key := filepath.Join(home, ".ssh", "id_ed25519")
+	if err := os.MkdirAll(filepath.Dir(key), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(key, []byte("not a key"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	store := filepath.Join(home, "config", "toktop", "known_hosts")
+	if err := os.MkdirAll(filepath.Dir(store), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(store, []byte("box not-an-authorized-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	oldStore := knownHostsPath
+	knownHostsPath = func() string { return store }
+	t.Cleanup(func() { knownHostsPath = oldStore })
+
+	_, keyErr := ResolveKeyFile(filepath.Join(home, ".ssh", "no-such-key"))
+	if keyErr == nil {
+		t.Fatal("missing key accepted")
+	}
+	// The key chain is assembled before any dial, so an unparsable key fails
+	// without a network round trip.
+	_, connErr := Connect(t.Context(), Target{Host: "box", KeyFile: key})
+	if connErr == nil {
+		t.Fatal("unparsable key accepted")
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"ResolveKeyFile", keyErr},
+		{"Connect", connErr},
+	} {
+		msg := tc.err.Error()
+		if strings.Contains(msg, home) || strings.Contains(msg, "private-user") {
+			t.Errorf("%s error names the home directory: %q", tc.name, msg)
+		}
+		if !strings.Contains(msg, "~") {
+			t.Errorf("%s error = %q, want the path folded to ~", tc.name, msg)
+		}
+	}
+}
+
 func TestCutConfigField(t *testing.T) {
 	cases := []struct {
 		line, key, val string
