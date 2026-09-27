@@ -207,7 +207,7 @@ prompt tokens.
 - **Agent feed** - any harness can POST usage events:
   ```
   curl -X POST localhost:8420/v1/events \
-    -H 'Idempotency-Key: turn-1' -d \
+    -H "Idempotency-Key: coder-$(date +%s)-1" -d \
     '{"agent":"coder","kind":"tool","prompt_tokens":4200,"output_tokens":310,"thinking_tokens":40,"note":"shell(git status)"}'
   ```
   `--agents` also fills this from local session logs. Per-agent rows show
@@ -295,6 +295,14 @@ Replay the whole request under the same `Idempotency-Key` when its events
 omit `id`: a derived id is the key plus the line's position, so a resumed
 POST numbers its first line 1 again and the feed would drop it as a
 duplicate of an event it never sent.
+
+An `Idempotency-Key` (and an event `id`) names one logical operation and
+nothing else: mint it per operation, and namespace it per sender. Two POSTs
+under the same key derive the same ids, so the second one's events decode
+and store nothing: they show up only as `stored` below `accepted` on that
+POST and on its log line, and the agent's token totals silently miss them.
+A key is not a session, a turn counter, or a fixed string, and the server
+cannot tell a retry from a second sender that picked the same one.
 
 ## Zero vendor libraries
 

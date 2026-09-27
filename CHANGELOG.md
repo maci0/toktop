@@ -50,6 +50,11 @@ support channel (see SECURITY.md).
 - A knob that `--once --plain` never reads is named, like every other flag
   passed into a mode that ignores it. `$TOKTOP_COLUMNS`, `$TOKTOP_LINES`
   and `--frames` set alongside `--plain` were silently dropped.
+- An `Idempotency-Key` (or an event `id`) names one logical operation and one
+  sender. The README says so, and its example mints a per-send key instead of
+  a fixed `turn-1`: two POSTs under one key derive the same ids, so the
+  second one's events decode and store nothing, visible only as `stored` below
+  `accepted`.
 - `--ingest` bound to a host *name* other than `localhost` now warns about
   the unauthenticated endpoint, as a literal non-loopback address always
   has; a loopback address or `localhost` stays quiet.
