@@ -303,6 +303,78 @@ func TestSourceConcurrentAccess(t *testing.T) {
 	}
 }
 
+// A probe wave runs on the UI goroutine, so where it lands among the ticks is
+// the OS scheduler's to decide. The frame stream must not notice: a source
+// probed on every tick and one never probed report the same values on the
+// same tick, or the seed stops determining the run.
+func TestProbeAllDoesNotMoveTheFrameStream(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	quiet := NewSource(time.Second, 11)
+	noisy := NewSource(time.Second, 11)
+	for i := range 24 {
+		now := t0.Add(time.Duration(i) * time.Second)
+		sq, sn := quiet.stepAt(now), noisy.stepAt(now)
+		noisy.ProbeAll()
+		if !reflect.DeepEqual(sq.Providers, sn.Providers) {
+			t.Fatalf("probe wave moved the provider frame at tick %d:\n%+v\n%+v", i, sq.Providers, sn.Providers)
+		}
+		if !reflect.DeepEqual(sq.Sys, sn.Sys) {
+			t.Fatalf("probe wave moved the vitals at tick %d:\n%+v\n%+v", i, sq.Sys, sn.Sys)
+		}
+	}
+	if len(noisy.probes) == 0 {
+		t.Fatal("ProbeAll produced no samples")
+	}
+}
+
+// Two sources that ran the same number of waves draw the same probe numbers,
+// whatever order the waves and the frames arrived in.
+func TestProbeStreamIsSeparatePerSeed(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	early := NewSource(time.Second, 11)
+	late := NewSource(time.Second, 11)
+	for i := range 12 {
+		early.stepAt(t0.Add(time.Duration(i) * time.Second))
+		late.stepAt(t0.Add(time.Duration(2*i) * time.Second))
+	}
+	early.ProbeAll()
+	for i := range 12 {
+		late.stepAt(t0.Add(time.Duration(12+i) * time.Second))
+	}
+	late.ProbeAll()
+	got, want := lastWave(late.probes), lastWave(early.probes)
+	if len(want) == 0 {
+		t.Fatal("ProbeAll produced no samples")
+	}
+	for addr, p := range want {
+		q, ok := got[addr]
+		if !ok {
+			t.Fatalf("wave sample for %s missing in the other run", addr)
+		}
+		if p.TTFTms != q.TTFTms || p.TokPS != q.TokPS || p.Tokens != q.Tokens {
+			t.Fatalf("wave sample for %s differs across interleavings: %+v vs %+v", addr, p, q)
+		}
+	}
+}
+
+// lastWave keys the newest samples of one wave by backend. A wave stamps
+// every backend at one instant, so the newest At is the wave.
+func lastWave(ps []core.ProbeSample) map[string]core.ProbeSample {
+	var newest time.Time
+	for _, p := range ps {
+		if p.At.After(newest) {
+			newest = p.At
+		}
+	}
+	out := map[string]core.ProbeSample{}
+	for _, p := range ps {
+		if p.At.Equal(newest) {
+			out[p.Addr] = p
+		}
+	}
+	return out
+}
+
 // Demo mode shares the ingest recorder: events must stay newest-last the
 // same way the live collector keeps them, or the agent feed renders a
 // stale event last and eviction drops the wrong end.

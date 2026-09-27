@@ -57,6 +57,12 @@ support channel (see SECURITY.md).
   went away (driver unloaded, vendor CLI uninstalled, the host turned into a
   VM) stayed on the dashboard for the rest of the run. A dump cut short
   before the last section still keeps the last good reading.
+- `--demo` draws its probe samples from a second seeded stream, separate from
+  the one the frames draw. A probe wave fired from the UI goroutine, or by
+  `--probe` on real time, could land between two ticks and shift every value
+  the next frame reported, so the same `--seed` replayed differently depending
+  on when the key was pressed. Frame values now depend on the seed and the
+  frames elapsed, probe values on the seed and the waves run.
 - `$GAUNTLET_HOME` is honored only when it is an absolute path, like the XDG
   base directories. A relative one resolved `agents.json` against the working
   directory, where a missing file is not an error: the agents it defined

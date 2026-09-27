@@ -19,11 +19,27 @@ type backend struct {
 	burstEvery               int // seconds between load bursts
 }
 
+// probeStreamIncr is the PCG stream selector for the probe draw. It keeps
+// ProbeAll's numbers off the frame stream, so a probe wave fired from the UI
+// goroutine at an arbitrary point in a tick cannot shift what the next frame
+// reports. A replay with the same seed then depends on how many waves ran,
+// not on how the two goroutines interleaved.
+const probeStreamIncr = 0x70726f62655f7374
+
 // Source emits plausible Snapshots on ch once per tick.
 type Source struct {
 	interval time.Duration
 	backends []backend
-	rng      *rand.Rand
+	// rng drives the frame timeline: histories, vitals, agent events and the
+	// background probes genProbe drops in. Its draw count is a function of
+	// the frames elapsed alone, so two sources stepped the same instants
+	// agree on every charted value.
+	rng *rand.Rand
+	// probeRng drives ProbeAll's synthesized samples, called from the UI
+	// goroutine on a keypress or the --probe ticker. Keeping it separate is
+	// what makes the seed the whole run: an interleaving that is up to the
+	// OS scheduler cannot move the frame stream forward.
+	probeRng *rand.Rand
 	seed     int64
 	mu       sync.Mutex
 
@@ -52,6 +68,7 @@ func NewSource(interval time.Duration, seed int64) *Source {
 	return &Source{
 		interval: interval,
 		rng:      rand.New(rand.NewPCG(uint64(seed), 0)),
+		probeRng: rand.New(rand.NewPCG(uint64(seed), probeStreamIncr)),
 		seed:     seed,
 		backends: []backend{
 			{label: "ollama", kind: core.KindOllama, addr: "http://127.0.0.1:11434", model: "llama3.1:8b-instruct-q4_K_M",
@@ -75,8 +92,12 @@ func NewSource(interval time.Duration, seed int64) *Source {
 }
 
 // Seed reports the seed this source draws from. Every simulated value comes
-// from it, so it is the whole run: the dashboard shows it, and a run is
-// reproduced by starting toktop with the same --seed.
+// from it, on one of two streams: the frame stream, whose values depend on
+// the seed and the frames elapsed, and the probe stream behind ProbeAll,
+// whose values depend on the seed and the waves run. Neither depends on
+// wall-clock timing or on goroutine interleaving, so the seed is the whole
+// run: the dashboard shows it, and a run is reproduced by starting toktop
+// with the same --seed.
 func (s *Source) Seed() int64 { return s.seed }
 
 var agentNames = []string{"coder-agent", "ops-agent", "research-agent", "swarm-07"}
@@ -278,21 +299,24 @@ func (s *Source) addProbe(p core.ProbeSample) {
 }
 
 // ProbeAll satisfies the UI prober interface by synthesizing samples now.
+// It draws from probeRng, not the frame stream: a wave the operator fires
+// half a tick early must not move every value the next frame reports.
 func (s *Source) ProbeAll() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	at := s.stamp()
 	for i := range s.backends {
-		s.addProbe(s.synthProbe(s.backends[i], at, 60, 180, 0.3, 1))
+		s.addProbe(s.synthProbe(s.probeRng, s.backends[i], at, 60, 180, 0.3, 1))
 	}
 }
 
 // synthProbe fabricates one plausible probe result; spans size the random
-// ttft/duration draws.
-func (s *Source) synthProbe(b backend, at time.Time, ttftLo, ttftSpan, durLo, durSpan float64) core.ProbeSample {
-	ttft := ttftLo + s.rng.Float64()*ttftSpan
-	dur := durLo + s.rng.Float64()*durSpan
-	n := int(dur * (b.outBase / (1 + s.rng.Float64())))
+// ttft/duration draws. The caller names the stream so a background probe
+// stays on the frame timeline and a UI-triggered one does not.
+func (s *Source) synthProbe(rng *rand.Rand, b backend, at time.Time, ttftLo, ttftSpan, durLo, durSpan float64) core.ProbeSample {
+	ttft := ttftLo + rng.Float64()*ttftSpan
+	dur := durLo + rng.Float64()*durSpan
+	n := int(dur * (b.outBase / (1 + rng.Float64())))
 	return core.ProbeSample{
 		At: at, Addr: b.addr, Model: b.model, OK: true,
 		TTFTms: ttft,
@@ -304,7 +328,7 @@ func (s *Source) synthProbe(b backend, at time.Time, ttftLo, ttftSpan, durLo, du
 // genProbe drops in one background probe; caller holds s.mu.
 func (s *Source) genProbe(now time.Time) {
 	b := s.backends[s.rng.IntN(len(s.backends))]
-	s.addProbe(s.synthProbe(b, now, 80, 140, 0.4, 1.2))
+	s.addProbe(s.synthProbe(s.rng, b, now, 80, 140, 0.4, 1.2))
 }
 
 func (s *Source) snapshot(now time.Time) core.Snapshot {
