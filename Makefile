@@ -333,6 +333,44 @@ govulncheck: ## run govulncheck at the GOVULNCHECK pin (same pin as CI)
 	$(GO) run $(GOVULNCHECK) ./...
 	$(GO) run $(GOVULNCHECK) -tags sqlite ./...
 
+# The dashboard captures under site/public are build outputs of
+# docs/images/dashboard.png, and site/worker.js names every one of them (the
+# srcset widths, the share-card path, the og:image size). A recapture that
+# renames or drops one of them does not fail a build: worker.js keeps serving
+# a 404 and the byte ceilings in worker.test.js still pass on the files that
+# remain. This is that recipe, so the shipped set and the documented set
+# cannot drift.
+#
+# The encoders are not the project's package manager, so their versions are
+# recorded instead of pinned: -strip drops the metadata that would otherwise
+# carry the encoder version and a build clock into every byte. magick and
+# avifenc stay out of prereqs and out of every gate: they are only needed to
+# recapture, so a machine without them still passes the whole merge path.
+.PHONY: require-encoders
+require-encoders:
+	@for tool in magick avifenc; do \
+		command -v $$tool >/dev/null 2>&1 || { \
+			echo "make site-assets: $$tool is not on PATH (ImageMagick 7 and libavif); see CONTRIBUTING.md 'Prerequisites'" >&2; \
+			exit 1; \
+		}; \
+	done
+
+.PHONY: site-assets
+site-assets: require-encoders ## rebuild the site dashboard captures from docs/images/dashboard.png
+	@mkdir -p $(DIST)
+	cp docs/images/dashboard.png site/public/dashboard.png
+	magick docs/images/dashboard.png -strip -resize 1920x -quality 82 site/public/dashboard.webp
+	magick docs/images/dashboard.png -strip -resize 1280x -quality 82 site/public/dashboard-1280.webp
+	magick docs/images/dashboard.png -strip -resize 768x -quality 82 site/public/dashboard-768.webp
+	magick docs/images/dashboard.png -strip -resize 1200x -colors 128 PNG8:site/public/dashboard-card.png
+	@for width in 1920 1280 768; do \
+		stem=$$( [ "$$width" = 1920 ] && echo dashboard || echo "dashboard-$$width" ); \
+		magick docs/images/dashboard.png -strip -resize $${width}x $(DIST)/$$stem.png; \
+		avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
+			$(DIST)/$$stem.png site/public/$$stem.avif; \
+	done
+	@bun test site/
+
 # Every site-* target depends on this: .bun-version is what CI installs
 # (bun-version-file), so a local run cannot check or deploy the site with
 # a different runtime than the merge gate did.

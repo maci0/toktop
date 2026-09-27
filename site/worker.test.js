@@ -762,9 +762,7 @@ test("the share card is the capture at card width, not the full-size original", 
   const view = new DataView(card.buffer, card.byteOffset, card.byteLength);
   expect([view.getUint32(16), view.getUint32(20)]).toEqual([1200, 704]);
   expect(assetBytes("dashboard-card.png")).toBeLessThan(80_000);
-  expect(assetBytes("dashboard-card.png")).toBeLessThan(
-    assetBytes("dashboard.png") * 0.3,
-  );
+  expect(assetBytes("dashboard-card.png")).toBeLessThan(assetBytes("dashboard.png") * 0.3);
   expect(identityBody).toContain(`og:image" content="${ORIGIN}/dashboard-card.png"`);
   expect(identityBody).toContain(`twitter:image" content="${ORIGIN}/dashboard-card.png"`);
 });

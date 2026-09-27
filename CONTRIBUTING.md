@@ -23,9 +23,9 @@
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
 - Only to regenerate the README screenshot (below), and never for the
-  edit-test loop or any merge gate: `tmux` to capture the live frame,
-  `magick` (ImageMagick 7) to resize the PNG into the WebP variants, and
-  `avifenc` (libavif) to encode the AVIF ones. Nothing in `make pr` runs
+  edit-test loop or any merge gate: `tmux` to capture the live frame, and
+  `magick` (ImageMagick 7) plus `avifenc` (libavif) for `make site-assets`,
+  which rebuilds the captures under `site/public/`. Nothing in `make pr` runs
   them, so a machine without them passes every gate and only fails when it
   tries to recapture.
 - Network access on first run. `make` pins `GOTOOLCHAIN` to the `go.mod`
@@ -108,27 +108,12 @@ detached session otherwise starts wherever the tmux server did, and
 `./toktop` is not there.
 
 The image's pixel size is repeated in `site/worker.js` as the `og:image`
-dimensions. Copy the PNG into `site/public/dashboard.png` and rebuild the
-hero variants the page actually sends:
+dimensions. `make site-assets` rebuilds every capture the page serves from
+that PNG and then runs `bun test site/`, so the set that ships and the set the
+worker names cannot drift:
 
 ```
-magick docs/images/dashboard.png -strip -resize 1920x -quality 82 \
-  site/public/dashboard.webp
-magick docs/images/dashboard.png -strip -resize 1280x -quality 82 \
-  site/public/dashboard-1280.webp
-magick docs/images/dashboard.png -strip -resize 768x -quality 82 \
-  site/public/dashboard-768.webp
-magick docs/images/dashboard.png -strip -resize 1200x -colors 128 \
-  PNG8:site/public/dashboard-card.png
-magick docs/images/dashboard.png -strip -resize 1920x .scratch/hero-1920.png
-magick docs/images/dashboard.png -strip -resize 1280x .scratch/hero-1280.png
-magick docs/images/dashboard.png -strip -resize 768x .scratch/hero-768.png
-avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
-  .scratch/hero-1920.png site/public/dashboard.avif
-avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
-  .scratch/hero-1280.png site/public/dashboard-1280.avif
-avifenc -q 40 -s 2 -y 444 --ignore-exif --ignore-xmp \
-  .scratch/hero-768.png site/public/dashboard-768.avif
+make site-assets
 ```
 
 AVIF is what browsers that speak it download (about half the WebP). The three
@@ -171,6 +156,7 @@ weight, so a recapture that blows the budget fails there.
 | `make site-lint` | biome format-check and lint over `site/` at the Makefile `BIOME` pin (CI parity) |
 | `make site-fmt` | rewrite `site/` with the biome formatter, then re-lint |
 | `make site-check` | `bun test site/` |
+| `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick` and `avifenc`) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
