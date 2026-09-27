@@ -60,7 +60,11 @@ func flagDocs(fs *flag.FlagSet) string {
 		if ph := flagPlaceholder(name, f); ph != "" {
 			b.WriteString(" " + ph)
 		}
-		b.WriteString("\n    \t" + f.Usage)
+		// Six spaces, not the four-then-tab the flag package's PrintDefaults
+		// uses: a tab stop lands the description at column 8, which reads
+		// as a stray indent rather than a hanging one under a flag name
+		// starting at column 3.
+		b.WriteString("\n      " + f.Usage)
 		if def := defaultDoc(f.DefValue); def != "" {
 			b.WriteString(" (" + def + ")")
 		}

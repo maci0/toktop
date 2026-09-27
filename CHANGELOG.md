@@ -51,6 +51,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- An `ssh://` target `url.Parse` rejects said only "bad ssh target". The
+  text is not echoed, because that is where an embedded password would be,
+  so the error now names the accepted spelling instead of leaving the reader
+  with nothing to change.
+- Flag descriptions in `--help` hang under the flag name with spaces. The
+  tab the flag package's own printer uses landed them on a tab stop.
 - `toktop update --help` names the `--repo` argument the way its own usage
   line does (`owner/name`) instead of the type name Go's flag package
   reports (`string`).

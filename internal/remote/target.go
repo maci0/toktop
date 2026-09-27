@@ -77,8 +77,9 @@ func parseURLTarget(raw string) (Target, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
 		// url.Parse may echo userinfo, which is the password when one was
-		// embedded; do not wrap that text into our error.
-		return Target{}, errors.New("bad ssh target")
+		// embedded; do not wrap that text into our error. The shape is named
+		// instead, which is what the reader needs to fix the argument.
+		return Target{}, errors.New("ssh target is not a URL toktop can parse (a space, quote or control character); expected ssh://[user@]host[:port]")
 	}
 	if u.User != nil {
 		if _, set := u.User.Password(); set {

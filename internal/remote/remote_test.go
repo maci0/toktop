@@ -129,6 +129,24 @@ func TestParseTargetPasswordNotLeaked(t *testing.T) {
 	}
 }
 
+// An argument url.Parse rejects cannot be echoed: the rejected text is
+// whatever followed the scheme, which is where an embedded password would
+// be. The error has to name the shape instead, or the reader is left with a
+// bare complaint and the argument to fix.
+func TestParseTargetUnparseableNamesTheShape(t *testing.T) {
+	const raw = "ssh://gpu box"
+	_, err := ParseTarget(raw)
+	if err == nil {
+		t.Fatal("unparseable ssh target accepted")
+	}
+	if got := err.Error(); !strings.Contains(got, "ssh://[user@]host[:port]") {
+		t.Errorf("error = %q, want the accepted spelling ssh://[user@]host[:port]", got)
+	}
+	if strings.Contains(err.Error(), raw) {
+		t.Errorf("error = %q echoed the argument", err)
+	}
+}
+
 func TestParseTargetSSHConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "config")

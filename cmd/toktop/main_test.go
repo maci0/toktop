@@ -641,6 +641,23 @@ func TestUsageDocumentsFlagsInLongForm(t *testing.T) {
 	}
 }
 
+// Each flag's description hangs under the flag name by spaces. Go's
+// PrintDefaults indents it with a tab, which lands every description on a
+// tab stop instead of under the two-space flag column.
+func TestFlagDescriptionsIndentWithSpaces(t *testing.T) {
+	var buf strings.Builder
+	usage(&buf)
+	section := flagSection(t, buf.String())
+	for _, line := range strings.Split(section, "\n") {
+		if strings.HasPrefix(line, "  --") || line == "" {
+			continue
+		}
+		if strings.ContainsRune(line, '\t') {
+			t.Errorf("usage() description line is tab-indented: %q", line)
+		}
+	}
+}
+
 // A parse failure must name the flag the way the help screen and the README
 // spell it. The flag package reports its own single-dash form, which is not
 // the spelling shown anywhere else and reads as a different flag.
