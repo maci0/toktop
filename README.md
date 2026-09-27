@@ -442,7 +442,10 @@ collect your gateway key. `--add` URLs must be `http://` or `https://` with
 a host and must not embed userinfo (`user:pass@`); an endpoint that needs
 the key is attached as `toktop --add http://127.0.0.1:20128` with the token
 in the environment. `--ingest` must be `host:port` (empty would bind every
-interface on an ephemeral port and is rejected). Unknown `TOKTOP_*`
+interface on an ephemeral port and is rejected), as is a bind whose host is
+a name that is not `localhost` (a loopback address is the only quiet one,
+since a non-loopback bind exposes the unauthenticated endpoint). Unknown
+`TOKTOP_*`
 variables are reported at startup, so a typo fails loudly instead of doing
 nothing (`TOKTOP_SCREENSHOT_FONT` is recognized so a developer export is
 not reported as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without
@@ -455,7 +458,9 @@ or above 180 with `--once`, an empty `--repo`, a malformed `--add` or
 abort with exit code 2 instead of being silently adjusted; so do
 out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when `--once` renders, and
 a set-but-invalid `TOKTOP_LOG_LEVEL`. A bare `--interval 1` is rejected
-because it has no unit; use `1s` or `500ms`. Startup prints one line of the knobs
+because it has no unit; use `1s` or `500ms`. A `--add` endpoint reached over
+plain `http://` on a host that is not this machine is named at startup: the
+bearer token would cross the network in cleartext. Startup prints one line of the knobs
 that apply (`interval`, `ingest`, mode flags); bearer tokens appear only
 as `bearer=set`.
 

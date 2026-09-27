@@ -12,6 +12,9 @@ support channel (see SECURITY.md).
 
 ### Added
 
+- A `--add` endpoint on plain `http://` whose host is not this machine is
+  named at startup, because the bearer token crosses the network in
+  cleartext there.
 - A key that has nothing to act on (`p` with no engines, `t` before any
   throughput, `a` with no engines to swap to) says so on the footer for a few
   seconds instead of being swallowed.
@@ -20,6 +23,9 @@ support channel (see SECURITY.md).
 
 ### Changed
 
+- `--ingest` bound to a host *name* other than `localhost` now warns about
+  the unauthenticated endpoint, as a literal non-loopback address always
+  has; a loopback address or `localhost` stays quiet.
 - A successful `POST /v1/events` answers `{"accepted":N,"stored":M}` and its
   log line carries `stored` too, so a sender (or an operator reading stderr)
   can see that a replayed id decoded and stored nothing.

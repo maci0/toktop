@@ -243,6 +243,7 @@ func main() {
 	// stay distinct; otherwise OMNIROUTE_API_KEY then TOKTOP_BEARER.
 	if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
 		bearer.Set(tok)
+		warnInsecureAdd(f.adds)
 	}
 	warnBearerFlag(explicit["bearer"], f.bearer)
 
@@ -436,11 +437,35 @@ func routableBind(addr string) bool {
 	if err != nil {
 		return false // no port to split: treat as local, not as an alarm
 	}
-	if host == "" {
-		return true // ":port" binds every interface
+	return host == "" || !localHost(host) // ":port" binds every interface
+}
+
+// localHost reports whether a host names this machine only. A literal loopback
+// address, and the "localhost" name, are local; every other name is treated as
+// routable without a lookup, so `--ingest box.internal:8420` is named at
+// startup rather than staying silent because the name did not parse as an IP.
+// A name that does resolve to loopback (ip6-localhost and friends) costs one
+// extra warning line; the reverse mistake is a publicly reachable endpoint
+// nobody was told about.
+func localHost(host string) bool {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
 	}
-	ip := net.ParseIP(host)
-	return ip != nil && !ip.IsLoopback()
+	name := strings.ToLower(strings.TrimSuffix(host, "."))
+	return name == "localhost" || strings.HasSuffix(name, ".localhost")
+}
+
+// warnInsecureAdd names a --add endpoint that would receive the bearer token
+// in cleartext: plain HTTP to a host that is not this machine. Loopback
+// endpoints are exempt, as are the local engines discovery finds on their own.
+func warnInsecureAdd(adds []string) {
+	for _, raw := range adds {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "http" || localHost(u.Hostname()) {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "toktop: warning: %s is plain http, so the bearer token crosses the network in cleartext\n", u.Host)
+	}
 }
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the

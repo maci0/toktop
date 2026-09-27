@@ -1190,8 +1190,9 @@ func TestRoutableBind(t *testing.T) {
 	}{
 		{"127.0.0.1:8420", false},
 		{"[::1]:8420", false},
-		{"localhost:8420", false}, // resolved form is what Addr reports; a literal name errs into quiet
-		{"notanip:8420", false},
+		{"localhost:8420", false},
+		{"localhost.:8420", false},
+		{"box.internal:8420", true}, // a name is routable unless it says localhost
 		{"invalid-no-port", false},
 		{"", false},
 		{":8420", true},
@@ -1203,5 +1204,32 @@ func TestRoutableBind(t *testing.T) {
 		if got := routableBind(tt.addr); got != tt.want {
 			t.Errorf("routableBind(%q) = %v, want %v", tt.addr, got, tt.want)
 		}
+	}
+}
+
+func TestWarnInsecureAdd(t *testing.T) {
+	tests := []struct {
+		name string
+		adds []string
+		want string
+	}{
+		{"plain http remote", []string{"http://gpu-box:8000/v1"}, "cleartext"},
+		{"plain http local", []string{"http://127.0.0.1:11434/v1"}, ""},
+		{"plain http localhost", []string{"http://localhost:8000/v1"}, ""},
+		{"https remote", []string{"https://api.example.com/v1"}, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := captureStderr(t, func() { warnInsecureAdd(tt.adds) })
+			if tt.want == "" {
+				if got != "" {
+					t.Fatalf("printed %q, want silence", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("printed %q, want %q", got, tt.want)
+			}
+		})
 	}
 }
