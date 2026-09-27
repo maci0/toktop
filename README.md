@@ -507,7 +507,11 @@ toktop version    same as --version
                   fragment, since the URL is echoed to the log and the
                   reports; use --bearer / $TOKTOP_BEARER)
 ssh://user@host   positional; monitor remote hosts (repeatable;
-                  ssh://[user@]host[:port] only, no password in the URL)
+                  ssh://[user@]host[:port] only, no password in the URL;
+                  the host and user may not carry a bidi control,
+                  zero-width or other format character, tag character
+                  or variation selector, and a target that does is
+                  refused at startup)
 --ssh-key PATH    private key for ssh targets (overrides ~/.ssh/config;
                   ~ is expanded; a missing file or an empty value aborts at
                   startup)

@@ -146,7 +146,9 @@ Positional arguments are ssh:// targets and may repeat; help and version
 are also accepted as commands. http(s) URLs are rejected with an --add hint;
 anything else points at --help. --add URLs must be http(s) with a host and
 must not embed userinfo. ssh:// targets must be ssh://[user@]host[:port]
-and must not embed a password (use $TOKTOP_SSH_PASSWORD or --ssh-key).
+and must not embed a password (use $TOKTOP_SSH_PASSWORD or --ssh-key); a
+host or user carrying a bidi control, zero-width or other invisible
+character is refused, since the name shown is not the one ssh dials.
 The live dashboard needs a terminal; use --once when piping or redirecting.
 
 Environment (a flag always wins over the variable it mirrors):

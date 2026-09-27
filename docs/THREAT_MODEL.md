@@ -180,7 +180,11 @@ Every externally reachable input, with its code location:
    and refuses the same endpoint twice, since two polls of it read as twice
    the tokens (validateAddURL, parseAdd, endpoints.go). An `ssh://` URL that
    embeds a password, path, query, or fragment is rejected at startup
-   (internal/remote/target.go).
+   (internal/remote/target.go), as is a host or user carrying a bidi control,
+   zero-width or other format character, tag character or variation selector
+   (validTargetField, target.go), which the sanitizer of M2 strips: those
+   characters render one string as another, so the trust store, the first-use
+   prompt and the host label would name a host other than the one ssh dials.
    The live dashboard refuses to start when stdout is not a terminal
    (main.go, 172-176); `--once` and `--once --json` are the two non-TTY
    paths.

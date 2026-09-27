@@ -13,6 +13,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Breaking
+
+- An ssh target whose host or user carries an invisible formatting character is
+  refused, with the reason named. A right-to-left override or a zero-width
+  character carries no part of a host name or a user name, and the string it
+  produces is not the one ssh dials: the bytes on the command line went to one
+  host, while the trust-on-first-use store, the first-use prompt, the host
+  label and the audit log all showed the host the operator believes it to be.
+  The set is the one `core.SanitizeText` names (bidi controls, zero-width and
+  other format characters, tag characters, variation selectors), so the check
+  and the sanitizer the rest of the tree renders with cannot drift; a zero-width
+  joiner stays legal, so an emoji spelled with it is still a target. The
+  characters have to be removed from the name for the target to work, which is
+  the point: `ssh` itself dials what the operator typed.
+
 ### Added
 
 - `make release-verify VERSION=x.y.z` fetches every asset a published version
@@ -64,6 +79,33 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   recency cell at the right is no longer the one a narrow pane cuts.
   Nothing is measured differently: `--once --plain` is unchanged, and a pane
   with room for a full row still draws one.
+- An agent row whose tokens are counted by an engine names that engine where
+  the rate goes, in the rate cell, and the recency cell no longer prints it a
+  second time beside `live`. Before this the row showed a vague `via engine`
+  in the cell a rate belongs to and the address over by the recency cell, so
+  the one number a reader looks for first was the one cell the row could not
+  use. Every other surface (the panel title, the compact strip, the feed line
+  and the plain report) already named the engine once.
+- A single agent is `1 agent` in the pane header, the compact strip and the
+  linear report, where the header and the strip read `1 agents` before. The
+  count is spelled in one place now, so the three surfaces cannot disagree.
+
+### Performance
+
+- The site's dashboard capture is 22% smaller at the width a phone asks for
+  (10,577 bytes at 768w against 13,563), at 30.0 dB PSNR against the resized
+  source.
+- The site Worker builds one content coding per request, the one that request
+  will send, instead of building all three inside the first request a cold
+  isolate answers. Measured on this page brotli takes 23 ms, gzip 0.7 ms and
+  zstd 4 ms, so a client that accepts all three paid for the sum. A client
+  that accepts only a coding the runtime cannot build now falls through to
+  the next one it named, and gets its `406` only when none of them can be
+  built.
+- Every engine in a frame is matched against the process list through one
+  parse of its address rather than two (`urlPort` and `isLoopbackURL` each
+  parsed the same string on every frame of every engine), and a provider key
+  is built once per probe sweep rather than per lookup.
 
 ### Fixed
 
@@ -172,6 +214,49 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   life of the process. Two runs of one build on one Mac could report different
   VRAM for the same card. The bare key still wins outright; the remaining
   candidates are now tried in name order.
+- A definitions reload that stops naming an agent stopped that agent's watcher
+  as well. `ResetDefinitions`, or a definitions file that no longer lists the
+  agent, left the watcher holding the adapter the last load gave it, and it
+  went on walking and billing a transcript store no spec claimed any more
+  for the life of the process. A spec with no usable root is withdrawn the
+  same way. The counts already published stay, so an agent whose definition
+  went away holds its last sample instead of dropping to zero and reading as
+  an agent whose sessions were deleted; a load that names it again re-derives
+  over the same watcher.
+- An OpenAI-compatible engine answering a well-formed listing with an empty
+  `data` array is now read as that kind of engine. The answer was compared
+  against a non-empty listing, so an engine serving no model yet was
+  indistinguishable from an endpoint that is not a listing at all, and the
+  switch that reaches every kind of engine never reached it. An absent `data`
+  is still the shape of a non-listing endpoint.
+- A malformed message payload in an opencode session store blinded every
+  reading of that agent. The token columns were extracted with a bare
+  `json_extract`, which raises on input that is not well-formed JSON, and one
+  truncated or non-JSON row failed the whole statement for as long as the row
+  survived. The extract is guarded, so such a row reads as absent, and a
+  negative stored counter is floored at zero instead of subtracting from the
+  sessions that read fine. The store is another program's and is opened
+  read-only, so nothing here constrains the rows.
+- A GPU vendor CLI that fails now says so in the audit log, once at the start
+  of an outage and once at its end. A driver that has been unloaded, a wedged
+  `nvidia-smi`, or a container whose GPU device vanished all blank the GPU
+  row, and a machine with no GPU at all looks the same on screen, so an
+  operator debugging a missing readout had nothing to read. The line is not
+  repeated per poll, which for a tool uninstalled hours ago would be one line
+  every interval for the rest of the run.
+- The release binaries carry the IANA zone database. The header clock, the
+  feed timestamps and the text report all render through `time.Local`, which a
+  released binary resolved against the host's zone files: on a host with none
+  (a scratch or distroless container, a downloaded binary on a machine with no
+  Go toolchain) the runtime fell back to UTC in silence, so the clock read two
+  hours behind and feed events carried instants the sender never sent. The
+  zone files on a host that has them still win, so a desktop install is
+  unchanged; the binary grows about 440 KiB.
+- The peer's stderr tail quoted into an ssh connection error is bounded in
+  grapheme clusters rather than in bytes. The cut landed inside a multi-byte
+  sequence, and trimming the partial rune still lands inside a grapheme, so an
+  "e" whose combining acute fell on the wrong side printed as an unaccented
+  letter in the one line of the traceback the operator needed.
 
 ## [0.15.0] - 2026-09-27
 
