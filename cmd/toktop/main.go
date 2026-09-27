@@ -345,12 +345,12 @@ func main() {
 			}
 			go func() {
 				if err := srv.Serve(); err != nil {
-					fmt.Fprintf(os.Stderr, "toktop: ingest stopped: %v\n", err)
-					// The UI renders the message verbatim, so it names its
-					// own subsystem here: the same channel carries the agent
-					// watch's failures, and an unprefixed one read as a feed
-					// outage no matter what had actually stopped.
-					select { // the alt screen hides stderr; tell the UI too
+					// Serve already audited the failure on the ingest logger,
+					// so stderr gets one line from here at most and the UI
+					// needs its own: the alt screen hides stderr, and the
+					// channel carries the agent watch's failures too, so the
+					// message names the subsystem that stopped.
+					select {
 					case feedErr <- "ingest stopped: " + err.Error():
 					default:
 					}

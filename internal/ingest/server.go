@@ -329,10 +329,21 @@ func (s *Server) Addr() string { return s.addr }
 
 // Serve runs the ingest endpoint until Close. A Close from any goroutine is
 // reported as a nil error, since that is how a run ends.
+//
+// Any other failure ends the endpoint for good, so it is audited here rather
+// than left to the caller: an accept error that only reached an ad hoc
+// stderr write lost the level floor and the addr redaction every other ingest
+// line has, and under the alt screen a feed that stops accepting is a feed
+// that silently stops.
 func (s *Server) Serve() error {
 	err := s.srv.Serve(s.ln)
 	if err == http.ErrServerClosed {
 		return nil
+	}
+	if err != nil && s.log != nil {
+		s.log.Error("toktop: ingest stopped",
+			"addr", s.addr,
+			"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256))
 	}
 	return err
 }
@@ -486,8 +497,12 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	default:
 		w.Header().Set("Retry-After", "1")
 		armWrite()
+		// in_flight beside the cap, so a run of these says how close the
+		// endpoint is to refusing everything rather than only that it did:
+		// the same number /healthz reports, on the same refusals.
 		reject(http.StatusServiceUnavailable,
-			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(eventSlots)))
+			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(eventSlots)),
+			"in_flight", len(eventSlots), "slot_cap", cap(eventSlots))
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)

@@ -550,19 +550,30 @@ function errorResponse(started, status, body, extraHeaders = {}) {
 // A client that refuses every coding gets an uncacheable 406, conditional
 // requests included: it cannot read any representation of the page, so a 304
 // would leave it holding a copy it still cannot decode. The Vary rides along
-// so a shared cache keys the refusal on what the client asked for.
+// so a shared cache keys the refusal on what the client asked for. It is rare
+// next to the served requests and the reason a visitor would report, so it
+// logs like the rest of the failures rather than passing in silence.
 function notAcceptable(request, started) {
-  return errorResponse(started, 406, request.method === "HEAD" ? null : "not acceptable", {
-    vary: VARY,
-  });
+  return failRequest(
+    request,
+    started,
+    406,
+    "not-acceptable",
+    request.method === "HEAD" ? null : "not acceptable",
+    { vary: VARY },
+  );
 }
 
-// One failure, one line and one answer. The line names the status the client
-// got and the milliseconds the edge spent, so one pivot off a visitor's
-// report says whether it succeeded and how slowly; the answer carries the
-// same numbers as headers.
-function failRequest(request, started, status, event, body, fields, extraHeaders) {
+// One failure, one line and one answer. Every line carries the same request
+// fields, so a filter on method, path or status works across every event
+// rather than only the ones that happened to pass them in. The line names the
+// status the client got and the milliseconds the edge spent, so one pivot off
+// a visitor's report says whether it succeeded and how slowly; the answer
+// carries the same numbers as headers.
+function failRequest(request, started, status, event, body, extraHeaders = {}, fields = {}) {
   logFailure(request, event, {
+    method: request.method,
+    path: new URL(request.url).pathname,
     status,
     duration_ms: Date.now() - started,
     ...fields,
@@ -652,9 +663,8 @@ export default {
         500,
         "unhandled",
         request.method === "HEAD" ? null : "internal error",
+        undefined,
         {
-          method: request.method,
-          path: new URL(request.url).pathname,
           error: String(err?.message ?? err),
         },
       );
@@ -666,14 +676,14 @@ async function handle(request, env, started) {
   const url = new URL(request.url);
   if (IMAGE_PATHS.has(url.pathname)) {
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return errorResponse(started, 405, "method not allowed", { allow: "GET, HEAD" });
+      return failRequest(request, started, 405, "method-not-allowed", "method not allowed", {
+        allow: "GET, HEAD",
+      });
     }
     if (!env?.ASSETS) {
       // Every image on the page is now a 404 and /health reports the missing
       // binding, so this is the line that names the request behind it.
-      return failRequest(request, started, 404, "assets-unbound", "not found", {
-        path: url.pathname,
-      });
+      return failRequest(request, started, 404, "assets-unbound", "not found");
     }
     // Images are already compressed. Clone-with-headers keeps
     // Accept-Encoding (a forbidden header), so this is a new request
@@ -704,7 +714,6 @@ async function handle(request, env, started) {
         asset.status,
         asset.status === 404 || asset.status === 410 ? "asset-missing" : "asset-store-error",
         request.method === "HEAD" ? null : assetErrorBody(asset.status),
-        { path: url.pathname },
       );
     }
     const headers = new Headers(asset.headers);
@@ -725,7 +734,9 @@ async function handle(request, env, started) {
     return new Response(asset.body, { status: asset.status, headers });
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return errorResponse(started, 405, "method not allowed", { allow: "GET, HEAD" });
+    return failRequest(request, started, 405, "method-not-allowed", "method not allowed", {
+      allow: "GET, HEAD",
+    });
   }
   if (url.pathname === "/health") {
     // Uptime probes hit this continuously; caching it would only blur

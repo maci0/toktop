@@ -40,6 +40,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `SpecFor` reporting transcript roots that no watcher read, since the adapter
   outranks every definition. A definition still replaces a compiled-in
   *definition*, which is what pi, prime-agent and feynman are.
+- The ingest endpoint audits an accept failure that stops it, on the same
+  logger, at error level, with the bound address and the reason. It was one
+  unstructured stderr line that ignored `$TOKTOP_LOG_LEVEL`, so a feed that
+  stopped accepting left no line to filter for.
 - `toktop` exits 2 when every ssh target it was given fails to attach,
   instead of starting a dashboard showing only local engines with the reason
   on a stderr line the alternate screen hides.

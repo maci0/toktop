@@ -121,15 +121,20 @@ a line per visit would bury the few that name a broken deploy.
 | `asset-store-error` | the asset store answered 5xx |
 | `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 and `/health` reports `degraded` |
 | `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size |
+| `method-not-allowed` | a method the path does not take, on the page or on an image |
+| `not-acceptable` | the client refused every encoding the isolate can produce, so the page cannot be sent to it at all |
 
-Each line that answers a request carries the request's `cf-ray` (empty off
-Cloudflare), the `status` the client was given, the `duration_ms` the edge
-spent getting there, plus the path, method or reason as the event needs. That
-is the pivot from a failure
+Every request line carries the same fields: the request's `cf-ray` (empty off
+Cloudflare), its `method` and `path`, the `status` the client was given, the
+`duration_ms` the edge spent getting there, and whatever reason the event
+adds. A filter on method, path or status works across every event. That is
+the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. A `405` or a
-`406` is not logged: the client did something the route does not do, the
-answer says so, and neither names a broken deploy.
+`406` is rare next to the served requests and names a client the edge cannot
+serve, which is a report an operator gets rather than a broken deploy, so
+both are logged; the served page, its 304s and its images are the ones that
+stay silent.
 
 ## Performance budget
 

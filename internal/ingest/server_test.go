@@ -2284,3 +2284,113 @@ func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 		t.Fatalf("status after the stalled request ended = %d, want 202", code)
 	}
 }
+
+// An accept failure ends the endpoint for good, so it is the one ingest event
+// with no request behind it: the audit line has to name the bound address and
+// the reason on its own, at error level, or a feed that stopped accepting
+// leaves no trace an operator can filter for.
+func TestServeAuditsItsOwnDeath(t *testing.T) {
+	lg, buf := captureLogger()
+	s, err := newServer("127.0.0.1:0", &memRecorder{}, lg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := s.Addr()
+	if err := s.ln.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Serve(); err == nil {
+		t.Fatal("Serve on a closed listener = nil, want the accept failure")
+	}
+	got := buf.String()
+	for _, want := range []string{
+		`level=ERROR`,
+		"msg=\"toktop: ingest stopped\"",
+		"addr=" + addr,
+		"error=",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stop audit line missing %q: %s", want, got)
+		}
+	}
+}
+
+// A deliberate Close is how a run ends, not a failure, so it must not write a
+// stop line an operator would page on.
+func TestServeCloseIsNotAudited(t *testing.T) {
+	lg, buf := captureLogger()
+	s, err := newServer("127.0.0.1:0", &memRecorder{}, lg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	go s.Serve()
+	// Wait for the accept loop to own the listener: a Close that lands first
+	// would turn Serve's own start into the failure under test.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		conn, err := net.DialTimeout("tcp", s.Addr(), 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("ingest never accepted on %s: %v", s.Addr(), err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "" {
+		t.Errorf("Close audited a stop: %q", got)
+	}
+}
+
+// The refusal is the one failure mode where the depth matters: a wall of
+// identical 503s says the endpoint is refusing, and in_flight beside the cap
+// says whether it is one stalled sender or the cap itself.
+func TestRefusedPostAuditsInFlightDepth(t *testing.T) {
+	lg, buf := captureLogger()
+	s, err := newServer("127.0.0.1:0", &memRecorder{}, lg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveIngest(t, s)
+	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
+
+	pr, pw := io.Pipe()
+	stalled := make(chan error, 1)
+	go func() {
+		defer pw.Close()
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
+		if err != nil {
+			stalled <- err
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+		stalled <- err
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for len(eventSlots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(eventSlots) == 0 {
+		t.Fatal("stalled POST never reached the decode loop")
+	}
+
+	if code, _ := postBody(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder"}`); code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", code)
+	}
+	got := buf.String()
+	for _, want := range []string{"status=503", "in_flight=1", "slot_cap=1"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("refusal audit line missing %q: %s", want, got)
+		}
+	}
+	pw.Close()
+	<-stalled
+}

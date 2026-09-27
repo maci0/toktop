@@ -307,10 +307,14 @@ Wrong-method and unknown-path requests log the same way, so a harness
 posting to `/events` is not silent. `GET /healthz` is not logged. It answers
 `503` with `Retry-After: 1` and a one-line reason while all 64 event slots are
 held, because the endpoint is refusing every POST then and `ok` would describe
-a service that accepts nothing. Event
+a service that accepts nothing. A refused POST audits `in_flight` and
+`slot_cap` beside the reason, so a run of them says how close the cap is, not
+just that it was hit. Event
 bodies are not logged. A handler panic is one ERROR
-line with `req` and a single-line `stack`. Responses carry `X-Request-Id`,
-echoed from the request when the sender set one.
+line with `req` and a single-line `stack`. An accept failure that ends the
+endpoint writes one ERROR line naming the bound address and the reason.
+Responses carry `X-Request-Id`, echoed from the request when the sender set
+one.
 
 Streams are recorded line by line: if a later line fails, events before it
 stay recorded and the error states how many. Retrying a stream (or a

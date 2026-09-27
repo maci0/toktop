@@ -229,25 +229,45 @@ test("implicit identity does not outweigh an accepted compressed representation"
 });
 
 test("unacceptable encodings return an uncacheable 406, including conditional requests", async () => {
-  const etag = (await call()).headers.get("etag");
-  for (const ae of ["identity;q=0", "*;q=0", "deflate, identity;q=0"]) {
-    for (const method of ["GET", "HEAD"]) {
-      for (const conditional of [{}, { "if-none-match": etag }]) {
-        const res = await call({ "accept-encoding": ae, ...conditional }, { method });
-        expect(res.status).toBe(406);
-        expect(res.headers.get("cache-control")).toBe("no-store");
-        expect(res.headers.get("vary")).toBe("Accept-Encoding");
-        expect(res.headers.get("content-encoding")).toBeNull();
-        for (const name of SECURITY_HEADER_NAMES) {
-          expect(res.headers.get(name)).not.toBeNull();
+  const logs = captureLogs();
+  try {
+    const etag = (await call()).headers.get("etag");
+    let refused = 0;
+    for (const ae of ["identity;q=0", "*;q=0", "deflate, identity;q=0"]) {
+      for (const method of ["GET", "HEAD"]) {
+        for (const conditional of [{}, { "if-none-match": etag }]) {
+          const res = await call({ "accept-encoding": ae, ...conditional }, { method });
+          expect(res.status).toBe(406);
+          expect(res.headers.get("cache-control")).toBe("no-store");
+          expect(res.headers.get("vary")).toBe("Accept-Encoding");
+          expect(res.headers.get("content-encoding")).toBeNull();
+          for (const name of SECURITY_HEADER_NAMES) {
+            expect(res.headers.get(name)).not.toBeNull();
+          }
+          if (method === "HEAD") expect(await res.text()).toBe("");
+          refused++;
         }
-        if (method === "HEAD") expect(await res.text()).toBe("");
       }
     }
+    // A 406 is a client the edge cannot serve at all, so it is one of the
+    // failures a visitor reports: one line each, and none of the served
+    // requests around them.
+    expect(logs.parse()).toEqual(
+      Array.from({ length: refused }, () => ({
+        event: "not-acceptable",
+        ray: "",
+        method: expect.stringMatching(/^(GET|HEAD)$/),
+        path: "/",
+        status: 406,
+        duration_ms: expect.any(Number),
+      })),
+    );
+    const accepted = await call({ "accept-encoding": "*;q=0, gzip;q=0.5" });
+    expect(accepted.status).toBe(200);
+    expect(accepted.headers.get("content-encoding")).toBe("gzip");
+  } finally {
+    logs.restore();
   }
-  const accepted = await call({ "accept-encoding": "*;q=0, gzip;q=0.5" });
-  expect(accepted.status).toBe(200);
-  expect(accepted.headers.get("content-encoding")).toBe("gzip");
 });
 
 test("every variant carries Vary: Accept-Encoding", async () => {
@@ -1020,6 +1040,7 @@ test("asset failures log their status; served requests log nothing", async () =>
       {
         event: "assets-unbound",
         ray: "",
+        method: "GET",
         status: 404,
         path: "/dashboard.avif",
         duration_ms: expect.any(Number),
@@ -1027,6 +1048,7 @@ test("asset failures log their status; served requests log nothing", async () =>
       {
         event: "asset-missing",
         ray: "",
+        method: "GET",
         status: 404,
         path: "/dashboard.avif",
         duration_ms: expect.any(Number),
@@ -1034,8 +1056,40 @@ test("asset failures log their status; served requests log nothing", async () =>
       {
         event: "asset-store-error",
         ray: "",
+        method: "GET",
         status: 502,
         path: "/dashboard.avif",
+        duration_ms: expect.any(Number),
+      },
+    ]);
+  } finally {
+    logs.restore();
+  }
+});
+
+test("a rejected method on either surface logs the request behind it", async () => {
+  const logs = captureLogs();
+  try {
+    const env = assetsEnv({ "/dashboard.webp": "webp-bytes" });
+    const page = await call({ "cf-ray": "9a1b2c3d4e5f-TOK" }, { method: "POST", env });
+    expect(page.status).toBe(405);
+    const image = await imageCall("/dashboard.webp", {}, { method: "PUT", env });
+    expect(image.status).toBe(405);
+    expect(logs.parse()).toEqual([
+      {
+        event: "method-not-allowed",
+        ray: "9a1b2c3d4e5f-TOK",
+        method: "POST",
+        path: "/",
+        status: 405,
+        duration_ms: expect.any(Number),
+      },
+      {
+        event: "method-not-allowed",
+        ray: "",
+        method: "PUT",
+        path: "/dashboard.webp",
+        status: 405,
         duration_ms: expect.any(Number),
       },
     ]);
