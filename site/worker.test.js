@@ -20,6 +20,9 @@ const ANSI16_BLOCK_RE = /^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m;
 const ANSI16_ENTRY_RE = /^\s*(\d+): (\(\d+, \d+, \d+\))/gm;
 const EDGE_DUR_RE = /^edge;dur=(\d+)$/;
 const DUR_SUFFIX_RE = /dur=\d+(?:\.\d+)?$/;
+const IMG_TAG_RE = /<img\b[^>]*>/g;
+const IMG_SIZE_RE = /width="(\d+)" height="(\d+)"/;
+const INLINED_ICON_RE = /rel="icon" href="data:image\/svg\+xml,([^"]+)"/;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -835,6 +838,52 @@ test("the share card is the capture at card width, not the full-size original", 
   expect(assetBytes("dashboard-card.png")).toBeLessThan(assetBytes("dashboard.png") * 0.3);
   expect(identityBody).toContain(`og:image" content="${ORIGIN}/dashboard-card.png"`);
   expect(identityBody).toContain(`twitter:image" content="${ORIGIN}/dashboard-card.png"`);
+});
+
+// The <img width height> is the aspect ratio the browser reserves the box with
+// before the fallback arrives, so it has to be the fallback file's own size and
+// not the width the page happens to draw it at. Stating a size the file does
+// not have reserves the right ratio by coincidence: a re-capture at a slightly
+// different ratio shifts the hero by a few pixels after it paints. Both halves
+// are read off the file, so a re-capture that changes the capture without
+// changing the markup fails here.
+test("the hero's reserved box is the fallback capture's own size", () => {
+  const png = readFileSync(join(PUBLIC, "dashboard.png"));
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  const declared = [...identityBody.matchAll(IMG_TAG_RE)][0][0].match(IMG_SIZE_RE);
+  expect([Number(declared[1]), Number(declared[2])]).toEqual([
+    view.getUint32(16),
+    view.getUint32(20),
+  ]);
+});
+
+// A browser that reads the <link> never asks for this, but a crawler, a
+// bookmark or a client that ignored the data URI does, and the one-page
+// catch-all answered it with the whole document: 3,602 bytes of text/html for
+// a request that wants an image, on a page whose whole budget is two requests.
+// The answer must be the icon itself, and it must not need the asset binding
+// the captures need.
+test("/favicon.ico answers with the icon, not the page", async () => {
+  const res = await call({}, { path: "/favicon.ico" });
+  expect(res.status).toBe(200);
+  expect(res.headers.get("content-type")).toBe("image/svg+xml");
+  const body = await res.text();
+  expect(body.startsWith("<svg ")).toBe(true);
+  expect(Number(res.headers.get("content-length"))).toBe(new TextEncoder().encode(body).byteLength);
+  // The same mark the page inlines, so the two cannot drift.
+  const inlined = identityBody.match(INLINED_ICON_RE)[1];
+  expect(decodeURIComponent(inlined)).toBe(body);
+  expect(res.headers.get("cache-control")).toBe((await call()).headers.get("cache-control"));
+  for (const name of SECURITY_HEADER_NAMES) {
+    expect(res.headers.get(name)).not.toBeNull();
+  }
+  // HEAD carries the GET headers and no body, like every other HEAD here.
+  const head = await call({}, { method: "HEAD", path: "/favicon.ico" });
+  expect(head.status).toBe(200);
+  expect(head.headers.get("content-type")).toBe("image/svg+xml");
+  expect(await head.text()).toBe("");
+  // A POST to it is still the one the method check answers.
+  expect((await call({}, { method: "POST", path: "/favicon.ico" })).status).toBe(405);
 });
 
 function assetsEnv(bodies) {

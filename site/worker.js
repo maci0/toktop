@@ -16,6 +16,11 @@ function htmlForWire(source) {
 // 1280w capture, 30,963 bytes for 722 pixels of it. 1920w is the 2x desktop
 // slot.
 // The img omits decoding=async so the browser does not postpone the LCP decode.
+// Its width and height are the fallback PNG's own 3240x1900, not a width the
+// page draws it at: they only supply the aspect ratio the box is reserved with
+// (.shot img is width:100%; height:auto), and stating a size the file does not
+// have reserves the right ratio by coincidence rather than by construction.
+// worker.test.js reads the PNG header and fails when the two disagree.
 const HERO_SIZES =
   "(max-width: 640px) calc(100vw - 1.7rem - 2px), calc(min(76rem, 100vw - 2.5rem) - 2px)";
 const HERO_AVIF_SRCSET =
@@ -58,12 +63,20 @@ const LIGHT = {
 
 // The h1 cursor block, in the panel and accent colors: the icon is the mark the
 // page already ends on, not a placeholder glyph.
-const FAVICON = `data:image/svg+xml,${encodeURIComponent(
+const FAVICON_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">' +
-    `<rect width="100" height="100" fill="${DARK.panel}"/>` +
-    `<rect x="37" y="25" width="26" height="50" fill="${DARK.accent}"/>` +
-    "</svg>",
-)}`;
+  `<rect width="100" height="100" fill="${DARK.panel}"/>` +
+  `<rect x="37" y="25" width="26" height="50" fill="${DARK.accent}"/>` +
+  "</svg>";
+
+// Inlined as a data URI, so a browser that reads the <link> fetches no second
+// file. The same bytes answer /favicon.ico for the ones that ask blind, and
+// that answer has to be here: with the icon only in the document, /favicon.ico
+// fell through to the one-page catch-all and answered 3,606 bytes of
+// text/html, a full page body for a request that wants an image.
+const FAVICON = `data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}`;
+const FAVICON_BYTES = new TextEncoder().encode(FAVICON_SVG);
+const FAVICON_PATH = "/favicon.ico";
 
 const HTML = htmlForWire(`<!doctype html>
 <html lang="en">
@@ -269,7 +282,7 @@ const HTML = htmlForWire(`<!doctype html>
     <picture>
       <source type="image/avif" srcset="${HERO_AVIF_SRCSET}" sizes="${HERO_SIZES}">
       <source type="image/webp" srcset="${HERO_WEBP_SRCSET}" sizes="${HERO_SIZES}">
-      <img src="/dashboard.png" width="1920" height="1126"
+      <img src="/dashboard.png" width="3240" height="1900"
            alt="toktop dashboard: five local inference engines with throughput, context length and KV-cache pressure, probe time-to-first-token beside them, a GPU and host strip, and an agent feed reporting two coding agents"
            fetchpriority="high">
     </picture>
@@ -364,10 +377,11 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
 // under one URL, and RFC 9110 forbids one strong ETag spanning multiple
 // representations. If-None-Match compares weakly for GET revalidation either
 // way, so nothing is lost: no ranges are offered on a page this small.
-// Caches that pre-compress also match the stored coding by the identity tag:
-// an accept-encoding transform that selects zstd (a newer, smaller coding)
-// must not serve the older brotli or gzip copy as a cache hit while claiming
-// its own ETag, so a zstd accept-encoding forces a full 200.
+// One tag across the codings is safe because every copy of this page is keyed
+// on the coding it was built for: Vary: Accept-Encoding is on the 200, the 304
+// and the 406 alike, so a cache holding the brotli body never answers a zstd
+// client, and the revalidation that reaches this Worker carries no coding of
+// its own to contradict.
 const ETAG_HASH = (() => {
   let hash = 0x811c9dc5;
   for (let i = 0; i < HTML.length; i++) {
@@ -797,6 +811,26 @@ async function handle(request, env, started) {
     return new Response(healthBody, {
       status: degraded ? 503 : 200,
       headers: healthHeaders,
+    });
+  }
+  // The icon, for the clients that ask the path instead of reading the <link>:
+  // a crawler, a bookmark, a browser that ignored the data URI. Answered from
+  // the bytes already in this file, so it costs no request of its own and no
+  // asset binding, and it is not compressed: an SVG is markup the Worker can
+  // hand over as it stands, and a few hundred bytes do not earn a pipeline.
+  // The one-page catch-all below would otherwise answer this with the whole
+  // page, under text/html, to a request for an image.
+  if (url.pathname === FAVICON_PATH) {
+    return new Response(request.method === "HEAD" ? null : FAVICON_BYTES, {
+      headers: {
+        "content-type": "image/svg+xml",
+        "content-length": String(FAVICON_BYTES.byteLength),
+        // The icon's bytes change only at a deploy, exactly like the page's,
+        // so it carries the page's freshness window rather than a longer one.
+        "cache-control": PAGE_CACHE_CONTROL,
+        "server-timing": serverTiming(started),
+        ...SECURITY_HEADERS,
+      },
     });
   }
   // One page: anything else is that page too, rather than a 404 nobody
