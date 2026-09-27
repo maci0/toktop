@@ -25,7 +25,7 @@ from typing import TextIO
 RGB = tuple[int, int, int]
 
 ANSI_RE = re.compile(
-    rb"\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Z0-9])"
+    rb"\x1b(?:\[[0-9;?]*[a-zA-Z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][A-Z0-9])",
 )
 
 BG: RGB = (13, 17, 23)  # #0d1117, matches internal/ui/theme.go cBase
@@ -54,12 +54,28 @@ ANSI16: dict[int, RGB] = {
     7: (215, 221, 229),  # white / fg
 }
 
+# Positional arguments are src out [scale] [cols] [rows]; scale, cols and rows
+# are optional and default to 2x, autodetected. 0 is a valid cols or rows, so
+# autodetect is spelled as 0 rather than as an absent argument.
+MIN_ARGS = 2
+OPTIONAL_ARGS: tuple[tuple[str, int], ...] = (
+    ("scale", 2),
+    ("cols", 0),
+    ("rows", 0),
+)
+MAX_ARGS = MIN_ARGS + len(OPTIONAL_ARGS)
+
+# A truecolor SGR payload is #rrggbb.
+HEX_DIGITS = 6
+
 
 def clamp8(v: int) -> int:
+    """Clamp v to a single color channel's 0-255 range."""
     return max(0, min(255, v))
 
 
 def sgr_rgb(color: RGB | None) -> RGB | None:
+    """Clamp every channel of color, passing None (default) through."""
     if color is None:
         return None
     r, g, b = color
@@ -111,10 +127,12 @@ def resolve_fonts() -> tuple[str, str]:
 
 
 def usage(out: TextIO) -> None:
+    """Write the module docstring, the usage text, to out."""
     print((__doc__ or "screenshot.py").strip(), file=out)
 
 
 def parse_int(name: str, raw: str) -> int:
+    """Parse raw as an integer, naming the argument in any failure."""
     try:
         return int(raw)
     except ValueError:
@@ -122,12 +140,27 @@ def parse_int(name: str, raw: str) -> int:
         raise SystemExit(2) from None
 
 
+def parse_optional(args: list[str]) -> tuple[int, int, int]:
+    """Parse the optional scale, cols and rows, falling back to their defaults.
+
+    The values are positional and may be omitted only from the right, so the
+    count of what was passed decides which default each missing one gets.
+    """
+    parsed = [
+        parse_int(name, args[MIN_ARGS + i]) if len(args) > MIN_ARGS + i else default
+        for i, (name, default) in enumerate(OPTIONAL_ARGS)
+    ]
+    scale, cols, rows = parsed
+    return scale, cols, rows
+
+
 def main() -> None:
+    """Validate the command line and render the capture."""
     args = sys.argv[1:]
     if "-h" in args or "--help" in args:
         usage(sys.stdout)
         raise SystemExit(0)
-    if len(args) < 2:
+    if len(args) < MIN_ARGS:
         usage(sys.stderr)
         raise SystemExit(2)
     for a in args:
@@ -137,19 +170,18 @@ def main() -> None:
                 file=sys.stderr,
             )
             raise SystemExit(2)
-    if len(args) > 5:
+    if len(args) > MAX_ARGS:
         print(
-            f"screenshot.py: unexpected argument {args[5]!r} "
+            f"screenshot.py: unexpected argument {args[MAX_ARGS]!r} "
             "(see 'screenshot.py --help')",
             file=sys.stderr,
         )
         raise SystemExit(2)
     src, out = args[0], args[1]
-    scale = parse_int("scale", args[2]) if len(args) > 2 else 2
     # Exact pane geometry keeps pyte from wrapping or scrolling; pass the
     # values of #{pane_width} #{pane_height} from the capturing tmux session.
-    cols = parse_int("cols", args[3]) if len(args) > 3 else 0
-    rows = parse_int("rows", args[4]) if len(args) > 4 else 0
+    # 0 in either means autodetect from the capture, so zero stays valid.
+    scale, cols, rows = parse_optional(args)
     if scale < 1:
         print(f"screenshot.py: scale must be >= 1, got {scale}", file=sys.stderr)
         raise SystemExit(2)
@@ -163,6 +195,11 @@ def main() -> None:
 
 
 def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
+    """Draw the capture in src as a PNG at out, one cell per terminal cell.
+
+    A cols or rows of 0 measures the capture instead of taking the pane
+    geometry from the caller.
+    """
     try:
         # Imported here so `screenshot.py --help` works without pyte/pillow.
         import pyte  # noqa: PLC0415
@@ -254,7 +291,7 @@ def ansi_or_truecolor(color: str | None) -> RGB | None:
     if color is None:
         return None
     v = color.lstrip("#")
-    if len(v) == 6 and all(c in string.hexdigits for c in v):
+    if len(v) == HEX_DIGITS and all(c in string.hexdigits for c in v):
         return (int(v[0:2], 16), int(v[2:4], 16), int(v[4:6], 16))
     named: dict[str, int | None] = {
         "black": 0,
@@ -280,10 +317,10 @@ def ansi_or_truecolor(color: str | None) -> RGB | None:
     idx = named.get(key)
     if idx is None:
         return None
-    if idx < 8:
+    if idx < len(ANSI16):
         return ANSI16[idx]
     # bright variants reuse the palette
-    return ANSI16[idx - 8]
+    return ANSI16[idx - len(ANSI16)]
 
 
 if __name__ == "__main__":

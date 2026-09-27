@@ -640,8 +640,11 @@ const PAGE_HEADERS = {
   ...SECURITY_HEADERS,
 };
 
+// srcset candidates are "url descriptor" pairs separated by commas.
+const SRCSET_SEPARATORS = /\s+/;
+
 function srcsetPaths(srcset) {
-  return srcset.split(",").map((part) => part.trim().split(/\s+/)[0]);
+  return srcset.split(",").map((part) => part.trim().split(SRCSET_SEPARATORS)[0]);
 }
 
 const IMAGE_PATHS = new Set([

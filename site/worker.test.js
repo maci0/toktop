@@ -10,6 +10,16 @@ import { join } from "node:path";
 import worker from "./worker.js";
 
 const ORIGIN = "https://toktop.ai";
+// Regexes live at the top level: a literal inside a function is recompiled on
+// every call, and the worker's own regexes are hoisted for the same reason.
+const METHOD_RE = /^(GET|HEAD)$/;
+const FONT_SIZE_RE = /font-size:\s*([^;}]+)/g;
+const FONT_STEP_RE = /^var\(--fs-([\w-]+)\)$/;
+const PALETTE_ENTRY_RE = /\d+/g;
+const ANSI16_BLOCK_RE = /^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m;
+const ANSI16_ENTRY_RE = /^\s*(\d+): (\(\d+, \d+, \d+\))/gm;
+const EDGE_DUR_RE = /^edge;dur=(\d+)$/;
+const DUR_SUFFIX_RE = /dur=\d+(?:\.\d+)?$/;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -256,7 +266,7 @@ test("unacceptable encodings return an uncacheable 406, including conditional re
       Array.from({ length: refused }, () => ({
         event: "not-acceptable",
         ray: "",
-        method: expect.stringMatching(/^(GET|HEAD)$/),
+        method: expect.stringMatching(METHOD_RE),
         path: "/",
         status: 406,
         duration_ms: expect.any(Number),
@@ -489,8 +499,8 @@ test("the type scale is named, ordered, and the one place a size is written", ()
   expect(steps.get("small")).toBeGreaterThan(steps.get("micro"));
   // Every font-size in the page is one of those steps, or the wordmark at
   // 2rem inside the max-width: 640px query.
-  for (const [, value] of identityBody.matchAll(/font-size:\s*([^;}]+)/g)) {
-    const token = /^var\(--fs-([\w-]+)\)$/.exec(value.trim());
+  for (const [, value] of identityBody.matchAll(FONT_SIZE_RE)) {
+    const token = FONT_STEP_RE.exec(value.trim());
     if (token) {
       expect(steps.has(token[1]), `${token[1]} is not a step on the scale`).toBe(true);
       continue;
@@ -534,7 +544,7 @@ const shotPalette = () => {
   const src = repoFile(["scripts", "screenshot.py"]);
   const toHex = (tuple) =>
     `#${tuple
-      .match(/\d+/g)
+      .match(PALETTE_ENTRY_RE)
       .map((n) => Number(n).toString(16).padStart(2, "0"))
       .join("")}`;
   const named = (name) => {
@@ -542,10 +552,10 @@ const shotPalette = () => {
     if (m === null) throw new Error(`${name} not found in scripts/screenshot.py`);
     return toHex(m[1]);
   };
-  const block = src.match(/^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m);
+  const block = src.match(ANSI16_BLOCK_RE);
   if (block === null) throw new Error("ANSI16 not found in scripts/screenshot.py");
   const ansi = {};
-  for (const [, index, tuple] of block[1].matchAll(/^\s*(\d+): (\(\d+, \d+, \d+\))/gm)) {
+  for (const [, index, tuple] of block[1].matchAll(ANSI16_ENTRY_RE)) {
     ansi[index] = toHex(tuple);
   }
   return { bg: named("BG"), fg: named("FG_DEFAULT"), ansi };
@@ -678,7 +688,7 @@ const assetBytes = (name) => statSync(join(PUBLIC, name)).size;
 // that report, so a timing series that covered only the served requests would
 // describe exactly the ones nobody is asking about.
 test("every answer, served or failed, reports the edge cost in Server-Timing", async () => {
-  const dur = (value) => /^edge;dur=(\d+)$/.exec(value ?? "")?.[1];
+  const dur = (value) => EDGE_DUR_RE.exec(value ?? "")?.[1];
   for (const headers of [{}, { "accept-encoding": "br" }]) {
     const res = await call(headers);
     expect(dur(res.headers.get("server-timing"))).toBeDefined();
@@ -1004,7 +1014,7 @@ test("an unhandled throw answers 500 and logs the request that caused it", async
     expect(typeof line.duration_ms).toBe("number");
     // The failing request is measurable the same way a served one is, so a
     // visitor's report and the log agree on what it cost.
-    expect(res.headers.get("server-timing")).toMatch(/dur=\d+(?:\.\d+)?$/);
+    expect(res.headers.get("server-timing")).toMatch(DUR_SUFFIX_RE);
   } finally {
     logs.restore();
   }

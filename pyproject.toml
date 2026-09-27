@@ -23,10 +23,24 @@ required-version = ">=0.16.4"
 # privates, FURB catches the rewrite-it-properly patterns, PTH keeps path
 # work on pathlib, G keeps logging calls lazy. A group absent from this list
 # runs its default set and nothing more.
+#
+# The two groups left out are the two the tree cannot pass, both because this
+# is a command-line renderer whose output is the product: T20 and PI flag every
+# print, which is how a CLI talks. D and COM are the docstring and trailing
+# comma sets, TCH keeps annotation-only imports out of runtime, CPY keeps the
+# SPDX header every file in this repo already carries.
 select = [
-    "A", "AIR", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "C90", "DTZ", "E", "EM",
-    "ERA", "EXE", "F", "FA", "FAST", "FBT", "FIX", "FLY", "FURB", "G", "I", "ICN",
-    "INT", "ISC", "LOG", "N", "NPY", "PD", "PERF", "PGH", "PIE", "PLC", "PLE",
-    "PLR091", "PLW", "PTH", "PYI", "Q", "RET", "RSE", "RUF", "S", "SIM", "SLF",
-    "SLOT", "T10", "TC", "TD", "TID", "TRY", "UP", "W", "YTT",
+    "A", "AIR", "ANN", "ARG", "ASYNC", "B", "BLE", "C4", "COM", "C90", "CPY", "D",
+    "DTZ", "E", "EM", "ERA", "EXE", "F", "FA", "FAST", "FBT", "FIX", "FLY",
+    "FURB", "G", "I", "ICN", "INT", "ISC", "LOG", "N", "NPY", "PD", "PERF",
+    "PGH", "PIE", "PLC", "PLE", "PLR", "PLW", "PTH", "PYI", "Q", "RET", "RSE",
+    "RUF", "S", "SIM", "SLF", "SLOT", "T10", "TC", "TCH", "TD", "TID", "TRY",
+    "UP", "W", "YTT",
 ]
+
+[tool.ruff.lint.pydocstyle]
+# The docstrings here use Google sections (Args:, Returns:, Raises:), which is
+# what the convention fixes. Without it ruff warns that D203/D211 and D212/D213
+# are mutually exclusive on every run, and a warning nobody acts on is noise
+# that trains people to skip the output.
+convention = "google"
