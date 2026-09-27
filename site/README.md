@@ -24,7 +24,8 @@ drifts, on a one-off hex in a rule, and on a violet anywhere in the three.
 
 The Worker answers `/health` with `ok` for uptime checks, serves the
 dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
-`/dashboard-1280.avif`, `/dashboard.webp` and `/dashboard-1280.webp`,
+`/dashboard-1280.avif`, `/dashboard-768.avif`, `/dashboard.webp`,
+`/dashboard-1280.webp` and `/dashboard-768.webp`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). Wrong methods are `405` with `Allow: GET, HEAD`. Image paths
 without an asset binding, and 404/5xx from the asset store, are `no-store`
@@ -54,6 +55,7 @@ is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
 transfers 4,081 bytes rather than 11,741 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
+
 Source comments
 in the HTML and CSS stay in `worker.js` and are stripped before the page is
 hashed, compressed, or sent. Every response carries `Vary: Accept-Encoding`,
@@ -85,10 +87,16 @@ answer says so, and neither names a broken deploy.
 
 One request for the page, no JavaScript, no webfonts, inline CSS only. The
 hero is the real dashboard capture: AVIF (72,812 bytes at 1920px, 39,708 at
-1280px), then WebP (148,050 / 81,540 bytes), then the PNG share-card original.
+1280px, 20,231 at 768px), then WebP (148,050 / 81,540 / 36,130 bytes), then
+the PNG share-card original. A phone lays the figure out at about 360 CSS px,
+so the 768w candidate is the slot a 2x screen takes: without it every phone
+rounded up to 1280w and fetched 39,708 bytes to fill 722 of them, which is the
+49% the 768w AVIF saves. A 3x phone (1083 device pixels) and a 1x desktop
+(1216) still take 1280w, and 1920w remains the 2x desktop slot.
 For public visitors, including mobile networks, `sizes` follows the body
 gutters, figure borders, and 76rem column cap rather than declaring a desktop
-width on tablets. Both formats retain their 1280w and 1920w candidates. Served from
+width on tablets. Each format retains its 768w, 1280w and 1920w candidates.
+Served from
 this Worker so a deploy updates share cards and the page together.
 `wrangler.jsonc` sets `run_worker_first` so those image paths hit the Worker
 (cache headers, HSTS, 405s) instead of Cloudflare's asset pipeline. Measured

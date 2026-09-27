@@ -10,11 +10,17 @@ function htmlForWire(source) {
   return source.replace(/<!--[\s\S]*?-->/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-// 1280w covers 3x phones and 1x desktop; 1920w is the 2x desktop slot.
+// A phone lays the figure out at about 360 CSS px, so a 2x screen asks for
+// roughly 720 device pixels: 768w is that slot, and 1280w is what a 3x phone
+// and a 1x desktop need. Without the 768w candidate every phone fetched the
+// 1280w capture, 39,708 bytes for 722 pixels of it. 1920w is the 2x desktop
+// slot.
 // The img omits decoding=async so the browser does not postpone the LCP decode.
 const HERO_SIZES = "(max-width: 640px) calc(100vw - 1.7rem - 2px), calc(min(76rem, 100vw - 2.5rem) - 2px)";
-const HERO_AVIF_SRCSET = "/dashboard-1280.avif 1280w, /dashboard.avif 1920w";
-const HERO_WEBP_SRCSET = "/dashboard-1280.webp 1280w, /dashboard.webp 1920w";
+const HERO_AVIF_SRCSET =
+  "/dashboard-768.avif 768w, /dashboard-1280.avif 1280w, /dashboard.avif 1920w";
+const HERO_WEBP_SRCSET =
+  "/dashboard-768.webp 768w, /dashboard-1280.webp 1280w, /dashboard.webp 1920w";
 
 // The palette, named once. toktop is a terminal: the page is a picture of one,
 // and the same hexes are the TUI's (internal/ui/theme.go) and the capture

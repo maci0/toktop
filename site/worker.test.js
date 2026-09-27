@@ -357,12 +357,16 @@ test("served HTML does not carry source comments", () => {
 test("hero is the captured dashboard, not an ASCII stand-in", () => {
   expect(identityBody.includes("<picture>")).toBe(true);
   expect(identityBody.includes('type="image/avif"')).toBe(true);
-  expect(identityBody.includes("/dashboard-1280.avif 1280w, /dashboard.avif 1920w")).toBe(
-    true,
-  );
-  expect(identityBody.includes("/dashboard-1280.webp 1280w, /dashboard.webp 1920w")).toBe(
-    true,
-  );
+  expect(
+    identityBody.includes(
+      "/dashboard-768.avif 768w, /dashboard-1280.avif 1280w, /dashboard.avif 1920w",
+    ),
+  ).toBe(true);
+  expect(
+    identityBody.includes(
+      "/dashboard-768.webp 768w, /dashboard-1280.webp 1280w, /dashboard.webp 1920w",
+    ),
+  ).toBe(true);
   expect(identityBody.includes('src="/dashboard.png"')).toBe(true);
   expect(identityBody.includes("https://toktop.ai/dashboard.png")).toBe(true);
   expect(identityBody.includes("decoding=")).toBe(false);
@@ -545,15 +549,39 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
 const PUBLIC = join(import.meta.dir, "public");
 const assetBytes = (name) => statSync(join(PUBLIC, name)).size;
 
-test("hero AVIF is smaller than WebP at each width, and 1280 is smaller than 1920", () => {
-  expect(assetBytes("dashboard.avif")).toBeLessThan(assetBytes("dashboard.webp"));
-  expect(assetBytes("dashboard-1280.avif")).toBeLessThan(assetBytes("dashboard-1280.webp"));
+test("hero AVIF is smaller than WebP at every width, and each width beats the next", () => {
+  for (const width of ["768", "1280", ""]) {
+    const suffix = width ? `-${width}` : "";
+    expect(assetBytes(`dashboard${suffix}.avif`)).toBeLessThan(
+      assetBytes(`dashboard${suffix}.webp`),
+    );
+  }
+  expect(assetBytes("dashboard-768.avif")).toBeLessThan(assetBytes("dashboard-1280.avif"));
   expect(assetBytes("dashboard-1280.avif")).toBeLessThan(assetBytes("dashboard.avif"));
+  expect(assetBytes("dashboard-768.webp")).toBeLessThan(assetBytes("dashboard-1280.webp"));
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(assetBytes("dashboard.webp"));
   expect(assetBytes("dashboard.avif")).toBeLessThan(80_000);
   expect(assetBytes("dashboard-1280.avif")).toBeLessThan(50_000);
+  expect(assetBytes("dashboard-768.avif")).toBeLessThan(25_000);
   expect(assetBytes("dashboard-1280.webp")).toBeLessThan(100_000);
+  expect(assetBytes("dashboard-768.webp")).toBeLessThan(45_000);
   expect(assetBytes("dashboard.webp")).toBeLessThan(160_000);
+});
+
+// The slot a phone actually takes: a 2x screen at the 360 CSS px the figure
+// occupies needs 722 device pixels, so the srcset hands it the 768w candidate.
+// Without that entry the browser rounds up to 1280w and downloads 39,708 bytes
+// to fill 722 of them. A 768w capture covers 36% of the 1280w area and lands
+// at 51% of its weight; the ceiling is set past that, so a re-capture that
+// drops or fattened the phone candidate fails here instead of quietly
+// doubling the weight of the visit that matters most.
+test("the phone slot is served by the 768w capture, not the 1280w one", () => {
+  expect(assetBytes("dashboard-768.avif")).toBeLessThan(
+    assetBytes("dashboard-1280.avif") * 0.6,
+  );
+  expect(assetBytes("dashboard-768.webp")).toBeLessThan(
+    assetBytes("dashboard-1280.webp") * 0.6,
+  );
 });
 
 // The <img src> fallback and the og:image both point at the PNG original, so
