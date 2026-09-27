@@ -62,6 +62,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   script no longer leaves its whole command line (flags, prompts, paths past
   the cut) in a structure the dashboard holds for as long as it runs. Nothing
   past the cut decided a match or a port before either.
+- Per-process CPU is reported on Windows. The CIM query read no CPU time, so
+  every engine process showed 0% there while Linux and macOS showed the real
+  figure; `Win32_Process` kernel and user times are now part of the one query
+  and folded into the same jiffy delta the other platforms use.
+- A home directory macOS stored with a decomposed character (`rène` as `e`
+  plus U+0301) is folded out of audit lines and diagnostics in the composed
+  spelling a process carries. The redaction compared bytes, so the same account
+  survived whenever the two spellings disagreed.
 - `TOKTOP_LOG_LEVEL` is no longer reported as unused under `--no-ingest`. The
   variable sets the floor for every audit log the process writes, and the
   engine collector, the ssh client and the `--add` attach path all write one;

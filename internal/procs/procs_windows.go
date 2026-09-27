@@ -20,6 +20,20 @@ type cimProc struct {
 	Name           string `json:"Name"`
 	CommandLine    string `json:"CommandLine"`
 	WorkingSetSize uint64 `json:"WorkingSetSize"`
+	KernelModeTime uint64 `json:"KernelModeTime"`
+	UserModeTime   uint64 `json:"UserModeTime"`
+}
+
+// windowsTicksPerSecond converts the 100-nanosecond units Win32_Process reports
+// CPU time in into the jiffies clkTck counts, so the delta math in procs.go
+// works the same on every platform.
+const windowsTicksPerJiffy = 1e4 / clkTck
+
+// windowsCPUTicks is a process's cumulative kernel plus user time in jiffies.
+// Without it every process reports 0% CPU on windows while linux and darwin
+// report the real figure, which the engine panels print per process.
+func windowsCPUTicks(kernel, user uint64) uint64 {
+	return (kernel + user) / windowsTicksPerJiffy
 }
 
 // windowsShell is the PowerShell CIM runs under, resolved once. See pickShell
@@ -40,7 +54,7 @@ func listWindows() ([]raw, error) {
 	// page, which json.Unmarshal rejects for command lines that are not ASCII.
 	// PowerShell 7 is UTF-8 already; the assignment is a no-op there.
 	cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-Command",
-		`$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine,WorkingSetSize | ConvertTo-Json -Compress`)
+		`$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine,WorkingSetSize,KernelModeTime,UserModeTime | ConvertTo-Json -Compress`)
 	cmd.WaitDelay = listPipeGrace
 	out, err := cmd.Output()
 	if err != nil {
@@ -61,10 +75,11 @@ func listWindows() ([]raw, error) {
 		}
 		args := splitWindowsArgs(p.CommandLine)
 		r := raw{
-			pid:  p.ProcessID,
-			name: p.Name,
-			args: append([]string{p.Name}, args...),
-			rss:  p.WorkingSetSize,
+			pid:   p.ProcessID,
+			name:  p.Name,
+			args:  append([]string{p.Name}, args...),
+			rss:   p.WorkingSetSize,
+			ticks: windowsCPUTicks(p.KernelModeTime, p.UserModeTime),
 		}
 		annotate(&r)
 		list = append(list, r)

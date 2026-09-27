@@ -14,12 +14,13 @@ import (
 // copied into issues and bug reports; the path is what makes them
 // unpostable, not the file name alone.
 //
-// The rewrite folds case on the platforms whose file systems look names up
-// that way: there the same directory reaches the message spelled the way the
-// process that named it wrote it, which is not always how UserHomeDir spells
-// it ("C:\Users\me" against "c:\users\me"). Everywhere else two spellings
-// really are two directories, so folding one into the other would hide the
-// path that matters.
+// The rewrite folds case and Unicode normalization on the platforms whose
+// file systems look names up that way: there the same directory reaches the
+// message spelled the way the process that named it wrote it, which is not
+// always how UserHomeDir spells it ("C:\Users\me" against "c:\users\me", a
+// macOS home stored decomposed against the composed spelling in argv).
+// Everywhere else two spellings really are two directories, so folding one
+// into the other would hide the path that matters.
 func RedactHome(msg string) string {
 	home, err := os.UserHomeDir()
 	if err != nil || !filepath.IsAbs(home) {
@@ -32,7 +33,14 @@ func RedactHome(msg string) string {
 	sep := string(filepath.Separator)
 	from, to := home+sep, "~"+sep
 	folded := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+	spell := home
 	if folded {
+		// The file systems behind the folding platforms also look names up
+		// normalization-insensitively, so the comparison has to be made there
+		// too: a home directory macOS stored decomposed ("rène" as "e" plus
+		// U+0301) is the same account as the composed spelling a process
+		// carries, and comparing bytes leaves the account name in the message.
+		msg, from, spell = normalizeSpelling(msg), normalizeSpelling(from), normalizeSpelling(home)
 		msg = replaceFold(msg, from, to)
 	} else {
 		msg = strings.ReplaceAll(msg, from, to)
@@ -42,7 +50,7 @@ func RedactHome(msg string) string {
 	// it untouched. A longer message ending in the home path is not rewritten.
 	// The comparison folds too: the path above does, so on those platforms
 	// the same directory spelled in another case is still the home directory.
-	if msg == home || (folded && strings.EqualFold(msg, home)) {
+	if msg == spell || (folded && strings.EqualFold(msg, spell)) {
 		return "~"
 	}
 	return msg
