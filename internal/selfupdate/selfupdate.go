@@ -33,6 +33,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // DefaultRepo is the GitHub repository releases are fetched from.
@@ -352,12 +354,22 @@ func sweepStaleTemps(dir string) {
 // it out of the way first, so that is what happens there; the displaced file
 // is removed on the next update, since it is still locked during this one.
 //
+// The caller's fsync covered the download, not the rename: flushing the
+// directory is what makes the new binary survive a crash, and without it an
+// update that reported success can be gone on the next boot, leaving the
+// previous version and a message saying otherwise.
+//
 // cordis-boundary: emission, compensate by verifying the download against the
 // release checksum before any rename and by restoring the displaced binary
 // when the second rename fails; the installed file itself is not reverted.
 func install(tmpName, self string) error {
+	dir := filepath.Dir(self)
 	if runtime.GOOS != "windows" {
-		return os.Rename(tmpName, self)
+		if err := os.Rename(tmpName, self); err != nil {
+			return err
+		}
+		core.SyncDir(dir)
+		return nil
 	}
 	displaced := self + ".old"
 	// The previous update's .old is still locked during this one, so a failed
@@ -376,6 +388,7 @@ func install(tmpName, self string) error {
 		}
 		return err
 	}
+	core.SyncDir(dir)
 	return nil
 }
 

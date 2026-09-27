@@ -1029,6 +1029,44 @@ func TestReadKnownHostsRejectsConflictingDuplicateHost(t *testing.T) {
 	}
 }
 
+// A store that parses to nothing is a store that lost its records, not a store
+// nobody has written to: every writer emits the host it just pinned, so a
+// file with no record line in it is truncated or emptied. Reading that as an
+// empty store re-trusts every host on the next connect, silently, which is
+// the outcome the file exists to prevent.
+func TestReadKnownHostsRejectsStoreWithNoRecords(t *testing.T) {
+	dir := t.TempDir()
+	for name, body := range map[string]string{
+		"zero length":   "",
+		"blank lines":   "\n \n\t\n",
+		"comments only": "# managed elsewhere\n#\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := readKnownHosts(path)
+			if err == nil {
+				t.Fatal("readKnownHosts accepted a store holding no host records")
+			}
+			if !strings.Contains(err.Error(), path) {
+				t.Errorf("error should name the file, got: %v", err)
+			}
+		})
+	}
+
+	// A store that was never created is the one absence that means "no pins
+	// yet", and it must keep working.
+	store, err := readKnownHosts(filepath.Join(dir, "absent"))
+	if err != nil {
+		t.Fatalf("a missing store must read as empty: %v", err)
+	}
+	if len(store) != 0 {
+		t.Fatalf("store = %v, want empty", store)
+	}
+}
+
 // A store another process holds must not be written from a stale snapshot:
 // the read and the write are one critical section, so the lock is taken
 // around both and released after, and a lock left by a dead process is broken

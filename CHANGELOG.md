@@ -127,6 +127,16 @@ support channel (see SECURITY.md).
 
 ### Fixed
 
+- An `ssh://` host-key pin store that holds no records at all is refused
+  instead of read as an empty one. A file truncated to nothing, or one a backup
+  or a dotfile manager restored empty, read as "nothing pinned yet" and
+  re-trusted every host on the next connect with nothing in the output. The
+  error names the file and how to recover; deleting it is how the re-trust is
+  asked for on purpose.
+- `toktop update` flushes the directory the new binary was renamed into, the
+  way the pin store already did. A crash after an update that reported success
+  could otherwise leave the previous version installed, with the message
+  saying otherwise.
 - `make site-rollback` runs once. `wrangler rollback` with no version undoes
   the most recent deployment whoever shipped it, so a second run rolled back a
   rollback and put the version that broke back on the site. A deploy that

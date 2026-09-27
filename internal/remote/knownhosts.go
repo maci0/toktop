@@ -206,6 +206,12 @@ func tofu() (ssh.HostKeyCallback, error) {
 //     one, so appending a line to the file overrides an existing pin without
 //     rewriting it, and the original pin is gone with no trace.
 //
+// A file that parses to no records at all is refused for the same reason: it
+// is not a store anybody can have written, because every writer emits at
+// least the host it just pinned. Zero length, or comments and blanks alone, is
+// a store that lost its contents, and reading it as "nothing pinned yet"
+// re-trusts every host on the next connect with nothing in the output.
+//
 // The same host repeated verbatim is a no-op, not an error: re-running a
 // migration that concatenated the file must not brick the store.
 func readKnownHosts(path string) (map[string]string, error) {
@@ -238,6 +244,9 @@ func readKnownHosts(path string) (map[string]string, error) {
 			return nil, fmt.Errorf("%s: host %s is recorded twice with different keys; refusing to pick one", path, host)
 		}
 		out[host] = record
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("%s: holds no host records; an emptied or truncated store cannot re-trust these hosts, so restore it from a copy or delete it to pin them again on purpose", path)
 	}
 	return out, nil
 }
@@ -330,7 +339,7 @@ func sweepStaleTempFiles(dir string) {
 func replaceFile(tmpName, path string) error {
 	err := os.Rename(tmpName, path)
 	if err == nil {
-		syncDir(filepath.Dir(path))
+		core.SyncDir(filepath.Dir(path))
 		return nil
 	}
 	displaced := path + ".displaced"
@@ -350,25 +359,12 @@ func replaceFile(tmpName, path string) error {
 		return rerr
 	}
 	_ = os.Remove(displaced)
-	syncDir(filepath.Dir(path))
+	core.SyncDir(filepath.Dir(path))
 	return nil
 }
 
-// syncDir flushes the directory entry a rename created. The file contents are
-// already fsynced, but without this the rename itself can be lost to a crash,
-// which would silently restore the previous store and drop the pin just
-// written. Best effort by design: a directory that cannot be opened or synced
-// (Windows, some network filesystems) leaves the file whole either way, and
-// failing the write over it would cost the operator the pin instead.
-func syncDir(dir string) {
-	d, err := os.Open(dir)
-	if err != nil {
-		return
-	}
-	defer d.Close()
-	_ = d.Sync()
-}
-
+// short names a stored pin by key type and base64 blob, the shape the change
+// warning prints.
 func short(s string) string {
 	fields := strings.Fields(s)
 	if len(fields) > 2 {

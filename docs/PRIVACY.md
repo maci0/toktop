@@ -34,6 +34,14 @@ Nothing about usage, agents or engines. The only files toktop writes are:
 Agent events live in memory for the life of the process. There is no history
 file, no cache and no database. If you want the feed to disappear, quit.
 
+`known_hosts` is the only thing here that outlives a run, and toktop backs it
+up nowhere: it is one small file, worth copying into whatever you already back
+up. If it is lost, every host you have connected to with `ssh://` is trusted
+again on its next connection, so a store that reads as damaged, truncated or
+emptied refuses the connection with an error instead of doing that silently.
+Deleting the file is how you ask for that on purpose, and it must then be
+verified out of band, as any first contact is.
+
 ## What is sent, and to whom
 
 - **The endpoints you name.** Requests carry the engine bearer token
