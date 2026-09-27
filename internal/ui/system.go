@@ -62,8 +62,9 @@ func (m Model) renderSystem() string {
 	}
 	switch {
 	case sy == nil:
-	case shownTemps == 0 && len(sy.GPUs) == 0 && sy.CPUModel == "" &&
-		len(sy.Drivers) == 0 && sy.OsName == "":
+	case shownTemps == 0 && len(ident) == 0:
+		// Nothing rendered above: a kernel or NPU-only host used to miss
+		// this and got both a segment and the "no sensors" line.
 		ident = append(ident, dim("no sensors found"))
 	case len(cpuTemps) > shownTemps:
 		// Counted on the filtered list: GPU readings already render as their

@@ -359,3 +359,29 @@ func FuzzParseJSON(f *testing.F) {
 		}
 	})
 }
+
+// Two working-directory keys on one line must not pick a winner at random.
+// Map ranges are randomized, so without a sorted walk the same unchanged
+// record could be attributed to a different directory on each poll, and
+// ownership is judged per record.
+func TestParseCwdWithTwoKeysIsDeterministic(t *testing.T) {
+	line := []byte(`{"cwd":"/home/one","working_directory":"/home/two",` +
+		`"usage":{"output_tokens":5}}`)
+	first := ""
+	for i := 0; i < 50; i++ {
+		ev, ok := parseJSON(line)
+		if !ok {
+			t.Fatal("line stopped parsing")
+		}
+		if first == "" {
+			first = ev.Cwd
+			continue
+		}
+		if ev.Cwd != first {
+			t.Fatalf("cwd flipped between polls: %q then %q", first, ev.Cwd)
+		}
+	}
+	if first == "" {
+		t.Fatal("no cwd taken from a line carrying two")
+	}
+}

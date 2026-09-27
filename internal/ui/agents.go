@@ -11,6 +11,10 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
+// maxSummaryAgents is how many agents fit on the panel-title summary line
+// before the rest collapse into a count.
+const maxSummaryAgents = 3
+
 // agentSummary renders the rates as one line, for a panel title.
 func agentSummary(rates []core.AgentRate) string {
 	if len(rates) == 0 {
@@ -18,8 +22,8 @@ func agentSummary(rates []core.AgentRate) string {
 	}
 	parts := make([]string, 0, len(rates))
 	for i, r := range rates {
-		if i == 3 {
-			parts = append(parts, dim(fmt.Sprintf("+%d more", len(rates)-3)))
+		if i == maxSummaryAgents {
+			parts = append(parts, dim(fmt.Sprintf("+%d more", len(rates)-maxSummaryAgents)))
 			break
 		}
 		// Agent names arrive from the ingest endpoint and agent definitions

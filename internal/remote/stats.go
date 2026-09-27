@@ -232,8 +232,10 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 		if s.Drivers == nil {
 			s.Drivers = map[string]string{}
 		}
-		if d := devs[0].Driver; d != "" {
-			s.Drivers[devs[0].Vendor] = d
+		for _, dev := range devs {
+			if d := dev.Driver; d != "" {
+				s.Drivers[dev.Vendor] = d
+			}
 		}
 	}
 	return loadsOK

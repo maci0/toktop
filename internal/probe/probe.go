@@ -216,14 +216,18 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 			reasoning++
 			contentBytes += len(chunk.Thinking)
 		}
-		if overBudget(tokens+reasoning, contentBytes) {
-			break
-		}
+		// The terminal frame is read before the budget check: it can be the
+		// frame that trips the cap, and its eval_count/eval_duration are the
+		// engine's own numbers. Breaking on the cap first dropped them and
+		// fell back to frame counting with no decode duration.
 		if chunk.Done {
 			if chunk.EvalCount > 0 {
 				reported = chunk.EvalCount
 				evalDur = time.Duration(chunk.EvalDuration) * time.Nanosecond
 			}
+			break
+		}
+		if overBudget(tokens+reasoning, contentBytes) {
 			break
 		}
 	}

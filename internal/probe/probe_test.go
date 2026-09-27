@@ -999,3 +999,29 @@ func TestRunOllamaEvalDurationMicroseconds(t *testing.T) {
 		t.Errorf("tokps = %v, want the microsecond reading, not the nanosecond one", s.TokPS)
 	}
 }
+
+// The Ollama terminal frame carries done, eval_count, eval_duration and a
+// final content delta. When that frame is also the one that trips the
+// content budget, the budget break used to fire first and discard the
+// engine's own numbers, leaving the sample with frame-counted tokens and
+// no decode duration to derive a rate from.
+func TestRunOllamaTerminalFrameKeepsEngineCounts(t *testing.T) {
+	// 1 + probeContentBytes worth of content in the final frame: past the cap.
+	big := strings.Repeat("x", probeContentBytes)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprintf(w, `{"response":"a","done":false}`+"\n")
+		fmt.Fprintf(w, `{"response":%q,"done":true,"eval_count":9,"eval_duration":900000000}`+"\n", big)
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	if !s.OK {
+		t.Fatalf("probe failed: %+v", s)
+	}
+	if s.Tokens != 9 {
+		t.Errorf("tokens = %d, want the engine's eval_count 9", s.Tokens)
+	}
+	if s.TokPS <= 0 {
+		t.Errorf("tok/s = %v, want a rate from the engine's eval_duration", s.TokPS)
+	}
+}

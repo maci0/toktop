@@ -167,6 +167,12 @@ func (w *Watcher) consumeZstd(f *os.File, off int64) (recs []values, complete in
 		if len(line) == 0 {
 			continue
 		}
+		// Same record cap the plain JSONL path applies (consumeAppend): a
+		// frame can decompress to more than maxLineBytes, and the parser
+		// rejects it either way, so drop it and keep reading.
+		if len(line) > maxLineBytes {
+			continue
+		}
 		recs = w.collect(recs, line)
 	}
 	return recs, off + int64(n), true

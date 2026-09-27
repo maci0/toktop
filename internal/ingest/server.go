@@ -521,9 +521,6 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	reqID := requestID(r)
 	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
-	if w.Header().Get("X-Request-Id") == "" {
-		w.Header().Set("X-Request-Id", reqID)
-	}
 	done := func(status, accepted, stored int, errMsg string, extra ...any) {
 		s.logRequest(r, reqID, status, accepted, stored, time.Since(start), errMsg, extra...)
 	}

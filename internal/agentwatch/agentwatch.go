@@ -141,14 +141,14 @@ func (w *Watcher) runningAgents() []agentusage.Process {
 // at that PID. Linux supplies a start time, which changes when the kernel
 // reuses the PID; when the platform does not (Darwin), tool and working
 // directory stand in.
-func sameProcess(tracked, found agentusage.Process) bool {
-	if tracked.PID != found.PID {
+func sameProcess(was, found agentusage.Process) bool {
+	if was.PID != found.PID {
 		return false
 	}
-	if !tracked.Started.IsZero() && !found.Started.IsZero() {
-		return tracked.Started.Equal(found.Started)
+	if !was.Started.IsZero() && !found.Started.IsZero() {
+		return was.Started.Equal(found.Started)
 	}
-	return tracked.Tool == found.Tool && tracked.Dir == found.Dir
+	return was.Tool == found.Tool && was.Dir == found.Dir
 }
 
 // discover starts following new agent processes and forgets exited ones.

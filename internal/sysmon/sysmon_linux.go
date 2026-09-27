@@ -415,10 +415,10 @@ func listHwmon(root string) []sensorInput {
 	var out []sensorInput
 	for _, chip := range chips {
 		nameB, err := os.ReadFile(filepath.Join(chip, "name"))
-		chipName := strings.ToLower(strings.TrimSpace(string(nameB)))
 		if err != nil {
 			continue
 		}
+		chipName := strings.ToLower(strings.TrimSpace(string(nameB)))
 		isGPUChip := core.ContainsAny(chipName, gpuChips...)
 		inputs, _ := filepath.Glob(filepath.Join(chip, "temp*_input"))
 		for _, in := range inputs {

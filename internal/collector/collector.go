@@ -117,9 +117,8 @@ func (c *Collector) SetNow(fn func() time.Time) {
 	c.started = fn()
 }
 
-// instant is the collector clock with c.now inlined by hand at the hot
-// call sites (procFn above, emit, RecordAgent, ProbeAll): one method call
-// less per snapshot. Kept for the remaining sites below.
+// instant is the collector clock, so a SetNow override reaches every call
+// site.
 func (c *Collector) instant() time.Time { return c.now() }
 
 // procSampler is the shared engine-process sampler; nil-safe when the

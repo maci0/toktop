@@ -437,12 +437,14 @@ func download(ctx context.Context, url string, w io.Writer) (string, error) {
 		return "", fmt.Errorf("%s returned %s", url, resp.Status)
 	}
 	h := sha256.New()
+	// One past the cap, so a truncated archive cannot be hashed as if it were
+	// the whole asset.
 	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(resp.Body, maxAssetBytes+1))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
 	}
 	if n > maxAssetBytes {
-		return "", fmt.Errorf("asset exceeds %d bytes", int64(maxAssetBytes))
+		return "", fmt.Errorf("%s exceeds %d bytes", url, int64(maxAssetBytes))
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

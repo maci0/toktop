@@ -11,8 +11,6 @@ package ui
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 	"strings"
 	"time"
 
@@ -182,30 +180,10 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 		}
 		b.WriteString(line + "\n")
 	}
-	if sy.CPUModel != "" || sy.OsName != "" || sy.Kernel != "" ||
-		len(sy.Drivers) > 0 || len(sy.NPUs) > 0 {
-		var ident []string
-		if sy.CPUModel != "" {
-			ident = append(ident, core.SanitizeText(sy.CPUModel))
-		}
-		if sy.OsName != "" || sy.Kernel != "" {
-			osPart := core.SanitizeText(sy.OsName)
-			if sy.Kernel != "" {
-				osPart = strings.TrimSpace(osPart + " " + core.SanitizeText(sy.Kernel))
-			}
-			ident = append(ident, osPart)
-		}
-		for _, k := range slices.Sorted(maps.Keys(sy.Drivers)) {
-			ident = append(ident, core.SanitizeText(k)+" "+core.SanitizeText(sy.Drivers[k]))
-		}
-		if len(sy.NPUs) > 0 {
-			names := make([]string, len(sy.NPUs))
-			for i, n := range sy.NPUs {
-				names[i] = core.SanitizeText(n)
-			}
-			ident = append(ident, "npu "+strings.Join(names, ","))
-		}
-		b.WriteString(strings.Join(ident, " · ") + "\n")
+	// Same segments as the TUI strip (hostSegments): a kernel string with no
+	// CPU model or OS name used to render here and nowhere else.
+	if ident := hostSegments(sy); len(ident) > 0 {
+		b.WriteString(strings.Join(ident, " ") + "\n")
 	}
 	shown := 0
 	for _, t := range sysCPUTemps(sy) {
@@ -253,14 +231,19 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 	if len(rates) > 0 {
 		var parts []string
 		for i, r := range rates {
-			if i == 3 {
-				parts = append(parts, fmt.Sprintf("+%d more", len(rates)-3))
+			if i == maxSummaryAgents {
+				parts = append(parts, fmt.Sprintf("+%d more", len(rates)-maxSummaryAgents))
 				break
 			}
 			name := core.SanitizeText(r.Agent)
-			if r.TokPS > 0 {
+			// Engine-routed tokens are already counted by the engine, so the
+			// agent row must not present them as its own rate.
+			switch {
+			case r.ViaEngine != "":
+				parts = append(parts, name+" via "+core.SanitizeText(r.ViaEngine))
+			case r.TokPS > 0:
 				parts = append(parts, fmt.Sprintf("%s %s tok/s", name, fmtRate(r.TokPS)))
-			} else {
+			default:
 				parts = append(parts, fmt.Sprintf("%s %s tok", name, fmtCount(r.Tokens)))
 			}
 		}
@@ -328,9 +311,12 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 			recency = "via " + core.SanitizeText(r.ViaEngine) + " " + recency
 		}
 		line := name
-		if r.TokPS > 0 {
+		switch {
+		case r.ViaEngine != "":
+			line += " via engine"
+		case r.TokPS > 0:
 			line += " " + fmtRate(r.TokPS) + " tok/s"
-		} else {
+		default:
 			line += " no rate yet"
 		}
 		line += " output " + fmtCount(r.Tokens)

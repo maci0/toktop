@@ -6,7 +6,9 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"math"
+	"slices"
 	"strings"
 )
 
@@ -117,7 +119,12 @@ func walk(node any, ev *jsonEvent, depth int) {
 	}
 	switch v := node.(type) {
 	case map[string]any:
-		for k, child := range v {
+		// Keys are visited in sorted order. Map ranges are randomized, so a
+		// record carrying two working-directory keys (or the same key at two
+		// nesting levels) would attribute a different cwd between polls of
+		// one unchanged line, and ownership is judged per record.
+		for _, k := range slices.Sorted(maps.Keys(v)) {
+			child := v[k]
 			lower := strings.ToLower(k)
 			if str, isString := child.(string); isString {
 				if cwdKeys[lower] && ev.Cwd == "" {
