@@ -60,10 +60,15 @@ type Provider struct {
 var httpClient = &http.Client{Timeout: PollTimeout, CheckRedirect: bearer.CheckRedirect}
 
 func httpStatus(url string, resp *http.Response) error {
-	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
+	b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
 	msg := fmt.Sprintf("%s: http %s", url, resp.Status)
 	if s := core.Snippet(b); s != "" {
 		msg += ": " + s
+	}
+	if rerr != nil {
+		// A body that stopped partway is a fragment, not what the engine
+		// said. Saying so keeps an operator from debugging the truncation.
+		msg += fmt.Sprintf(" (body read: %v)", rerr)
 	}
 	return errors.New(msg)
 }

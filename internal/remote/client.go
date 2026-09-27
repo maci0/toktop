@@ -585,9 +585,12 @@ func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, err
 		if !clash {
 			return l, nil
 		}
-		// The bind succeeded and is being given up, so a failure to close it
-		// is not the reason the loop below runs out of attempts.
-		l.Close()
+		// The bind succeeded and is being given up. A close that fails leaks
+		// the descriptor this loop is about to add another of, so it ends the
+		// attempt instead of retrying over the leak.
+		if cerr := l.Close(); cerr != nil {
+			return nil, fmt.Errorf("cannot release loopback port %d: %w", port, cerr)
+		}
 	}
 	return nil, fmt.Errorf("no loopback port free of the forwarded set after %d attempts", forwardBindAttempts)
 }

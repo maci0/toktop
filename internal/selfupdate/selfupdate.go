@@ -26,6 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -311,7 +312,15 @@ func applyTo(ctx context.Context, rel *Release, self string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("checksums.txt has no entry for %s", want)
 	}
-	if have, err := fileChecksum(self); err == nil && have == expect {
+	// A binary toktop cannot read is not an up-to-date binary: reporting the
+	// read failure names the permission or path problem instead of spending a
+	// download on an install that cannot replace the same file anyway.
+	have, cerr := fileChecksum(self)
+	if cerr != nil {
+		if !errors.Is(cerr, fs.ErrNotExist) {
+			return "", fmt.Errorf("cannot checksum %s: %w", self, cerr)
+		}
+	} else if have == expect {
 		return self, nil
 	}
 

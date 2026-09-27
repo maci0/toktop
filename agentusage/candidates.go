@@ -32,6 +32,11 @@ const rescanEvery = time.Second
 // that is the clock the filesystem records in.
 const recencyWindow = 2 * time.Minute
 
+// walkWait bounds how long a caller waits on another goroutine's walk of the
+// same root. It is well past the rescan interval a healthy walk fits inside, so
+// hitting it means the filesystem, not the walk, is stuck.
+const walkWait = 2 * time.Second
+
 // rootListing is one walk of a transcript store, shared by every watcher
 // reading the same root. Ten claude processes would otherwise WalkDir the
 // same ~/.claude/projects tree independently every rescan.
@@ -103,10 +108,20 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			// A walk for this root is already running. Wait for its result and
 			// re-check: the walk it publishes answers this call, and a force
 			// caller that lost the race still gets one of its own.
+			//
+			// The wait is bounded. A walk over a store on a stalled mount can
+			// block in the kernel, and nothing can cancel it; an unbounded wait
+			// here would wedge every watcher sharing the root and the shutdown
+			// that drains them. A tick that gives up reports no transcripts and
+			// the next one re-claims the walk once it lands.
 			walk := c.walk
 			rootListMu.Unlock()
-			<-walk
-			continue
+			select {
+			case <-walk:
+				continue
+			case <-time.After(walkWait):
+				return nil
+			}
 		}
 		// This call owns the walk for key. The placeholder carries the current
 		// instant so the prune pass leaves it alone, and no files so a reader
