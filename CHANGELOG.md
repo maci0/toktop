@@ -86,6 +86,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   appears anywhere in the value, instead of letting the request fail on an
   invalid header that named the transport rather than the variable.
 
+### Breaking
+
+- An ingested event's `note` that is nothing but a path is stored reduced to
+  its last two components. Before this release a note was kept as the sender
+  wrote it, with only a path under `$HOME` folded to `~`, so
+  `/home/you/clients/Acme/migrator` reached the feed, the live dashboard and
+  the `--once --plain` report as `~/clients/Acme/migrator`; the feed now holds
+  `Acme/migrator`. Everything above the checkout is where a client's name and
+  a project index sit, and a feed redirected into a file or a journal kept
+  them. A note counts as a bare path when it is a single token carrying a `/`
+  or `\`, or spelled from `~`; a note with a space, a tab or a `·` in it is
+  free text and is still stored as written, past the home fold. A sender
+  whose note is a path cannot opt out of the shortening: put any other text in
+  the note (`checkout: /home/you/clients/Acme/migrator`) and the whole string
+  is kept with `$HOME` folded. The field is a display label, and
+  [README.md](README.md#agent-feed-api) says so per field.
+
 ### Added
 
 - `agentusage.Sample.Delta` returns the growth between two samples, and
@@ -156,11 +173,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
-- An ingested event's `note` that is nothing but a directory is reduced to its
-  last two components, the way a locally watched agent's working directory
-  already was. A pushed path reached the feed whole, and everything above the
-  checkout is where a client's name and a project index sit. A note carrying
-  any other text is still stored as the sender wrote it, past the home fold.
+- toktop.ai answers a revalidation or a refused encoding before it builds a
+  compressed copy of the page. A 304 and a 406 carry no body, and both waited
+  on the brotli, zstd and gzip pipeline first. An isolate that only ever
+  serves revalidations now builds no representation at all.
+- The feed panel's error line is rendered as the message arrives, and its
+  badge now reads "feed error" rather than "ingest down". The agent watch
+  reports through the same channel, so a monitored engine address that will
+  not parse was being shown as an ingest outage with a "restart toktop to
+  restore ingest" remedy that would not fix it.
 - The in-app help overlay lists exactly the keys the footer advertises, under
   the same conditions. `p`, `t` and `a` are now left out of the reference when
   they have nothing to act on, instead of being advertised and then doing
@@ -261,6 +282,37 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
+  windows, instead of leaving them on the wall clock. A program driving a
+  simulated timeline stepped time forward and still read the file set a
+  full-length run would have dropped, so a replay was not reproducible.
+  Transcript mtimes and `since` stay wall time.
+- An engine answering a version endpoint with a bare invalid byte, an escape
+  sequence, or a quoted line break no longer has that text cached as its
+  version and re-rendered every frame.
+- `agentusage.LoadDefinitions` skips a `usage` entry naming an agent a
+  compiled-in adapter already reads (claude, codex, dsh). Registering it left
+  `SpecFor` reporting transcript roots that no watcher read, since the adapter
+  outranks every definition. A definition still replaces a compiled-in
+  *definition*, which is what pi, prime-agent and feynman are.
+- The ingest endpoint audits an accept failure that stops it, on the same
+  logger, at error level, with the bound address and the reason. It was one
+  unstructured stderr line that ignored `$TOKTOP_LOG_LEVEL`, so a feed that
+  stopped accepting left no line to filter for.
+- `toktop` exits 2 when every ssh target it was given fails to attach,
+  instead of starting a dashboard showing only local engines with the reason
+  on a stderr line the alternate screen hides.
+- A monitored engine address that fails, recovers, and fails again is
+  reported to the operator again. The first report silenced every recurrence
+  of the same message, including one that appeared after a real recovery.
+- A relative `XDG_DATA_HOME` is named at startup while opencode's session
+  database is read, and a relative `XDG_CONFIG_HOME` with an `ssh://` target,
+  the way a relative `GAUNTLET_HOME` already was. Both fell back to the
+  default directory in silence, so the paths they named were never used.
+- `toktop update` strips a trailing newline from `GITHUB_TOKEN` (what
+  `export GITHUB_TOKEN=$(cat token)` leaves behind) and refuses one that
+  appears anywhere in the value, instead of letting the request fail on an
+  invalid header that named the transport rather than the variable.
 - An `ssh://` target that stops answering says so. A failed poll kept the last
   good sample and said nothing, so once that sample went past the staleness
   window the ssh readings dropped out of the frame and the local host's numbers

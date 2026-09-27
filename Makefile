@@ -10,6 +10,8 @@ CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
 	awk -v v='$(VERSION)' 'index($$0, "[" v "]: ") == 1 {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md missing '[$(VERSION)]:' link reference" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'index($$0, "[" v "]: ") == 1 && $$0 !~ "compare/.*v" v "$$" {f=1} END{exit f}' CHANGELOG.md || { echo "make: CHANGELOG.md '[$(VERSION)]:' link does not end at tag v$(VERSION)" >&2; exit 1; }; \
 	awk '/^\#\# \[Unreleased\]/{f=1;next} /^\#\# \[/{f=0} f && /^- /{n++} END{exit (n>0)}' CHANGELOG.md || { echo "make: CHANGELOG.md still has entries under [Unreleased]; move them under [$(VERSION)] first" >&2; exit 1; }; \
+	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "]") == 1 {f=1;next} /^\#\# \[/{f=0} f && /^- /{n++} END{exit (n==0)}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) has no entries; a release ships notes or does not ship" >&2; exit 1; }; \
+	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "]") == 1 {f=1;next} /^\#\# \[/{f=0} f && /^\#\#\# /{if (seen[$$0]++) d=1} END{exit (d==1)}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) repeats an impact heading; one heading per impact" >&2; exit 1; }; \
 fi
 
 GO          ?= go

@@ -20,6 +20,9 @@ toktop ssh://user@box    # watch engines on another host
 CGO_ENABLED=0 go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
 ```
 
+Building from source needs Go 1.27, the version `go.mod` pins. A
+downloaded release binary needs nothing but the platform it was built for.
+
 `-tags sqlite` matches the GitHub binaries and `make build`: crush and
 opencode session databases cannot be read without it. `CGO_ENABLED=0`
 matches those artifacts too (pure-Go net resolver, no libc); a host with
