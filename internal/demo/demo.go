@@ -24,6 +24,7 @@ type Source struct {
 	interval time.Duration
 	backends []backend
 	rng      *rand.Rand
+	seed     int64
 	mu       sync.Mutex
 
 	start   time.Time
@@ -49,6 +50,7 @@ func NewSource(interval time.Duration, seed int64) *Source {
 	return &Source{
 		interval: interval,
 		rng:      rand.New(rand.NewPCG(uint64(seed), 0)),
+		seed:     seed,
 		backends: []backend{
 			{label: "ollama", kind: core.KindOllama, addr: "http://127.0.0.1:11434", model: "llama3.1:8b-instruct-q4_K_M",
 				outBase: 38, inBase: 120, burstEvery: 17},
@@ -69,6 +71,11 @@ func NewSource(interval time.Duration, seed int64) *Source {
 		swapPct: 14,
 	}
 }
+
+// Seed reports the seed this source draws from. Every simulated value comes
+// from it, so it is the whole run: the dashboard shows it, and a run is
+// reproduced by starting toktop with the same --seed.
+func (s *Source) Seed() int64 { return s.seed }
 
 var agentNames = []string{"coder-agent", "ops-agent", "research-agent", "swarm-07"}
 var evKinds = []string{core.AgentKindTurn, core.AgentKindTool, core.AgentKindTool, core.AgentKindNote, core.AgentKindError}

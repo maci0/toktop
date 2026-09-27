@@ -22,7 +22,7 @@ import (
 func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	var b strings.Builder
 	if cfg.Demo {
-		b.WriteString("[demo] ")
+		fmt.Fprintf(&b, "[demo seed %d] ", cfg.DemoSeed)
 	}
 	b.WriteString("toktop v" + cfg.Version)
 	if s.Sys != nil && s.Sys.RemoteHost != "" {

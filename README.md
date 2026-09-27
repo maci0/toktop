@@ -399,7 +399,8 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   frame (screen-reader friendly)
 --frames N        with --once: snapshots to accumulate before rendering
                   (max 180, the chart history length)
---seed N          demo RNG seed
+--seed N          demo RNG seed; the demo frame shows the seed it ran
+                  with, and the same seed replays the run
 --no-hot-reload   disable restart-on-rebuild while running
 --version         print version and exit
 --help, -h        show usage, examples and environment fallbacks

@@ -188,6 +188,36 @@ func TestStatsMergeFreshnessAndOverlay(t *testing.T) {
 	}
 }
 
+// The staleness window runs on the injected clock: with a stepped clock a
+// sample stays fresh for the window's worth of simulated time and expires on
+// the step past it, whatever the wall clock does.
+func TestMergeFreshnessFollowsInjectedClock(t *testing.T) {
+	now := time.Unix(1_700_000_000, 0).UTC()
+	s := &Stats{last: core.SysSample{RemoteHost: "box"}}
+	s.SetNow(func() time.Time { return now })
+
+	var into core.SysSample
+	s.at = now
+	s.Merge(&into)
+	if into.RemoteHost != "box" {
+		t.Fatalf("fresh sample not merged: %+v", into)
+	}
+
+	now = now.Add(stalenessWindow - time.Second)
+	into = core.SysSample{}
+	s.Merge(&into)
+	if into.RemoteHost != "box" {
+		t.Errorf("sample one second short of the window dropped: %+v", into)
+	}
+
+	now = now.Add(2 * time.Second)
+	into = core.SysSample{}
+	s.Merge(&into)
+	if into.RemoteHost != "" {
+		t.Errorf("sample past the window merged anyway: %+v", into)
+	}
+}
+
 // The merged sample is published to the UI while the next poll rewrites
 // s.last.GPUs; aliasing that slice would data-race with a render.
 func TestMergeCopiesGPUs(t *testing.T) {

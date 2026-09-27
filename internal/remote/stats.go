@@ -28,11 +28,39 @@ type Stats struct {
 	// still poll successfully, and merging their absent loads would zero
 	// the local readout every frame.
 	loadsValid bool
+	// now stamps sample freshness and ages it in Merge. nil means time.Now.
+	// A stepped clock keeps the staleness window on the caller's timeline
+	// instead of the wall clock's, so a replayed run merges exactly what a
+	// live one would.
+	now func() time.Time
+}
+
+// SetNow overrides the clock used to stamp and age remote samples. Call
+// before Run.
+func (s *Stats) SetNow(fn func() time.Time) {
+	if fn == nil {
+		fn = time.Now
+	}
+	s.now = fn
+}
+
+// instant reads s.now, falling back to the wall clock for a Stats built as a
+// literal (tests, and any caller that never called SetNow).
+func (s *Stats) instant() time.Time {
+	if s.now == nil {
+		return time.Now()
+	}
+	return s.now()
 }
 
 // sectionMark separates the vitals dump into ordered sections. Chosen to be
 // unlikely to appear in any of the read files.
 const sectionMark = "%toktop%"
+
+// stalenessWindow is how long a remote sample still counts as fresh. Past it
+// the overlay is dropped rather than merged: a remote that stopped answering
+// must not freeze its last known vitals on screen indefinitely.
+const stalenessWindow = 20 * time.Second
 
 // vitalsScript dumps load, memory, uptime, CPU model, OS name, kernel and GPU
 // telemetry (NVIDIA via nvidia-smi, AMD via rocm-smi; whichever is present) in
@@ -115,7 +143,7 @@ func (s *Stats) poll(ctx context.Context) {
 	defer s.mu.Unlock()
 	s.loadsValid = parseVitals(out, &s.last)
 	s.last.RemoteHost = s.Client.Target.Host
-	s.at = time.Now()
+	s.at = s.instant()
 }
 
 // Merge overlays fresh remote stats onto a local sample. Stale data (>20s)
@@ -123,7 +151,7 @@ func (s *Stats) poll(ctx context.Context) {
 func (s *Stats) Merge(into *core.SysSample) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.at.IsZero() || time.Since(s.at) > 20*time.Second {
+	if s.at.IsZero() || s.instant().Sub(s.at) > stalenessWindow {
 		return
 	}
 	if s.loadsValid {

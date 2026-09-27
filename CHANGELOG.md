@@ -24,6 +24,9 @@ support channel (see SECURITY.md).
   anchor but no link.
 - The `ssh://` discovery sweep sends at most the first 4096 bytes of each
   remote process's command line, which is all an engine match reads.
+- The `DEMO` tag names the seed the run drew from (`DEMO seed 42`), and
+  `--once --plain --demo` leads with `[demo seed 42]`. A demo frame is
+  reproducible from that seed alone, so the frame has to carry it.
 
 ## [0.14.1] - 2026-09-26
 

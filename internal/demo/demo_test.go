@@ -27,6 +27,14 @@ func collectOne(t *testing.T, s *Source) core.Snapshot {
 	}
 }
 
+// The seed is the whole run, so a source has to be able to report the one it
+// was built with: the dashboard shows it and the operator replays with it.
+func TestSeedReportsConstructionSeed(t *testing.T) {
+	if got := NewSource(time.Second, 7).Seed(); got != 7 {
+		t.Errorf("Seed() = %d, want 7", got)
+	}
+}
+
 func TestDeterministicPerSeed(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		testDeterministicPerSeed(t)

@@ -222,8 +222,8 @@ func TestPlainFrameUsesSnapshotTime(t *testing.T) {
 // Demo runs must not pass themselves off as real telemetry in the linear
 // frame either.
 func TestPlainFrameMarksDemo(t *testing.T) {
-	out := PlainTextFrame(Config{Version: "t", Demo: true}, core.Snapshot{})
-	if !strings.HasPrefix(out, "[demo] ") {
-		t.Errorf("demo plain frame lacks [demo] marker:\n%s", out)
+	out := PlainTextFrame(Config{Version: "t", Demo: true, DemoSeed: 7}, core.Snapshot{})
+	if !strings.HasPrefix(out, "[demo seed 7] ") {
+		t.Errorf("demo plain frame lacks its seed marker:\n%s", out)
 	}
 }

@@ -413,6 +413,9 @@ func main() {
 		FeedErr:    feedErr,
 		Agents:     f.agents,
 	}
+	if demoSrc != nil {
+		cfg.DemoSeed = demoSrc.Seed()
+	}
 
 	if f.once {
 		if code := runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain); code != 0 {

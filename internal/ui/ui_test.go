@@ -1640,6 +1640,17 @@ func TestFooterOmitsDeadKeys(t *testing.T) {
 	}
 }
 
+// A demo frame is reproducible from its seed alone, so the frame has to name
+// it: a screenshot or a --once frame with no seed in it cannot be re-run.
+func TestDemoFooterNamesSeed(t *testing.T) {
+	m := New(Config{Version: "t", Demo: true, DemoSeed: 7}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "x", OK: true}}}
+	got := strip(m.renderFooter())
+	if !strings.Contains(got, "DEMO seed 7") {
+		t.Errorf("demo footer does not name the seed: %q", got)
+	}
+}
+
 func TestHeaderSessionMatchesPlain(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	m.snap = core.Snapshot{

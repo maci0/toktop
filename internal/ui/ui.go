@@ -20,8 +20,12 @@ import (
 
 // Config wires the dashboard to its data source.
 type Config struct {
-	Version    string
-	Demo       bool
+	Version string
+	Demo    bool
+	// DemoSeed is the seed the demo source draws from, shown next to the
+	// DEMO tag: a demo frame is reproducible from it, so the frame itself
+	// has to say which run produced it.
+	DemoSeed   int64
 	IngestAddr string
 	PollEvery  time.Duration // sampling cadence; anchors the chart timescale
 	Prober     func()        // nil disables manual probing
@@ -1202,7 +1206,7 @@ func (m Model) renderFooter() string {
 	}
 	tag := ""
 	if m.cfg.Demo {
-		tag = styleWarn.Render(" DEMO ") + " "
+		tag = styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
 	}
 	return tag + foot
 }
