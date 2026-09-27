@@ -194,7 +194,7 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 			break
 		}
 		b.WriteString(fmt.Sprintf("temp %s %s\n",
-			core.SanitizeText(strings.TrimSuffix(strings.Fields(t.Label+",")[0], ",")),
+			core.SanitizeText(strings.TrimSuffix(strings.Fields(t.Label + ",")[0], ",")),
 			fmtTempC(t.MilliC)))
 		shown++
 	}

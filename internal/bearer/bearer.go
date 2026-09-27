@@ -7,6 +7,10 @@
 // hostile listener on a scanned port cannot harvest a gateway API key that
 // was never meant for it. Set once at startup, before discovery spawns
 // goroutines.
+//
+// The package also owns the redirect policy every engine request runs under
+// (CheckRedirect), which confines a chain to the origin it started on for the
+// same reason.
 package bearer
 
 import (
@@ -72,12 +76,36 @@ func Apply(req *http.Request) {
 	req.Header.Set("Authorization", "Bearer "+t)
 }
 
+// CheckRedirect is the redirect policy for every engine request, so it carries
+// both the credential rule and the destination rule.
+//
+// A hop off the original origin is refused rather than followed. Every engine
+// request starts from an address nobody authenticated as a toktop peer: a
+// scanned loopback port, or a port forwarded over ssh from a remote host the
+// operator merely wants to watch. Answering a poll with a redirect would make
+// that listener a confused deputy, turning a read of 127.0.0.1:8080 into a
+// request to any URL the operator's host can reach, including cloud instance
+// metadata and services on the operator's LAN, and surfacing the answer in the
+// dashboard. Confining the chain to one origin also covers the https to http
+// downgrade the origin comparison treats as a different origin, so no engine
+// token is ever sent in cleartext to a hop that chose the scheme.
+//
+// The Authorization header needs no stripping for the same reason: a hop that
+// leaves the origin is never made, and a hop within it lands on the origin
+// Apply already admitted or already refused. The hop count stays capped.
 func CheckRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= 10 {
 		return errors.New("stopped after 10 redirects")
 	}
-	if len(via) == 0 || originOf(req.URL) != originOf(via[0].URL) || !admits(req.URL) {
-		req.Header.Del("Authorization")
+	if len(via) == 0 {
+		return nil
+	}
+	from, to := originOf(via[0].URL), originOf(req.URL)
+	if to == "" {
+		return fmt.Errorf("refusing redirect from %s to a non-http destination", from)
+	}
+	if from != to {
+		return fmt.Errorf("refusing redirect from %s to %s", from, to)
 	}
 	return nil
 }

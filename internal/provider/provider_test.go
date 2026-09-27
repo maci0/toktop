@@ -284,6 +284,10 @@ func TestPollCarriesBearerAndContextLength(t *testing.T) {
 	}
 }
 
+// A same-origin redirect is followed and the token rides it. A hop to another
+// origin is refused: every base here is a scanned loopback port or an
+// ssh-forwarded remote port, so following a redirect off it would let the
+// listener answer a poll by sending the operator's host to any URL instead.
 func TestProviderRedirectAuthorization(t *testing.T) {
 	bearer.Set("sk-test")
 	t.Cleanup(func() { bearer.Set("") })
@@ -315,12 +319,8 @@ func TestProviderRedirectAuthorization(t *testing.T) {
 				var received atomic.Int32
 				final := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					received.Add(1)
-					want := "Bearer sk-test"
-					if crossOrigin {
-						want = ""
-					}
-					if got := r.Header.Get("Authorization"); got != want {
-						t.Errorf("redirect Authorization = %q, want %q", got, want)
+					if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+						t.Errorf("redirect Authorization = %q, want the token", got)
 					}
 					fmt.Fprint(w, `{}`)
 				})
@@ -342,11 +342,18 @@ func TestProviderRedirectAuthorization(t *testing.T) {
 				}))
 				defer srv.Close()
 				bearer.Allow(srv.URL)
-				if err := fetch.run(srv.URL); err != nil {
+				err := fetch.run(srv.URL)
+				wantRequests := int32(1)
+				if crossOrigin {
+					if err == nil {
+						t.Fatal("cross-origin redirect was followed")
+					}
+					wantRequests = 0
+				} else if err != nil {
 					t.Fatal(err)
 				}
-				if got := received.Load(); got != 1 {
-					t.Errorf("final requests = %d, want 1", got)
+				if got := received.Load(); got != wantRequests {
+					t.Errorf("final requests = %d, want %d", got, wantRequests)
 				}
 			})
 		}

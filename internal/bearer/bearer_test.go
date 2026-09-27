@@ -1,6 +1,7 @@
 package bearer
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -121,17 +122,17 @@ func TestAllowScopesByOrigin(t *testing.T) {
 func TestCheckRedirectScopesAuthorization(t *testing.T) {
 	t.Cleanup(resetAllowed)
 	for _, tc := range []struct {
-		name   string
-		target string
-		allow  bool
-		want   string
+		name    string
+		target  string
+		allow   bool
+		wantErr bool
 	}{
-		{"same origin", "https://engine.local/next", true, "Bearer sk-test"},
-		{"default port", "https://ENGINE.local:443/next", true, "Bearer sk-test"},
-		{"other port", "https://engine.local:8443/next", true, ""},
-		{"downgrade", "http://engine.local/next", true, ""},
-		{"subdomain", "https://sub.engine.local/next", true, ""},
-		{"not admitted", "https://engine.local/next", false, ""},
+		{name: "same origin", target: "https://engine.local/next", allow: true},
+		{name: "default port", target: "https://ENGINE.local:443/next", allow: true},
+		{name: "other port", target: "https://engine.local:8443/next", allow: true, wantErr: true},
+		{name: "downgrade", target: "http://engine.local/next", allow: true, wantErr: true},
+		{name: "subdomain", target: "https://sub.engine.local/next", allow: true, wantErr: true},
+		{name: "not admitted", target: "https://engine.local/next", wantErr: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			resetAllowed()
@@ -147,11 +148,18 @@ func TestCheckRedirectScopesAuthorization(t *testing.T) {
 				t.Fatal(err)
 			}
 			next.Header.Set("Authorization", "Bearer sk-test")
-			if err := CheckRedirect(next, []*http.Request{first}); err != nil {
+			err = CheckRedirect(next, []*http.Request{first})
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("hop to %s was allowed, want refusal", tc.target)
+				}
+				return
+			}
+			if err != nil {
 				t.Fatal(err)
 			}
-			if got := next.Header.Get("Authorization"); got != tc.want {
-				t.Errorf("Authorization = %q, want %q", got, tc.want)
+			if got := next.Header.Get("Authorization"); got != "Bearer sk-test" {
+				t.Errorf("Authorization = %q, want it kept on a same-origin hop", got)
 			}
 			if err := CheckRedirect(next, make([]*http.Request, 10)); err == nil {
 				t.Fatal("redirect limit not enforced")
@@ -160,18 +168,23 @@ func TestCheckRedirectScopesAuthorization(t *testing.T) {
 	}
 }
 
-func TestCheckRedirectStripsHeaderOnCrossOriginChain(t *testing.T) {
+// A hop that leaves the origin is refused, so the redirect target is never
+// contacted at all: the engine a scanned port or an ssh-forwarded port answers
+// for cannot turn a poll into a request to any URL the operator's host reaches.
+func TestCheckRedirectRefusesCrossOriginHop(t *testing.T) {
 	t.Cleanup(func() { Set(""); resetAllowed() })
 	Set("sk-test")
 
-	var sawAuth atomic.Value
-	sawAuth.Store("")
+	var reached atomic.Int32
 	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		sawAuth.Store(r.Header.Get("Authorization"))
+		reached.Add(1)
 	}))
 	defer other.Close()
 
 	chain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer sk-test" {
+			t.Errorf("first hop Authorization = %q, want the token", got)
+		}
 		http.Redirect(w, r, other.URL, http.StatusFound)
 	}))
 	defer chain.Close()
@@ -184,11 +197,48 @@ func TestCheckRedirectStripsHeaderOnCrossOriginChain(t *testing.T) {
 	}
 	c := &http.Client{CheckRedirect: CheckRedirect}
 	resp, err := c.Do(req)
+	if err == nil {
+		resp.Body.Close()
+		t.Fatal("cross-origin redirect was followed")
+	}
+	if n := reached.Load(); n != 0 {
+		t.Errorf("redirect target was contacted %d time(s), want 0", n)
+	}
+}
+
+// A same-origin redirect still works, and the token rides the hop: an engine
+// that answers a poll with a redirect to another path on itself is normal.
+func TestCheckRedirectFollowsSameOriginChain(t *testing.T) {
+	t.Cleanup(func() { Set(""); resetAllowed() })
+	Set("sk-test")
+
+	var sawAuth atomic.Value
+	sawAuth.Store("")
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawAuth.Store(r.Header.Get("Authorization"))
+		fmt.Fprint(w, `{}`)
+	}))
+	defer final.Close()
+
+	chain := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/final" {
+			sawAuth.Store(r.Header.Get("Authorization"))
+			fmt.Fprint(w, `{}`)
+			return
+		}
+		http.Redirect(w, r, "/final", http.StatusFound)
+	}))
+	defer chain.Close()
+
+	Allow(chain.URL)
+	req, _ := http.NewRequest("GET", chain.URL, nil)
+	Apply(req)
+	resp, err := (&http.Client{CheckRedirect: CheckRedirect}).Do(req)
 	if err != nil {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
-	if a := sawAuth.Load().(string); a != "" {
-		t.Errorf("Authorization = %q reached the redirect target, want unset", a)
+	if a := sawAuth.Load().(string); a != "Bearer sk-test" {
+		t.Errorf("Authorization = %q on the same-origin hop, want the token", a)
 	}
 }
