@@ -81,7 +81,7 @@ type tracked struct {
 	// dashboard; ViaEngine on the event is what stops aggregates adding them
 	// on top of the engine's own numbers.
 	viaEngine string
-	// dirNote is shortDir(proc.Dir), resolved once at discovery. Every
+	// dirNote is core.ShortDir(proc.Dir), resolved once at discovery. Every
 	// reported event carries it, and deriving it walks the path's symlinks,
 	// which is one lstat per component on a path that cannot change while the
 	// process lives.
@@ -263,7 +263,7 @@ func (w *Watcher) discover(ctx context.Context) {
 		// event on every replay.
 		watch.SetNow(w.instant)
 		tctx, cancel := context.WithCancel(ctx)
-		t := &tracked{proc: p, dirNote: shortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
+		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()
 		if _, seen := w.tracked[p.PID]; seen {
 			w.mu.Unlock()
@@ -465,10 +465,6 @@ func sampleID(proc agentusage.Process, at time.Time) string {
 		strconv.FormatInt(proc.Started.UnixNano(), 10) + ":" +
 		strconv.FormatInt(at.UnixNano(), 10)
 }
-
-// shortDir is core.ShortDir under the name the tracker uses, so the one
-// per-process derivation stays in one place.
-func shortDir(dir string) string { return core.ShortDir(dir) }
 
 // note carries what the event cannot: where the agent is working (already
 // shortened by the tracker, which resolved it once), how much of the output

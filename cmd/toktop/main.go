@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"maps"
 	"os"
 	"os/signal"
 	"slices"
@@ -29,10 +28,8 @@ import (
 	"github.com/maci0/toktop/internal/demo"
 	"github.com/maci0/toktop/internal/ingest"
 	"github.com/maci0/toktop/internal/logcfg"
-	"github.com/maci0/toktop/internal/provider"
 	"github.com/maci0/toktop/internal/remote"
 	"github.com/maci0/toktop/internal/selfreload"
-	"github.com/maci0/toktop/internal/sysmon"
 	"github.com/maci0/toktop/internal/ui"
 )
 
@@ -222,63 +219,9 @@ func main() {
 		recorder = demoSrc
 
 	default:
-		providers := provider.Discover(ctx)
-		for _, raw := range f.adds {
-			// The token rides only to endpoints the operator named: discovery
-			// probes every well-known port on spec, and whatever answers there
-			// must not be able to harvest the credential.
-			if err := bearer.Allow(raw); err != nil {
-				fmt.Fprintf(os.Stderr, "toktop: %v; requests there go unauthenticated\n", err)
-			}
-			if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p.Poll != nil {
-				providers = append(providers, p)
-			} else {
-				fmt.Fprintf(os.Stderr, "toktop: nothing recognized at %s; polling as generic openai anyway\n", raw)
-				providers = append(providers, provider.NewOpenAICompat(raw, raw, core.KindOpenAI))
-			}
-		}
-
-		var sysWrap func() core.SysSample
-		// A target that fails while others attach is a degraded run, not a
-		// failed one, and the reason is already on stderr. But when every
-		// target the operator named failed, the dashboard that comes up shows
-		// local engines only, and the one line explaining why is hidden under
-		// the alt screen: a typo'd host looks exactly like a host with no
-		// engines running. That is the same reasoning the --ingest branch
-		// below applies to an explicit listen address, so it gets the same
-		// treatment: refuse to start rather than start into a silent
-		// substitution.
-		attached, lastAttachErr := 0, error(nil)
-		for _, tgt := range targets {
-			// Only when set: an empty flag must keep the IdentityFile
-			// resolved from ~/.ssh/config by ParseTarget.
-			if f.sshKey != "" {
-				tgt.KeyFile = f.sshKey
-			}
-			rp, rsys, rerr := attachRemote(ctx, tgt)
-			if rerr != nil {
-				fmt.Fprintf(os.Stderr, "toktop: %v\n", rerr)
-				lastAttachErr = rerr
-				continue
-			}
-			attached++
-			providers = append(providers, rp...)
-			prev := sysWrap
-			sysWrap = func() core.SysSample {
-				var s core.SysSample
-				if prev != nil {
-					s = prev()
-				} else {
-					s = sysmon.Sample()
-				}
-				rsys.Merge(&s)
-				return s
-			}
-			fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n",
-				len(rp), tgt.Host)
-		}
-		if len(targets) > 0 && attached == 0 {
-			fmt.Fprintf(os.Stderr, "toktop: no ssh target could be attached; last error: %v\n", lastAttachErr)
+		providers, sysFn, err := attachEngines(ctx, f, targets)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "toktop:", err)
 			os.Exit(2)
 		}
 
@@ -291,8 +234,8 @@ func main() {
 		}
 
 		col := collector.New(providers, f.interval)
-		if sysWrap != nil {
-			col.SetSysFn(sysWrap)
+		if sysFn != nil {
+			col.SetSysFn(sysFn)
 		}
 		go col.Run(ctx, ch)
 		prober = col.ProbeAll
@@ -673,85 +616,4 @@ func loadAgentDefs() error {
 		return nil
 	}
 	return agentusage.LoadDefinitions(path)
-}
-
-// attachRemote connects to an ssh target, discovers engines, relays their
-// ports through the connection and starts remote stats sampling. Everything
-// shares one in-process ssh client; its death mid-run is reported once.
-func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, *remote.Stats, error) {
-	cli, err := remote.Connect(ctx, tgt)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	wellKnown := provider.CandidatePorts()
-	disc, err := remote.Discover(ctx, cli, wellKnown)
-	if err != nil {
-		cli.Close()
-		return nil, nil, err
-	}
-	ports := disc.ForwardSet(wellKnown)
-	if len(ports) == 0 {
-		cli.Close()
-		return nil, nil, fmt.Errorf("no inference ports listening on %s", tgt.Host)
-	}
-	fwd, err := cli.Forward(ports)
-	if err != nil {
-		cli.Close()
-		return nil, nil, err
-	}
-	// Forward skips a port whose local listener cannot be bound; without
-	// this line the engine behind it silently vanishes from the dashboard.
-	for _, p := range ports {
-		if _, ok := fwd[p]; !ok {
-			fmt.Fprintf(os.Stderr, "toktop: %s:%d could not be forwarded locally; engines on that port are invisible\n",
-				tgt.Host, p)
-		}
-	}
-	go func() {
-		select {
-		case <-ctx.Done():
-		case <-cli.Done():
-			if ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "toktop: ssh connection to %s lost (%v)\n", tgt.Host, cli.Err())
-			}
-		}
-		// Close on both paths: watchClose reclaims listeners after a drop,
-		// but nothing else tears the client down, and a cancelled Run
-		// context would otherwise leave the conn, keepalive, and any
-		// still-bound forwards until process exit.
-		cli.Close()
-	}()
-
-	// Ascending remote ports: backend order must not depend on map iteration.
-	rports := slices.Sorted(maps.Keys(fwd))
-	bases := make([]string, len(rports))
-	for i, rport := range rports {
-		bases[i] = fmt.Sprintf("http://127.0.0.1:%d", fwd[rport])
-	}
-	// Identify concurrently: provider fans the probes out per candidate.
-	kinds := provider.IdentifyAll(ctx, bases)
-
-	var providers []provider.Provider
-	var skipped []int
-	for i, kind := range kinds {
-		if kind != "" {
-			label := fmt.Sprintf("%s:%d", tgt.Host, rports[i])
-			p := provider.NewOpenAICompat(bases[i], label, kind)
-			if kind == core.KindOllama {
-				p = provider.NewOllama(bases[i])
-				p.Label = label
-			}
-			providers = append(providers, p)
-			continue
-		}
-		skipped = append(skipped, rports[i])
-	}
-	for _, p := range skipped {
-		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
-			tgt.Host, p)
-	}
-	stats := &remote.Stats{Client: cli}
-	go stats.Run(ctx, 5*time.Second)
-	return providers, stats, nil
 }
