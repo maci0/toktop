@@ -13,6 +13,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-09-28
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.17.1).
+
+### Fixed
+
+- A Grok session directory encodes `:` in the working directory. On Windows
+  that path is `C:\...`, and the colon was left in the directory name, so
+  the folder could not be opened and the session's usage was never read.
+
 ## [0.17.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on
@@ -1736,7 +1747,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.17.1...HEAD
+[0.17.1]: https://github.com/maci0/toktop/compare/v0.17.0...v0.17.1
 [0.17.0]: https://github.com/maci0/toktop/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/maci0/toktop/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/maci0/toktop/compare/v0.14.1...v0.15.0
