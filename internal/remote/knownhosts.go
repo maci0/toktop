@@ -44,11 +44,12 @@ func defaultKnownHostsPath() string {
 // covers concurrent connections and the file itself. It says nothing about
 // other processes, which is what lockStore is for.
 //
-// The mutex is keyed by path so two stores cannot block each other, and every
-// holder takes it *inside* lockStore, never around it: lockStore sleeps for up
-// to storeLockWait waiting on a peer process, and a single global mutex held
-// across that sleep stalled every concurrent handshake in the process, not just
-// the one for the contended host.
+// The mutex is keyed by path so two stores cannot block each other, and it is
+// taken inside lockStore rather than held across it: lockStore sleeps for up
+// to storeLockWait waiting on a peer process, and a mutex held across that
+// sleep would stall every concurrent handshake in the process, not just the
+// one for the contended host. Holding it briefly around a read, as the
+// trust-on-first-use probe does, costs no such wait.
 var storeMu sync.Map // path -> *sync.Mutex
 
 func storeMutex(path string) *sync.Mutex {

@@ -13,7 +13,7 @@ import (
 )
 
 // eventFromWire sanitizes one decoded event. Timestamp clamping against
-// arrival time stays in handlePost: that bound is a property of the request,
+// arrival time stays in decodeStream: that bound is a property of the request,
 // not of the wire object.
 func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	at, err := parseEventTime(wire.At)

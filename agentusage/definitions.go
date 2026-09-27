@@ -30,9 +30,11 @@ var knownAgents = []string{
 	"prime-agent", "qwen",
 }
 
-// Agents lists every agent name this package knows: the ones compiled in, the
-// ones [LoadDefinitions] registered, and the ones [RegisterSpec] added. Sorted
-// and deduplicated, so an agent several of those name appears once.
+// Agents lists every agent name this package knows: the recognized CLIs in
+// [knownAgents] (most of which keep no transcript worth reading), the ones
+// [LoadDefinitions] registered, and the ones [RegisterSpec] added. Sorted and
+// deduplicated, so an agent several of those name appears once. Use
+// [Supported] to tell which of them can be read.
 func Agents() []string {
 	out := slices.Clone(knownAgents)
 	defsMu.RLock()

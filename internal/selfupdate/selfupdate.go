@@ -413,9 +413,10 @@ func sweepStaleTemps(dir string) {
 // update that reported success can be gone on the next boot, leaving the
 // previous version and a message saying otherwise.
 //
-// cordis-boundary: emission, compensate by verifying the download against the
-// release checksum before any rename and by restoring the displaced binary
-// when the second rename fails; the installed file itself is not reverted.
+// The caller has already checked tmpName against the release checksums, so
+// install trusts its input. It is not transactional: a kill between the two
+// Windows renames leaves the old binary displaced until the next run, and
+// nothing here reverts a rename that already succeeded.
 func install(tmpName, self string) error {
 	if runtime.GOOS != "windows" {
 		if err := os.Rename(tmpName, self); err != nil {

@@ -25,8 +25,7 @@ type Target struct {
 }
 
 // ParseTarget parses ssh://[user@]host[:port] and applies ~/.ssh/config
-// overrides for everything the URL leaves unset. A key already on the target
-// skips the config lookup entirely. A password in the URL is
+// overrides for everything the URL leaves unset. A password in the URL is
 // rejected: it would be visible in process listings, and this parser would
 // otherwise ignore it. A path, query, or fragment is rejected rather than
 // ignored.

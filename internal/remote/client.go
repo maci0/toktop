@@ -39,9 +39,7 @@ var runTimeout = 15 * time.Second
 // sessionOpenTimeout bounds the channel-open round trip on its own, well
 // under runTimeout. A channel open is a single request that a healthy peer
 // answers in milliseconds; runTimeout is the budget for a whole command and
-// the runtimes of the script inside it. Borrowing runTimeout here meant one
-// slow channel open could hold the open for a full command budget before the
-// failure was noticed.
+// the runtimes of the script inside it.
 var sessionOpenTimeout = 3 * time.Second
 
 // Client is one long-lived ssh connection carrying everything toktop needs

@@ -19,7 +19,7 @@ run from a `go run` or `bunx` pin. No floating ranges anywhere.
 | github.com/klauspost/compress | Apache-2.0, BSD-3-Clause | zstd decode for dsh session stores. stdlib has no zstd, and the zstd payloads there are large enough to matter. |
 | github.com/rivo/uniseg | MIT | Grapheme cluster iteration, so truncation and width never split an emoji or a combining sequence. |
 | golang.org/x/crypto | BSD-3-Clause | SSH client, agent, and known-hosts handling for the remote collector. |
-| golang.org/x/sys | BSD-3-Clause | Windows named pipes, job objects, and the per-platform syscalls stdlib does not expose. |
+| golang.org/x/sys | BSD-3-Clause | The host vitals syscalls stdlib does not expose: sysctl, uname and clock reads on Unix, the named-pipe error codes and lazy system DLLs on Windows. |
 | golang.org/x/term | BSD-3-Clause | Raw-mode terminal control and window size. |
 | golang.org/x/text | BSD-3-Clause | Unicode normalization (NFC) and case folding for agent names and paths, which are compared across filesystems that disagree about form. |
 | modernc.org/sqlite | MIT, SQLite public domain | Pure-Go SQLite driver for the crush and opencode session databases, behind the sqlite build tag. CGO stays off so cross-compilation and reproducible builds are unaffected. |
@@ -58,8 +58,9 @@ against.
 
 ## Gates that keep this honest
 
-- `go mod tidy -diff` and `go mod verify` in CI: the manifest matches the
-  imports, and every module in the cache matches its go.sum hash.
+- `go mod tidy -diff` in CI: the manifest matches the imports. Every build
+  runs with `-mod=readonly`, so a module missing from go.sum or a manifest out
+  of step with the source fails the build rather than resolving around it.
 - `make govulncheck`, both sqlite tag halves: no reachable vulnerability in the
   standard library or the modules above.
 - `make sbom` on every release: a CycloneDX inventory with per-module licenses

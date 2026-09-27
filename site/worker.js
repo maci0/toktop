@@ -13,7 +13,7 @@ function htmlForWire(source) {
 // A phone lays the figure out at about 360 CSS px, so a 2x screen asks for
 // roughly 720 device pixels: 768w is that slot, and 1280w is what a 3x phone
 // and a 1x desktop need. Without the 768w candidate every phone fetched the
-// 1280w capture, 30,963 bytes for 722 pixels of it. 1920w is the 2x desktop
+// 1280w capture, 25,360 bytes for 722 pixels of it. 1920w is the 2x desktop
 // slot.
 // The img omits decoding=async so the browser does not postpone the LCP decode.
 // Its width and height are the fallback PNG's own 3240x1900, not a width the

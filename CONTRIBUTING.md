@@ -124,13 +124,15 @@ and the set the worker names cannot drift:
 make site-assets
 ```
 
-AVIF is what browsers that speak it download (about half the WebP). The three
+AVIF is what browsers that speak it download (about a third of the WebP). The three
 widths match the `srcset` in `site/worker.js`: 768w is the ~720px slot,
 1280w covers phones at 3x and desktops at 1x, 1920w is the 2x desktop.
-`-q 40` rather than 50: the capture is flat color and hard edges, and at 1:1
-on the densest text the two are indistinguishable, while 40 takes a third off
-the phone capture and a quarter off the desktop one. Compare a crop before
-moving it further; the gain below 40 is visible.
+`-q 32` rather than 40 or 50: the capture is flat color and hard edges, and
+the page downscales each candidate, so 32 is where the bytes stop paying:
+10,577 bytes at 768w against 13,563 at `-q 40`, a 22% cut of the image that is
+79% of a phone's visit, at 30.0 dB PSNR against the resized source. The gain
+below 32 is not on screen at the size anyone reads it, so compare a crop
+before moving it.
 `dashboard-card.png` is the share card, not a fifth hero candidate: the
 `og:image` crawlers fetch one URL and draw it at card size, so it is the
 capture at 1200px, the width a `summary_large_image` is laid out at. The

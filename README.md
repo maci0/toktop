@@ -217,8 +217,9 @@ end to end, writing the transcript after the watcher attaches because records
 already on disk belong to an earlier run. `errors.Is` matches `ErrEmptyTool`
 and `ErrNoRoots` on a rejected spec, `ErrInvalidDefinitions` on a malformed
 definitions file, and `ErrCollidingDefinitions` on two agent names in one file
-that reduce to the
-same key. `SpecFor` is the read side: it reports the transcript
+that reduce to the same key; a file that exists but cannot be read
+returns the wrapped `os` error instead, matching neither, and a missing
+one is not an error. `SpecFor` is the read side: it reports the transcript
 location registered for an agent, roots as written, which is how a program
 finds out which entries a definitions file registered and which it skipped
 (the agents read by a compiled-in adapter are not reported, so a `usage` entry
@@ -513,7 +514,9 @@ technology:
 ```
 toktop update     subcommand: install the latest release (--check to only
                   report it, --repo owner/name for a fork). With --check,
-                  stdout is the release URL and nothing else
+                  stdout is the release URL and nothing else, or nothing at
+                  all when the release names no GitHub release page, which
+                  stderr then says
 toktop help       same as --help; `toktop help update` / `toktop help version`
 toktop version    same as --version
 --demo            simulated fleet, zero setup
@@ -528,8 +531,8 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   or variation selector, and a target that does is
                   refused at startup)
 --ssh-key PATH    private key for ssh targets (overrides ~/.ssh/config;
-                  ~ is expanded; a missing file or an empty value aborts at
-                  startup)
+                  ~ is expanded; an empty value aborts at startup, and a
+                  missing file aborts only with a non-demo ssh:// target)
 --bearer TOKEN    bearer token sent to --add endpoints only; OmniRoute API
                   keys etc. (env: OMNIROUTE_API_KEY, then TOKTOP_BEARER;
                   an explicit --bearer, even empty, wins)
@@ -553,8 +556,8 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   effect alongside it; TOKTOP_COLUMNS / TOKTOP_LINES have no
                   effect with either)
 --frames N        with --once: snapshots to accumulate before rendering
-                  (max 180, the chart history length; with --plain only the
-                  wait before rendering changes)
+                  (max 180, the chart history length; with --plain and
+                  --json only the wait before rendering changes)
 --seed N          demo RNG seed; the demo frame shows the seed it ran
                   with, and the same seed replays the run
 --origin TIME     with --demo: pin the instant the simulated timeline
@@ -627,7 +630,7 @@ follow the run rather than how long the process took.
 | `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
 | `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with an `ssh://` target; a run on Linux with one fails at connect |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset |
-| `NO_COLOR` | strips terminal styling when set to any value (honored by the renderer) |
+| `NO_COLOR` | strips terminal styling when set to a non-empty value (honored by the terminal renderer, as usual) |
 
 An explicit `--bearer`, even empty, wins over its env fallbacks; otherwise
 the environment is used. Prefer an env var over `--bearer` for tokens:
@@ -681,6 +684,7 @@ make test-pkg PKG=./internal/ui    # one package while iterating
 make test-pkg PKG=./internal/core RUN=TestSanitizeTextPreservesUTF8
 make test-pkg PKG=./agentusage     # both halves of the sqlite tag gate
 make test-pkg PKG=./internal/ui RACE=0   # faster loop, no race detector
+make install                    # install into PREFIX/bin (default ~/.local/bin)
 ```
 
 Cross-compiles (no cgo anywhere); `make test-dist` is the same flags the

@@ -215,10 +215,9 @@ func clip(s string, w int) string {
 	return shorten(strip(s), w)
 }
 
-// strip is core.SanitizeText at render width: untrusted strings
-// (engine-supplied names, agent events) must never reach the raw terminal.
-// Kept as a named alias because clip's cut path and the header's engine
-// count both need it and the name reads shorter at those call sites.
+// strip is core.SanitizeText under a shorter name, for the untrusted strings
+// (engine-supplied names, agent events) that must never reach the raw
+// terminal. Width clipping is clip's job, and happens after this.
 func strip(s string) string { return core.SanitizeText(s) }
 
 func padTo(s string, w int) string {

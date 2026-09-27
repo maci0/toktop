@@ -216,7 +216,7 @@ test("accept-encoding variants negotiate correctly", async () => {
     ["gzip", "gzip"],
     ["GZIP", "gzip"],
     ["*", "br"],
-    // zstd is bigger than gzip on this page (4,406 against 4,176), so the
+    // zstd is bigger than gzip on this page (4,526 against 4,291), so the
     // ranking the Worker negotiates from is a list, not the order the
     // codings are offered in, and a client naming both gets the smaller.
     ["zstd, gzip", "gzip"],

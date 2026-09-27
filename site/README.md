@@ -151,7 +151,10 @@ a line per visit would bury the few that name a broken deploy.
 Every request line carries the same fields: `event`, the request's ray under
 `ray` (empty off Cloudflare), its `method` and `path`, the `status` the
 client was given, the `duration_ms` the edge spent getting there, and
-whatever reason the event adds. A filter on method, path or status works across every event. That is
+whatever reason the event adds. `coding-dropped` is the one exception: it names
+a compression build, not an answer the client was given, so it carries only
+`coding` and `error` beside `event` and `ray`. A filter on method, path or
+status works across every other event. That is
 the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. A `405` or a

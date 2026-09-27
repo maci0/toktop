@@ -103,12 +103,11 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 }
 
 // appleGPUFromDisplay decodes one SPDisplaysDataType entry. VRAM is resolved
-// in two passes, neither of them over an unordered range: the bare vram key
-// wins outright, and the substring candidates are tried in name order. One
-// map range makes whichever of several vram-ish keys the runtime happens to
-// visit first decide a total the identity cache then holds for the life of
-// the process, so two runs of one binary on one Mac could report different
-// VRAM for the same card.
+// in two passes, neither of which lets a map range decide the answer: the
+// first is an exact lookup on "vram", whose result does not depend on the
+// order the runtime visits the map, and the second walks the keys sorted, so
+// two runs of one binary on one Mac report the same VRAM for the same card
+// and the identity cache can hold that total for the life of the process.
 func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 	dev := core.GPUDevice{Vendor: "apple"}
 	if name, ok := d["_name"].(string); ok {

@@ -40,9 +40,9 @@ type Server struct {
 }
 
 // idleTimeout reaps keep-alive connections that sit between requests. Without
-// it a vanished peer holds an fd and a goroutine for the life of the dashboard;
-// ReadHeaderTimeout covers only the headers and no ReadTimeout is set, so a
-// peer that finishes them and then goes silent is this one's to reap. The
+// it a vanished peer holds an fd and a goroutine for the life of the dashboard.
+// A peer that goes silent mid-body is a different bound: progressBody applies
+// bodyIdleTimeout per read and maxEventLifetime to the stream as a whole. The
 // endpoint is localhost-bound by default but can be exposed via --ingest.
 var idleTimeout = 2 * time.Minute
 

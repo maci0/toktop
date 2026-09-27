@@ -203,8 +203,8 @@ const probeSecsMax = 24 * 60 * 60
 
 // Poll interval bounds apply after flag.Duration parses a unit-bearing value
 // (or zero). The 50ms floor prevents excessive polling; a provider request is
-// bounded by provider.PollTimeout (1.5s). The 1h ceiling also caps the
-// per-frame wait in --once, which is three times the interval.
+// bounded by provider.PollTimeout (1.5s). The --once frame wait is three
+// times the interval, so this ceiling bounds it too.
 const (
 	intervalMin = 50 * time.Millisecond
 	intervalMax = time.Hour

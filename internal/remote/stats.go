@@ -329,10 +329,9 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 	// answers nothing once the driver is unloaded, the tool is uninstalled,
 	// or the machine is a VM. An empty answer therefore replaces what the
 	// previous poll recorded instead of leaving the card and its driver on
-	// the dashboard for the rest of the run, which is what a merge into the
-	// retained sample used to do. A section that never arrived (a dump cut
-	// short before the last marker) leaves the last reading alone, like every
-	// other section.
+	// the dashboard for the rest of the run. A section that never arrived
+	// (a dump cut short before the last marker) leaves the last reading
+	// alone, like every other section.
 	if gpuSection < len(sections) {
 		devs := parseGPUs(sections[gpuSection])
 		s.GPUs = devs
