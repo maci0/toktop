@@ -378,12 +378,24 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 		ID:             sampleID(proc, cur.At),
 		Agent:          agent,
 		Kind:           core.AgentKindTurn,
-		PromptTokens:   int64(max(prompt, 0)),
-		OutputTokens:   int64(max(out, 0)),
-		ThinkingTokens: int64(max(think, 0)),
+		PromptTokens:   eventTokens(prompt),
+		OutputTokens:   eventTokens(out),
+		ThinkingTokens: eventTokens(think),
 		ViaEngine:      core.ClampField(core.SanitizeText(via), 128),
 		Note:           core.ClampField(core.SanitizeText(note(proc, think, via)), 512),
 	})
+}
+
+// eventTokens bounds one event's token count the way the HTTP ingest path
+// does. A transcript file's accumulators saturate at MaxInt64, and the
+// retained agent window sums this field across events, so an unclamped value
+// wraps the agent total negative.
+func eventTokens(n int) int64 {
+	const maxEventTokens = 1 << 40
+	if n <= 0 || int64(n) > maxEventTokens {
+		return 0
+	}
+	return int64(n)
 }
 
 // sampleID is stable for one process at one sample instant, so a retried

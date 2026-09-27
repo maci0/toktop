@@ -110,6 +110,36 @@ func satSub(a, b uint64) uint64 {
 	return a - b
 }
 
+// satAdd4 adds four page counts without wrapping: a wrapping sum turns a
+// huge reading into a small, plausible-looking byte count.
+func satAdd4(a, b, c, d uint64) uint64 {
+	s := satAdd(satAdd(a, b), satAdd(c, d))
+	if s < a || s < b || s < c || s < d {
+		return ^uint64(0)
+	}
+	return s
+}
+
+func satAdd(a, b uint64) uint64 {
+	s := a + b
+	if s < a {
+		return ^uint64(0)
+	}
+	return s
+}
+
+// pagesToBytes converts a page count to bytes, saturating so the multiply
+// cannot wrap a remote host's absurd value into a small byte count.
+func pagesToBytes(pages, pageSize uint64) uint64 {
+	if pageSize == 0 {
+		return 0
+	}
+	if pages > ^uint64(0)/pageSize {
+		return ^uint64(0)
+	}
+	return pages * pageSize
+}
+
 func cutMeminfoLine(line string) (string, uint64, bool) {
 	k, rest, ok := strings.Cut(line, ":")
 	if !ok {

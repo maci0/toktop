@@ -164,3 +164,38 @@ func TestSample(t *testing.T) {
 		}
 	}
 }
+
+func TestSatAdd4NeverWraps(t *testing.T) {
+	const big = ^uint64(0) / 2
+	tests := []struct {
+		name       string
+		a, b, c, d uint64
+		want       uint64
+	}{
+		{"ordinary", 1, 2, 3, 4, 10},
+		{"carries but fits", 1 << 62, 1 << 62, 1 << 62, 0, 3 << 62},
+		{"wraps to small", math.MaxUint64, 1, 0, 0, math.MaxUint64},
+		{"two wraps", math.MaxUint64, 2, 0, 0, math.MaxUint64},
+		{"all four large", big, big, big, big, math.MaxUint64},
+	}
+	for _, tc := range tests {
+		got := satAdd4(tc.a, tc.b, tc.c, tc.d)
+		if got != tc.want {
+			t.Errorf("%s: satAdd4 = %d, want %d", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestPagesToBytesSaturates(t *testing.T) {
+	if got := pagesToBytes(3, 4096); got != 12288 {
+		t.Errorf("pagesToBytes(3, 4096) = %d, want 12288", got)
+	}
+	if got := pagesToBytes(1, 0); got != 0 {
+		t.Errorf("pagesToBytes(1, 0) = %d, want 0", got)
+	}
+	// A page count that would overflow the multiply must saturate, not wrap to
+	// a small byte count.
+	if got, want := pagesToBytes(math.MaxUint64, 4096), uint64(math.MaxUint64); got != want {
+		t.Errorf("pagesToBytes(MaxUint64, 4096) = %d, want %d", got, want)
+	}
+}

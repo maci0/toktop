@@ -929,3 +929,37 @@ func TestStderrTailStripsTerminalInjection(t *testing.T) {
 		t.Errorf("stderrTail = %q, want visible text kept", got)
 	}
 }
+
+// The kernel's ephemeral range overlaps the ports a remote host serves on, so
+// a forward must never hand out a local port that collides with another
+// forward's remote port or with an already-mapped local port.
+func TestListenEphemeralAvoidingReservesForwardedPorts(t *testing.T) {
+	rports := []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20}
+	taken := map[int]int{}
+	var ls []net.Listener
+	defer func() {
+		for _, l := range ls {
+			l.Close()
+		}
+	}()
+	for _, rp := range rports {
+		l, err := listenEphemeralAvoiding(rports, taken)
+		if err != nil {
+			t.Fatalf("listenEphemeralAvoiding: %v", err)
+		}
+		ls = append(ls, l)
+		port := l.Addr().(*net.TCPAddr).Port
+		for _, other := range rports {
+			if other == port {
+				t.Errorf("bound local port %d, which is also a forwarded remote port", port)
+			}
+		}
+		if prev, dup := taken[port]; dup {
+			t.Errorf("local port %d already mapped to remote %d", port, prev)
+		}
+		taken[port] = rp
+	}
+	if len(taken) != len(rports) {
+		t.Errorf("mapped %d distinct local ports, want %d", len(taken), len(rports))
+	}
+}

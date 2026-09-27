@@ -275,6 +275,10 @@ func (c *Client) probe(wait time.Duration) bool {
 
 const stderrBufferBytes = 4096
 
+// forwardBindAttempts bounds the rebind loop that steers a kernel-chosen
+// ephemeral port away from the forwarded set.
+const forwardBindAttempts = 8
+
 // stderrBuf collects a remote command's stderr. x/crypto/ssh copies it from
 // a background goroutine that is only drained when Session.Output's Wait
 // finishes, so on the timeout and cancellation paths below that goroutine can
@@ -425,8 +429,13 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 		return nil, net.ErrClosed
 	}
 	var lastErr error
+	seen := make(map[int]bool, len(rports))
 	for _, rp := range rports {
-		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if seen[rp] {
+			continue // a duplicate would bind a second listener no map entry reaches
+		}
+		seen[rp] = true
+		l, err := listenEphemeralAvoiding(rports, out)
 		if err != nil {
 			lastErr = err
 			continue
@@ -442,6 +451,39 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 		return nil, fmt.Errorf("no local ports available for forwarding")
 	}
 	return out, nil
+}
+
+// listenEphemeralAvoiding binds a kernel-chosen loopback port that collides
+// with no remote port still to be forwarded and none already mapped. The
+// ephemeral range overlaps the ports an inference host serves on, so an
+// unchecked bind can return (say) 45000 for the 40000 forward and silently
+// point one engine at another's relay. Rebind until the pick is clear.
+func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, error) {
+	var lastErr error
+	for range forwardBindAttempts {
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		port := l.Addr().(*net.TCPAddr).Port
+		clash := taken[port] != 0
+		for _, rp := range rports {
+			if rp == port {
+				clash = true
+				break
+			}
+		}
+		if !clash {
+			return l, nil
+		}
+		if err := l.Close(); err != nil {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, fmt.Errorf("no loopback port free of the forwarded set after %d attempts", forwardBindAttempts)
 }
 
 func (c *Client) relay(l net.Listener, rport int) {

@@ -4,6 +4,7 @@ package sysmon
 
 import (
 	"encoding/binary"
+	"math"
 
 	"golang.org/x/sys/unix"
 
@@ -40,8 +41,12 @@ func sampleMemoryDarwin(s *core.SysSample) {
 		return uint64(v)
 	}
 	s.MemTotal = total
-	s.MemUsed = (page("vm.pages_wired") + page("vm.pages_active") +
-		page("vm.pages_inactive") + page("vm.pages_compressed")) * ps
+	// pages_compressed is already counted inside active/inactive on current
+	// macOS, so the sum can exceed MemTotal. Saturate the byte conversion and
+	// the total rather than reporting memory used over total.
+	s.MemUsed = min(pagesToBytes(satAdd4(
+		page("vm.pages_wired"), page("vm.pages_active"),
+		page("vm.pages_inactive"), page("vm.pages_compressed")), ps), total)
 
 	if tu, uu, ok := swapUsage(); ok {
 		s.SwapTotal, s.SwapUsed = tu, uu
@@ -64,7 +69,14 @@ func decodeLoadavg(b []byte) (l1, l5, l15 float64) {
 		return 0, 0, 0
 	}
 	get := func(off int) float64 {
-		return float64(int32(binary.LittleEndian.Uint32(b[off:off+4]))) / float64(scale)
+		v := float64(int32(binary.LittleEndian.Uint32(b[off:off+4]))) / float64(scale)
+		// The field is signed, so a kernel that has not filled it in (or has
+		// wrapped it) yields a negative load average. Collapse it to zero the
+		// way ParseLoadavg does, rather than printing "ld -0.42".
+		if !(v >= 0) || math.IsInf(v, 0) {
+			return 0
+		}
+		return v
 	}
 	return get(0), get(4), get(8)
 }

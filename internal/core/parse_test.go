@@ -39,3 +39,22 @@ func TestContainsAny(t *testing.T) {
 		t.Error("no substrings must not match")
 	}
 }
+
+func TestSatAddPos(t *testing.T) {
+	tests := []struct {
+		a, b, want int64
+	}{
+		{0, 0, 0},
+		{5, 7, 12},
+		{-1, 5, 5}, // a negative leg is not a count
+		{5, -1, 5},
+		{math.MaxInt64, 0, math.MaxInt64},
+		{math.MaxInt64, 1, math.MaxInt64}, // must saturate, not wrap negative
+		{1 << 40, 1 << 40, 1 << 41},
+	}
+	for _, tc := range tests {
+		if got := SatAddPos(tc.a, tc.b); got != tc.want {
+			t.Errorf("SatAddPos(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

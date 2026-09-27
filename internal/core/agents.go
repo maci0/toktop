@@ -67,9 +67,9 @@ func agentRatesFiltered(events []AgentEvent, now time.Time, ownOnly bool) []Agen
 			a = &acc{first: ev.At}
 			by[agent] = a
 		}
-		a.tokens += ev.OutputTokens
-		a.prompt += ev.PromptTokens
-		a.thinking += ev.ThinkingTokens
+		a.tokens = SatAddPos(a.tokens, ev.OutputTokens)
+		a.prompt = SatAddPos(a.prompt, ev.PromptTokens)
+		a.thinking = SatAddPos(a.thinking, ev.ThinkingTokens)
 		a.last = ev.At
 		a.via = ev.ViaEngine
 		a.n++

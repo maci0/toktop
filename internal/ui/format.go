@@ -89,12 +89,18 @@ func fmtDur(d time.Duration) string {
 	return fmt.Sprintf("%dh%02dm", int64(d/time.Hour), int64(d/time.Minute)%60)
 }
 
+// humanBytes renders a byte count. The KiB tier exists because a sub-MiB
+// value (a small size_vram, a small process) would otherwise round to a
+// flat "0MiB", reading as no allocation at all.
 func humanBytes(b uint64) string {
 	const g = 1 << 30
 	if b >= g {
 		return fmt.Sprintf("%.1fGiB", float64(b)/g)
 	}
-	return fmt.Sprintf("%.0fMiB", float64(b)/(1<<20))
+	if b >= 1<<20 {
+		return fmt.Sprintf("%.0fMiB", float64(b)/(1<<20))
+	}
+	return fmt.Sprintf("%.0fKiB", float64(b)/(1<<10))
 }
 
 // humanBytesShort is the compact form used in the system strip. Same unit,
@@ -107,7 +113,10 @@ func humanBytesShort(b uint64) string {
 	if b >= 1<<30 {
 		return fmt.Sprintf("%.1fG", float64(b)/(1<<30))
 	}
-	return fmt.Sprintf("%.0fM", float64(b)/m)
+	if b >= m {
+		return fmt.Sprintf("%.0fM", float64(b)/m)
+	}
+	return fmt.Sprintf("%.0fK", float64(b)/(1<<10))
 }
 
 // shorten truncates s to n visible cells with an ellipsis. Cells, not

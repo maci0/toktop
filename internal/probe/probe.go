@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strconv"
 	"strings"
@@ -45,6 +46,13 @@ const probeTokenTrust = probeTokens * 4
 // billing) until the HTTP timeout. 32 bytes per requested token covers
 // any encoding of a 32-token reply.
 const probeContentBytes = probeTokens * 32
+
+// evalDurationBandDiv sets the floor of the band a scaled engine-reported
+// decode duration must land in, as a divisor of the measured round trip.
+// Generation dominates a probe, so a correct reading is not a rounding error
+// of the exchange; 4 keeps a genuine tail-light decode (short prompt, small
+// max_tokens) from being rescaled away.
+const evalDurationBandDiv = 4
 
 // probeLineMax is the largest SSE/NDJSON frame we will buffer. A 32-token
 // completion plus wrapper JSON is hundreds of bytes; a megabyte line is
@@ -117,13 +125,38 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 	s.TTFTms = float64(ttft.Microseconds()) / 1000.0
 	switch {
 	case evalDur > 0:
-		s.TokPS = float64(tokens) / evalDur.Seconds()
+		s.TokPS = float64(tokens) / fitEvalDuration(evalDur, total).Seconds()
 	case total > ttft && tokens > 0:
 		s.TokPS = float64(tokens) / (total - ttft).Seconds()
 	case tokens > 0 && total > 0:
 		s.TokPS = float64(tokens) / total.Seconds()
 	}
 	return s
+}
+
+// fitEvalDuration normalizes the engine-reported eval_duration against the
+// round trip we just measured wall-clock. The field is a bare integer with no
+// unit on the wire; Ollama sends nanoseconds, but llama.cpp-derived and
+// several gateway builds send microseconds or milliseconds, which reads
+// 1000x or 1e6x slow. Generation dominates a probe, so the honest reading
+// lands in the upper part of the measured exchange: take the finest unit whose
+// scaling lands in that band. When nothing lands there, keep the raw
+// nanosecond value (a fast local engine can legitimately report longer than
+// the HTTP round trip around it).
+func fitEvalDuration(reported, total time.Duration) time.Duration {
+	if reported <= 0 || total <= 0 {
+		return reported
+	}
+	lo := total / evalDurationBandDiv
+	for _, unit := range []time.Duration{1, time.Microsecond, time.Millisecond} {
+		if unit > 1 && reported > time.Duration(math.MaxInt64/int64(unit)) {
+			continue // the rescaling would overflow
+		}
+		if scaled := reported * unit; scaled >= lo && scaled <= total {
+			return scaled
+		}
+	}
+	return reported
 }
 
 func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens int, evalDur, ttft time.Duration, err error) {

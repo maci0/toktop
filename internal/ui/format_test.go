@@ -117,3 +117,38 @@ func TestWidthOfFastPathMatchesLipgloss(t *testing.T) {
 		}
 	}
 }
+
+func TestHumanBytesSubMebiTier(t *testing.T) {
+	tests := []struct {
+		in   uint64
+		want string
+	}{
+		{0, "0KiB"},
+		{1536, "2KiB"}, // used to render "0MiB"
+		{1 << 20, "1MiB"},
+		{3<<20 + 512<<10, "4MiB"},
+		{1 << 30, "1.0GiB"},
+	}
+	for _, tc := range tests {
+		if got := humanBytes(tc.in); got != tc.want {
+			t.Errorf("humanBytes(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestHumanBytesShortSubMebiTier(t *testing.T) {
+	tests := []struct {
+		in   uint64
+		want string
+	}{
+		{0, "0K"},
+		{1536, "2K"}, // used to render "0M"
+		{1 << 20, "1M"},
+		{1 << 30, "1.0G"},
+	}
+	for _, tc := range tests {
+		if got := humanBytesShort(tc.in); got != tc.want {
+			t.Errorf("humanBytesShort(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}

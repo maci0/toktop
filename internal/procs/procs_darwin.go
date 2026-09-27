@@ -4,6 +4,7 @@ package procs
 
 import (
 	"context"
+	"math"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -11,6 +12,16 @@ import (
 
 func init() {
 	platformList = listDarwin
+}
+
+// kibToBytes converts a ps(1) RSS column (KiB) to bytes, saturating so an
+// absurd value cannot wrap to a small byte count in the shift.
+func kibToBytes(kib uint64) uint64 {
+	const capKib = ^uint64(0) >> 10
+	if kib > capKib {
+		return ^uint64(0)
+	}
+	return kib << 10
 }
 
 // listDarwin shells out to ps(1): there is no pure-Go API for the BSD process
@@ -43,13 +54,16 @@ func parseDarwinProcesses(out string) []raw {
 			continue
 		}
 		cpu, _ := strconv.ParseFloat(fields[1], 64)
+		if !(cpu >= 0) || math.IsInf(cpu, 0) {
+			cpu = 0
+		}
 		rssKB, _ := strconv.ParseUint(fields[2], 10, 64)
 
 		r := raw{
 			pid:        pid,
 			name:       fields[3],
 			args:       fields[3:],
-			rss:        rssKB << 10,
+			rss:        kibToBytes(rssKB),
 			cpuPercent: cpu,
 		}
 		annotate(&r)

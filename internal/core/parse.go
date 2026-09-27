@@ -41,3 +41,20 @@ func SatUint(v float64) uint64 {
 	}
 	return uint64(v)
 }
+
+// SatAddPos adds two non-negative counts, saturating at MaxInt64. Agent token
+// totals accumulate one event per retained sample from several producers,
+// some of which report whatever their transcript file happened to hold, so
+// the sum must not wrap to a negative total.
+func SatAddPos(a, b int64) int64 {
+	if a < 0 {
+		a = 0
+	}
+	if b < 0 {
+		b = 0
+	}
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
+}

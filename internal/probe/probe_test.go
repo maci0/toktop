@@ -956,3 +956,46 @@ func FuzzReadEngineJSON(f *testing.F) {
 		}
 	})
 }
+
+func TestFitEvalDuration(t *testing.T) {
+	const measured = 3 * time.Second
+	tests := []struct {
+		name     string
+		reported time.Duration
+		want     time.Duration
+	}{
+		{"nanoseconds fit", 2 * time.Second, 2 * time.Second},
+		{"microseconds rescaled", 2000000, 2 * time.Second}, // 2e6 us = 2 s
+		{"milliseconds rescaled", 2000, 2 * time.Second},    // 2000 ms = 2 s
+		// A fast local engine can report longer than the HTTP round trip we
+		// measured; the raw reading stands rather than being scaled away.
+		{"nothing fits, keep raw", 10 * time.Second, 10 * time.Second},
+	}
+	for _, tc := range tests {
+		if got := fitEvalDuration(tc.reported, measured); got != tc.want {
+			t.Errorf("%s: fitEvalDuration(%v) = %v, want %v", tc.name, tc.reported, got, tc.want)
+		}
+	}
+}
+
+// A gateway reporting eval_duration in microseconds must not read 1000x slow.
+func TestRunOllamaEvalDurationMicroseconds(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		time.Sleep(200 * time.Millisecond)
+		w.Write([]byte(
+			`{"response":"one","done":false}` + "\n" +
+				`{"response":"","done":true,"eval_count":6,"eval_duration":200000}` + "\n"))
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	if !s.OK {
+		t.Fatalf("probe failed: %+v", s)
+	}
+	// 200000 as nanoseconds is 200us and would read ~30000 tok/s; read as
+	// microseconds it is 200ms, ~30 tok/s.
+	if s.TokPS > 1000 {
+		t.Errorf("tokps = %v, want the microsecond reading, not the nanosecond one", s.TokPS)
+	}
+}
