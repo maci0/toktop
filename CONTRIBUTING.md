@@ -137,12 +137,12 @@ byte ceilings, so a recapture that blows the budget fails there.
 | `make site-lint` | biome over `site/` at the Makefile `BIOME` pin (CI parity) |
 | `make site-check` | `bun test site/` |
 | `make site-deploy` | deploy the site Worker at the `WRANGLER` pin, then poll `/health` |
-| `make site-rollback` | roll the site Worker back to the version before the last deploy |
+| `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health` |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
 | `make repro-check` | build every release platform twice, varying path, cache, locale, and TZ, then diff |
-| `make repro-check-pair` | the same gate over the two platforms the PR gate builds twice |
+| `make repro-check-pair` | the same gate over `REPRO_PLATFORMS`, the pair the PR gate and the release job both build twice |
 
 ## Before opening a PR
 
@@ -183,8 +183,10 @@ A `repro` job builds two shipped platforms twice, varying the output path,
 the build cache, the locale, and the timezone between passes, and fails if
 the bytes differ. It is the guard on the reproducibility flags above, and
 `make pr` runs it over the same pair, so a reproducibility failure shows up
-before the push rather than after it. `make repro-check-pair` runs that pair
-on its own; `make repro-check` runs the full `PLATFORMS` list and is what to
+before the push rather than after it. The release job runs
+`make repro-check-pair` over that same pair, since neither job lists the
+platforms itself. `make repro-check-pair` runs that pair on its own;
+`make repro-check` runs the full `PLATFORMS` list and is what to
 run before a release.
 
 ## Releases

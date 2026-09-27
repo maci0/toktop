@@ -87,6 +87,10 @@ support channel (see SECURITY.md).
 
 ### Fixed
 
+- `make site-rollback` waits for `/health` before it reports success, the way
+  `make site-deploy` already did. A rollback that restored a Worker which
+  never came up exited 0, so the only signal that the site was down was a
+  visitor.
 - A probe no longer reports throughput thousands of times too high when an
   engine's `eval_duration` is plausible only in microseconds or milliseconds
   and the decode itself is fast. The unit fit kept the raw value whenever

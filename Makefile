@@ -50,8 +50,8 @@ BIOME       := @biomejs/biome@2.5.14
 # machine happens to have installed (or a bare `cf deploy`) makes the upload
 # depend on PATH, so the pin is named here and every deploy path reads it.
 WRANGLER    := 4.126.0
-# The Worker answers /health with `ok`; site-deploy polls it until the new
-# version is serving or gives up.
+# The Worker answers /health with `ok`; site-deploy and site-rollback poll it
+# until the expected version is serving or give up.
 SITE_HEALTH_URL   := https://toktop.ai/health
 SITE_HEALTH_TRIES := 6
 SITE_HEALTH_WAIT  := 10
@@ -270,35 +270,44 @@ site-lint: require-bun ## biome-lint site/ at the BIOME pin (CI parity)
 # platform last, and a rollback racing a deploy restores whichever version
 # the platform happened to serve. mkdir is the portable lock (flock is not on
 # macOS); it lives under dist/, so `make clean` releases a stale one.
-.PHONY: site-deploy
-site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wait for /health
-	@mkdir -p $(DIST); \
-	if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
-		echo "another site deploy or rollback holds $(SITE_LOCK); wait for it, or remove the directory if that process is gone" >&2; \
-		exit 1; \
-	fi; \
-	trap 'rmdir $(SITE_LOCK) 2>/dev/null || true' EXIT; \
-	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
+#
+# $(SITE_GUARD) opens the recipe: one shell takes the lock, arms the trap that
+# releases it, and defines wait_for_site for the recipe to call once the
+# platform call is done. Every site-* recipe must open with it and carry the
+# rest of its work on the same recipe line: a second line is a second shell,
+# so the trap would fire and free the lock before the deploy ran.
+define SITE_GUARD
+mkdir -p $(DIST); \
+if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
+	echo "another site deploy or rollback holds $(SITE_LOCK); wait for it, or remove the directory if that process is gone" >&2; \
+	exit 1; \
+fi; \
+trap 'rmdir $(SITE_LOCK) 2>/dev/null || true' EXIT; \
+wait_for_site() { \
 	for i in $$(seq 1 $(SITE_HEALTH_TRIES)); do \
 		if [ "$$(curl -fsS --max-time 10 $(SITE_HEALTH_URL))" = "ok" ]; then \
 			echo "$(SITE_HEALTH_URL) answered ok after $${i} attempt(s)"; \
-			exit 0; \
+			return 0; \
 		fi; \
 		echo "attempt $$i/$(SITE_HEALTH_TRIES): no ok from $(SITE_HEALTH_URL)"; \
 		sleep $(SITE_HEALTH_WAIT); \
 	done; \
-	echo "deploy finished but $(SITE_HEALTH_URL) never answered ok; roll back with 'make site-rollback'" >&2; \
-	exit 1
+	echo "$(SITE_HEALTH_URL) never answered ok" >&2; \
+	return 1; \
+};
+endef
+
+.PHONY: site-deploy
+site-deploy: require-bun ## deploy the site Worker at the WRANGLER pin, then wait for /health
+	@$(SITE_GUARD) \
+	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
+	wait_for_site || { echo "deploy finished but the site is not serving; roll back with 'make site-rollback'" >&2; exit 1; }
 
 .PHONY: site-rollback
-site-rollback: require-bun ## roll the site Worker back to the version before the last deploy
-	@mkdir -p $(DIST); \
-	if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
-		echo "another site deploy or rollback holds $(SITE_LOCK); wait for it, or remove the directory if that process is gone" >&2; \
-		exit 1; \
-	fi; \
-	trap 'rmdir $(SITE_LOCK) 2>/dev/null || true' EXIT; \
-	(cd site && bunx wrangler@$(WRANGLER) rollback)
+site-rollback: require-bun ## roll the site Worker back to the version before the last deploy, then wait for /health
+	@$(SITE_GUARD) \
+	(cd site && bunx wrangler@$(WRANGLER) rollback) || exit 1; \
+	wait_for_site || { echo "rollback finished but the site is not serving; retry, or read the deployment log in the Cloudflare dashboard" >&2; exit 1; }
 
 .PHONY: fmt
 fmt: ## rewrite all Go files with gofmt (including simplifications)
