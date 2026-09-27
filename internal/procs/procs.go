@@ -234,6 +234,13 @@ const (
 	matchJoinBytes = 4096
 )
 
+// CmdlinePrefix is the longest leading slice of a command line any engine
+// matcher reads, so a command line longer than this cannot change a match. A
+// scan of another host's processes (internal/remote) ships at most this many
+// bytes per process: the tail is where an agent's inline prompt, a file path
+// or a credential sits, and none of it is read back on the other side.
+const CmdlinePrefix = matchJoinBytes
+
 // clipArg keeps the prefix of a single argument that engine matchers look
 // at. A Chrome --disable-features blob is tens of kilobytes and never an
 // engine module path.

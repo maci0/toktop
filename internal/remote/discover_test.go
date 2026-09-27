@@ -2,8 +2,11 @@ package remote
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/maci0/toktop/internal/procs"
 )
 
 const netTCPSample = `  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
@@ -124,5 +127,23 @@ func TestProbeScriptShape(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("probeScript missing %q:\n%s", want, s)
 		}
+	}
+}
+
+// The cmdline sweep carries every process's command line off the remote host,
+// so it must ship no more than the prefix a match can read. Without the cut,
+// a prompt typed after an agent's flags, a home directory or a key on the
+// command line crosses the ssh connection unread.
+func TestProcScanScriptCapsCmdline(t *testing.T) {
+	s := procScanScript()
+	cut := "cut -c 1-" + strconv.Itoa(procs.CmdlinePrefix)
+	if !strings.Contains(s, cut) {
+		t.Errorf("procScanScript does not cap the command line with %q:\n%s", cut, s)
+	}
+	// A line that ends inside an argument still parses: the matcher scans
+	// tokens, so a clipped tail is the same shape a short command line has.
+	infos := parseProcScan("42 " + strings.Repeat("x", procs.CmdlinePrefix+1))
+	if len(infos) != 1 || len(infos[0].Args) == 0 {
+		t.Fatalf("parseProcScan of a clipped line = %+v", infos)
 	}
 }

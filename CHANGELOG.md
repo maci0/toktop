@@ -16,11 +16,14 @@ support channel (see SECURITY.md).
   throughput, `a` with no engines to swap to) says so on the footer for a few
   seconds instead of being swallowed.
 - The help overlay is titled `KEYS`.
+- `docs/PRIVACY.md` lists what toktop reads, sends and stores.
 
 ### Changed
 
 - toktop.ai's section nav links `Run`, the first-run command block that had an
   anchor but no link.
+- The `ssh://` discovery sweep sends at most the first 4096 bytes of each
+  remote process's command line, which is all an engine match reads.
 
 ## [0.14.1] - 2026-09-26
 

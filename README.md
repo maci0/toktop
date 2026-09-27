@@ -474,8 +474,9 @@ make test-dist VERSION=x.y.z    # every release platform into dist/
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, the edit-test loop,
-and what CI runs, and [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the
-attack surface, what toktop trusts, and the mitigations already in place.
+and what CI runs, [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the
+attack surface, what toktop trusts, and the mitigations already in place,
+and [docs/PRIVACY.md](docs/PRIVACY.md) for what it reads, sends and stores.
 
 Releases: push a tag `v*` and GitHub Actions attaches binaries for
 linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 and
