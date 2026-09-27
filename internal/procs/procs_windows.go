@@ -26,10 +26,11 @@ type cimProc struct {
 	UserModeTime   uint64 `json:"UserModeTime"`
 }
 
-// windowsTicksPerSecond converts the 100-nanosecond units Win32_Process reports
-// CPU time in into the jiffies clkTck counts, so the delta math in procs.go
-// works the same on every platform.
-const windowsTicksPerJiffy = 1e4 / clkTck
+// windowsTicksPerJiffy is how many of the 100-nanosecond units Win32_Process
+// reports CPU time in make up one jiffy: a second is 1e7 of those units and
+// clkTck jiffies, so the delta math in procs.go works the same on every
+// platform.
+const windowsTicksPerJiffy = 1e7 / clkTck
 
 // windowsCPUTicks is a process's cumulative kernel plus user time in jiffies.
 // Without it every process reports 0% CPU on windows while linux and darwin
