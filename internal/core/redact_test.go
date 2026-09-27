@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestRedactHomeFoldsEveryOccurrence(t *testing.T) {
@@ -100,8 +101,21 @@ func TestRedactHomeRootHomeIsNotFolded(t *testing.T) {
 	}
 }
 
+// foldCase is one replaceFold expectation, named so the fold cases built from
+// a code point below can join the same table.
+type foldCase struct{ in, old, new, want string }
+
 func TestReplaceFold(t *testing.T) {
-	cases := []struct{ in, old, new, want string }{
+	// KELVIN and DOTTED_I are spelled by code point on purpose. Both fold
+	// against an ASCII letter, both are multi-byte, and both look like ASCII
+	// in an editor: written as literals they quietly reduce to the ASCII cases
+	// that already pass, which is how a comment can claim to cover U+212A
+	// while the test runs on "K".
+	const (
+		kelvin  = string(rune(0x212A))
+		dottedI = string(rune(0x130))
+	)
+	cases := []foldCase{
 		{"cannot write C:\\Users\\me\\bin", "C:\\Users\\me\\", "~/", "cannot write ~/bin"},
 		{"cannot write c:\\users\\me\\bin", "C:\\Users\\me\\", "~/", "cannot write ~/bin"},
 		{"cannot write C:\\USERS\\ME\\bin", "C:\\Users\\me\\", "~/", "cannot write ~/bin"},
@@ -109,13 +123,28 @@ func TestReplaceFold(t *testing.T) {
 		{"/Users/me/a /Users/me/b", "/Users/me/", "~/", "~/a ~/b"},
 		// A different home must not be folded into this one.
 		{"/home/maria/x", "/Users/me/", "~/", "/home/maria/x"},
-		// K (U+212A) folds to "k" and is three bytes wide; a search over
-		// lowercased copies would land on the wrong offset here.
-		{"K:\\x K:\\y", "k:\\", "~/", "~/x ~/y"},
+		// Two spellings that fold together need not span the same bytes, so
+		// neither the match offset nor the resume point can be taken from the
+		// pattern. KELVIN is three bytes against "k"'s one: resuming by
+		// len(old) splits it in half, and with the pattern carrying the wide
+		// rune instead it runs the slice end past the string entirely.
+		{kelvin + ":\\x " + kelvin + ":\\y", "k:\\", "~/", "~/x ~/y"},
+		{"k:\\x k:\\y", kelvin + ":\\", "~/", "~/x ~/y"},
+		// The fold is simple case folding, the rule strings.EqualFold applies
+		// and the rule RedactHome's bare-home comparison uses further down, so
+		// the two cannot disagree about which string is the home directory.
+		// unicode.ToLower is a different mapping: it sends DOTTED_I to "i",
+		// folding a path component the file systems behind these two
+		// platforms keep apart.
+		{dottedI + ":\\x", "i:\\", "~/", dottedI + ":\\x"},
 	}
 	for _, c := range cases {
-		if got := replaceFold(c.in, c.old, c.new); got != c.want {
+		got := replaceFold(c.in, c.old, c.new)
+		if got != c.want {
 			t.Errorf("replaceFold(%q, %q, %q) = %q, want %q", c.in, c.old, c.new, got, c.want)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("replaceFold(%q, %q, %q) = %q, which is not valid UTF-8", c.in, c.old, c.new, got)
 		}
 	}
 }

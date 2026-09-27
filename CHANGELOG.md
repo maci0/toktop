@@ -78,6 +78,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - The site's rejected-method test calls the worker's request helper instead
   of an `imageCall` that does not exist, which failed the `site` CI job and
   every `make pr` with a `ReferenceError` before any assertion ran.
+- Redacting the home directory out of a diagnostic message no longer panics on
+  macOS and Windows, where a path is matched without regard to case. The match
+  is a rune-at-a-time fold, but the rewrite resumed at `len(home)`, and a home
+  spelled with a character that folds to an ASCII one (K, U+212A) is a
+  different number of bytes from the spelling in the message. The leftover
+  bytes were re-emitted as a split multi-byte sequence, or the slice ran past
+  the end of the string. The fold is now simple case folding, the same rule
+  the bare-home comparison beside it already used.
+- A plain-text version endpoint answered in a non-Latin script is no longer
+  dropped for being over-long. The cap is 128 characters and the reject that
+  screened for prose counted bytes, so a 128-character CJK version (384 bytes)
+  was refused while the same version in ASCII was kept.
 - `agentusage.Watcher.SetNow` now also ages the transcript recency and rescan
   windows, instead of leaving them on the wall clock. A program driving a
   simulated timeline stepped time forward and still read the file set a

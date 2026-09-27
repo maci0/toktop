@@ -52,46 +52,72 @@ func RedactHome(msg string) string {
 // leaving the matched text's own spelling to the caller. Runes are compared
 // one at a time because a folded rune is not always as wide as the one it
 // folds from, so searching lowercased copies of the two strings would land on
-// the wrong offset.
+// the wrong offset. The resume offset is the match's own length for the same
+// reason: advancing by len(old) skips past the text the match actually spanned.
 func replaceFold(s, old, new string) string {
 	var b strings.Builder
 	for {
-		i := indexFold(s, old)
-		if i < 0 {
+		at, n, ok := indexFold(s, old)
+		if !ok {
 			b.WriteString(s)
 			return b.String()
 		}
-		b.WriteString(s[:i])
+		b.WriteString(s[:at])
 		b.WriteString(new)
-		s = s[i+len(old):]
+		s = s[at+n:]
 	}
 }
 
-// indexFold returns the byte offset of the first case-insensitive occurrence
-// of sub in s, or -1.
-func indexFold(s, sub string) int {
+// indexFold returns where the first case-insensitive occurrence of sub begins
+// in s and how many bytes it spans there, and whether it found one. The span
+// is the one the occurrence occupies in s, which is not len(sub): the two
+// spellings fold together but need not be the same width in bytes (U+212A
+// KELVIN SIGN against "k"). Resuming by len(sub) would step past the text the
+// match covered, splitting the wide rune or running off the end of s.
+func indexFold(s, sub string) (at, n int, ok bool) {
 	for i := 0; i < len(s); {
-		if hasPrefixFold(s[i:], sub) {
-			return i
+		if n := prefixFoldLen(s[i:], sub); n > 0 {
+			return i, n, true
 		}
 		_, w := utf8.DecodeRuneInString(s[i:])
 		i += w
 	}
-	return -1
+	return 0, 0, false
 }
 
-// hasPrefixFold reports whether s begins with prefix, compared without regard
-// to case. Simple case folding, the same rule strings.EqualFold applies.
-func hasPrefixFold(s, prefix string) bool {
+// prefixFoldLen returns the byte length of the case-insensitive match for
+// prefix at the start of s, or 0 when s does not begin with it. A match
+// always spans at least one byte, so 0 is unambiguous.
+func prefixFoldLen(s, prefix string) int {
+	i := 0
 	for _, want := range prefix {
-		if s == "" {
-			return false
+		if i == len(s) {
+			return 0
 		}
-		got, w := utf8.DecodeRuneInString(s)
-		s = s[w:]
-		if got != want && unicode.ToLower(got) != unicode.ToLower(want) {
-			return false
+		got, w := utf8.DecodeRuneInString(s[i:])
+		if !equalFoldRune(got, want) {
+			return 0
+		}
+		i += w
+	}
+	return i
+}
+
+// equalFoldRune reports whether a and b are the same letter under simple case
+// folding, the rule strings.EqualFold applies and the one the file systems
+// behind the platforms that fold case use to match names. unicode.ToLower is
+// a different mapping and disagrees with EqualFold on exactly the runes that
+// matter here: ToLower leaves U+017F alone and turns "S" into "s", so a home
+// spelled with a long s survives the prefix rewrite while RedactHome's own
+// bare-home comparison, which calls EqualFold, recognizes it.
+func equalFoldRune(a, b rune) bool {
+	if a == b {
+		return true
+	}
+	for f := unicode.SimpleFold(a); f != a; f = unicode.SimpleFold(f) {
+		if f == b {
+			return true
 		}
 	}
-	return true
+	return false
 }

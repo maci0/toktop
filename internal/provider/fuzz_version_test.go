@@ -82,11 +82,14 @@ func FuzzExtractVersionField(f *testing.F) {
 		}
 		// Prose is not a version. A body past the cap is refused outright, and
 		// so is anything carrying JSON or a newline, so the plain-text branch
-		// can only ever answer with a body no longer than the cap.
+		// can only ever answer with a body no longer than the cap. The cap is
+		// counted in characters, the unit versionCap and capVersion use: a byte
+		// count would make the reject stricter for every non-ASCII script and
+		// drop a 128-character CJK version that the cluster cap accepts.
 		if !strings.HasPrefix(strings.TrimSpace(text), "{") {
 			trimmed := strings.TrimSpace(text)
-			if len(trimmed) > versionCap {
-				t.Fatalf("extractVersionField(%q) = %q, but a %d-byte body is past the %d cap", text, got, len(trimmed), versionCap)
+			if n := utf8.RuneCountInString(trimmed); n > versionCap {
+				t.Fatalf("extractVersionField(%q) = %q, but a %d-character body is past the %d cap", text, got, n, versionCap)
 			}
 		}
 	})

@@ -625,10 +625,17 @@ func TestExtractVersionField(t *testing.T) {
 		"":                       "",
 		`{"a":1} trailing junk`:  "",
 		strings.Repeat("x", 129): "", // over-long text is not a version
-		"\x8c":                   "", // a bare invalid byte is not a version
-		"\"\n\"":                 "", // nor is a line break the engine quoted
-		"\"\x1b[2J\"":            "", // a quoted escape sequence is not a version
-		"b4600  \t b4600":        "b4600 b4600",
+		// versionCap counts characters, and three bytes per character is what
+		// makes the two readings differ: a byte-counted reject drops the 128
+		// characters below and keeps the ASCII version of the same length.
+		// U+7248, built from its code point so no editor can leave an ASCII
+		// lookalike that reduces the case to the one above.
+		strings.Repeat(string(rune(0x7248)), versionCap):   strings.Repeat(string(rune(0x7248)), versionCap),
+		strings.Repeat(string(rune(0x7248)), versionCap+1): "",
+		"\x8c":            "", // a bare invalid byte is not a version
+		"\"\n\"":          "", // nor is a line break the engine quoted
+		"\"\x1b[2J\"":     "", // a quoted escape sequence is not a version
+		"b4600  \t b4600": "b4600 b4600",
 	}
 	for body, want := range cases {
 		if got := extractVersionField(body); got != want {
