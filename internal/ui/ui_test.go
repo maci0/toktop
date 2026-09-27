@@ -359,12 +359,12 @@ func TestProcLineVRAMSumSaturates(t *testing.T) {
 			{Name: "b", SizeVRAM: 1 << 30},
 		},
 	})
-	// MaxUint64 + 1GiB wraps to ~1GiB. Saturated sum formats as a huge GiB figure.
-	if strings.Contains(got, "MiB") {
-		t.Fatalf("VRAM sum wrapped to a small readout: %q", got)
-	}
-	if !strings.Contains(got, "GiB") {
-		t.Fatalf("expected saturated GiB readout, got %q", got)
+	// MaxUint64 + 1GiB saturates to MaxUint64, and MaxUint64/(1<<30) is
+	// 17179869184.0. A wrapping sum lands on exactly 1<<30 instead, which
+	// formats as "1.0GiB" and would satisfy a bare "contains GiB" check.
+	const want = "17179869184.0GiB"
+	if !strings.Contains(got, want) {
+		t.Fatalf("VRAM sum = %q, want the saturated figure %q", got, want)
 	}
 }
 

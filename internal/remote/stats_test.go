@@ -207,15 +207,18 @@ func TestStatsMergeFreshnessAndOverlay(t *testing.T) {
 		t.Fatalf("merge before poll changed sample: %+v", into)
 	}
 
+	// The stale path must be able to change something: seed the fields the
+	// freshness check guards, or "unchanged" is what an empty sample already
+	// satisfies and a Merge that ignored the window entirely would pass.
 	parseVitals(vitalsDump, &s.last)
+	s.last.RemoteHost = "box"
 	s.at = time.Now().Add(-30 * time.Second) // stale
 	s.Merge(&into)
-	if into.RemoteHost != "" {
-		t.Error("stale stats must be ignored")
+	if into.RemoteHost != "" || len(into.GPUs) != 1 {
+		t.Errorf("stale stats must be ignored: %+v", into)
 	}
 
 	s.at = time.Now()
-	s.last.RemoteHost = "box"
 	s.Merge(&into)
 	if into.RemoteHost != "box" || into.CPUModel == "" || into.HostUptime <= 0 {
 		t.Errorf("fresh merge missing vitals: %+v", into)

@@ -87,14 +87,17 @@ func TestFeedLinesNewestLast(t *testing.T) {
 	var events []core.AgentEvent
 	for i := range 6 {
 		events = append(events, core.AgentEvent{
-			At: base.Add(time.Duration(i) * time.Second), Agent: fmt.Sprint(i), Kind: "turn",
+			// "evN", not a bare digit: every line starts with an
+			// HH:MM:SS stamp, so a single-character agent name is
+			// matched by the clock's own seconds field.
+			At: base.Add(time.Duration(i) * time.Second), Agent: fmt.Sprintf("ev%d", i), Kind: "turn",
 		})
 	}
 	lines := feedLines(events, 4, 80)
 	if len(lines) != 4 {
 		t.Fatalf("lines = %d, want 4", len(lines))
 	}
-	for i, want := range []string{"2", "3", "4", "5"} {
+	for i, want := range []string{"ev2", "ev3", "ev4", "ev5"} {
 		if got := strip(lines[i]); !strings.Contains(got, want) {
 			t.Errorf("line %d = %q, want oldest-first event %s", i, got, want)
 		}

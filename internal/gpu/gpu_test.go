@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -220,9 +221,18 @@ func TestSaturatesAbsurdVendorNumbers(t *testing.T) {
 	}
 }
 
+// vendorOrder is a package literal, so comparing two of its entries proves
+// nothing about Sample's sort. Sort the real keys and compare against the
+// order the dashboard is specified to draw.
 func TestVendorOrdering(t *testing.T) {
-	if vendorOrder["nvidia"] >= vendorOrder["amd"] || vendorOrder["amd"] >= vendorOrder["intel"] {
-		t.Fatal("vendor sort order drifted")
+	got := make([]string, 0, len(vendorOrder))
+	for v := range vendorOrder {
+		got = append(got, v)
+	}
+	sort.Slice(got, func(i, j int) bool { return vendorOrder[got[i]] < vendorOrder[got[j]] })
+	want := []string{"nvidia", "amd", "intel", "apple"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("vendor sort order = %v, want %v", got, want)
 	}
 	var _ core.GPUDevice // keep import honest
 }

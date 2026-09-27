@@ -34,9 +34,11 @@ vllm:request_success_total{finished_reason="stop",model_name="qwen"} 11
 `
 
 func TestParsePromSumsLabeledSeries(t *testing.T) {
-	fam := parseProm(vllmFixture)
-	if got := fam["vllm:prompt_tokens_total"]; got != 1000 {
-		t.Fatalf("prompt_tokens_total = %v, want 1000", got)
+	// Two series of one family: vllmFixture has every family exactly once,
+	// so it can only prove the last-wins overwrite, never the accumulation.
+	fam := parseProm(vllmFixture + "vllm:prompt_tokens_total{model=\"other\"} 250.0\n")
+	if got := fam["vllm:prompt_tokens_total"]; got != 1250 {
+		t.Fatalf("prompt_tokens_total = %v, want 1250 (1000 + 250)", got)
 	}
 	if _, ok := fam["vllm:num_requests_running"]; !ok {
 		t.Fatal("labels were not stripped from family names")
@@ -112,7 +114,9 @@ func TestClassifyVLLM(t *testing.T) {
 	if m.Running != 3 || m.Waiting != 7 {
 		t.Errorf("queues = run:%d wait:%d", m.Running, m.Waiting)
 	}
-	if !m.HasKV || m.KVPct < 61.9 || m.KVPct > 62.1 {
+	// 0.62 in the fixture, scaled by 100 in classify: exactly 62, so assert
+	// exactly. A band would hide a wrong-but-nearby scale factor.
+	if !m.HasKV || m.KVPct != 62 {
 		t.Errorf("kv pct = %v hasKV=%v", m.KVPct, m.HasKV)
 	}
 	if want := 4.0 / 20.0 * 1000; m.TTFTms != want {

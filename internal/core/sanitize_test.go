@@ -27,24 +27,35 @@ func TestSanitizeTextPassthrough(t *testing.T) {
 }
 
 func TestSanitizeTextStripsTerminalInjection(t *testing.T) {
-	cases := []struct{ name, in string }{
-		{"osc52 clipboard hijack", "\x1b]52;c;YU9UQw==\x07stealth"},
-		{"osc0 title spoof (ST terminated)", "\x1b]0;evil title\x1b\\x"},
-		{"csi cursor move + redraw", "\x1b[2J\x1b[3;5Hfake"},
-		{"sgr recolor", "ok\x1b[31mred\x1b[0m"},
-		{"8-bit CSI", "a\xc2\x9b2Jb"},
-		{"carriage return overwrite", "safe\rERASED"},
-		{"backspace", "ab\bX"},
-		{"bel", "ring\a"},
-		{"dcs", "\x1bP1$r\x1b\\after"},
-		{"bare esc", "pre\x1b"},
-		{"esc mid-sequence truncation", "\x1b]52;c;no terminator at all"},
-		{"c1 others", "a\xc2\x85b\xc2\x90c"},
-		{"nul and controls", "a\x00b\x01c\x1fd"},
-		{"del", "a\x7fb"},
+	// want is the exact text, not a "no control byte remains" scan: the
+	// encoded C1 forms (U+0085, U+0090, U+009B) are every byte >= 0x80, so
+	// a byte-level scan cannot see them and a pass-through implementation
+	// would satisfy it.
+	cases := []struct{ name, in, want string }{
+		{"osc52 clipboard hijack", "\x1b]52;c;YU9UQw==\x07stealth", "stealth"},
+		{"osc0 title spoof (ST terminated)", "\x1b]0;evil title\x1b\\x", "x"},
+		{"csi cursor move + redraw", "\x1b[2J\x1b[3;5Hfake", "fake"},
+		{"sgr recolor", "ok\x1b[31mred\x1b[0m", "okred"},
+		// The introducer is dropped; its parameters stay as visible text.
+		{"8-bit CSI", "a\xc2\x9b2Jb", "a2Jb"},
+		{"carriage return overwrite", "safe\rERASED", "safeERASED"},
+		{"backspace", "ab\bX", "abX"},
+		{"bel", "ring\a", "ring"},
+		{"dcs", "\x1bP1$r\x1b\\after", "after"},
+		{"bare esc", "pre\x1b", "pre"},
+		// ESC plus one non-introducer byte: the only input that reaches
+		// skipEscapeSeq's two-byte default arm.
+		{"two-byte esc", "pre\x1bZpost", "prepost"},
+		{"esc mid-sequence truncation", "\x1b]52;c;no terminator at all", ""},
+		{"c1 others", "a\xc2\x85b\xc2\x90c", "abc"},
+		{"nul and controls", "a\x00b\x01c\x1fd", "abcd"},
+		{"del", "a\x7fb", "ab"},
 	}
 	for _, tc := range cases {
 		got := SanitizeText(tc.in)
+		if got != tc.want {
+			t.Errorf("%s: SanitizeText(%q) = %q, want %q", tc.name, tc.in, got, tc.want)
+		}
 		for i := 0; i < len(got); i++ {
 			c := got[i]
 			if (c < 0x20 && c != '\n' && c != '\t') || c == 0x7f || c == 0x1b {

@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"runtime"
-	"runtime/pprof"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -767,8 +766,9 @@ func TestRecordAgentReportsStored(t *testing.T) {
 }
 
 // emit launches one goroutine per provider and waits; they must all return
-// so the leak profile stays empty. A leaked poll goroutine would show up
-// here after GC, the same way a production dashboard would accumulate them.
+// so a second frame draws no more goroutines than the first. A leaked poll
+// goroutine would stay live for the rest of the run, the same way a
+// production dashboard would accumulate them.
 func TestEmitDoesNotLeakGoroutines(t *testing.T) {
 	fp := fakeProvider{label: "x", m: &provider.Metrics{
 		OutTotal: 1, Models: []core.ModelInfo{{Name: "m"}},
@@ -776,21 +776,21 @@ func TestEmitDoesNotLeakGoroutines(t *testing.T) {
 	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 1} })
 	ch := make(chan core.Snapshot, 1)
+	before := runtime.NumGoroutine()
 	c.emit(context.Background(), ch)
 	<-ch
-	runtime.GC()
-	runtime.GC()
-	p := pprof.Lookup("goroutineleak")
-	if p == nil {
-		t.Fatal("goroutineleak profile not available")
+	// Poll rather than sample once: a goroutine on its way out still counts
+	// until the scheduler parks it, and one that has just been spawned may
+	// not have run at all when the first sample is taken.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		if got := runtime.NumGoroutine(); got <= before {
+			return
+		}
 	}
-	var buf strings.Builder
-	if err := p.WriteTo(&buf, 1); err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(buf.String(), "goroutine ") {
-		t.Fatalf("leaked goroutines after emit:\n%s", buf.String())
-	}
+	t.Fatalf("goroutines after emit = %d, want no more than the %d before it", runtime.NumGoroutine(), before)
 }
 
 // The id window is the retained ring: once an event is evicted, its id may
