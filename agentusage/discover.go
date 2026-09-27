@@ -5,7 +5,6 @@ package agentusage
 
 import (
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -36,6 +35,18 @@ func (p Process) Watch(since time.Time) *Watcher {
 // shell out to pgrep-style helpers to find the processes themselves: spawning
 // a process to count processes is how a monitor ends up measuring itself.
 
+// knownNames is the set of agent names a discovered process is matched
+// against, keyed the way agentName looks them up: canonical (NFC, trimmed).
+// Building it in one place keeps every platform's discovery walking the same
+// convention as the registry it reads from.
+func knownNames() map[string]bool {
+	known := make(map[string]bool, len(knownAgents))
+	for _, a := range Agents() {
+		known[canonicalTool(a)] = true
+	}
+	return known
+}
+
 // agentName names the known agent a process is running, or "" when it is not
 // one.
 //
@@ -44,15 +55,22 @@ func (p Process) Watch(since time.Time) *Watcher {
 // Both the kernel's short name (comm / ucomm) and the first two command-line
 // words are checked, and only whole path components count, so a shell that
 // merely mentions an agent in a later argument is not mistaken for one.
+//
+// Candidates are canonicalized the way definitions are, so the process name
+// and the registered name are compared in one form. A binary named with a
+// decomposed accent ("cafe" + U+0301, what a macOS file system stores) is
+// otherwise missed by an agent registered precomposed in agents.json, and
+// the running agent never shows up. The canonical spelling is returned, since
+// that is the key definedSpec and sourceFor look up.
 func agentName(comm string, argv []string, known map[string]bool) string {
-	if t := strings.TrimSpace(comm); known[t] {
+	if t := canonicalTool(comm); known[t] {
 		return t
 	}
 	for i, a := range argv {
 		if i > 1 || a == "" {
 			break
 		}
-		if t := filepath.Base(a); known[t] {
+		if t := canonicalTool(filepath.Base(a)); known[t] {
 			return t
 		}
 	}

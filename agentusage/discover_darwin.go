@@ -25,10 +25,7 @@ func Discover() []Process {
 	if err != nil {
 		return nil
 	}
-	known := map[string]bool{}
-	for _, a := range Agents() {
-		known[a] = true
-	}
+	known := knownNames()
 
 	var found []Process
 	for line := range strings.SplitSeq(out, "\n") {

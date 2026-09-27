@@ -27,10 +27,7 @@ func Discover() []Process {
 	if err != nil {
 		return nil
 	}
-	known := map[string]bool{}
-	for _, a := range Agents() {
-		known[a] = true
-	}
+	known := knownNames()
 
 	var out []Process
 	for _, e := range entries {

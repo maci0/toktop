@@ -29,3 +29,36 @@ func TestAgentName(t *testing.T) {
 		}
 	}
 }
+
+// An agent whose name carries an accent is registered in whatever form its
+// definition was written in, but the process name comes from the file system
+// and a macOS one hands back the decomposed spelling. Byte equality missed it
+// and the running agent never appeared.
+func TestAgentNameNormalization(t *testing.T) {
+	const precomposed = "caf\u00e9" // café, one code point
+	const decomposed = "cafe\u0301" // e + combining acute
+	known := map[string]bool{precomposed: true}
+
+	for _, form := range []string{precomposed, decomposed} {
+		if got := agentName(form, nil, known); got != precomposed {
+			t.Errorf("agentName(comm=%q) = %q, want %q", form, got, precomposed)
+		}
+		if got := agentName("", []string{"/usr/local/bin/" + form}, known); got != precomposed {
+			t.Errorf("agentName(argv0=%q) = %q, want %q", form, got, precomposed)
+		}
+	}
+	// A name that is neither spelling of a known agent is still unknown.
+	if got := agentName("cafe\u0301x", nil, known); got != "" {
+		t.Errorf("agentName matched an unregistered name: %q", got)
+	}
+}
+
+func TestKnownNamesUsesCanonicalForm(t *testing.T) {
+	known := knownNames()
+	for _, name := range Agents() {
+		c := canonicalTool(name)
+		if !known[c] {
+			t.Errorf("knownNames is missing %q (canonical %q)", name, c)
+		}
+	}
+}
