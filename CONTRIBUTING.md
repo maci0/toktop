@@ -253,8 +253,10 @@ section in [CHANGELOG.md](CHANGELOG.md) under the new version before tagging,
 and leave an empty `## [Unreleased]` stub behind. `make check-changelog`
 enforces this on the tag push: the release build fails unless the section and
 its `[version]:` compare link both exist, the link ends at the tag being cut,
-the section holds at least one entry, and nothing is left under Unreleased.
-Run it locally with
+the section heading carries its release date, the section holds at least one
+entry, and nothing is left under Unreleased. The `## [Unreleased]` heading and
+its `[Unreleased]:` compare link have to survive the move too, since the next
+release is written under them. Run it locally with
 `make check-changelog VERSION=0.15.0` before you tag.
 
 Keep one heading per impact, in the order the file uses: `Breaking`, then

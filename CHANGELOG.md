@@ -20,6 +20,22 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   and `Delta.Thinking` were already public, so a consumer showing a thinking
   rate had to write the division itself.
 
+### Changed
+
+- A dashboard pane too narrow for a full row now shows the measurement and
+  shortens the decoration, where before the decoration was drawn at its own
+  fixed size and the measurement was cut off the right edge. An engine row
+  sizes the kv gauge from the space its rates and queue counts did not take,
+  and drops the gauge below three cells rather than clip `run`/`wait` behind
+  it, so a queue backing up no longer reads as a missing value. A probe row
+  measures first and names the model in what is left, dropping the `tok/s`
+  and `ttft` unit labels before it drops a number, and a failed probe says
+  `failed` where it used to carry a `✗` mark. The agent table sizes its rate
+  and token columns to the rows instead of to 22 and 18 cells, so the `● live`
+  recency cell at the right is no longer the one a narrow pane cuts.
+  Nothing is measured differently: `--once --plain` is unchanged, and a pane
+  with room for a full row still draws one.
+
 ### Fixed
 
 - `toktop update --repo` named a malformed repository as `repo "x" must be

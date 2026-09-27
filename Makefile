@@ -7,6 +7,9 @@ VERSION ?= dev
 CHECK_VERSION = printf '%s' '$(VERSION)' | grep -qE '^[A-Za-z0-9._+-]+$$' || { echo "make: VERSION must match [A-Za-z0-9._+-]+ (got '$(VERSION)')" >&2; exit 1; }
 CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
 	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "] ") == 1 || $$0 == "\#\# [" v "]" {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md missing '\#\# [$(VERSION)]' section" >&2; exit 1; }; \
+	awk -v v='$(VERSION)' 'index($$0, "[Unreleased]: ") == 1 {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md missing '[Unreleased]:' link reference" >&2; exit 1; }; \
+	awk '$$0 == "\#\# [Unreleased]" {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md is missing the '\#\# [Unreleased]' stub the next release fills" >&2; exit 1; }; \
+	awk -v v='$(VERSION)' '(index($$0, "\#\# [" v "] ") == 1 || $$0 == "\#\# [" v "]") && $$0 !~ /- [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/ {d=1} END{exit d}' CHANGELOG.md || { echo "make: CHANGELOG.md '\#\# [$(VERSION)]' heading carries no release date" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'index($$0, "[" v "]: ") == 1 {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md missing '[$(VERSION)]:' link reference" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'index($$0, "[" v "]: ") == 1 && $$0 !~ "compare/.*v" v "$$" {f=1} END{exit f}' CHANGELOG.md || { echo "make: CHANGELOG.md '[$(VERSION)]:' link does not end at tag v$(VERSION)" >&2; exit 1; }; \
 	awk '/^\#\# \[Unreleased\]/{f=1;next} /^\#\# \[/{f=0} f && /^- /{n++} END{exit (n>0)}' CHANGELOG.md || { echo "make: CHANGELOG.md still has entries under [Unreleased]; move them under [$(VERSION)] first" >&2; exit 1; }; \
