@@ -4,6 +4,7 @@ import (
 	"context"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -317,13 +318,13 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 		}
 	}
 	if cpu := firstLine(section(3)); cpu != "" {
-		s.CPUModel = cpu
+		s.CPUModel = vitalsField(cpu)
 	}
 	if osName := trimQuotes(firstLine(section(4))); osName != "" {
-		s.OsName = osName
+		s.OsName = vitalsField(osName)
 	}
 	if kern := firstLine(section(5)); kern != "" {
-		s.Kernel = kern
+		s.Kernel = vitalsField(kern)
 	}
 	// The GPU section is the one a dump can legitimately deliver empty: the
 	// script emits its marker whatever the vendor CLI does, and the CLI
@@ -386,10 +387,35 @@ func splitSections(out string) []string {
 	return append(secs, cur.String())
 }
 
-// trimQuotes strips one layer of matching quotes (PRETTY_NAME style).
+// trimQuotes strips one layer of matching quotes (PRETTY_NAME style). The
+// local producer of the same field, /etc/os-release's PRETTY_NAME, uses
+// strings.Trim(v, `"`) at internal/sysmon/sysmon_linux.go, which is a cutset
+// trim: PRETTY_NAME=""" reads locally as no OS name at all and over ssh as a
+// one-character name. strconv.Unquote is the library call for this job and
+// makes both paths agree, including on a value that carries the escapes a
+// real os-release does.
 func trimQuotes(s string) string {
+	if u, err := strconv.Unquote(s); err == nil {
+		return u
+	}
 	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
 		return s[1 : len(s)-1]
 	}
 	return s
+}
+
+// vitalsFieldMax bounds a host-identity string the remote peer chooses. The
+// values come from the peer's /proc/cpuinfo, /etc/os-release and uname -r,
+// and firstLine bounds them by nothing but the line the peer sent: a 5 MB
+// PRETTY_NAME is a 5 MB field in the snapshot, re-sanitized by every renderer
+// on every frame and written whole into --json. ModelNameMax is the same
+// bound the rest of the tree puts on a server-chosen string.
+const vitalsFieldMax = core.ModelNameMax
+
+// vitalsField is the shape a peer-supplied host-identity string takes in this
+// program: one line, terminal-sanitized, and capped at vitalsFieldMax grapheme
+// clusters. The cap counts clusters, so an accented letter or an emoji in a
+// model name is never cut in half.
+func vitalsField(s string) string {
+	return core.SingleLine(core.TruncateClusters(s, vitalsFieldMax))
 }

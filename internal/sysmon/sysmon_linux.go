@@ -182,6 +182,11 @@ func hostInfoLinux(s *core.SysSample) {
 	s.NPUs = h.npus
 }
 
+// prettyOSName reads PRETTY_NAME from /etc/os-release. The value is unquoted
+// with strconv.Unquote, not strings.Trim(v, `"`): a cutset trim eats every
+// leading and trailing quote, so PRETTY_NAME=""" reads as no name at all. The
+// remote reader of the same file (internal/remote/stats.go trimQuotes) uses
+// the same call, so one file answers the same both ways.
 func prettyOSName() string {
 	b, err := os.ReadFile("/etc/os-release")
 	if err != nil {
@@ -189,7 +194,11 @@ func prettyOSName() string {
 	}
 	for line := range strings.SplitSeq(string(b), "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok && k == "PRETTY_NAME" {
-			return strings.Trim(v, `"`)
+			v = strings.TrimSpace(v)
+			if u, err := strconv.Unquote(v); err == nil {
+				return u
+			}
+			return v
 		}
 	}
 	return ""

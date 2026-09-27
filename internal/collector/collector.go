@@ -435,7 +435,17 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		// Folded for the same reason the audit log folds it: an engine error
 		// can echo a model or config path under the operator's home, and
 		// this text reaches the dashboard and both reports.
-		ps.Err = core.RedactHome(r.err.Error())
+		//
+		// Snippet bounds it too, and that is the part the home fold does not
+		// do: the error is a decoder's, and encoding/json embeds the whole
+		// offending literal in an UnmarshalTypeError. An engine answering
+		// /api/ps with a 4 MiB number puts those 4 MiB in the error, into
+		// the snapshot, and out again on every frame and on every --json
+		// run, and they are re-sanitized each time. The engine's HTTP status
+		// line rides the same string and is no better (ReadResponse does not
+		// check its bytes), so this is where both are made safe, once, at the
+		// boundary every other engine-supplied string already uses.
+		ps.Err = core.Snippet([]byte(core.RedactHome(r.err.Error())))
 	case r.m == nil:
 		ps.Err = "empty poll result"
 	default:

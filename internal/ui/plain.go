@@ -34,10 +34,10 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 			if target == "" {
 				target = "remote"
 			}
-			b.WriteString(" via ssh:" + core.SanitizeText(target) +
-				" (not answering: " + core.SanitizeText(s.Sys.RemoteErr) + ")")
+			b.WriteString(" via ssh:" + core.SingleLine(target) +
+				" (not answering: " + core.SingleLine(s.Sys.RemoteErr) + ")")
 		case s.Sys.RemoteHost != "":
-			b.WriteString(" via ssh:" + core.SanitizeText(s.Sys.RemoteHost))
+			b.WriteString(" via ssh:" + core.SingleLine(s.Sys.RemoteHost))
 		}
 	}
 	b.WriteString("\n\n")
@@ -117,13 +117,13 @@ func writeEnginesPlain(b *strings.Builder, s core.Snapshot) {
 			detail = append(detail, model)
 		}
 		if p.Version != "" {
-			detail = append(detail, "version "+core.SanitizeText(p.Version))
+			detail = append(detail, "version "+core.SingleLine(p.Version))
 		}
 		if len(detail) > 0 {
 			b.WriteString("       " + strings.Join(detail, " · ") + "\n")
 		}
 		if !p.OK {
-			if msg := strings.TrimSpace(core.SanitizeText(p.Err)); msg != "" {
+			if msg := strings.TrimSpace(core.SingleLine(p.Err)); msg != "" {
 				b.WriteString("       error: " + shorten(msg, 120) + "\n")
 			}
 			continue
@@ -220,8 +220,8 @@ func writeProbesPlain(b *strings.Builder, s core.Snapshot) {
 	for i := len(s.Probes) - 1; i >= 0 && shown < 2; i-- {
 		p := s.Probes[i]
 		if !p.OK {
-			line := fmt.Sprintf("failed %s", shorten(core.SanitizeText(p.Model), 40))
-			if msg := strings.TrimSpace(core.SanitizeText(p.Err)); msg != "" {
+			line := fmt.Sprintf("failed %s", shorten(core.SingleLine(p.Model), 40))
+			if msg := strings.TrimSpace(core.SingleLine(p.Err)); msg != "" {
 				line += " error: " + shorten(msg, 100)
 			}
 			b.WriteString(line + "\n")
@@ -229,7 +229,7 @@ func writeProbesPlain(b *strings.Builder, s core.Snapshot) {
 			continue
 		}
 		fmt.Fprintf(b, "ok %s ttft %s %s tok/s\n",
-			shorten(core.SanitizeText(p.Model), 40), fmtMs(p.TTFTms),
+			shorten(core.SingleLine(p.Model), 40), fmtMs(p.TTFTms),
 			fmtRate(p.TokPS))
 		shown++
 	}
@@ -247,12 +247,12 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 				parts = append(parts, fmt.Sprintf("+%d more", len(rates)-maxSummaryAgents))
 				break
 			}
-			name := core.SanitizeText(r.Agent)
+			name := core.SingleLine(r.Agent)
 			// Engine-routed tokens are already counted by the engine, so the
 			// agent row must not present them as its own rate.
 			switch {
 			case r.ViaEngine != "":
-				parts = append(parts, name+" via "+core.SanitizeText(r.ViaEngine))
+				parts = append(parts, name+" via "+core.SingleLine(r.ViaEngine))
 			case r.TokPS > 0:
 				parts = append(parts, fmt.Sprintf("%s %s tok/s", name, fmtRate(r.TokPS)))
 			default:
@@ -275,27 +275,27 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 	}
 	start := max(len(s.Agents)-maxFeedEvents, 0)
 	for _, ev := range s.Agents[start:] {
-		model := strings.TrimSpace(core.SanitizeText(ev.Model))
+		model := strings.TrimSpace(core.SingleLine(ev.Model))
 		if model == "" {
 			model = "-"
 		}
-		kind := core.SanitizeText(ev.Kind)
+		kind := core.SingleLine(ev.Kind)
 		if kind == "" {
 			kind = "event"
 		}
 		fmt.Fprintf(b, "%s %s %s model %s prompt %s output %s",
 			ev.At.Local().Format("15:04:05"), kind,
-			core.SanitizeText(ev.Agent),
+			core.SingleLine(ev.Agent),
 			model,
 			fmtCount(ev.PromptTokens), fmtCount(ev.OutputTokens))
 		if ev.ThinkingTokens > 0 {
 			b.WriteString(" thinking " + fmtCount(ev.ThinkingTokens))
 		}
 		if ev.ViaEngine != "" {
-			b.WriteString(" via " + core.SanitizeText(ev.ViaEngine))
+			b.WriteString(" via " + core.SingleLine(ev.ViaEngine))
 		}
 		if ev.Note != "" {
-			b.WriteString(" note " + shorten(core.SanitizeText(ev.Note), 60))
+			b.WriteString(" note " + shorten(core.SingleLine(ev.Note), 60))
 		}
 		b.WriteString("\n")
 	}
@@ -314,7 +314,7 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	rates := sum.Rates
 	rows := 0
 	for _, r := range rates {
-		name := core.SanitizeText(r.Agent)
+		name := core.SingleLine(r.Agent)
 		recency := ""
 		switch d, how := agentIdle(now, r.Last); how {
 		case recencyLive:
@@ -328,7 +328,7 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 		line := name
 		switch {
 		case r.ViaEngine != "":
-			line += " via " + core.SanitizeText(r.ViaEngine)
+			line += " via " + core.SingleLine(r.ViaEngine)
 		case r.TokPS > 0:
 			line += " " + fmtRate(r.TokPS) + " tok/s"
 		default:

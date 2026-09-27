@@ -113,7 +113,7 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 	sinceCells := make([]string, len(rates))
 	nameW, rateW, tokW := agentNameMin, agentRateMin, agentTokensMin
 	for i, r := range rates {
-		names[i] = core.SanitizeText(r.Agent)
+		names[i] = core.SingleLine(r.Agent)
 		// Engine-routed tokens are already counted by the engine, so the row
 		// names the engine where the rate would go and does not also print it
 		// again beside the recency cell. agentSummary, agentMiniLine, feedLine

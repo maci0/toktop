@@ -265,12 +265,12 @@ func (m Model) renderMinimal() string {
 		if !p.OK {
 			dot = dotBad
 		}
-		line := dot + " " + core.SanitizeText(p.Label) + " " + fmtRate(p.OutTokPS) + " tok/s"
+		line := dot + " " + core.SingleLine(p.Label) + " " + fmtRate(p.OutTokPS) + " tok/s"
 		if !p.OK {
 			// ✗ matches ENGINES/probes so greyscale still reads, and "down"
 			// plus the error keep the reason the full view shows.
 			line += " " + styleBad.Render("down")
-			if msg := strings.TrimSpace(core.SanitizeText(p.Err)); msg != "" {
+			if msg := strings.TrimSpace(core.SingleLine(p.Err)); msg != "" {
 				line += " " + dim(shorten(msg, 32))
 			}
 		}

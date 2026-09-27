@@ -119,6 +119,32 @@ func TestParseTargets(t *testing.T) {
 	}
 }
 
+// One host, two spellings. The NFD spelling is what a macOS terminal hands
+// the operator for an accented host, and it is the same host: attaching it
+// twice forwards the same remote ports twice and lists the same engines
+// under two local addresses, so their tokens land in the totals twice.
+func TestParseTargetsCollapsesNormalizationVariants(t *testing.T) {
+	const composed = "caf\u00e9.example"    // é as one code point
+	const decomposed = "cafe\u0301.example" // e + combining acute
+	got, dupes, err := ParseTargets([]string{
+		"ssh://user@" + composed + ":2222",
+		"ssh://user@" + decomposed + ":2222",
+	})
+	if err != nil {
+		t.Fatalf("ParseTargets(nfd) = %v, want nil", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("ParseTargets(nfd) = %+v, want one target", got)
+	}
+	if len(dupes) != 1 {
+		t.Fatalf("ParseTargets(nfd) duplicates = %+v, want the NFD spelling dropped", dupes)
+	}
+	if foldHost(composed) != foldHost(decomposed) {
+		t.Fatalf("foldHost(%q) = %q, foldHost(%q) = %q; want one key",
+			composed, foldHost(composed), decomposed, foldHost(decomposed))
+	}
+}
+
 // A target named twice must attach once. Attaching it twice opens a second
 // ssh connection, forwards the same remote ports onto a second set of local
 // listeners, and lists that host's engines again under different local

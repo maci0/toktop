@@ -11,7 +11,22 @@ import (
 	"strings"
 
 	"github.com/maci0/toktop/internal/core"
+	"golang.org/x/text/unicode/norm"
 )
+
+// foldHost is the fold every host name is keyed and matched by: case-folded
+// like DNS, and NFC-composed first. FoldASCII alone leaves every non-ASCII
+// byte alone, which is right for a name that is ASCII by construction and
+// wrong for a hostname, which may carry an IDN in U-label form. A macOS
+// terminal hands the operator the NFD spelling of an accented host; DNS and
+// ssh_config both speak the composed one, so without the composition
+// ssh://café.example typed one way is a second target (ParseTargets keys
+// on it), a second ssh_config block that never matches, and a second
+// trust-on-first-use pin for a host the operator already pinned. This is
+// the same pairing internal/bearer uses for a host name it compares.
+func foldHost(s string) string {
+	return core.FoldASCII(norm.NFC.String(s))
+}
 
 // Target is one ssh-reachable host to monitor, fully resolved. Explicit URL
 // user, port and key win over ~/.ssh/config, which wins over defaults; a
@@ -85,7 +100,7 @@ func ParseTargets(raws []string) (targets, duplicates []Target, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		key := core.FoldASCII(t.Host) + "\x00" + t.User + "\x00" + strconv.Itoa(t.Port) + "\x00" + t.KeyFile
+		key := foldHost(t.Host) + "\x00" + t.User + "\x00" + strconv.Itoa(t.Port) + "\x00" + t.KeyFile
 		if seen[key] {
 			duplicates = append(duplicates, t)
 			continue
@@ -200,13 +215,13 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 			for pat := range strings.FieldsSeq(val) {
 				pat = core.FoldASCII(pat)
 				if strings.HasPrefix(pat, "!") {
-					if patternMatch(strings.TrimPrefix(pat, "!"), core.FoldASCII(name)) {
+					if patternMatch(strings.TrimPrefix(pat, "!"), foldHost(name)) {
 						negated = true
 						break
 					}
 					continue
 				}
-				if patternMatch(pat, core.FoldASCII(name)) {
+				if patternMatch(pat, foldHost(name)) {
 					inBlock = true
 				}
 			}

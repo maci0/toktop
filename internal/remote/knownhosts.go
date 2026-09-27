@@ -159,8 +159,11 @@ func tofu() (ssh.HostKeyCallback, error) {
 		// The store is keyed case-insensitively, as DNS is: without this a
 		// target spelled ssh://Box.example and the same host spelled
 		// ssh://box.example are two entries, and the second connection
-		// silently re-trusts a host the operator already pinned.
-		storeKey := core.FoldASCII(hostname)
+		// silently re-trusts a host the operator already pinned. The composed
+		// spelling is the other half of the same key: an accented host typed
+		// in the NFD form a macOS terminal supplies is one host, and
+		// readKnownHosts folds it the same way.
+		storeKey := foldHost(hostname)
 		line := hostname + " " + string(ssh.MarshalAuthorizedKey(key))
 		line = strings.TrimSpace(line)
 		// The read and the write are one critical section, across processes
@@ -277,7 +280,7 @@ func parseKnownHosts(path string, b []byte) (map[string]string, error) {
 			return nil, malformedPin(path, n, line, core.Snippet([]byte(err.Error())))
 		}
 		record := host + " " + rest
-		key := core.FoldASCII(host)
+		key := foldHost(host)
 		if prev, dup := out[key]; dup && pinKey(prev) != pinKey(record) {
 			return nil, fmt.Errorf("%s: host %s is recorded twice with different keys; refusing to pick one", path, core.Snippet([]byte(host)))
 		}

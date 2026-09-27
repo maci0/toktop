@@ -149,7 +149,7 @@ exit 0`)
 // procScanScript dumps "pid argv..." for every readable /proc/PID/cmdline,
 // control characters flattened to spaces so each process is one line.
 // Matching happens locally in Go; the remote side stays generic POSIX.
-// Each command line is cut to procs.CmdlinePrefix characters: a match cannot
+// Each command line is cut to procs.CmdlinePrefix bytes: a match cannot
 // read past that (see procs.CmdlinePrefix), while the tail is exactly where
 // an agent's inline prompt, a home directory or a credential on the command
 // line sits. Nothing after the cut crosses the ssh connection. A --port
@@ -157,11 +157,20 @@ exit 0`)
 // cmdline sweep already costs. The trailing exit 0 keeps a vanished/empty
 // final cmdline (kernel threads race constantly) from failing the whole
 // command despite good output.
+//
+// LC_ALL=C is what makes that bound bytes rather than characters. POSIX cut -c
+// counts characters, so under the login locale of a UTF-8 peer a command line
+// of 4096 emoji keeps all 4096 of them and ships 16 KiB per process, four
+// times the documented budget, for every process in the table. The C locale
+// also makes the tr range below a byte range, which is the only reading of
+// '\000-\037' that does not mangle the continuation bytes of a multi-byte
+// character.
 func procScanScript() string {
-	return `for d in /proc/[0-9]*; do
+	return `LC_ALL=C; export LC_ALL
+for d in /proc/[0-9]*; do
   p=${d#/proc/}
   [ "$p" = "$$" ] && continue
-  c=$(tr '\000-\037' '  ' <"$d/cmdline" 2>/dev/null | cut -c 1-` + strconv.Itoa(procs.CmdlinePrefix) + `) || continue
+  c=$(tr '\000-\037\177' '   ' <"$d/cmdline" 2>/dev/null | cut -c 1-` + strconv.Itoa(procs.CmdlinePrefix) + `) || continue
   [ -n "$c" ] && printf '%s %s\n' "$p" "$c"
 done
 exit 0`

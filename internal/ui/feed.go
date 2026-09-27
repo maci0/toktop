@@ -83,7 +83,10 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 func (m Model) feedEmptyLines(w int) []string {
 	switch {
 	case m.feedDown != "":
-		reason := clip(shorten(core.SanitizeText(m.feedDown), w), w)
+		// SingleLine, not SanitizeText: the reason arrives as its producer's
+		// error text, and a newline left in it becomes a row of the panel that
+		// the dashboard reads as its own output.
+		reason := clip(shorten(core.SingleLine(m.feedDown), w), w)
 		return []string{styleBad.Render(reason)}
 	case m.cfg.Agents:
 		return []string{dim("no agent activity yet: agents running locally are picked up automatically")}

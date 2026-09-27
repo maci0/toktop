@@ -2017,3 +2017,33 @@ func TestUnloadedModelClearsCachedKVPct(t *testing.T) {
 		t.Fatalf("second emit KVPct = %v, want 0 after model unloaded", snap2.Providers[0].KVPct)
 	}
 }
+
+// A poll error is a decoder's, and encoding/json embeds the whole offending
+// literal in an UnmarshalTypeError: an engine answering /api/ps with a
+// megabyte-long number puts that megabyte in the error. The snapshot field
+// that error reaches is re-rendered on every frame and written whole into
+// --json, so it is capped and folded at the boundary that stores it.
+func TestProviderErrorIsCappedAndOneLine(t *testing.T) {
+	huge := strings.Repeat("9", 200_000)
+	multi := errors.New("dial tcp 10.0.0.5:8000: connection refused\ndial tcp 10.0.0.6:8000: connection refused")
+	p := fakeProvider{label: "ollama", addr: "http://127.0.0.1:11434", err: errors.New("json: cannot unmarshal number " + huge + " into Go value")}
+	ch := make(chan core.Snapshot, 1)
+	c := New([]provider.Provider{p.asProvider()}, time.Hour)
+	c.emit(context.Background(), ch)
+	snap := <-ch
+	if len(snap.Providers) != 1 {
+		t.Fatalf("providers = %d, want 1", len(snap.Providers))
+	}
+	if got := len([]rune(snap.Providers[0].Err)); got > core.SnippetCap {
+		t.Errorf("provider error is %d characters, want at most SnippetCap (%d)", got, core.SnippetCap)
+	}
+
+	p2 := fakeProvider{label: "vllm", addr: "http://127.0.0.1:8000", err: multi}
+	ch2 := make(chan core.Snapshot, 1)
+	c2 := New([]provider.Provider{p2.asProvider()}, time.Hour)
+	c2.emit(context.Background(), ch2)
+	snap2 := <-ch2
+	if msg := snap2.Providers[0].Err; strings.ContainsAny(msg, "\n\t") {
+		t.Errorf("provider error %q kept a line break; the snapshot row it feeds would print as two lines", msg)
+	}
+}
