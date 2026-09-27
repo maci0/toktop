@@ -205,6 +205,17 @@ func tierOf(t *testing.T) map[string]int {
 	return tier
 }
 
+// importPathOf names a directory the walk handed back by its import path. The
+// walk spells paths with the platform separator and echoes the root it was
+// given verbatim, so on Windows the root arrives as "../.." and the path under
+// it as "..\..\internal\core": a byte prefix test misses, and the leftover
+// "..\..\internal\core" matches no tier and reads as a package nobody placed.
+// Both sides are folded to slashes before the prefix comes off.
+func importPathOf(root, path string) string {
+	rel := strings.TrimPrefix(filepath.ToSlash(path), filepath.ToSlash(root))
+	return modulePath + "/" + strings.TrimPrefix(rel, "/")
+}
+
 // packageDirs returns every directory in the module holding Go files, named
 // by its import path ("internal/remote", "cmd/toktop").
 func packageDirs(root string) (map[string]bool, error) {
@@ -226,7 +237,7 @@ func packageDirs(root string) (map[string]bool, error) {
 		}
 		for _, e := range entries {
 			if !e.IsDir() && strings.HasSuffix(e.Name(), ".go") {
-				dirs[modulePath+"/"+strings.TrimPrefix(strings.TrimPrefix(path, root), string(filepath.Separator))] = true
+				dirs[importPathOf(root, path)] = true
 				return nil
 			}
 		}
@@ -254,7 +265,7 @@ func TestImportsPointDownward(t *testing.T) {
 		if !strings.HasSuffix(d.Name(), ".go") {
 			return nil
 		}
-		dir := modulePath + "/" + strings.TrimPrefix(strings.TrimPrefix(filepath.Dir(path), moduleRoot), string(filepath.Separator))
+		dir := importPathOf(moduleRoot, filepath.Dir(path))
 		from, ok := tier[dir]
 		if !ok {
 			return nil

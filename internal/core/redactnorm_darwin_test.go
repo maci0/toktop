@@ -16,7 +16,7 @@ import (
 // RedactHome exists to prevent.
 func TestRedactHomeFoldsAcrossUnicodeNormalization(t *testing.T) {
 	decomposed := absPath("Users", "re\u0301ne", "private-user")
-	composed := absPath("Users", "r\u00e8ne", "private-user")
+	composed := absPath("Users", "r\u00e9ne", "private-user")
 	if decomposed == composed {
 		t.Skip("the temp path is already normalized; nothing to fold")
 	}
@@ -24,7 +24,8 @@ func TestRedactHomeFoldsAcrossUnicodeNormalization(t *testing.T) {
 
 	sep := string(filepath.Separator)
 	msg := "open " + filepath.Join(composed, ".toktop", "toktop.log") + ": permission denied"
-	want := "~" + sep + filepath.Join(".toktop", "toktop.log")
+	// Only the home prefix is rewritten; the text around it is the caller's.
+	want := "open ~" + sep + filepath.Join(".toktop", "toktop.log") + ": permission denied"
 	if got := RedactHome(msg); got != want {
 		t.Fatalf("RedactHome(%q) = %q, want %q", msg, got, want)
 	}
@@ -34,7 +35,7 @@ func TestRedactHomeFoldsAcrossUnicodeNormalization(t *testing.T) {
 	}
 	// A sibling directory that merely shares the composed prefix is a
 	// different directory and must survive verbatim.
-	sibling := filepath.Join(absPath("Users", "r\u00e8ne"), "other") + sep + "toktop.log"
+	sibling := filepath.Join(absPath("Users", "r\u00e9ne"), "other") + sep + "toktop.log"
 	if got := RedactHome("open " + sibling); got != "open "+sibling {
 		t.Errorf("RedactHome(%q) = %q, want it unchanged", "open "+sibling, got)
 	}

@@ -51,7 +51,7 @@ func RedactHome(msg string) string {
 		if folded {
 			// The file systems behind the folding platforms also look names
 			// up normalization-insensitively, so the comparison has to be made
-			// there too: a home directory macOS stored decomposed ("rène" as
+			// there too: a home directory macOS stored decomposed ("réne" as
 			// "e" plus U+0301) is the same account as the composed spelling a
 			// process carries, and comparing bytes leaves the account name in
 			// the message.

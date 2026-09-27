@@ -379,7 +379,10 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 	if strings.Contains(got, home) {
 		t.Errorf("the audit line spells out the home directory %q:\n%s", home, got)
 	}
-	if !strings.Contains(got, "root=~/.claude/projects/gone") {
+	// RedactHome folds with the platform separator, so the folded root is
+	// spelled the way this platform spells a path.
+	foldedRoot := "root=" + filepath.Join("~", ".claude", "projects", "gone")
+	if !strings.Contains(got, foldedRoot) {
 		t.Errorf("the audit line does not fold the root to ~:\n%s", got)
 	}
 }
