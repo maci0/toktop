@@ -44,7 +44,7 @@ func sampleMemoryDarwin(s *core.SysSample) {
 	// pages_compressed is already counted inside active/inactive on current
 	// macOS, so the sum can exceed MemTotal. Saturate the byte conversion and
 	// the total rather than reporting memory used over total.
-	s.MemUsed = min(pagesToBytes(satAdd4(
+	s.MemUsed = min(core.MulSatU64(satAdd4(
 		page("vm.pages_wired"), page("vm.pages_active"),
 		page("vm.pages_inactive"), page("vm.pages_compressed")), ps), total)
 

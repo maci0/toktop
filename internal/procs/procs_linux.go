@@ -85,23 +85,9 @@ func procStatCPUAndRSS(stat string) (ticks uint64, rssBytes uint64) {
 			stime, _ = strconv.ParseUint(rest[start:i], 10, 64)
 		case 24:
 			pages, _ = strconv.ParseUint(rest[start:i], 10, 64)
-			return core.SatAddU64(utime, stime), pagesToBytes(pages)
+			return core.SatAddU64(utime, stime), core.MulSatU64(pages, uint64(os.Getpagesize()))
 		}
 		field++
 	}
-	return core.SatAddU64(utime, stime), pagesToBytes(pages)
-}
-
-// pagesToBytes converts a /proc/pid/stat RSS page count to bytes. A page
-// count at or past MaxUint64/pagesize would wrap to a small byte count in
-// the multiply; saturate instead.
-func pagesToBytes(pages uint64) uint64 {
-	ps := uint64(os.Getpagesize())
-	if ps == 0 {
-		return 0
-	}
-	if pages > ^uint64(0)/ps {
-		return ^uint64(0)
-	}
-	return pages * ps
+	return core.SatAddU64(utime, stime), core.MulSatU64(pages, uint64(os.Getpagesize()))
 }

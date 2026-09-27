@@ -46,6 +46,25 @@ func TestSatAddU64(t *testing.T) {
 	}
 }
 
+func TestMulSatU64(t *testing.T) {
+	tests := []struct {
+		a, b, want uint64
+	}{
+		{0, 0, 0},
+		{1, 0, 0}, // a zero factor yields zero rather than dividing by it
+		{3, 4096, 12288},
+		{1 << 20, 1 << 20, 1 << 40},
+		{math.MaxUint64, 4096, math.MaxUint64}, // must saturate, not wrap small
+		{^uint64(0) >> 10, 1 << 10, (^uint64(0) >> 10) << 10},
+		{^uint64(0)>>10 + 1, 1 << 10, math.MaxUint64},
+	}
+	for _, tc := range tests {
+		if got := MulSatU64(tc.a, tc.b); got != tc.want {
+			t.Errorf("MulSatU64(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
 func TestContainsAny(t *testing.T) {
 	if !ContainsAny("vllm:requests_running", "running", "waiting") {
 		t.Error("matching substring not found")

@@ -181,14 +181,14 @@ func (s *Stats) poll(ctx context.Context) {
 		if s.failedPolls == 1 {
 			s.failedSince = s.instant()
 			audit().Warn("toktop: remote vitals poll failed",
-				"target", logField(s.Client.Target.userHost(), 256),
+				"target", logField(s.Client.Target.UserHost(), 256),
 				"error", logField(err.Error(), 256))
 		}
 		return
 	}
 	if s.failedPolls > 0 {
 		audit().Info("toktop: remote vitals poll recovered",
-			"target", logField(s.Client.Target.userHost(), 256),
+			"target", logField(s.Client.Target.UserHost(), 256),
 			"failed_polls", s.failedPolls,
 			"outage", s.instant().Sub(s.failedSince).Round(time.Second))
 	}

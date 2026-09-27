@@ -15,11 +15,6 @@ package agentusage
 // dirVariants lists the spellings p can be recorded under: just itself.
 func dirVariants(p string) []string { return []string{p} }
 
-// sameSpelling reports whether two recorded paths denote the same directory.
-func sameSpelling(a, b string) bool {
-	return spellingEqual(foldSpelling(a), foldSpelling(b))
-}
-
 // foldSpelling brings a recorded path to the one form sameSpelling compares
 // in, and spellingEqual compares two such forms. Split out so a caller
 // comparing a path against a set can fold each one once instead of on every

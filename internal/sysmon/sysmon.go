@@ -89,15 +89,12 @@ func ParseMeminfo(b []byte, s *core.SysSample) {
 	s.SwapUsed = kibBytes(satSub(vals.swapTotal, vals.swapFree))
 }
 
-// kibBytes converts a meminfo KiB count to bytes. The remote vitals path
-// feeds this parser text from another host, so an absurd magnitude must
-// saturate rather than wrap to a small byte count in the shift.
+// bytesPerKiB is the meminfo unit: every value in /proc/meminfo is KiB.
+const bytesPerKiB uint64 = 1 << 10
+
+// kibBytes converts a meminfo KiB count to bytes.
 func kibBytes(kib uint64) uint64 {
-	const capKib = ^uint64(0) >> 10
-	if kib > capKib {
-		return ^uint64(0)
-	}
-	return kib << 10
+	return core.MulSatU64(kib, bytesPerKiB)
 }
 
 // satSub subtracts saturating at zero: some ballooning/virtualized kernels
@@ -117,18 +114,6 @@ func satSub(a, b uint64) uint64 {
 // fire.
 func satAdd4(a, b, c, d uint64) uint64 {
 	return core.SatAddU64(core.SatAddU64(a, b), core.SatAddU64(c, d))
-}
-
-// pagesToBytes converts a page count to bytes, saturating so the multiply
-// cannot wrap a remote host's absurd value into a small byte count.
-func pagesToBytes(pages, pageSize uint64) uint64 {
-	if pageSize == 0 {
-		return 0
-	}
-	if pages > ^uint64(0)/pageSize {
-		return ^uint64(0)
-	}
-	return pages * pageSize
 }
 
 func cutMeminfoLine(line string) (string, uint64, bool) {

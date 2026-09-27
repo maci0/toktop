@@ -10,20 +10,15 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+
+	"github.com/maci0/toktop/internal/core"
 )
+
+// bytesPerKiB is the unit of the ps(1) rss column.
+const bytesPerKiB uint64 = 1 << 10
 
 func init() {
 	platformList = listDarwin
-}
-
-// kibToBytes converts a ps(1) RSS column (KiB) to bytes, saturating so an
-// absurd value cannot wrap to a small byte count in the shift.
-func kibToBytes(kib uint64) uint64 {
-	const capKib = ^uint64(0) >> 10
-	if kib > capKib {
-		return ^uint64(0)
-	}
-	return kib << 10
 }
 
 // listDarwin shells out to ps(1): there is no pure-Go API for the BSD process
@@ -81,7 +76,7 @@ func parseDarwinProcesses(out string) []raw {
 			pid:        pid,
 			name:       fields[3],
 			args:       fields[3:],
-			rss:        kibToBytes(rssKB),
+			rss:        core.MulSatU64(rssKB, bytesPerKiB),
 			cpuPercent: cpu,
 		}
 		annotate(&r)

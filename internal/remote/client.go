@@ -212,13 +212,13 @@ func Connect(ctx context.Context, t Target) (*Client, error) {
 		// dashboard with no engines on it. The audit line is the record that
 		// outlives the frame.
 		audit().Warn("toktop: ssh connect failed",
-			"target", logField(t.userHost(), 256),
+			"target", logField(t.UserHost(), 256),
 			"port", t.Port,
 			"error", logField(err.Error(), 256))
 		return nil, errors.New(core.RedactHome(err.Error()))
 	}
 	audit().Info("toktop: ssh connected",
-		"target", logField(t.userHost(), 256),
+		"target", logField(t.UserHost(), 256),
 		"port", t.Port,
 		"dial", time.Since(c.connectedAt).Round(time.Millisecond))
 	return c, nil
@@ -272,11 +272,11 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
-		return nil, fmt.Errorf("ssh %s: %w", t.userHost(), authHint(err))
+		return nil, fmt.Errorf("ssh %s: %w", t.UserHost(), authHint(err))
 	}
 	if err := hc.SetDeadline(time.Time{}); err != nil {
 		cc.Close()
-		return nil, fmt.Errorf("ssh %s: %w", t.userHost(), err)
+		return nil, fmt.Errorf("ssh %s: %w", t.UserHost(), err)
 	}
 	c := &Client{Target: t, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
 		keepaliveDone: make(chan struct{}), connectedAt: time.Now()}
@@ -348,7 +348,7 @@ func (c *Client) keepalive() {
 			// keepalive and a peer that closed the socket need different
 			// investigations and the wire error alone cannot tell them apart.
 			audit().Warn("toktop: ssh peer stopped answering keepalives",
-				"target", logField(c.Target.userHost(), 256),
+				"target", logField(c.Target.UserHost(), 256),
 				"misses", misses,
 				"probe_every", keepaliveEvery)
 			c.conn.Close() // unblocks any probe still awaiting a reply
@@ -521,7 +521,7 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		// a network blip and a host to investigate, so it is recorded before
 		// the error reaches the caller that will drop the target.
 		audit().Warn("toktop: ssh channel open unanswered",
-			"target", logField(c.Target.userHost(), 256),
+			"target", logField(c.Target.UserHost(), 256),
 			"wait", sessionOpenTimeout)
 		c.conn.Close()
 		// conn.Close is what releases the parked open; the session it may
@@ -751,7 +751,7 @@ func (c *Client) watchClose() {
 	// engines stop answering and the vitals loop gives up. Up to here the only
 	// record was one stderr line under the alt screen.
 	audit().Error("toktop: ssh connection lost",
-		"target", logField(c.Target.userHost(), 256),
+		"target", logField(c.Target.UserHost(), 256),
 		"port", c.Target.Port,
 		"uptime", time.Since(c.connectedAt).Round(time.Second),
 		"error", logField(c.Err().Error(), 256))

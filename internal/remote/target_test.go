@@ -77,17 +77,17 @@ func TestParseTargetRejectsTerminalEscapesInHostAndUser(t *testing.T) {
 	}
 }
 
-// userHost is what goes into the ssh argv, so an absent user must produce the
+// UserHost is what goes into the ssh argv, so an absent user must produce the
 // bare host and ssh applies its own default.
 func TestTargetUserHost(t *testing.T) {
-	if got := (Target{Host: "box"}).userHost(); got != "box" {
-		t.Errorf("userHost with no user = %q, want %q", got, "box")
+	if got := (Target{Host: "box"}).UserHost(); got != "box" {
+		t.Errorf("UserHost with no user = %q, want %q", got, "box")
 	}
-	if got := (Target{User: "root", Host: "box"}).userHost(); got != "root@box" {
-		t.Errorf("userHost = %q, want %q", got, "root@box")
+	if got := (Target{User: "root", Host: "box"}).UserHost(); got != "root@box" {
+		t.Errorf("UserHost = %q, want %q", got, "root@box")
 	}
-	if got := (Target{}).userHost(); got != "" {
-		t.Errorf("userHost with neither = %q, want empty", got)
+	if got := (Target{}).UserHost(); got != "" {
+		t.Errorf("UserHost with neither = %q, want empty", got)
 	}
 }
 

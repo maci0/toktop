@@ -62,13 +62,6 @@ func TestSamplerLinuxTree(t *testing.T) {
 }
 
 func TestPagesToBytesSaturates(t *testing.T) {
-	ps := uint64(os.Getpagesize())
-	if got := pagesToBytes(512); got != 512*ps {
-		t.Errorf("512 pages = %d, want %d", got, 512*ps)
-	}
-	if got := pagesToBytes(^uint64(0)); got != ^uint64(0) {
-		t.Errorf("huge page count = %d, want saturation", got)
-	}
 	_, rss := procStatCPUAndRSS("1 (x) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 18446744073709551615")
 	if rss != ^uint64(0) {
 		t.Errorf("stat RSS wrap: %d, want saturation", rss)

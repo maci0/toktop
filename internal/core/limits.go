@@ -54,6 +54,21 @@ func SatAddU64(a, b uint64) uint64 {
 	return a + b
 }
 
+// MulSatU64 multiplies two counts saturating at MaxUint64, and reads a zero
+// factor as zero. Every byte count the tree derives from a page count or a
+// KiB column is a product of that, and the remote vitals path feeds this
+// parser text from another host: a wrapped product reads as a few kilobytes
+// where the host measured an absurd amount.
+func MulSatU64(a, b uint64) uint64 {
+	if b == 0 {
+		return 0
+	}
+	if a > math.MaxUint64/b {
+		return math.MaxUint64
+	}
+	return a * b
+}
+
 // SatAddPos adds two non-negative counts, saturating at MaxInt64. Agent token
 // totals accumulate one event per retained sample from several producers,
 // some of which report whatever their transcript file happened to hold, so

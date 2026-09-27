@@ -28,15 +28,6 @@ import (
 // only record of a target that silently stopped contributing.
 var attachLog = logcfg.Logger
 
-// targetLabel names an ssh target the way the operator wrote it, minus
-// anything the key path would add.
-func targetLabel(t remote.Target) string {
-	if t.User == "" {
-		return t.Host
-	}
-	return t.User + "@" + t.Host
-}
-
 // attachLocal adds one --add endpoint to providers. The bearer token rides
 // only to endpoints the operator named: discovery probes every well-known port
 // on spec, and whatever answers there must not be able to harvest the
@@ -78,14 +69,14 @@ func attachTarget(ctx context.Context, tgt remote.Target, sshKey string, sysFn f
 		// unreadable host-key store and unreachable hosts, none of which the
 		// dashboard says anything about once it is up.
 		attachLog().Warn("toktop: ssh target not attached",
-			"target", logcfg.Field(targetLabel(tgt), 256),
+			"target", logcfg.Field(tgt.UserHost(), 256),
 			"port", tgt.Port,
 			"error", logcfg.Field(err.Error(), 256))
 		return nil, sysFn, err
 	}
 	fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n", len(rp), tgt.Host)
 	attachLog().Info("toktop: ssh target attached",
-		"target", logcfg.Field(targetLabel(tgt), 256),
+		"target", logcfg.Field(tgt.UserHost(), 256),
 		"port", tgt.Port,
 		"engines", len(rp))
 	prev := sysFn
@@ -162,7 +153,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 			fmt.Fprintf(os.Stderr, "toktop: %s:%d could not be forwarded locally; engines on that port are invisible\n",
 				tgt.Host, p)
 			attachLog().Warn("toktop: remote port not forwarded",
-				"target", logcfg.Field(targetLabel(tgt), 256),
+				"target", logcfg.Field(tgt.UserHost(), 256),
 				"remote_port", p)
 		}
 	}
@@ -205,7 +196,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
 			tgt.Host, rports[i])
 		attachLog().Warn("toktop: remote port skipped",
-			"target", logcfg.Field(targetLabel(tgt), 256),
+			"target", logcfg.Field(tgt.UserHost(), 256),
 			"remote_port", rports[i],
 			"reason", "no recognized engine API")
 	}

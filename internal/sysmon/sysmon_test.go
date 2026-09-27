@@ -109,10 +109,6 @@ func TestDurationFromClock(t *testing.T) {
 	if got := durationFromClock(maxSec-1, 2_000_000_000); got != time.Duration(math.MaxInt64) {
 		t.Errorf("overflow clock = %v, want saturation", got)
 	}
-	const capKib = ^uint64(0) >> 10
-	if got := kibBytes(capKib); got != capKib<<10 {
-		t.Errorf("kibBytes(capKib) = %d, want %d", got, capKib<<10)
-	}
 }
 
 func TestParseUptimeSecs(t *testing.T) {
@@ -194,16 +190,13 @@ func TestSatAdd4NeverWraps(t *testing.T) {
 }
 
 func TestPagesToBytesSaturates(t *testing.T) {
-	if got := pagesToBytes(3, 4096); got != 12288 {
-		t.Errorf("pagesToBytes(3, 4096) = %d, want 12288", got)
-	}
-	if got := pagesToBytes(1, 0); got != 0 {
-		t.Errorf("pagesToBytes(1, 0) = %d, want 0", got)
-	}
-	// A page count that would overflow the multiply must saturate, not wrap to
-	// a small byte count.
-	if got, want := pagesToBytes(math.MaxUint64, 4096), uint64(math.MaxUint64); got != want {
-		t.Errorf("pagesToBytes(MaxUint64, 4096) = %d, want %d", got, want)
+	// The byte conversion saturates: the remote vitals path feeds this
+	// parser text from another host, so a KiB count that would wrap the
+	// multiply must read as MaxUint64, not as a small byte count.
+	s := &core.SysSample{}
+	ParseMeminfo([]byte("MemTotal: 18446744073709551615 kB\nMemAvailable: 0 kB\n"), s)
+	if s.MemTotal != math.MaxUint64 || s.MemUsed != math.MaxUint64 {
+		t.Errorf("oversized meminfo = total %d used %d, want both saturated", s.MemTotal, s.MemUsed)
 	}
 }
 

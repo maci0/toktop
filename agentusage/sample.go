@@ -142,14 +142,9 @@ const (
 // reporting nothing beats displaying a lie (or overflowing the totals).
 const maxSaneTokens = 1 << 40
 
-// counter coerces a decoded transcript counter to its contribution: negative
-// or absurd magnitudes read as absent, the same judgment asInt makes for the
-// generic walker.
+// counter coerces a decoded transcript counter to its contribution.
 func counter(n int) int {
-	if n < 0 || n > maxSaneTokens {
-		return 0
-	}
-	return n
+	return int(clampSane(int64(n)))
 }
 
 // clampSane is the one statement of the ceiling counter enforces: a negative

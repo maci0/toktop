@@ -32,12 +32,6 @@ func dirVariants(p string) []string {
 	return out
 }
 
-// sameSpelling reports whether two recorded paths denote the same directory
-// after cleaning, slash folding, and ASCII/Unicode case folding.
-func sameSpelling(a, b string) bool {
-	return spellingEqual(foldSpelling(a), foldSpelling(b))
-}
-
 // foldSpelling brings a recorded path to the one form sameSpelling compares
 // in, and spellingEqual compares two such forms. Split out so a caller
 // comparing a path against a set can fold each one once instead of on every

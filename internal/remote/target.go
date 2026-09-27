@@ -105,7 +105,10 @@ func parseURLTarget(raw string) (Target, error) {
 	return t, nil
 }
 
-func (t Target) userHost() string {
+// UserHost names the target the way the operator wrote it, minus anything
+// the key path would add. It is what goes into the ssh argv, so it is also
+// the one spelling every log line and error names a target by.
+func (t Target) UserHost() string {
 	if t.User == "" {
 		return t.Host
 	}

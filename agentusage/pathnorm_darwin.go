@@ -33,13 +33,6 @@ func dirVariants(p string) []string {
 	return out
 }
 
-// sameSpelling reports whether two recorded paths denote the same directory:
-// byte equality, or agreement once both are brought to one normalization form
-// and compared without regard to case (the APFS default).
-func sameSpelling(a, b string) bool {
-	return spellingEqual(foldSpelling(a), foldSpelling(b))
-}
-
 // foldSpelling brings a recorded path to the one form sameSpelling compares
 // in, and spellingEqual compares two such forms. Split out so a caller
 // comparing a path against a set can fold each one once instead of on every
