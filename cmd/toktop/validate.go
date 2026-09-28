@@ -310,11 +310,16 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 	return nil
 }
 
-// unixSecondsDigits is the width of a Unix second in the years this binary
-// can run: 10 digits from 2001-09-09 to 2286. A shorter unsigned digit string
-// is a date, a longer one is a sub-second count in the wrong unit, and
-// neither is the instant --origin asks for.
-const unixSecondsDigits = 10
+// dateDigits, dateTimeDigits and dateSecDigits are the digit counts a date or
+// a datetime is written in: YYYYMMDD, YYYYMMDDHHMM and YYYYMMDDHHMMSS. A bare
+// --origin of one of those widths is a date the operator mistyped for a Unix
+// second, and reading it as one would pin the run to an instant in 1970 that
+// the operator never meant.
+const (
+	dateDigits     = 8  // 20260928
+	dateTimeDigits = 12 // 20260928T1337
+	dateSecDigits  = 14 // 20260928T133700
+)
 
 // parseOrigin turns --origin into the instant the demo timeline starts at.
 // RFC3339 and bare Unix seconds are both accepted, so a replay can be written
@@ -324,26 +329,47 @@ const unixSecondsDigits = 10
 // Rejection is loud: a mistyped instant would otherwise leave the run on the
 // wall clock, and the operator replaying a captured frame would get a second
 // run that differs only in timestamps, which is exactly the difference they
-// pinned the origin to remove. The bare-integer branch is therefore bounded:
-// a digit string is a Unix second only if it is the length one, so a mistyped
-// date such as 20260928 is refused rather than read as an instant in 1970.
+// pinned the origin to remove. The bare-integer branch is therefore bounded by
+// width alone: every Unix second the flag documents is accepted, from 0 to the
+// 19-digit forms, and only a digit string shaped like a date is refused.
 func parseOrigin(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, nil
 	}
-	// A leading minus is a pre-epoch second and has no date spelling to be
-	// confused with, so the width bound is on the unsigned form only.
-	if s[0] == '-' || len(s) == unixSecondsDigits {
-		if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
-			return time.Unix(secs, 0).UTC(), nil
-		}
+	if secs, ok := bareUnixSeconds(s); ok {
+		return time.Unix(secs, 0).UTC(), nil
 	}
 	at, err := time.Parse(time.RFC3339, s)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("--origin must be an RFC3339 instant or Unix seconds, got %q", s)
 	}
 	return at, nil
+}
+
+// bareUnixSeconds reads s as a Unix second, or reports that it is not one. A
+// leading minus is a pre-epoch second and has no date spelling to be confused
+// with, so the width bound is on the unsigned form only.
+func bareUnixSeconds(s string) (int64, bool) {
+	if s[0] == '-' {
+		if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return secs, true
+		}
+		return 0, false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return 0, false
+		}
+	}
+	if len(s) == dateDigits || len(s) == dateTimeDigits || len(s) == dateSecDigits {
+		return 0, false
+	}
+	secs, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return secs, true
 }
 
 // validateSSHKeyFlag rejects an explicitly empty --ssh-key. The flag names a

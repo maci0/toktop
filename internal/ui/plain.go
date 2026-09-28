@@ -117,10 +117,45 @@ func writeThroughputPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	if outPeak <= 0 && inPeak <= 0 {
 		return
 	}
-	window := fmtDur(time.Duration(core.HistoryLen-1) * cad)
 	b.WriteString("\nTHROUGHPUT\n")
 	fmt.Fprintf(b, "peak %s tok/s out, %s tok/s in, over the last %s\n",
-		fmtRate(outPeak), fmtRate(inPeak), window)
+		fmtRate(outPeak), fmtRate(inPeak), fmtDur(historyWindow(s, cad)))
+}
+
+// historyWindow is the span the plotted samples actually cover, oldest sample
+// to newest across every engine. The buffer is sized for a full run, so
+// naming its capacity here would claim a three-minute window for a five-frame
+// `--once` render that measured four seconds. The stamps that travel with the
+// values are the real answer; a sample count on the collector cadence stands
+// in only for a caller that built a snapshot without them.
+func historyWindow(s core.Snapshot, cad time.Duration) time.Duration {
+	var oldest, newest time.Time
+	plotted := 0
+	for i := range s.Providers {
+		for _, out := range [2]bool{true, false} {
+			vals, stamps := historyOf(s.Providers[i], out)
+			plotted = max(plotted, len(vals))
+			for j := range vals {
+				at := sampleTime(stamps, j)
+				if at.IsZero() {
+					continue
+				}
+				if oldest.IsZero() || at.Before(oldest) {
+					oldest = at
+				}
+				if at.After(newest) {
+					newest = at
+				}
+			}
+		}
+	}
+	if !oldest.IsZero() && newest.After(oldest) {
+		return newest.Sub(oldest)
+	}
+	if plotted >= 2 {
+		return time.Duration(plotted-1) * cad
+	}
+	return cad
 }
 
 // writeEnginesPlain lists every backend as its own block of lines, healthy or
@@ -222,9 +257,12 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 	}
 	// Same segments as the TUI strip (hostSegments), uncapped: this report
 	// wraps to the terminal's width, so a cut CPU model would be a fact the
-	// reader has no way to get back.
+	// reader has no way to get back. They carry the strip's separator, not a
+	// space: a CPU model ending in a word and the OS name after it run
+	// together into one indistinguishable string, and this report has no row
+	// borders to tell the fields apart.
 	if ident := hostSegments(sy, hostSegmentLimits{}); len(ident) > 0 {
-		b.WriteString(strings.Join(ident, " ") + "\n")
+		b.WriteString(strings.Join(ident, " · ") + "\n")
 	}
 	shown := 0
 	for _, t := range sysCPUTemps(sy) {

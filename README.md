@@ -565,7 +565,7 @@ technology:
   5/5 engines up · out 1.5k tok/s · in 10k tok/s · 2 agents · session 24s
 
   THROUGHPUT
-  peak 1.9k tok/s out, 10k tok/s in, over the last 3m0s
+  peak 1.9k tok/s out, 10k tok/s in, over the last 24s
 
   ENGINES
   up   vllm-a100 (vllm)

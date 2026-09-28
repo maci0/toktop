@@ -93,6 +93,30 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the `/proc` entry names as strings, so a program listing the agents on a
   machine showed pids 1, 10, 100, 11, 2.
 
+- `--once --plain` names the window its THROUGHPUT peaks were measured over
+  from the samples behind them instead of from the chart buffer's capacity. A
+  buffer sized for a full run claimed three minutes for a five-frame render
+  that measured four seconds, so the one number the report gave a screen
+  reader about the shape of the curve was a claim about a run that had not
+  happened. A full buffer reports the same three minutes it always did.
+
+- The identity row of the `--once --plain` SYSTEM section separates the CPU
+  model from the OS and kernel the way the dashboard strip does. Joined by a
+  space, a model ending in a word ran into the OS name with nothing to tell
+  the reader where one field ended and the next began, and the plain report
+  has no row borders to do it.
+
+- `--origin` accepts every Unix second the flag documents, not only the ones
+  that happen to be ten digits wide. `0`, `946684800` (2000-01-01) and every
+  other second before 2001-09-09 were refused while the same instant written
+  as RFC 3339 was accepted, so a replay spelled the shorter way died on a
+  value the flag names. The mistyped-date guard is unchanged: a bare
+  `20260928`, `202609281200` or `20260928120000` is still refused.
+
+- `agentusage.ResetDefinitions` drops the unknown usage keys the file it
+  removes named. They described a file no longer in force, so a program
+  reporting them at startup named a file it had just discarded.
+
 - The web site no longer removes the focus outline from the skip link's
   target. `main` takes focus from that key press, so a keyboard user who
   activated the skip link had nothing to show where focus had landed.

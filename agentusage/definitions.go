@@ -176,6 +176,10 @@ func ResetDefinitions() {
 	defsMu.Lock()
 	defer defsMu.Unlock()
 	defs = builtinDefs()
+	// The keys named in a usage block described a file this call is dropping,
+	// so reporting them afterwards would name a file that is no longer in
+	// force.
+	unknownKeys = nil
 	bumpDefsGen()
 }
 
