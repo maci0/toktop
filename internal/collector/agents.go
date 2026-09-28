@@ -94,6 +94,82 @@ func (c *Collector) forgetAgedAgentIDs(cutoff time.Time) {
 	}
 }
 
+// refuseForWindow latches a run of events the retained window turned away, so
+// emit can say once that a sender is being dropped rather than idle. Without
+// it the only trace is stored < accepted on the sender's own POST, which reads
+// as a replay: a sender whose clock lags sees exactly that, forever, and the
+// agent list stays empty with nothing on it to say why.
+//
+// The collector clock, like every other latch here: the sample's At, the
+// probe-wave gate and the skew correction all follow it, so a latch stamped
+// from time.Now ages against a timeline none of them shares.
+//
+// Call with c.mu held.
+func (c *Collector) refuseForWindow(now time.Time, agent string) {
+	if c.windowLost.IsZero() {
+		c.windowLost = now
+	}
+	c.windowRefused++
+	c.windowAgent = agent
+}
+
+// storedForWindow records that an event was retained while a run of refusals
+// was running, which is the end of that run. agent is the one that got in, so
+// the recovery line names the sender that came back rather than the one that
+// was last turned away. Call with c.mu held.
+func (c *Collector) storedForWindow(agent string) {
+	if c.windowLost.IsZero() {
+		return
+	}
+	if c.windowRecovered == "" {
+		c.windowRecovered = agent
+	}
+}
+
+// windowRun is what one drained run of window refusals has to report: the
+// events refused so far, the agent they were refused for, and the run's end.
+// A run is either opening or closing at the moment it is drained, never both.
+type windowRun struct {
+	refused   int
+	agent     string
+	back      string
+	lostFor   time.Duration
+	recovered bool
+}
+
+// empty reports whether the run has nothing to say, which is every interval
+// that neither refused nor stored anything.
+func (r windowRun) empty() bool { return r.refused == 0 && !r.recovered }
+
+// drainWindowRefusals reports one run of window refusals: its opening line the
+// first time it is seen, its recovery line once an event lands again. The run
+// itself is latched until that event, so an interval that refuses nothing new
+// writes nothing. Reading it here rather than in RecordAgent keeps the logging
+// off the ingest request path and behind the same lock the poll loop needs.
+// Call with c.mu held.
+func (c *Collector) drainWindowRefusals() windowRun {
+	if c.windowLost.IsZero() {
+		return windowRun{}
+	}
+	if !c.windowLogged {
+		c.windowLogged = true
+		refused := c.windowRefused
+		c.windowRefused = 0
+		return windowRun{refused: refused, agent: c.windowAgent}
+	}
+	if c.windowRecovered == "" {
+		return windowRun{}
+	}
+	run := windowRun{
+		back:      c.windowRecovered,
+		lostFor:   core.Age(c.instant(), c.windowLost).Round(time.Second),
+		recovered: true,
+	}
+	c.windowLost, c.windowAgent = time.Time{}, ""
+	c.windowRecovered, c.windowLogged = "", false
+	return run
+}
+
 // RecordAgent stores an agent event (called from the ingest server) and
 // reports whether it was retained.
 // Events come from many senders whose clocks disagree (the ingest endpoint
@@ -103,7 +179,9 @@ func (c *Collector) forgetAgedAgentIDs(cutoff time.Time) {
 // agentIDHorizon is ignored, so a retried POST of the same event does not
 // double-count, however long after the first send it arrives. An event that
 // sorts behind the whole retained window is refused too, so the answer stays
-// what a sender is told: the feed took this, or it did not.
+// what a sender is told: the feed took this, or it did not. Only the window
+// refusal is latched for the audit log: a duplicate is the sender's own replay
+// and says nothing about the run's health.
 func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	now := c.instant()
 	if ev.At.IsZero() {
@@ -175,9 +253,11 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 		// runs behind sees the same honest "kept nothing" it already gets for
 		// a duplicate. Its id is not ledgered: no entry was retained, so there
 		// is no duplicate for the ledger to suppress.
+		c.refuseForWindow(now, key)
 		return false
 	}
 	c.agents = agents
+	c.storedForWindow(key)
 	// Only a retained event is a reading of the sender's clock. A replayed
 	// POST carries the stamp of the original send, so its lead reads zero, and
 	// a minimum estimator cannot climb back off a zero it was handed: one

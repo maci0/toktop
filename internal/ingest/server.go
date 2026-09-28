@@ -555,8 +555,16 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	slots := eventSlots
 	reqID := requestID(r)
 	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
+	// keyAttrs is the request's replay key on the audit line, hashed into the
+	// same prefix the derived event ids carry (derivedKeyPrefix). It is filled
+	// in once the header has been read, so the rejections answered before that
+	// carry nothing: they never decoded a line, so they named no event ids.
+	// With it, a POST that stored fewer events than it sent can be tied to the
+	// ids it minted, and a sender comparing its own retries with the feed
+	// matches the two records on one field.
+	var keyAttrs []any
 	done := func(status, accepted, stored int, errMsg string, extra ...any) {
-		s.logRequest(r, reqID, status, accepted, stored, time.Since(start), errMsg, extra...)
+		s.logRequest(r, reqID, status, accepted, stored, time.Since(start), errMsg, append(extra, keyAttrs...)...)
 	}
 	// n counts events decoded off the wire, stored how many the feed took.
 	// A replay of an already-retained id decodes fine and stores nothing.
@@ -627,6 +635,13 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(br)
 	defer r.Body.Close()
 	replayKey := clientEventKey(r)
+	// The prefix is a property of the POST, not of a line, so it is hashed
+	// once here and handed to decodeStream per line rather than re-normalizing
+	// and re-hashing the same key for every event.
+	keyPrefix := derivedKeyPrefix(replayKey)
+	if keyPrefix != "" {
+		keyAttrs = []any{"event_key", keyPrefix}
+	}
 	// fail reports a stream-level error. Events decode-and-record one by one,
 	// so everything before the failing line is already in the feed; saying so
 	// lets a sender recover without duplicating what was kept.
@@ -662,7 +677,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		armWrite()
 		reject(res.status, msg, append(append([]any{}, res.extra...), writeArm...)...)
 	}
-	res := s.decodeStream(dec, progress, replayKey, state)
+	res := s.decodeStream(dec, progress, replayKey, keyPrefix, state)
 	n, stored = res.decoded, res.stored
 	if res.status != 0 {
 		fail(res)
@@ -701,11 +716,11 @@ type streamResult struct {
 // each as it goes, and reports how the stream ended. Events are recorded
 // before the next line is read, so a body that fails halfway leaves everything
 // before the failing line in the feed; the returned counts say so.
-func (s *Server) decodeStream(dec *json.Decoder, progress *progressBody, replayKey string, state *requestState) streamResult {
+//
+// keyPrefix is derivedKeyPrefix(replayKey), computed once by the caller for the
+// whole body and reused for every id-less line.
+func (s *Server) decodeStream(dec *json.Decoder, progress *progressBody, replayKey, keyPrefix string, state *requestState) streamResult {
 	var r streamResult
-	// The replay key is fixed for the whole body, so its hash prefix is
-	// computed once here rather than per id-less line.
-	keyPrefix := derivedKeyPrefix(replayKey)
 	// keyed tracks whether the last id-less line had an identity derived from
 	// the POST key and its position in the body. Such a line can only be
 	// recovered by replaying the whole request.

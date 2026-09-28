@@ -1610,7 +1610,37 @@ func TestIngestReportsReplayStoredNothing(t *testing.T) {
 	}
 }
 
-// A server with no recorder would answer 202 for every event and show none,
+// A POST under an Idempotency-Key mints the ids its events are stored under,
+// and the audit line carries the prefix those ids start with, so an operator
+// can tie a request to the feed rows it produced. A POST without one mints no
+// derived id, so its line carries no key field either.
+func TestIngestAuditLineNamesReplayKey(t *testing.T) {
+	lg, buf := captureLogger()
+	s := startIngestLog(t, &memRecorder{}, lg)
+	url := "http://" + s.Addr() + "/v1/events"
+	const key = "harness-batch-9"
+	want := "event_key=" + derivedKeyPrefix(key)
+
+	buf.Reset()
+	if code, _ := postKeyed(t, url, `{"agent":"coder","output_tokens":7}`, key); code != http.StatusAccepted {
+		t.Fatalf("keyed post status = %d", code)
+	}
+	if got := buf.String(); !strings.Contains(got, want) {
+		t.Errorf("keyed audit line missing %q: %s", want, got)
+	}
+	if got := buf.String(); strings.Contains(got, key) {
+		t.Errorf("audit line echoed the raw replay key: %s", got)
+	}
+
+	buf.Reset()
+	if code, _ := postKeyed(t, url, `{"agent":"coder","output_tokens":7}`, ""); code != http.StatusAccepted {
+		t.Fatalf("unkeyed post status = %d", code)
+	}
+	if got := buf.String(); strings.Contains(got, "event_key=") {
+		t.Errorf("unkeyed post named a replay key: %s", got)
+	}
+}
+
 // postKeyed sends body under an Idempotency-Key and returns the status plus
 // the response text.
 func postKeyed(t *testing.T, url, body, key string) (int, string) {

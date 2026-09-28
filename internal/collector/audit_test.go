@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -244,5 +245,76 @@ func TestProbeFailuresAreAuditedOnce(t *testing.T) {
 	// line per --probe tick is the noise this latch exists to prevent.
 	if got := countLines(logs, "probe failed"); got != 1 {
 		t.Fatalf("failure lines = %d, want the recovery not to re-arm the latch:\n%s", got, logs.String())
+	}
+}
+
+// A sender whose events all sort behind the retained window is dropped
+// silently: its own POST says stored under accepted, which is the same answer
+// a replay gets, and the agent list goes empty with nothing on it to say why.
+// The audit log gets the run once, not once per interval, and one line when an
+// event lands again.
+func TestWindowRefusalsAreAuditedOnce(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
+	c := New(nil, time.Second)
+	c.SetNow(func() time.Time { return now })
+	c.procFn = nil
+	logs := captureAudit(t)
+	ch := make(chan core.Snapshot, 1)
+	emit := func() {
+		c.emit(context.Background(), ch)
+		<-ch
+	}
+
+	for i := range core.AgentHistoryLen {
+		now = base.Add(time.Duration(i) * time.Second)
+		c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("n%d", i), Agent: "a"})
+	}
+	oldest := c.agents[0].At
+	if c.RecordAgent(core.AgentEvent{At: oldest.Add(-time.Second), ID: "stale", Agent: "lagging"}) {
+		t.Fatal("an event older than the retained window reported as stored")
+	}
+	// Two more refusals and three frames: the run is one line, not one per
+	// event or per poll.
+	for range 2 {
+		now = now.Add(time.Second)
+		c.RecordAgent(core.AgentEvent{At: oldest.Add(-time.Second), ID: "stale2", Agent: "lagging"})
+	}
+	for range 3 {
+		emit()
+	}
+	if got := countLines(logs, "agent events refused"); got != 1 {
+		t.Fatalf("refusal lines = %d, want 1:\n%s", got, logs.String())
+	}
+	for _, want := range []string{"agent=lagging", "refused=3", "reason="} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("refusal line does not carry %s:\n%s", want, logs.String())
+		}
+	}
+	if got := countLines(logs, "agent events stored again"); got != 0 {
+		t.Fatalf("recovery logged with no stored event yet:\n%s", logs.String())
+	}
+
+	// A replay is a sender retrying its own POST, not a sender being dropped,
+	// so it must not arm the latch: an endpoint under a retry storm would
+	// otherwise report an outage it has none of.
+	now = base.Add((core.AgentHistoryLen + 1) * time.Second)
+	if !c.RecordAgent(core.AgentEvent{At: now, ID: "fresh", Agent: "a"}) {
+		t.Fatal("a newer event was refused")
+	}
+	now = now.Add(time.Second)
+	if c.RecordAgent(core.AgentEvent{At: now, ID: "fresh", Agent: "a"}) {
+		t.Fatal("a duplicate id was stored twice")
+	}
+	emit()
+	if got := countLines(logs, "agent events refused"); got != 1 {
+		t.Fatalf("a duplicate re-armed the latch: %d refusal lines\n%s", got, logs.String())
+	}
+	if got := countLines(logs, "agent events stored again"); got != 1 {
+		t.Fatalf("recovery lines = %d, want 1:\n%s", got, logs.String())
+	}
+	emit()
+	if got := countLines(logs, "agent events stored again"); got != 1 {
+		t.Fatalf("recovery logged again with no new refusals: %d lines\n%s", got, logs.String())
 	}
 }

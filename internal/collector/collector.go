@@ -97,9 +97,23 @@ type Collector struct {
 	agentSkews     map[string]time.Duration
 	agentSkewLive  map[string]agentSkewEntry
 	agentSkewOrder []agentSkewEntry
-	probes         []core.ProbeSample
-	started        time.Time
-	baseCtx        context.Context // set by Run; bounds ad-hoc probes past shutdown
+	// windowLost latches a run of agent events the feed window refused, which
+	// it does for an event older than everything it retains: a sender whose
+	// clock lags contributes nothing and is told only that stored came back
+	// under accepted. down and slow latch the same way, for the same reason.
+	// One counter and one name rather than a map keyed on agent: the ingest
+	// endpoint authenticates nobody, so an unbounded per-agent map would be
+	// memory an attacker could name into existence. The run survives the emit
+	// that reported it and clears when an event lands again, so a run that
+	// keeps going stays one line and its end is still reported.
+	windowLost      time.Time // when the current run started; zero when none
+	windowRefused   int       // events refused since the last line
+	windowAgent     string    // the last agent refused, named on the line
+	windowLogged    bool      // the run's opening line is written
+	windowRecovered string    // agent that got back in; closes the run
+	probes          []core.ProbeSample
+	started         time.Time
+	baseCtx         context.Context // set by Run; bounds ad-hoc probes past shutdown
 	// down holds the endpoints that failed their last poll, with when the
 	// outage started and what it said, so the audit log records an engine
 	// going away and coming back once each instead of once per poll.
@@ -390,11 +404,15 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 		}
 		snap.Providers = append(snap.Providers, ps)
 	}
+	// Taken under the lock and written after it, like the transitions above:
+	// a stalled stderr must not stall the poll loop the snapshot depends on.
+	refused := c.drainWindowRefusals()
 	c.mu.Unlock()
 	logHealth(failed, slog.LevelWarn, "toktop: engine not answering")
 	logHealth(recovered, slog.LevelInfo, "toktop: engine answering again")
 	logSlow(slow, slog.LevelWarn, "toktop: engine poll slow")
 	logSlow(fast, slog.LevelInfo, "toktop: engine poll back to normal")
+	logWindowRefusals(refused)
 	// Send outside the critical section: a stalled consumer must neither pin
 	// emit past cancellation nor freeze RecordAgent/RecordProbe/ProbeAll
 	// behind c.mu while this send waits for buffer space.
@@ -622,6 +640,33 @@ func logSlow(changes []healthChange, level slog.Level, msg string) {
 			attrs = append(attrs, "slow_for", ch.heldFor.Round(time.Millisecond))
 		}
 		lg.Log(context.Background(), level, msg, attrs...)
+	}
+}
+
+// logWindowRefusals writes the pair of lines one run of window refusals
+// produces. A sender whose events all sort behind the retained window is
+// dropped with no line of its own, and its sender-side answer (stored under
+// accepted) is the one an ordinary replay also gets, so the agent list goes
+// empty with nothing on it that says why. The first line names the run; the
+// second names its end, when an event was retained again.
+func logWindowRefusals(run windowRun) {
+	if run.empty() {
+		return
+	}
+	lg := audit()
+	if run.refused > 0 {
+		attrs := []any{
+			"agent", logcfg.Field(run.agent, core.AgentNameMax),
+			"refused", run.refused,
+			"reason", "older than the retained agent window",
+		}
+		if run.lostFor > 0 {
+			attrs = append(attrs, "down_for", run.lostFor)
+		}
+		lg.Warn("toktop: agent events refused", attrs...)
+	}
+	if run.recovered {
+		lg.Info("toktop: agent events stored again", "agent", logcfg.Field(run.back, core.AgentNameMax))
 	}
 }
 

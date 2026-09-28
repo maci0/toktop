@@ -13,6 +13,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- The audit log names a run of agent events the retained feed window refused,
+  once when it starts and once when an event lands again. A sender whose clock
+  lags has every event sorted behind the window, and the only record was
+  `stored` under `accepted` on its own POST, which is the answer a replay also
+  gets: the agent list went empty with nothing on it saying why.
+
+- A `POST /v1/events` carrying an `Idempotency-Key` audits `event_key`, the
+  hashed prefix its derived event ids start with, so the request and the feed
+  rows it minted can be matched on one field.
+
 ### Fixed
 
 - `toktop --demo --ingest` deduplicates agent events through a bounded

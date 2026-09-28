@@ -377,7 +377,9 @@ checked: the body is always read as JSON/NDJSON, so plain `curl -d` works
 unmodified.
 Every POST is logged to stderr as one structured line (`req`, `method`,
 `path`, `status`, `accepted`, `stored`, `duration`, `remote`; failures add
-`error`).
+`error`). A POST carrying an `Idempotency-Key` adds `event_key`, the hashed
+prefix its derived event ids start with, so a request can be matched against
+the rows it minted.
 Wrong-method and unknown-path requests log the same way, so a harness
 posting to `/events` is not silent. `GET /healthz` is not logged. It answers
 `503` with `Retry-After: 1` and a one-line reason while all 64 event slots are
