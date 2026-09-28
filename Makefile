@@ -395,8 +395,13 @@ BOTH_HALVES = $(if $(TESTTAGS),,$(filter \
 #
 # TEST_HALF is the tags of the half under test, set by the caller; the second
 # line is the sqlite half, which only runs when TESTTAGS is unset.
+#
+# The tag list is one -tags argument, so $$tags stays quoted: unquoted it
+# split "sqlite timetzdata" into two words and go read the second as a
+# package pattern, the listing failed, and every RUN against a half with
+# more than one tag was refused as matching no test.
 define CHECK_RUN_MATCHES
-matched() { tags="-tags $(ZONE_TAG)"; [ -n "$$1" ] && tags="-tags $$1 $(ZONE_TAG)"; $(GO) test -mod=readonly $$tags -list "$(RUN_PATTERN)" "$(PKG)" 2>/dev/null | grep -E '^(Test|Example|Benchmark|Fuzz)' || true; }; \
+matched() { tags="$(ZONE_TAG)"; [ -n "$$1" ] && tags="$$1 $(ZONE_TAG)"; $(GO) test -mod=readonly -tags "$$tags" -list "$(RUN_PATTERN)" "$(PKG)" 2>/dev/null | grep -E '^(Test|Example|Benchmark|Fuzz)' || true; }; \
 	names=$$(matched "$(TESTTAGS)"); \
 	if [ -z "$$names" ] && [ -n "$(BOTH_HALVES)" ]; then names=$$(matched sqlite); fi; \
 	if [ -z "$$names" ]; then \
@@ -663,19 +668,21 @@ WORKFLOWS := $(wildcard .github/workflows/*.yml)
 # is therefore invisible on the default loop and lands on the RACE=0 loop,
 # the one contributors are told to use for a faster cycle.
 #
-# Three rules, all read off the recipe source with index() rather than a
+# Four rules, all read off the recipe source with index() rather than a
 # regexp: the pattern text here is `$(race_flag)`, whose parentheses and
 # dollar sign are regexp metacharacters, and a mangled pattern is a check
 # that fires on every line or none. Every `$(GO) test` line must name the
 # zone tag (directly or through GOTAGS); none may put `$(race_flag)`
-# against a preceding non-space character; and every one that runs tests
-# rather than listing them must carry -shuffle=on.
+# against a preceding non-space character; none may hand -tags an unquoted
+# shell variable where the shell splits a two-tag list into a tag and a
+# package pattern; and every one that runs tests rather than listing them
+# must carry -shuffle=on.
 #
 # The guard skips any line containing awk, because its own recipe lines
 # quote the very text being searched for and a check that matches itself
 # reports every line it was meant to skip.
 .PHONY: check-test-flags
-check-test-flags: ## fail if a Makefile go test line lost the zone tag, glued a flag onto it, or dropped -shuffle=on
+check-test-flags: ## fail if a Makefile go test line lost the zone tag, glued a flag onto it, split -tags, or dropped -shuffle=on
 	@untagged=$$(awk '/^[[:space:]]*#/ || /awk/ { next } index($$0, "$$(GO) test") && !index($$0, "$$(ZONE_TAG)") && !index($$0, "$$(GOTAGS") { print "  Makefile:" FNR ": " $$0 }' $(MAKEFILE_LIST)); \
 	if [ -n "$$untagged" ]; then \
 		echo "make check-test-flags: these lines run go test without -tags $(ZONE_TAG), so they test a binary without the embedded zone database, which is the fallback the released binaries no longer have:" >&2; \
@@ -692,6 +699,12 @@ check-test-flags: ## fail if a Makefile go test line lost the zone tag, glued a 
 	if [ -n "$$unshuffled" ]; then \
 		echo "make check-test-flags: these lines run tests without -shuffle=on, so an order-dependent test passes locally and fails under the shuffled order CI uses:" >&2; \
 		echo "$$unshuffled" >&2; \
+		exit 1; \
+	fi
+	@split=$$(awk '/^[[:space:]]*#/ || /awk/ { next } index($$0, "$$(GO) test") { p = index($$0, "-tags $$"); if (p > 0 && substr($$0, p + 7, 1) ~ /^[A-Za-z_]$$/) print "  Makefile:" FNR ": " $$0 }' $(MAKEFILE_LIST)); \
+	if [ -n "$$split" ]; then \
+		echo "make check-test-flags: these lines hand -tags an unquoted shell variable holding more than one tag, and the shell splits it: go takes the first word as the tag list and the rest as package patterns, the run fails with 'package <tag> is not in std', and the line it was meant to run is never reached:" >&2; \
+		echo "$$split" >&2; \
 		exit 1; \
 	fi
 
