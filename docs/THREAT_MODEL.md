@@ -108,10 +108,14 @@ What is worth stealing, corrupting, or denying:
   from `history.jsonl` or `cache/last_conversations.json`, only steps that
   carry token counts), clanker
   (its token log inside the repository it runs in, registry.go, 126-133), and
-  the built-in pi, prime-agent, and feynman definitions
-  (agentusage/definitions.go, 115-121), and kimi
+  the built-in pi, prime-agent, feynman, and omp definitions
+  (`~/.pi/agent/sessions`, `~/.prime/agent/sessions`, `~/.feynman/sessions`,
+  `~/.omp/agent/sessions`), cursor-agent
+  (`~/.cursor/projects/<project>/agent-transcripts`, only lines that carry
+  token counts), and kimi
   (`~/.kimi-code/sessions`, agentusage/kimi.go, 69). Beyond plain JSONL, dsh's default
-  `session.v<N>.jsonl.zstd` (concatenated zstd frames, agentusage/dsh.go),
+  `session.v<N>.jsonl.zstd` (concatenated zstd frames, agentusage/dsh.go)
+  and the same records under `~/.dsh-native/sessions`,
   crush's project database `.crush/crush.db`
   (agentusage/crush_sqlite.go, gated by the `sqlite` build tag and
   no extra flag), and opencode's `~/.local/share/opencode/opencode.db` or

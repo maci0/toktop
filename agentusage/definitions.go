@@ -22,8 +22,8 @@ import (
 //
 // Recognition and readability are separate questions: an agent here is one
 // whose process can be identified, which is what makes it appear in Discover.
-// Whether its tokens can be read is decided by the adapters in registry.go, and
-// most of this list keeps no transcript worth reading.
+// Whether its tokens can be read is decided by the adapters in registry.go
+// and the definitions below.
 var knownAgents = []string{
 	"agy", "claude", "clanker", "codex", "copilot", "crush", "cursor-agent",
 	"dsh", "feynman", "gemini", "grok", "kimi", "omp", "opencode", "pi",
@@ -127,10 +127,14 @@ func bumpDefsGen() { defsGen.Add(1) }
 // builtinDefs are the definitions compiled into this build, which
 // ResetDefinitions restores.
 func builtinDefs() map[string]Spec {
+	// HeaderCwd: the session file's first record names the working directory,
+	// and the usage lines after it do not. Without that, every session under
+	// the store would count for every project.
 	return map[string]Spec{
-		"pi":          {Roots: []string{"~/.pi/agent/sessions"}},
-		"prime-agent": {Roots: []string{"~/.prime/agent/sessions"}},
-		"feynman":     {Roots: []string{"~/.feynman/sessions"}},
+		"pi":          {Roots: []string{"~/.pi/agent/sessions"}, HeaderCwd: true},
+		"prime-agent": {Roots: []string{"~/.prime/agent/sessions"}, HeaderCwd: true},
+		"feynman":     {Roots: []string{"~/.feynman/sessions"}, HeaderCwd: true},
+		"omp":         {Roots: []string{"~/.omp/agent/sessions"}, HeaderCwd: true},
 	}
 }
 

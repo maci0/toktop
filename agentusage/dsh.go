@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -289,10 +290,67 @@ func (w *Watcher) ownsZstd(path string, f *os.File) (mine, decided bool) {
 			return mine, true
 		}
 	}
-	// The first complete frames had no cwd. That is the header; waiting
-	// longer will not invent one.
+	// The first complete frames had no cwd. A project-scoped root still owns
+	// the file when the frames decoded: a native log has no header to wait
+	// for. A frame that did not decode is not that case.
+	if derr == nil && w.ad.rootOwns {
+		w.owner[path] = true
+		return true, true
+	}
 	w.owner[path] = false
 	return false, true
+}
+
+// pathSlug is the single path component an agent uses for a working
+// directory. Separators and ':' become '-', so the name is legal on Windows
+// and does not introduce another directory. A component that already
+// contains '-' is not recoverable from the slug; callers compare a path
+// they have, they do not decode one.
+func pathSlug(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	// Both separators, on either OS: a Windows path written into a fixture
+	// still has to become one component when the test runs on Linux, where
+	// filepath.ToSlash leaves '\' alone.
+	s := strings.ReplaceAll(filepath.Clean(dir), "\\", "/")
+	s = strings.TrimPrefix(s, "/")
+	s = strings.ReplaceAll(s, ":", "-")
+	s = strings.ReplaceAll(s, "/", "-")
+	if s == "" || s == "." {
+		return ""
+	}
+	return s
+}
+
+// dshDirName is the session directory the harness creates for one working
+// directory, under both ~/.dsh/sessions and ~/.dsh-native/sessions.
+func dshDirName(dir string) string {
+	slug := pathSlug(dir)
+	if slug == "" {
+		return ""
+	}
+	return "--" + slug + "--"
+}
+
+// dshRoots is the project directory inside each dsh store. The store holds
+// every project, so the walk is the one directory this working directory
+// names rather than the whole tree.
+func dshRoots(dir string) []string {
+	var out []string
+	for _, root := range []string{home(".dsh", "sessions"), home(".dsh-native", "sessions")} {
+		if root == "" {
+			continue
+		}
+		for _, spelling := range dirSpellings(dir) {
+			name := dshDirName(spelling)
+			if name == "" {
+				continue
+			}
+			out = append(out, filepath.Join(root, name))
+		}
+	}
+	return out
 }
 
 // decodeZstdPrefix decompresses every complete frame at the front of src

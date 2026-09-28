@@ -349,14 +349,20 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 		}
 		lines++
 	}
-	if lines < ownerScanLines {
-		// The file ended before the cap: the header may simply not be
-		// written yet. Stay undecided and uncached.
+	if err := sc.Err(); err != nil {
 		return false, false
 	}
-	// The scan cap was reached with no header anywhere in it, so there is
-	// nothing to wait for: refuse durably rather than credit another
-	// project's tokens to this working directory.
+	// No cwd anywhere in what was written. A root that is already one
+	// project's directory owns the file: dsh-native and cursor-agent logs
+	// never grow a header. Anywhere else, a short file may still be flushing
+	// its header, and a long one has none and must not be credited here.
+	if w.ad.rootOwns && lines > 0 {
+		w.owner[path] = true
+		return true, true
+	}
+	if lines < ownerScanLines {
+		return false, false
+	}
 	w.owner[path] = false
 	return false, true
 }

@@ -46,6 +46,10 @@ type adapter struct {
 	// directory its agents/ directory sits under). nil when the transcript or
 	// its header names the directory.
 	sessionCwdFile func(path string) (string, bool)
+	// rootOwns says a transcript whose header never names a working directory
+	// still belongs to this watcher. The roots are already one project's
+	// directory. A header that does name a directory still decides.
+	rootOwns bool
 }
 
 // perFileOwner reports whether ownership is decided per transcript file
@@ -82,12 +86,18 @@ var adapters = map[string]adapter{
 	// cwd, like opencode's directory column and every other adapter here. A
 	// `dsh web` server launched in one directory therefore reads the sessions
 	// of that directory, not the ones it hosts for other projects.
+	// Both stores key a project as --<slug>--, where slug is the absolute
+	// path with separators turned into '-'. ~/.dsh/sessions is the harness
+	// default. ~/.dsh-native/sessions is the same log written without zstd,
+	// and those files often have no cwd of their own: the directory is the
+	// attribution, and a header that does name one still wins.
 	"dsh": {
-		roots:      func(string) []string { return []string{home(".dsh", "sessions")} },
+		roots:      dshRoots,
 		suffixes:   []string{dshZstdSuffix, ".jsonl"},
 		kind:       perMessage,
 		parse:      parseDsh,
 		sessionCwd: genericSessionCwd,
+		rootOwns:   true,
 	},
 
 	// clanker keeps its own token log inside the repository it runs in, one
@@ -157,6 +167,19 @@ var adapters = map[string]adapter{
 		kind:           perMessage,
 		parse:          parseAgy,
 		sessionCwdFile: agySessionCwd,
+	},
+	// cursor-agent appends one JSONL per chat under
+	// ~/.cursor/projects/<slug>/agent-transcripts. The slug is the working
+	// directory with separators turned into '-'. A line counts only when it
+	// carries token usage; the directory is the attribution, since the
+	// transcript itself does not repeat the cwd.
+	"cursor-agent": {
+		roots:      cursorRoots,
+		suffix:     ".jsonl",
+		kind:       perMessage,
+		parse:      parseGeneric,
+		sessionCwd: genericSessionCwd,
+		rootOwns:   true,
 	},
 	// Grok writes one usage.json per session, rewritten in place with the
 	// session's own totals, under ~/.grok/sessions/<encoded cwd>/<id>/.

@@ -78,6 +78,10 @@ var (
 		"cache_read_tokens": true, "cache_creation_tokens": true,
 		// Kimi Code CLI's own spelling of the same two shares.
 		"inputcacheread": true, "inputcachecreation": true,
+		// pi and the agents built on it (prime-agent, feynman, omp) spell the
+		// two billed cache shares cacheRead and cacheWrite. They are the
+		// bulk of a turn's prompt: input alone is the uncached remainder.
+		"cacheread": true, "cachewrite": true,
 	}
 	// Fields naming the working directory a record belongs to.
 	cwdKeys = map[string]bool{

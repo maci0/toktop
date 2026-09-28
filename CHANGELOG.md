@@ -13,6 +13,26 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- cursor-agent transcripts under `~/.cursor/projects/<project>/agent-transcripts`
+  are read when a line carries token counts. A line that names none
+  contributes nothing. The project directory is the working directory with
+  its separators folded into the name.
+- omp (oh-my-pi) sessions under `~/.omp/agent/sessions` are read the same way
+  as pi. A session counts for the working directory its header records.
+- dsh also reads `~/.dsh-native/sessions`, the uncompressed store beside
+  `~/.dsh/sessions`. A log that never writes a cwd still counts for the
+  project directory it sits in.
+
+### Fixed
+
+- pi, prime-agent, and feynman session logs count `cacheRead` and
+  `cacheWrite` as billed prompt. Those shares were dropped, so a turn whose
+  prompt was almost entirely cached reported only the uncached remainder.
+  A session is attributed by the cwd on its header, so another project's
+  transcript in the same store is not counted.
+
 ## [0.17.1] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

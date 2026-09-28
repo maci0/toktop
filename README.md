@@ -73,14 +73,18 @@ added on top of the engine's own numbers.
 
 Once asked for, nothing else has to be configured and the agent does not have
 to cooperate: claude, codex, qwen, copilot, kimi, gemini, grok, agy, pi,
-prime-agent, feynman, clanker, crush, opencode, and dsh all keep records
+prime-agent, feynman, omp, cursor-agent, clanker, crush, opencode, and dsh all keep records
 carrying the provider's own counts (JSONL transcripts, except opencode and
 crush which keep SQLite stores, and grok which rewrites one usage.json per
 session). Gemini CLI chats live under `~/.gemini/tmp`, Grok under
 `~/.grok/sessions`, and Antigravity (`agy`) under `~/.gemini/antigravity-cli`.
 An agy step that names no tokens contributes nothing. Its workspace comes
 from `history.jsonl`, or from `cache/last_conversations.json` when the
-history has no line for that conversation.
+history has no line for that conversation. cursor-agent transcripts live
+under `~/.cursor/projects`, omp under `~/.omp/agent/sessions`, and dsh also
+reads `~/.dsh-native/sessions`. pi, prime-agent, feynman, and omp count
+`cacheRead` and `cacheWrite` with the prompt, and a session counts only for
+the working directory its header records.
 dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 Agents that report nothing show no rate rather than a zero.

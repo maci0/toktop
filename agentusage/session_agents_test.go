@@ -16,7 +16,7 @@ import (
 // The agents named for this package have to be readable. crush and opencode
 // are covered with the sqlite tag, because that is what links their driver.
 func TestNamedFileAgentsAreReadable(t *testing.T) {
-	for _, tool := range []string{"dsh", "kimi", "agy", "claude", "grok", "codex", "gemini", "qwen"} {
+	for _, tool := range []string{"dsh", "kimi", "agy", "claude", "grok", "codex", "gemini", "qwen", "cursor-agent", "omp", "pi", "prime-agent", "feynman"} {
 		if !Supported(tool) {
 			t.Errorf("Supported(%s) = false", tool)
 		}
