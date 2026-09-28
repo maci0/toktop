@@ -4,6 +4,7 @@ package collector
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"slices"
 	"sync"
@@ -94,6 +95,7 @@ type Collector struct {
 	probes          []core.ProbeSample
 	started         time.Time
 	baseCtx         context.Context // set by Run; bounds ad-hoc probes past shutdown
+	running         bool            // a Run is live: see errRunInProgress
 	// down holds the endpoints that failed their last poll, with when the
 	// outage started and what it said, so the audit log records an engine
 	// going away and coming back once each instead of once per poll.
@@ -214,11 +216,32 @@ func (c *Collector) clock() (time.Time, time.Time) {
 	return c.now(), c.started
 }
 
-// Run polls until ctx is cancelled, emitting one Snapshot per interval.
-func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
-	c.mu.Lock()
-	c.baseCtx = ctx
-	c.mu.Unlock()
+// errRunInProgress is what a second concurrent Run is refused with. A
+// collector is built for one run: the pollers, the rate baselines and the
+// down/slow latches below all belong to that one.
+var errRunInProgress = errors.New("collector: already running")
+
+// Run polls until ctx is cancelled, emitting one Snapshot per interval, and
+// returns nil when the context ends the loop.
+//
+// A second Run while the first is live is refused with errRunInProgress and
+// starts nothing. Two Run loops on one collector do not poll twice and report
+// twice; they divide one dashboard's state between them. Each loop starts its
+// own process-table and host-vitals poller, so the vendor CLIs run twice as
+// often and the caches are force-refreshed by each loop's own tick; each
+// writes its own Snapshot into the same channel, so the consumer renders every
+// frame twice; and both fold their polls into the same prev baselines and the
+// same down/slow latches, so a rate is measured across one loop's samples while
+// the other loop's sit in between, and a transition that one loop logged is
+// logged again by the other against a state the first already moved.
+//
+// The claim is released when the loop returns, so a restart after a finished
+// run is unaffected: what is refused is a second live loop, not a second run.
+func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) error {
+	if !c.claimRun(ctx) {
+		return errRunInProgress
+	}
+	defer c.releaseRun()
 	procDone := c.startProcPoller(ctx)
 	defer func() { <-procDone }()
 	// Warm the vitals cache before the first emit so that frame is a cache
@@ -231,6 +254,29 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) {
 	// is still being written to out.
 	emit := func() { c.emit(ctx, out) }
 	<-core.Tick(ctx, c.interval, emit, emit)
+	return nil
+}
+
+// claimRun takes the single live-run claim and records the context ad-hoc
+// probes are bounded by. It reports false when another Run already holds it,
+// having changed nothing.
+func (c *Collector) claimRun(ctx context.Context) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.running {
+		return false
+	}
+	c.running = true
+	c.baseCtx = ctx
+	return true
+}
+
+// releaseRun hands the claim back, so a run started after the previous one
+// returned is not read as a second live loop.
+func (c *Collector) releaseRun() {
+	c.mu.Lock()
+	c.running = false
+	c.mu.Unlock()
 }
 
 // result is one engine's poll outcome, paired so the fan-out can write each

@@ -50,6 +50,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   assistive technology, so a screen reader announces the command rather than
   a "dollar" in front of it.
 
+- A second `collector.Run` on a live collector is refused instead of run
+  alongside the first. Two loops on one collector start a second pair of
+  background pollers, write a second snapshot per interval into the same
+  channel, and fold their polls into the same rate baselines and health
+  latches, so every frame was rendered twice and each rate was measured across
+  the other loop's samples. A run started after the previous one returned is
+  unaffected.
+
 - The working-directory note a macOS watcher builds strips the home directory
   across Unicode normalization, the way the log redactor already does. A home
   macOS stored decomposed and a working directory an agent recorded composed

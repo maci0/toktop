@@ -729,6 +729,60 @@ func TestRunEmitsUntilCancel(t *testing.T) {
 	})
 }
 
+// A collector is built for one live run. A second Run alongside the first
+// would start a second pair of pollers, write a second Snapshot per interval
+// into the same channel, and fold its polls into the same rate baselines, so
+// the second call is refused rather than run alongside the first. A run
+// started after the first returned is a restart and still works.
+func TestRunRefusesASecondLiveRun(t *testing.T) {
+	fp := fakeProvider{label: "run", m: &provider.Metrics{
+		OutTotal: 1, Models: []core.ModelInfo{{Name: "m"}},
+	}}
+	newCollector := func() (*Collector, chan core.Snapshot) {
+		c := New([]provider.Provider{fp.asProvider()}, 5*time.Millisecond)
+		c.SetSysFn(func() core.SysSample { return core.SysSample{} })
+		c.procFn = func() []procs.Info { return nil }
+		return c, make(chan core.Snapshot, 8)
+	}
+
+	c, ch := newCollector()
+	ctx, cancel := context.WithCancel(t.Context())
+	first := make(chan error, 1)
+	go func() { first <- c.Run(ctx, ch) }()
+	// One frame proves the first run holds the claim before the second calls.
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first Run never emitted")
+	}
+	if err := c.Run(ctx, ch); !errors.Is(err, errRunInProgress) {
+		t.Fatalf("second Run = %v, want errRunInProgress", err)
+	}
+	if n := len(ch); n != 0 {
+		t.Fatalf("the refused Run emitted %d snapshots", n)
+	}
+	cancel()
+	if err := <-first; err != nil {
+		t.Fatalf("first Run = %v, want nil", err)
+	}
+
+	// The claim is released on return, so a restart is not read as a second
+	// live loop and a collector that was stopped can still be run again.
+	ctx2, cancel2 := context.WithCancel(t.Context())
+	defer cancel2()
+	restart := make(chan error, 1)
+	go func() { restart <- c.Run(ctx2, ch) }()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the restarted Run never emitted")
+	}
+	cancel2()
+	if err := <-restart; err != nil {
+		t.Fatalf("restarted Run = %v, want nil", err)
+	}
+}
+
 // Run warms the vitals cache before its first emit, so the (potentially
 // seconds-slow) sampler - GPU vendor CLIs especially - never runs inside
 // emit's c.mu critical section: ingest handlers and probe launches must stay
