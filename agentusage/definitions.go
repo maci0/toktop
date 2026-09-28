@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +17,8 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/text/unicode/norm"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // knownAgents are the CLIs this package recognizes by name.
@@ -200,9 +203,19 @@ type definitionFile map[string]*struct {
 	} `json:"usage,omitempty"`
 }
 
+// maxDefinitionsBytes bounds the agent definitions file. It is a JSON object
+// of transcript locations, so a real one is a few kilobytes; a file past this
+// is a mistake or an attack, and either way must not be read into memory to be
+// rejected. The read is capped here rather than by a Stat so a file grown
+// between the two cannot slip past the bound, and json.Unmarshal below builds
+// a second copy of everything it decodes, so an uncapped read costs twice what
+// the file is.
+const maxDefinitionsBytes = 8 << 20
+
 // ErrInvalidDefinitions is returned by LoadDefinitions when the file exists
-// but has invalid JSON or colliding agent names after normalization. JSON
-// errors are wrapped, so errors.As still recovers the parse position.
+// but cannot be used: invalid JSON, colliding agent names after normalization,
+// or a file past maxDefinitionsBytes. JSON errors are wrapped, so errors.As
+// still recovers the parse position.
 var ErrInvalidDefinitions = errors.New("malformed agent definitions")
 
 // ErrCollidingDefinitions marks an agents.json holding two names that NFC
@@ -212,16 +225,46 @@ var ErrInvalidDefinitions = errors.New("malformed agent definitions")
 // whose JSON is wrong from one whose agent names are, and say which.
 var ErrCollidingDefinitions = errors.New("agent names collide after NFC normalization")
 
+// redactedError renders a diagnostic with the home directory folded out while
+// keeping the wrapped cause reachable through errors.Is and errors.As.
+//
+// The fold has to run over the whole rendered message, not just the path this
+// function interpolates: an *fs.PathError from the os package carries its own
+// copy of the absolute path, so a message that names the file twice would leak
+// the account through the second copy. Formatting the message and then
+// discarding the chain to fold it would cost the callers their errors.Is
+// checks, so the fold is a wrapper rather than a rewrite.
+type redactedError struct {
+	msg   string
+	cause error
+}
+
+func (e redactedError) Error() string { return e.msg }
+func (e redactedError) Unwrap() error { return e.cause }
+
+// defsErr builds a LoadDefinitions diagnostic with the home directory folded
+// out. Every error this function returns goes through it, since every one
+// names a file under $HOME. The cause is joined rather than interpolated so
+// errors.Is still matches every error named in the message, which is the
+// contract LoadDefinitions documents for ErrInvalidDefinitions.
+func defsErr(causes []error, format string, args ...any) error {
+	return redactedError{
+		msg:   core.RedactHome(fmt.Sprintf(format, args...)),
+		cause: errors.Join(causes...),
+	}
+}
+
 // LoadDefinitions reads agent definitions from a JSON file, teaching this
 // package about agents it was not compiled to know, including where they keep
 // their transcripts:
 //
 //	{"myagent": {"usage": {"roots": ["~/.myagent/sessions"]}}}
 //
-// A missing file is not an error, since most machines have none. A malformed
-// or unreadable one is: running with a half-loaded agent set is worse than
-// refusing. The error names the file; errors.Is matches ErrInvalidDefinitions
-// for invalid JSON or colliding agent names after normalization.
+// A missing file is not an error, since most machines have none. A malformed,
+// oversize or unreadable one is: running with a half-loaded agent set is worse
+// than refusing. The error names the file, with $HOME folded to "~" so the
+// line can be pasted into issues; errors.Is matches ErrInvalidDefinitions for
+// a file that exists but cannot be used.
 //
 // A definition may replace another definition, including one compiled into
 // this build: the pi family is defined rather than adapted, so a file naming
@@ -246,20 +289,29 @@ var ErrCollidingDefinitions = errors.New("agent names collide after NFC normaliz
 // that agent rather than adding a second copy. [ResetDefinitions] drops
 // everything this call added.
 func LoadDefinitions(path string) error {
-	data, err := os.ReadFile(path)
+	// Every diagnostic below names the file, and the file is an absolute path
+	// under $HOME ($GAUNTLET_HOME/agents.json, or ~/.gauntlet/agents.json): it
+	// names the account, and these are the lines pasted into issues. defsErr
+	// folds the home out of all of them, the way warnIgnoredGauntletHome and
+	// the ssh store's reader both spell the same path, so the reason the file
+	// could not be used survives while the account name does not.
+	data, err := readCapped(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		return fmt.Errorf("agent definitions %s: %w", path, err)
+		if errors.Is(err, errDefinitionsTooLarge) {
+			return defsErr([]error{ErrInvalidDefinitions, err}, "%s: %s: %v", ErrInvalidDefinitions, path, err)
+		}
+		return defsErr([]error{err}, "agent definitions %s: %v", path, err)
 	}
 	data = bytes.TrimPrefix(data, utf8BOM)
 	var file definitionFile
 	if err := json.Unmarshal(data, &file); err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrInvalidDefinitions, path, err)
+		return defsErr([]error{ErrInvalidDefinitions, err}, "%s: %s: %v", ErrInvalidDefinitions, path, err)
 	}
 	if file == nil {
-		return fmt.Errorf("%w: %s: expected an object, not null", ErrInvalidDefinitions, path)
+		return defsErr([]error{ErrInvalidDefinitions}, "%s: %s: expected an object, not null", ErrInvalidDefinitions, path)
 	}
 	type pendingSpec struct {
 		name string
@@ -269,7 +321,7 @@ func LoadDefinitions(path string) error {
 	seen := make(map[string]string, len(file))
 	for name, def := range file {
 		if def == nil {
-			return fmt.Errorf("%w: %s: agent %q must be an object, not null", ErrInvalidDefinitions, path, name)
+			return defsErr([]error{ErrInvalidDefinitions}, "%s: %s: agent %q must be an object, not null", ErrInvalidDefinitions, path, name)
 		}
 		canonical := canonicalTool(name)
 		if canonical == "" || def.Usage == nil {
@@ -285,7 +337,8 @@ func LoadDefinitions(path string) error {
 			continue
 		}
 		if prev, dup := seen[canonical]; dup {
-			return fmt.Errorf("%w: %s: %w: %q and %q both reduce to %q",
+			return defsErr([]error{ErrInvalidDefinitions, ErrCollidingDefinitions},
+				"%s: %s: %s: %q and %q both reduce to %q",
 				ErrInvalidDefinitions, path, ErrCollidingDefinitions, prev, name, canonical)
 		}
 		spec := Spec{
@@ -313,6 +366,35 @@ func LoadDefinitions(path string) error {
 		bumpDefsGen()
 	}
 	return nil
+}
+
+// errDefinitionsTooLarge marks a definitions file past the cap. It is folded
+// into ErrInvalidDefinitions at the call site, because a file too large to
+// hold definitions is one LoadDefinitions already refuses, and the caller
+// contract is that every refusal of a file that exists is that error: a
+// second kind would split it in two for no reason a caller could act on.
+var errDefinitionsTooLarge = errors.New("agent definitions file is too large")
+
+// readCapped reads the definitions file whole, refusing one past
+// maxDefinitionsBytes. One byte past the cap is read so a truncated file
+// cannot decode as a complete document, the same shape snapshotValue applies
+// to a transcript snapshot. A missing file is returned as the os error it is,
+// so the caller keeps telling "no definitions here" apart from "definitions
+// unreadable": the first is the ordinary case, the second is a fault.
+func readCapped(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxDefinitionsBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxDefinitionsBytes {
+		return nil, fmt.Errorf("%w: over %d bytes", errDefinitionsTooLarge, maxDefinitionsBytes)
+	}
+	return data, nil
 }
 
 // DefinitionsPath is where agent definitions live by default. It follows

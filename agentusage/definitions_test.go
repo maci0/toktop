@@ -175,6 +175,90 @@ func TestLoadDefinitionsRejectsMalformedFile(t *testing.T) {
 	}
 }
 
+// A file past the cap is refused, not read: it cannot be a definitions file,
+// and json.Unmarshal builds a second copy of everything it decodes, so an
+// uncapped read costs twice what the file is. The refusal is the same error a
+// malformed file gets, so the caller contract (every refusal of a file that
+// exists is ErrInvalidDefinitions) holds, and it registers nothing.
+func TestLoadDefinitionsRejectsOversizeFile(t *testing.T) {
+	// A valid document padded past the cap: the size is what must be refused,
+	// not the JSON, which decodes cleanly on its own.
+	body := `{"a":{"usage":{"roots":["~"]}},"pad":"` + strings.Repeat("x", maxDefinitionsBytes) + `"}`
+	path := writeDefs(t, body)
+	saved := snapshotDefs()
+	t.Cleanup(func() { restoreDefs(saved) })
+
+	err := LoadDefinitions(path)
+	if err == nil {
+		t.Fatal("oversize definitions accepted")
+	}
+	if !errors.Is(err, ErrInvalidDefinitions) {
+		t.Fatalf("oversize file = %v, want ErrInvalidDefinitions", err)
+	}
+	if _, ok := definedSpec("a"); ok {
+		t.Error("rejected oversize file still registered an agent")
+	}
+}
+
+// A file at the cap is still read: the bound is on what is refused, not on
+// what is accepted. The padding is inter-token whitespace, which keeps the
+// document valid JSON without adding a top-level key the value struct cannot
+// hold.
+func TestLoadDefinitionsAcceptsFileAtCap(t *testing.T) {
+	const prefix = `{"a":{"usage":{"roots":["~"]}}`
+	body := prefix + strings.Repeat(" ", maxDefinitionsBytes-len(prefix)-1) + "}"
+	path := writeDefs(t, body)
+	dropDefs(t, "a")
+
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatalf("file at the cap = %v, want nil", err)
+	}
+	if _, ok := definedSpec("a"); !ok {
+		t.Error("file at the cap did not register its agent")
+	}
+}
+
+// Every LoadDefinitions diagnostic names the file, and the file is an absolute
+// path under $HOME: it names the account, and these are the lines pasted into
+// issues. The home is folded out of all of them.
+func TestLoadDefinitionsErrorsRedactHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"unreadable", ""},
+		{"malformed", "{oops"},
+		{"null", "null"},
+		{"null agent", `{"a":null}`},
+		{"colliding", "{\"cafe\\u0301\":{\"usage\":{\"roots\":[\"~\"]}},\"caf\\u00e9\":{\"usage\":{\"roots\":[\"~\"]}}}"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(home, "agents.json")
+			if tc.body != "" {
+				if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				// A directory where the file belongs: a read error, which is
+				// the one refusal that is not ErrInvalidDefinitions.
+				path = filepath.Join(home, "as-directory")
+				if err := os.Mkdir(path, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			err := LoadDefinitions(path)
+			if err == nil {
+				t.Fatal("bad definitions accepted")
+			}
+			if strings.Contains(err.Error(), home) {
+				t.Errorf("error leaks the home directory: %v", err)
+			}
+		})
+	}
+}
+
 // Only token-bearing definitions mean anything here: a launch-only entry says
 // nothing about transcripts and must be skipped, a blank name is unusable,
 // and a full entry carries every usage field through.
