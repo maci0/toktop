@@ -269,6 +269,9 @@ since the watcher attached, so a program reporting events takes the growth
 between two of them from `Sample.Delta`.
 `Rate` is output tokens per second between two samples; `InputRate` is the
 same for billed prompt tokens, and `ThinkingRate` for the reasoning share.
+Each has a method form taking the two samples in the order a caller holds
+them, as `cur.RateFrom(prev)` and `cur.InputRateFrom(prev)`, so the pair
+cannot be swapped at the call site.
 All three divide
 by the time the model spent (`Sample.Span`) when the transcript recorded it,
 and by the gap between the two readings when it did not, and all three report

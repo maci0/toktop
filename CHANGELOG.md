@@ -25,6 +25,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- `Sample.RateFrom`, `Sample.InputRateFrom` and `Sample.ThinkingRateFrom`
+  take the two samples the way a caller holds them, as `cur.Delta(prev)`
+  already does. `Rate`, `InputRate` and `ThinkingRate` are two `Sample`
+  arguments in an order only the names distinguish, and a swapped pair
+  reports no rate rather than failing, so a `Run` callback now measures an
+  interval the same way it reports one.
+
 - The THROUGHPUT and PROMPT panel titles name the peak their braille plot is
   scaled against, and `--once --plain` prints a `THROUGHPUT` section with
   both peaks and the window they were measured over. The plots were the one
@@ -81,6 +88,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   screenshot whose frame was overridden had no account of the size. The
   override is named only where the sized frame is what renders, since
   `--plain` and `--json` replace it.
+
+- `agentusage.Discover` returns its processes in ascending pid order. It read
+  the `/proc` entry names as strings, so a program listing the agents on a
+  machine showed pids 1, 10, 100, 11, 2.
 
 - The web site no longer removes the focus outline from the skip link's
   target. `main` takes focus from that key press, so a keyboard user who

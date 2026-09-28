@@ -98,12 +98,28 @@ func (s Sample) Delta(prev Sample) (Delta, bool) {
 	return d, d.Output > 0 || d.Thinking > 0 || d.Input > 0
 }
 
+// RateFrom returns output tokens per second between prev and the current
+// sample, and whether it could be computed. It is [Rate] with the two samples
+// in the order a caller holds them, the same shape as [Sample.Delta], so the
+// arguments cannot be swapped at the call site: cur.RateFrom(prev), never
+// Rate(prev, cur) with the names to keep straight.
+func (s Sample) RateFrom(prev Sample) (float64, bool) { return Rate(prev, s) }
+
+// InputRateFrom is [InputRate] in the same argument order as [Sample.RateFrom].
+func (s Sample) InputRateFrom(prev Sample) (float64, bool) { return InputRate(prev, s) }
+
+// ThinkingRateFrom is [ThinkingRate] in the same argument order as
+// [Sample.RateFrom].
+func (s Sample) ThinkingRateFrom(prev Sample) (float64, bool) { return ThinkingRate(prev, s) }
+
 // Rate returns output tokens per second between two samples, and whether it
 // could be computed at all. Both samples need a timestamp: a missing one is
 // not a reading, and treating it as the zero instant would invent a rate off
 // a first sample whose counter has already grown. It never extrapolates:
 // without two readings and a positive span there is no rate to report.
-// Prompt growth is InputRate.
+// Prompt growth is InputRate. A caller holding the current sample calls
+// [Sample.RateFrom] instead, which takes the two in the same order as
+// [Sample.Delta].
 //
 // The span it divides by is the time the model spent producing the interval's
 // tokens when the transcript recorded one ([Sample.Span]), and the wall gap

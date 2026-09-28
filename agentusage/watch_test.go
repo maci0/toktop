@@ -494,6 +494,40 @@ func TestRateUsesRecordedSpanOverTheWallGap(t *testing.T) {
 	}
 }
 
+// The method forms exist so the two samples cannot be swapped at the call
+// site, which means each one has to agree with the function it mirrors, on
+// both the growth case and the no-growth one.
+func TestRateMethodsMatchTheFunctions(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	prev := Sample{Output: 100, Input: 400, Thinking: 20, Span: 4 * time.Second, At: t0}
+	cases := []struct {
+		name string
+		cur  Sample
+	}{
+		{"growth over the recorded span", Sample{Output: 700, Input: 1000, Thinking: 70, Span: 14 * time.Second, At: t0.Add(time.Minute)}},
+		{"growth over the wall gap", Sample{Output: 700, Input: 1000, Thinking: 70, At: t0.Add(time.Second)}},
+		{"no interval at all", Sample{Output: 700, Input: 1000, Thinking: 70}},
+		{"no growth", Sample{Output: 100, Input: 400, Thinking: 20, Span: 14 * time.Second, At: t0.Add(time.Minute)}},
+	}
+	for _, c := range cases {
+		for _, fn := range []struct {
+			name string
+			got  func(prev, cur Sample) (float64, bool)
+			meth func(prev, cur Sample) (float64, bool)
+		}{
+			{"Rate", func(p, cur Sample) (float64, bool) { return Rate(p, cur) }, func(p, cur Sample) (float64, bool) { return cur.RateFrom(p) }},
+			{"InputRate", func(p, cur Sample) (float64, bool) { return InputRate(p, cur) }, func(p, cur Sample) (float64, bool) { return cur.InputRateFrom(p) }},
+			{"ThinkingRate", func(p, cur Sample) (float64, bool) { return ThinkingRate(p, cur) }, func(p, cur Sample) (float64, bool) { return cur.ThinkingRateFrom(p) }},
+		} {
+			wantR, wantOK := fn.got(prev, c.cur)
+			gotR, gotOK := fn.meth(prev, c.cur)
+			if gotR != wantR || gotOK != wantOK {
+				t.Errorf("%s/%s: method form = %v,%v want %v,%v", c.name, fn.name, gotR, gotOK, wantR, wantOK)
+			}
+		}
+	}
+}
+
 // A delta is the interval a caller reports, so a rewrite under the watcher
 // (counts that went down) must not read as growth, and reasoning on its own
 // is growth a caller would otherwise drop.

@@ -6,16 +6,19 @@
 package agentusage
 
 import (
+	"cmp"
 	"math"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Discover lists the agent CLIs running on this machine.
+// Discover lists the agent CLIs running on this machine, in ascending pid
+// order.
 //
 // On Linux this is a /proc walk: comm, cmdline, and cwd per process, plus
 // starttime for matches; no subprocess. Every other user's processes simply
@@ -60,6 +63,10 @@ func Discover() []Process {
 		}
 		out = append(out, Process{PID: pid, Tool: tool, Dir: cwd, Started: startedAt(pid), AllDirs: tool == "dsh" && dshHosts(args)})
 	}
+	// os.ReadDir sorts entry names as strings, which orders pids 1, 10, 100,
+	// 11, 2. A caller listing agents would read that as a broken listing, so
+	// the order is fixed here rather than left to each caller's sort.
+	slices.SortFunc(out, func(a, b Process) int { return cmp.Compare(a.PID, b.PID) })
 	return out
 }
 

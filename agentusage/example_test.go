@@ -65,6 +65,19 @@ func ExampleRate() {
 	// Output: 250 true
 }
 
+// The method form takes the two samples the way a caller holds them, which is
+// the same order Sample.Delta uses, so a Run callback measuring an interval
+// cannot pass them the wrong way round.
+func ExampleSample_RateFrom() {
+	t0 := time.Unix(1_000_000, 0)
+	prev := agentusage.Sample{Output: 100, At: t0}
+	cur := agentusage.Sample{Output: 350, At: t0.Add(time.Second)}
+	if r, ok := cur.RateFrom(prev); ok {
+		fmt.Println(int(r))
+	}
+	// Output: 250
+}
+
 // A transcript that records how long the model spent is reporting the
 // interval the tokens were generated over, and the rate is that one rather
 // than the wall gap between two readings. A turn whose counts arrive when it

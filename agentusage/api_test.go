@@ -62,7 +62,7 @@ var publicFuncs = []string{
 
 var publicMethods = map[string][]string{
 	"Process": {"Watch"},
-	"Sample":  {"Delta", "Empty"},
+	"Sample":  {"Delta", "Empty", "InputRateFrom", "RateFrom", "ThinkingRateFrom"},
 	"Watcher": {"Dir", "Err", "Poll", "Run", "Sample", "SetNow", "Tool"},
 }
 

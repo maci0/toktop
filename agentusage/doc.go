@@ -23,7 +23,7 @@
 // opencode is added by EnableOpenCodeDB because its store is machine-wide
 // and the operator opts into it.
 //
-// Discover finds the agent processes running now, and Watch reads the
+// Discover finds the agent processes running now, in pid order, and Watch reads the
 // transcripts of the one working in a directory, so a caller can take a
 // Sample on an interval without knowing which agent is underneath.
 //
