@@ -216,8 +216,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   hashed prefix its derived event ids start with, so the request and the feed
   rows it minted can be matched on one field.
 
-### Fixed
-
 - A long `--agents` run held per-file bookkeeping for every transcript a
   per-file-owner agent's store had ever shown it, judged ours and then aged out
   of the recency window. Nothing released it: the verdict is kept so a session

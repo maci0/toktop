@@ -785,6 +785,7 @@ make test-pkg PKG=./internal/core RUN=TestSanitizeTextPreservesUTF8
 make test-pkg PKG=./agentusage     # both halves of the sqlite tag gate
 make test-pkg PKG=./internal/ui RACE=0   # faster loop, no race detector
 make install                    # install into PREFIX/bin (default ~/.local/bin)
+make uninstall                  # remove it again
 ```
 
 Cross-compiles (no cgo anywhere); `make test-dist` is the same flags the

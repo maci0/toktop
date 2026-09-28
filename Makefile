@@ -1340,15 +1340,58 @@ repro-check-pair: ## repro-check over REPRO_PLATFORMS (what the PR gate runs)
 	@$(MAKE) repro-check PLATFORMS="$(REPRO_PLATFORMS)"
 
 # XDG user bin on Linux; override on macOS so the binary lands on PATH
-# (PREFIX=/usr/local or PREFIX=$(brew --prefix)).
-PREFIX ?= $(HOME)/.local
+# (PREFIX=/usr/local or PREFIX=$(brew --prefix)). Empty rather than '/.local'
+# when HOME is unset (make under sudo, a systemd unit, a CI container): a
+# recursive mkdir of '/.local/bin' then succeeds as root and scatters a user
+# binary outside any prefix. install refuses that instead.
+PREFIX ?= $(if $(HOME),$(HOME)/.local)
+
+# Staging file for the install, so the copy lands beside the destination and
+# the rename below is atomic. `install` in place replaces the destination's
+# inode (it unlinks first), so there is a window where PREFIX/bin/toktop is a
+# copy that has not finished writing; a copy cut short by a full disk or a
+# killed make leaves a truncated executable under the installed name. The
+# rename has no such window. It also has to be the same directory rather than
+# /tmp, because a rename across filesystems is a copy, which is the window
+# again.
+INSTALL_TMP = .toktop-install-
 
 .PHONY: install
 install: build ## install into PREFIX/bin (default ~/.local/bin)
+	@if [ -z "$(PREFIX)" ] || [ "$(PREFIX)" = "/" ]; then \
+		echo "make install: PREFIX='$(PREFIX)' is not a directory to install into." >&2; \
+		echo "  HOME is unset, so ~/.local does not name one here; pass PREFIX=<dir>." >&2; \
+		exit 1; \
+	fi
 	mkdir -p "$(PREFIX)/bin"
-	install -m 0755 $(BINARY) "$(PREFIX)/bin/$(BINARY)"
+	@tmp=$$(mktemp "$(PREFIX)/bin/$(INSTALL_TMP)XXXXXX") || exit 1; \
+	trap 'rm -f "$$tmp"' EXIT INT TERM; \
+	install -m 0755 $(BINARY) "$$tmp" || exit 1; \
+	mv -f "$$tmp" "$(PREFIX)/bin/$(BINARY)" || exit 1; \
+	trap - EXIT INT TERM
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
 		*) echo "make install: installed to $(PREFIX)/bin, which is not on PATH; add it before '$(BINARY)' resolves" >&2; \
 		   echo "  export PATH=\"$(PREFIX)/bin:$$PATH\"" >&2 ;; \
 	esac
+
+# The remove half of the install path, and it removes only what install put
+# there: the installed binary and any staging file a killed install left. It
+# says so when there is nothing installed rather than reporting a clean
+# uninstall, so a mistyped PREFIX cannot read as a removal that happened.
+.PHONY: uninstall
+uninstall: ## remove the binary from PREFIX/bin (default ~/.local/bin)
+	@if [ -z "$(PREFIX)" ] || [ "$(PREFIX)" = "/" ]; then \
+		echo "make uninstall: PREFIX='$(PREFIX)' is not a directory to uninstall from." >&2; \
+		exit 1; \
+	fi
+	@found=0; \
+	if [ -f "$(PREFIX)/bin/$(BINARY)" ]; then rm -f "$(PREFIX)/bin/$(BINARY)" && found=1; fi; \
+	for stale in "$(PREFIX)/bin/$(INSTALL_TMP)"*; do \
+		[ -e "$$stale" ] || continue; \
+		rm -f "$$stale" && found=1; \
+	done; \
+	if [ "$$found" = 0 ]; then \
+		echo "make uninstall: nothing installed under $(PREFIX)/bin" >&2; \
+		exit 1; \
+	fi
