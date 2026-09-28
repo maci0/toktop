@@ -92,21 +92,21 @@ func warnIgnoredFrameEnv(once, plain, jsonOut bool) {
 	if once && !plain && !jsonOut {
 		return
 	}
-	for _, name := range [...]string{"TOKTOP_COLUMNS", "TOKTOP_LINES"} {
-		if strings.TrimSpace(os.Getenv(name)) == "" {
+	for _, e := range frameEnvVars {
+		if strings.TrimSpace(os.Getenv(e.name)) == "" {
 			continue
 		}
 		if !once {
-			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", name)
+			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect without --once\n", e.name)
 			continue
 		}
 		// Both --plain and --json replace the sized frame with a report that
 		// has no layout to size, and each says which one it was.
 		if plain {
-			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", name)
+			fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --plain; the text report has no fixed frame size\n", e.name)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --json; the JSON report is not a sized frame\n", name)
+		fmt.Fprintf(os.Stderr, "toktop: $%s has no effect with --json; the JSON report is not a sized frame\n", e.name)
 	}
 }
 
@@ -474,6 +474,19 @@ const (
 	frameLinesMax   = 512
 )
 
+// frameEnvVars are the TOKTOP_COLUMNS / TOKTOP_LINES overrides, each with the
+// bounds it is validated against and the key the startup line reports it
+// under. One table so the range check, the unused-variable warning and the
+// startup line cannot name a different pair or a different bound.
+var frameEnvVars = [...]struct {
+	name        string
+	key         string
+	least, most int
+}{
+	{name: "TOKTOP_COLUMNS", key: "columns", least: frameColumnsMin, most: frameColumnsMax},
+	{name: "TOKTOP_LINES", key: "lines", least: frameLinesMin, most: frameLinesMax},
+}
+
 // frameEnv reads one TOKTOP_COLUMNS / TOKTOP_LINES override. Unset or empty
 // means default (set is false). Surrounding whitespace is ignored so a value
 // copied with a trailing newline still parses, matching TOKTOP_LOG_LEVEL.
@@ -494,13 +507,7 @@ func frameEnv(name string, least, most int) (n int, set bool, err error) {
 // come out at the fallback size with nothing explaining why. Unset or empty
 // means default, matching how every other optional setting reads here.
 func validateOnceEnv() error {
-	for _, e := range [...]struct {
-		name        string
-		least, most int
-	}{
-		{"TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax},
-		{"TOKTOP_LINES", frameLinesMin, frameLinesMax},
-	} {
+	for _, e := range frameEnvVars {
 		if _, _, err := frameEnv(e.name, e.least, e.most); err != nil {
 			return err
 		}

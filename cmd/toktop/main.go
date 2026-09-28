@@ -677,6 +677,20 @@ func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, open
 		if f.jsonOut {
 			cfg = append(cfg, configFlag{key: "json", bare: true})
 		}
+		// The sized frame is the only --once output the two reports above do
+		// not replace, so it is the only one an override can reach. Reported
+		// under the short key rather than the variable name because a capture
+		// run is reproduced from this line: it names the frame that was
+		// rendered, where the render itself is a bitmap with nothing in it to
+		// say how large it was meant to be. An override that cannot take
+		// effect is absent, the same rule plain and json follow.
+		if !f.plain && !f.jsonOut {
+			for _, e := range frameEnvVars {
+				if v, set, err := frameEnv(e.name, e.least, e.most); err == nil && set {
+					cfg = append(cfg, configFlag{key: e.key, value: strconv.Itoa(v)})
+				}
+			}
+		}
 	}
 	if f.probeSecs > 0 {
 		cfg = append(cfg, configFlag{key: "probe", value: fmt.Sprintf("%ds", f.probeSecs)})

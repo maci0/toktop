@@ -55,6 +55,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `$SSH_AUTH_SOCK` is stripped of surrounding whitespace and a trailing newline
+  before the ssh-agent is dialed, the rule `$TOKTOP_SSH_PASSWORD` and
+  `$GITHUB_TOKEN` already followed. A wrapper that exported the socket name
+  through `$(...)` left the line ending on it; the socket so named does not
+  exist, the dial failed, and the run fell back to keys and then to a password
+  prompt, which is the error naming nothing about the cause. A value that is
+  only whitespace now resolves to the platform default rather than a path made
+  of the whitespace.
+
+- The startup line names a `TOKTOP_COLUMNS` / `TOKTOP_LINES` frame override in
+  force, as `columns=` and `lines=`. The line is the record a run is
+  reconstructed from, and a sized capture leaves it out: the render is a
+  bitmap carrying nothing about the dimensions it was asked for, so a
+  screenshot whose frame was overridden had no account of the size. The
+  override is named only where the sized frame is what renders, since
+  `--plain` and `--json` replace it.
+
 - The web site no longer removes the focus outline from the skip link's
   target. `main` takes focus from that key press, so a keyboard user who
   activated the skip link had nothing to show where focus had landed.

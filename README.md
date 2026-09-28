@@ -714,7 +714,7 @@ follow the run rather than how long the process took.
 | `OMNIROUTE_API_KEY` | bearer token fallback for `--bearer` (checked first unless `--bearer` is passed). Surrounding whitespace is trimmed, and a value that is empty or blank only is skipped rather than used as a token |
 | `TOKTOP_BEARER` | bearer token fallback for `--bearer` (checked after `OMNIROUTE_API_KEY`). Same trimming and skip-a-blank-value rule |
 | `TOKTOP_SSH_PASSWORD` | ssh password for headless runs; otherwise an interactive prompt. A trailing newline (from `$(cat file)`) is stripped, everything else is sent as typed. Set but empty is named rather than passed over: a headless run fails saying so, and a terminal run says it is prompting instead |
-| `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. `--once --plain` renders no sized frame, so both are named as unused and never validated |
+| `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. One in force is reported on the startup line as `columns=` / `lines=`, so a capture is reproducible from the log. `--once --plain` renders no sized frame, so both are named as unused and never validated |
 | `TOKTOP_LOG_LEVEL` | audit log floor for every subsystem that writes one (ingest endpoint, engine collector, host-vitals sampler, ssh client, `--add` attach, agent watch): `debug`, `info` (default), `warn` (or `warning`), or `error`, case-insensitive; a set-but-invalid value aborts with exit code 2 |
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header, and a set-but-blank value is named before the request, since the rate-limit error it produces otherwise advises setting a variable that is already set |
@@ -722,7 +722,7 @@ follow the run rather than how long the process took.
 | `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
 | `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with a non-demo `ssh://` target; a run on Linux with one fails at connect |
 | `KIMI_CODE_HOME` | with `--agents`: directory under which kimi's `sessions` are read (default `~/.kimi-code`); a relative value is ignored and named at startup, and so is an absolute one with no `sessions` directory under it |
-| `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset |
+| `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset. Surrounding whitespace and a trailing newline (from `$(...)`) are stripped, the rule the other secret variables follow, since a socket named with one does not exist and the run would fall back to keys and then to a password prompt |
 | `NO_COLOR` | strips terminal styling when set to a non-empty value (honored by the terminal renderer, as usual) |
 
 An explicit `--bearer`, even empty, wins over its env fallbacks; otherwise
@@ -761,7 +761,9 @@ silently adjusted; so do out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when
 `--add` endpoint reached over plain `http://` on a host that is not this
 machine is named at startup: the bearer token would cross the network in
 cleartext. Startup prints one line of the knobs that apply (`interval`,
-`ingest`, mode flags); bearer tokens appear only as `bearer=set`, or
+`ingest`, mode flags, and `columns` / `lines` for a `TOKTOP_COLUMNS` /
+`TOKTOP_LINES` frame override in force); bearer tokens appear only as
+`bearer=set`, or
 `bearer=refused` when the token carries a line break and is therefore turned
 down, leaving the `--add` endpoints queried unauthenticated.
 

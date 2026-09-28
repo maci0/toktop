@@ -1840,6 +1840,35 @@ func TestLogActiveConfig(t *testing.T) {
 			t.Fatalf("logActiveConfig() = %q, want ingest=off", buf.String())
 		}
 	})
+	// A capture run is reproduced from the startup line: the render is a
+	// bitmap that says nothing about the size it was asked for, so an
+	// override the frame took must be on the line. The two reports that
+	// replace the frame make the override unreachable, and an unreachable
+	// one is named by warnIgnoredFrameEnv rather than claimed here.
+	t.Run("a frame override in force is named", func(t *testing.T) {
+		t.Setenv("TOKTOP_COLUMNS", "100")
+		t.Setenv("TOKTOP_LINES", "40")
+		var buf strings.Builder
+		logActiveConfig(&buf, &cliFlags{interval: time.Second, once: true}, map[string]bool{}, 0, 0, false)
+		got := buf.String()
+		if !strings.Contains(got, " columns=100") || !strings.Contains(got, " lines=40") {
+			t.Fatalf("logActiveConfig() = %q, want the frame size", got)
+		}
+		for _, tc := range []struct {
+			name  string
+			flags cliFlags
+		}{
+			{"plain", cliFlags{interval: time.Second, once: true, plain: true}},
+			{"json", cliFlags{interval: time.Second, once: true, jsonOut: true}},
+			{"no --once", cliFlags{interval: time.Second}},
+		} {
+			buf.Reset()
+			logActiveConfig(&buf, &tc.flags, map[string]bool{}, 0, 0, false)
+			if got := buf.String(); strings.Contains(got, " columns=") || strings.Contains(got, " lines=") {
+				t.Fatalf("logActiveConfig() with %s = %q, want no frame size named", tc.name, got)
+			}
+		}
+	})
 	// A demo run replays from its seed and, when the operator pinned one,
 	// from its origin. A run that crashes leaves the audit log and no report,
 	// so the line has to carry both or the run cannot be reproduced from what

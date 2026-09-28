@@ -75,6 +75,23 @@ func TestAgentSockPrefersSSHAuthSock(t *testing.T) {
 	if got := agentSock(); got != "platform-default" {
 		t.Fatalf("agentSock = %q, want the platform default when SSH_AUTH_SOCK is unset", got)
 	}
+	// A wrapper that exports the name with `$(...)` leaves the line ending
+	// behind. The socket named with it does not exist, so the dial fails and
+	// the run falls through to the password prompt without naming why.
+	for _, v := range []string{"/tmp/agent.sock\n", "/tmp/agent.sock\r\n", " /tmp/agent.sock "} {
+		t.Setenv("SSH_AUTH_SOCK", v)
+		if got := agentSock(); got != "/tmp/agent.sock" {
+			t.Fatalf("agentSock = %q, want the trimmed path for SSH_AUTH_SOCK %q", got, v)
+		}
+	}
+	// Whitespace alone names no socket at all, so it resolves to the
+	// platform default rather than a path built out of the whitespace.
+	for _, v := range []string{"  \n\t ", "\n"} {
+		t.Setenv("SSH_AUTH_SOCK", v)
+		if got := agentSock(); got != "platform-default" {
+			t.Fatalf("agentSock = %q, want the platform default for SSH_AUTH_SOCK %q", got, v)
+		}
+	}
 }
 
 func TestDefaultAgentSock(t *testing.T) {

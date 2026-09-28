@@ -174,8 +174,17 @@ const agentDialTimeout = 2 * time.Second
 // and does not set the env var. Tests may replace it.
 var platformAgentSock = defaultAgentSock
 
+// agentSock is the socket ssh-agent is reached on. A trailing CR/LF is
+// stripped, the rule sshPasswordEnv and githubToken apply to the other two
+// environment secrets, because `export SSH_AUTH_SOCK=$(agent-socket-name)`
+// leaves one behind. A socket named with a newline in it does not exist, so
+// the dial fails and the run falls back to keys and then to a password
+// prompt: a headless run that authenticated by agent until a wrapper started
+// exporting the variable reports the prompt instead, which is the error
+// naming nothing about the cause. A value that is only whitespace is the same
+// misreading and resolves to the platform default rather than a path.
 func agentSock() string {
-	if s := os.Getenv("SSH_AUTH_SOCK"); s != "" {
+	if s := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK")); s != "" {
 		return s
 	}
 	return platformAgentSock()
