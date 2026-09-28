@@ -149,10 +149,10 @@ func utcTime(_ []string, a slog.Attr) slog.Attr {
 
 // Field prepares attacker-shaped text for a single-line log attribute:
 // terminal escapes stripped, whitespace collapsed so a payload cannot split
-// the line, then capped.
-func Field(s string, n int) string {
-	return core.ClampField(strings.Join(strings.Fields(core.SanitizeText(s)), " "), n)
-}
+// the line, then capped. [core.SingleLine] and [core.ClampField] are the two
+// halves, and composing them here keeps the audit line and a dashboard cell
+// folded the same way.
+func Field(s string, n int) string { return core.ClampField(core.SingleLine(s), n) }
 
 // Remote prepares a peer address for the audit line. Loopback keeps the port
 // so a local sender can be told apart; any other IP is dropped. The address

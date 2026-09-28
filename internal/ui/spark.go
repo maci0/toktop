@@ -48,21 +48,6 @@ type ChartStyle struct {
 
 const hexDigits = "0123456789abcdef"
 
-// fadeColor blends a hex color toward black by factor f (0..1). Non-hex
-// colors pass through untouched.
-func fadeColor(c lipgloss.Color, f float64) string {
-	r, g, b, ok := parseHexRGB(c)
-	if !ok {
-		return string(c)
-	}
-	f = clamp01(f)
-	return formatHexRGB(
-		uint64(float64(r)*f),
-		uint64(float64(g)*f),
-		uint64(float64(b)*f),
-	)
-}
-
 // formatHexRGB assembles the 7-byte "#rrggbb" form by hand: the chart fade
 // calls it per bisection step, where fmt.Sprintf allocated several objects
 // for one short string.
@@ -110,7 +95,7 @@ func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
 		return lipgloss.Color(formatHexRGB(r, g, b))
 	}
 
-	// fadeColor is monotonic (less factor = darker = lower ratio), so the
+	// The blend is monotonic (less factor = darker = lower ratio), so the
 	// shallowest factor still above the floor can be bisected without
 	// allocating intermediate strings.
 	lo, hi := f, 1.0

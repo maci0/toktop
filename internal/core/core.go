@@ -255,21 +255,6 @@ func AppendSorted[T any](s []T, item T, max int, cmp func(a, b T) int) []T {
 	return s
 }
 
-// InsertSorted returns s with its last element moved to its stable position,
-// after every element cmp reports as less than or equal to it. A caller that
-// has already appended the item delegates here, so the trim stays the caller's
-// business and the ordering is one binary search plus one shift.
-func InsertSorted[T any](s []T, cmp func(a, b T) int) []T {
-	if len(s) < 2 {
-		return s
-	}
-	item := s[len(s)-1]
-	i := sort.Search(len(s)-1, func(j int) bool { return cmp(s[j], item) > 0 })
-	copy(s[i+1:], s[i:])
-	s[i] = item
-	return s
-}
-
 // AppendRetained appends item to a newest-last feed of at most max entries
 // and reports whether it was retained.
 //
