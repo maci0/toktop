@@ -6,7 +6,7 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
-	"io/fs"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +31,13 @@ const geminiProjectFile = ".project_root"
 // is the layout; the bound is what keeps a missing file from walking out of
 // the store.
 const geminiRootDepth = 4
+
+// geminiRootCap bounds the .project_root read. The file holds one directory
+// path, so the cap is the same size a stored cwd gets; a longer file is not a
+// path this module can use. The store is writable by the agent, and this read
+// runs once per transcript per rescan, so an uncapped one is memory an
+// operator's own padding holds for the whole run.
+const geminiRootCap = 1 << 20
 
 func parseGeminiRecord(line []byte) (values, string, bool) {
 	line = bytes.TrimPrefix(bytes.TrimSpace(line), utf8BOM)
@@ -133,8 +140,13 @@ func readGeminiRoot(dir string) (string, bool) {
 		return "", false
 	}
 	defer r.Close()
-	b, err := fs.ReadFile(r.FS(), geminiProjectFile)
+	f, err := r.Open(geminiProjectFile)
 	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, geminiRootCap+1))
+	if err != nil || len(b) > geminiRootCap {
 		return "", false
 	}
 	cwd := strings.TrimSpace(string(bytes.TrimPrefix(b, utf8BOM)))

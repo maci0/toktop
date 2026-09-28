@@ -19,10 +19,9 @@ func (m Model) renderFeed() string {
 	rows := agentRows(rates, now)
 	statsN := 0
 	if len(rows) > 0 && feedIn > 0 {
+		// Half the feed, at least one row, so the stats never take the last
+		// line the feed has.
 		statsN = min(len(rows), max(feedIn/2, 1))
-		if statsN >= feedIn && feedIn > 1 {
-			statsN = feedIn - 1
-		}
 	}
 	var lines []string
 	if statsN > 0 {

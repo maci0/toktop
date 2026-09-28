@@ -86,7 +86,6 @@ func procStatCPUAndRSS(stat string) (ticks uint64, rssBytes uint64) {
 			stime, _ = strconv.ParseUint(rest[start:i], 10, 64)
 		case 24:
 			pages, _ = strconv.ParseUint(rest[start:i], 10, 64)
-			return core.SatAddU64(utime, stime), core.MulSatU64(pages, uint64(os.Getpagesize()))
 		}
 		field++
 	}

@@ -321,6 +321,29 @@ func TestHomeHandlerFoldsHomeInMessageAndAttrs(t *testing.T) {
 	}
 }
 
+// A folded attribute rebuilds the record, so an attribute that came before the
+// fold and carried no home of its own still has to reach the inner handler.
+func TestHomeHandlerKeepsAttrsBeforeTheFold(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)})
+	lg.Warn("engine not answering",
+		"engine", "ollama",
+		"addr", filepath.Join(home, "toktop"),
+		"status", http.StatusBadGateway)
+	got := buf.String()
+	if strings.Contains(got, home) {
+		t.Fatalf("line kept the home directory: %s", got)
+	}
+	for _, want := range []string{"engine=ollama", "status=502", "addr=~"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("line lost %q: %s", want, got)
+		}
+	}
+}
+
 // A record whose attributes carry no path keeps every other value as it was:
 // the fold rewrites a home directory and nothing else.
 func TestHomeHandlerLeavesOtherValuesAlone(t *testing.T) {

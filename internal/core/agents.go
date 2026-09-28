@@ -215,7 +215,7 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 		// reports tokens without a rate, unless the event itself says how
 		// long the model spent. That duration is the span, not the time
 		// since the previous event.
-		if a.n > 0 && a.spanned == a.n && a.span > 0 {
+		if a.spanned == a.n && a.span > 0 {
 			secs := a.span.Seconds()
 			r.TokPS = float64(a.tokens) / secs
 			r.PromptPS = float64(a.prompt) / secs
@@ -234,7 +234,7 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			Thinking: a.ownThinking,
 			Last:     a.ownLast,
 		}
-		if a.ownN > 0 && a.ownSpanned == a.ownN && a.ownSpan > 0 {
+		if a.ownSpanned == a.ownN && a.ownSpan > 0 {
 			secs := a.ownSpan.Seconds()
 			o.TokPS = float64(a.ownTokens) / secs
 			o.PromptPS = float64(a.ownPrompt) / secs

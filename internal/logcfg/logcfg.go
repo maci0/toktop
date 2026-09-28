@@ -105,27 +105,34 @@ type HomeHandler struct {
 // Handle implements slog.Handler.
 func (h HomeHandler) Handle(ctx context.Context, r slog.Record) error {
 	msg := core.RedactHome(r.Message)
-	var folded []slog.Attr
+	// One walk to decide whether a rebuild is needed, so a record carrying no
+	// home directory is forwarded without collecting anything.
+	changed := false
 	r.Attrs(func(a slog.Attr) bool {
-		if a.Value.Kind() == slog.KindString {
-			if s := core.RedactHome(a.Value.String()); s != a.Value.String() {
-				a.Value = slog.StringValue(s)
-				if folded == nil {
-					folded = make([]slog.Attr, 0, 8)
-				}
-				folded = append(folded, a)
-				return true
-			}
+		if a.Value.Kind() != slog.KindString {
+			return true
 		}
-		if folded != nil {
-			folded = append(folded, a)
+		if s := core.RedactHome(a.Value.String()); s != a.Value.String() {
+			changed = true
+			return false
 		}
 		return true
 	})
-	if folded == nil {
+	if !changed {
 		r.Message = msg
 		return h.Handler.Handle(ctx, r)
 	}
+	// Every attribute is collected, not only the ones from the first fold on:
+	// the rebuilt record is all the inner handler ever sees, and an attribute
+	// left out of it is dropped rather than passed through.
+	folded := make([]slog.Attr, 0, 8)
+	r.Attrs(func(a slog.Attr) bool {
+		if a.Value.Kind() == slog.KindString {
+			a.Value = slog.StringValue(core.RedactHome(a.Value.String()))
+		}
+		folded = append(folded, a)
+		return true
+	})
 	// slog.Record hands out its attributes one at a time and offers no way to
 	// put a rewritten one back, so a record that changed is rebuilt: the
 	// message, the time, the level and the call site all carry over, and the

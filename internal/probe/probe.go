@@ -350,11 +350,13 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 					ttft = time.Since(s.At)
 				}
 			}
-			for _, reason := range []string{c.Delta.Reasoning, c.Delta.ReasoningContent} {
-				if reason != "" {
-					reasoning++
-					contentBytes += len(reason)
-				}
+			// The same four fields the whole-body path reads, and the
+			// longest of them, so a gateway that carries a reasoning-only
+			// answer in the message object while streaming does not read as
+			// an empty stream here and a working one there.
+			if reason := longest(c.Delta.Reasoning, c.Delta.ReasoningContent, c.Message.Reasoning, c.Message.ReasoningContent); reason != "" {
+				reasoning++
+				contentBytes += len(reason)
 			}
 		}
 		if overBudget(tokens+reasoning, contentBytes) { // engine ignored max_tokens: hang up
@@ -376,6 +378,17 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 // byte count catches a single huge delta that would count as one frame.
 func overBudget(tokens, contentBytes int) bool {
 	return tokens >= probeTokens || contentBytes >= probeContentBytes
+}
+
+// longest returns the longest of the values, or "" when every one is empty.
+func longest(values ...string) string {
+	longest := ""
+	for _, v := range values {
+		if len(v) > len(longest) {
+			longest = v
+		}
+	}
+	return longest
 }
 
 // capModel trims and bounds an engine-supplied model id.
@@ -612,7 +625,7 @@ func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.
 		// A thinking model that answers in one piece carries its whole trace
 		// in message.reasoning_content and can leave content empty, so a
 		// count that read content alone called a working engine an empty
-		// stream. The same two fields the streaming path reads.
+		// stream. The same four fields the streaming path reads.
 		if text != "" || c.Message.Reasoning != "" || c.Message.ReasoningContent != "" ||
 			c.Delta.Reasoning != "" || c.Delta.ReasoningContent != "" {
 			n++

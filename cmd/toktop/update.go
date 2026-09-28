@@ -128,7 +128,7 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 // it, so a dashboard run has nothing to say about it.
 func warnBlankGitHubToken() {
 	v, set := os.LookupEnv(selfupdate.TokenEnv)
-	if !set || strings.TrimSpace(strings.TrimRight(v, "\r\n")) != "" {
+	if !set || strings.TrimSpace(v) != "" {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "toktop update: $%s is set but blank; the GitHub API is queried unauthenticated\n",

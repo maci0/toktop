@@ -377,16 +377,14 @@ func LoadDefinitions(path string) error {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
-		if errors.Is(err, errDefinitionsTooLarge) {
-			return defsErr([]error{ErrInvalidDefinitions, err}, "%s: %s: %v", ErrInvalidDefinitions, path, err)
-		}
 		// A file that is there but cannot be read is a file that cannot be
 		// used, which is the one thing ErrInvalidDefinitions names, so it
 		// carries that error as well as the I/O failure. A caller asking
 		// errors.Is whether this path is usable gets the same answer for a
-		// permission failure, a directory passed by mistake, and malformed
-		// JSON. The os error is joined, so errors.Is against fs.ErrPermission
-		// and errors.As against *fs.PathError still work through it.
+		// permission failure, a directory passed by mistake, an oversized
+		// file, and malformed JSON. The os error is joined, so errors.Is
+		// against fs.ErrPermission and errors.As against *fs.PathError still
+		// work through it.
 		return defsErr([]error{ErrInvalidDefinitions, err}, "%s: %s: %v", ErrInvalidDefinitions, path, err)
 	}
 	data = bytes.TrimPrefix(data, utf8BOM)
