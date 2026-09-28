@@ -554,11 +554,7 @@ func aggHist(s core.Snapshot, out bool, w int, cadence time.Duration) []float64 
 	var srcs []src
 	var end time.Time
 	for i := range s.Providers {
-		p := &s.Providers[i]
-		vals, ts := p.OutHist, p.OutStamps
-		if !out {
-			vals, ts = p.InHist, p.InStamps
-		}
+		vals, ts := historyOf(s.Providers[i], out)
 		if len(vals) == 0 {
 			continue
 		}

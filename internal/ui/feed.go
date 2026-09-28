@@ -84,19 +84,40 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 // nothing to do with it, and send the operator to restart a dashboard whose
 // endpoint is answering.
 func (m Model) feedEmptyLines(w int) []string {
-	switch {
-	case m.feedDown != "":
+	if m.feedDown != "" {
 		// SingleLine, not SanitizeText: the reason arrives as its producer's
 		// error text, and a newline left in it becomes a row of the panel that
 		// the dashboard reads as its own output.
 		reason := clip(shorten(core.SingleLine(m.feedDown), w), w)
 		return []string{styleBad.Render(reason)}
-	case m.cfg.Agents:
-		return []string{dim("no agent activity yet: agents running locally are picked up automatically")}
-	case m.cfg.IngestAddr != "":
-		return []string{dim("no agent activity yet: point your harness at the endpoint above")}
+	}
+	// The panel title on the line above already carries the endpoint, so this
+	// clause points at it rather than repeating the address.
+	where := ""
+	if m.cfg.IngestAddr != "" {
+		where = "point your harness at the endpoint above"
+	}
+	return []string{dim(feedEmptyHint(m.cfg, where))}
+}
+
+// feedEmptyHint is the one sentence an empty agent feed carries. The dashboard
+// panel and the linear report answer the same question about the same empty
+// panel, and both used to spell it separately: the punctuation drifted, the
+// wording drifted, and a reader who had seen both had no reason to expect the
+// same advice in two shapes.
+//
+// where names where to send events, or is empty for a run with no ingest
+// endpoint to name, which falls through to the flag the reader has to quit and
+// re-run with. The two views differ only in whether they can point at the
+// endpoint or have to spell the address out.
+func feedEmptyHint(cfg Config, where string) string {
+	switch {
+	case cfg.Agents:
+		return "no agent activity yet: agents running locally are picked up automatically"
+	case where != "":
+		return "no agent activity yet: " + where
 	default:
-		return []string{dim("no agent activity yet: run with --agents to watch coding agents on this machine")}
+		return "no agent activity yet: run with --agents to watch coding agents on this machine"
 	}
 }
 

@@ -19,20 +19,25 @@ func (m Model) renderCharts() string {
 	w := m.w - 4 // panel borders + padding
 	cad := m.chartCadence()
 	outH, _, _ := m.sectionHeights()
-	agg, grid := m.outSeries(w, cad)
+	agg, grid := m.rateSeries(w, cad, true)
 	out := panel(
 		m.throughputTitle(w, seriesPeak(agg)),
 		BrailleChart(agg, w, outH, ChartStyle{Heat: heatColor, Grid: grid}),
 		w, outH,
 	)
-	inVals := aggHist(m.snap, false, w, cad)
+	// The prompt plot reads the same timescale mode and the same boundaries as
+	// the decode plot above it: they are two halves of one time axis, stacked,
+	// with no labels on either. Left on the uniform cadence, pressing t made the
+	// pair disagree about how much wall clock a column spans, and a reader
+	// comparing the two traces had no way to tell the mode had split them.
+	inVals, _ := m.rateSeries(w, cad, false)
 	in := panel(
 		// Same text alternative as THROUGHPUT: the prompt plot is one braille
 		// row, so the current rate in the title is the only number on the frame
 		// and the peak is what says how high the window got.
 		promptTitle(w, seriesPeak(inVals), m.aggIn()),
 		BrailleChart(inVals, w, 1,
-			ChartStyle{Heat: func(float64) lipgloss.Color { return cCyan }}),
+			ChartStyle{Heat: func(float64) lipgloss.Color { return cCyan }, Grid: grid}),
 		w, 1,
 	)
 	return out + "\n" + in
@@ -46,13 +51,14 @@ const chartCompressedDefault = true
 // doubles moving left.
 const compressBlock = 12
 
-// outSeries produces the throughput series plus grid boundaries for the
-// active timescale mode.
-func (m Model) outSeries(w int, cadence time.Duration) ([]float64, map[int]bool) {
+// rateSeries produces one direction's throughput series plus the grid
+// boundaries for the active timescale mode. Both charts read it, so the two
+// plots stacked in the frame can never be on different timescales.
+func (m Model) rateSeries(w int, cadence time.Duration, out bool) ([]float64, map[int]bool) {
 	if !m.chartCompressed {
-		return aggHist(m.snap, true, w, cadence), nil
+		return aggHist(m.snap, out, w, cadence), nil
 	}
-	vals, bounds := compressSeries(timedSeries(m.snap, cadence), w, compressBlock)
+	vals, bounds := compressSeries(timedSeries(m.snap, out, cadence), w, compressBlock)
 	return vals, bounds
 }
 
@@ -112,6 +118,17 @@ type timedVal struct {
 	engine int
 }
 
+// historyOf is one provider's rate history and its stamps for a direction:
+// the output series or the prompt series. aggHist and timedSeries both pick
+// their half through it, so the two cannot name opposite halves for the same
+// direction.
+func historyOf(p core.ProviderSnapshot, out bool) (vals []float64, stamps []time.Time) {
+	if out {
+		return p.OutHist, p.OutStamps
+	}
+	return p.InHist, p.InStamps
+}
+
 // sampleTime is the instant history sample j was taken, or the zero time when
 // the snapshot carries no stamps for it. An unstamped sample is not placed on
 // any axis: a chart must show when a rate was measured, not guess from the
@@ -140,20 +157,25 @@ func lastSampleTime(ts []time.Time, n int) time.Time {
 // instant it was taken, so a slow scrape or a coalesced tick lands where it
 // happened rather than one cadence per sample index.
 //
+// out picks the direction (output or prompt); the two directions carry their
+// own stamped histories, so the compressed timescale covers both.
+//
 // The slice is pre-sized: the caller replays this every frame, and growing
 // it from nil reallocated per provider row.
-func timedSeries(s core.Snapshot, cadence time.Duration) []timedVal {
+func timedSeries(s core.Snapshot, out bool, cadence time.Duration) []timedVal {
 	n := 0
 	for i := range s.Providers {
-		n += len(s.Providers[i].OutHist)
+		vals, _ := historyOf(s.Providers[i], out)
+		n += len(vals)
 	}
 	n += core.AgentHistoryLen + core.HistoryLen
 	tv := make([]timedVal, 0, n)
 	var end time.Time
 	for i := range s.Providers {
 		p := &s.Providers[i]
-		for j, v := range p.OutHist {
-			t := sampleTime(p.OutStamps, j)
+		vals, stamps := historyOf(*p, out)
+		for j, v := range vals {
+			t := sampleTime(stamps, j)
 			if t.IsZero() {
 				continue
 			}
@@ -168,7 +190,7 @@ func timedSeries(s core.Snapshot, cadence time.Duration) []timedVal {
 	}
 	if !end.IsZero() {
 		n := core.HistoryLen
-		hist := agentDenseHist(s.Agents, true, end, n, cadence)
+		hist := agentDenseHist(s.Agents, out, end, n, cadence)
 		engine := len(s.Providers)
 		nonzero := false
 		for _, v := range hist {

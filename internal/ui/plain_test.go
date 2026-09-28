@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"cmp"
 	"regexp"
 	"strings"
 	"testing"
@@ -292,5 +293,43 @@ func TestPlainFramePrintsTheFullCPUModel(t *testing.T) {
 	m.snap = snap
 	if stripSegs := m.renderSystem(); strings.Contains(strip(stripSegs), cpu) {
 		t.Errorf("SYS strip let a %d-cell model past its budget", len(cpu))
+	}
+}
+
+// The dashboard panel and the linear report answer the same question about the
+// same empty panel, so they must give the same advice. Only the ingest clause
+// differs, and only because the panel title above it already carries the
+// endpoint; the two used to drift apart entirely.
+func TestEmptyFeedAdviceMatchesAcrossViews(t *testing.T) {
+	snap := core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "x", OK: true}}}
+	for _, tc := range []struct {
+		name  string
+		cfg   Config
+		want  string
+		panel string // the dashboard clause, where it cannot be want verbatim
+	}{
+		{"agents", Config{Version: "t", Agents: true},
+			"no agent activity yet: agents running locally are picked up automatically", ""},
+		{"agents+ingest", Config{Version: "t", Agents: true, IngestAddr: "127.0.0.1:8420"},
+			"no agent activity yet: agents running locally are picked up automatically", ""},
+		{"ingest", Config{Version: "t", IngestAddr: "127.0.0.1:8420"},
+			"no agent activity yet: POST events to http://127.0.0.1:8420/v1/events",
+			"no agent activity yet: point your harness at the endpoint above"},
+		{"bare", Config{Version: "t"},
+			"no agent activity yet: run with --agents to watch coding agents on this machine", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if plain := PlainTextFrame(tc.cfg, snap); !strings.Contains(plain, tc.want) {
+				t.Errorf("plain report = %q, want %q", plain, tc.want)
+			}
+			m := New(tc.cfg, nil)
+			m.w, m.h, m.ready = 120, 40, true
+			m.snap = snap
+			got := strip(strings.Join(m.feedEmptyLines(100), "\n"))
+			want := cmp.Or(tc.panel, tc.want)
+			if got != want {
+				t.Errorf("feed panel = %q, want %q", got, want)
+			}
+		})
 	}
 }

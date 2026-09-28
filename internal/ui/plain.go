@@ -291,15 +291,13 @@ func writeFeedPlain(b *strings.Builder, s core.Snapshot, cfg Config, rates []cor
 		b.WriteString(strings.Join(parts, " · ") + "\n")
 	}
 	if len(s.Agents) == 0 {
-		switch {
-		case cfg.Agents:
-			b.WriteString("no agent activity yet; local agents are picked up automatically\n")
-		case cfg.IngestAddr != "":
-			b.WriteString(fmt.Sprintf("no agent activity yet; POST events to http://%s/v1/events\n",
-				core.SanitizeText(cfg.IngestAddr)))
-		default:
-			b.WriteString("no agent activity yet; run with --agents to watch coding agents on this machine\n")
+		// No panel title above this line to point at, so the endpoint is spelled
+		// out; the dashboard's clause for the same run points at its own title.
+		where := ""
+		if cfg.IngestAddr != "" {
+			where = "POST events to http://" + core.SanitizeText(cfg.IngestAddr) + "/v1/events"
 		}
+		b.WriteString(feedEmptyHint(cfg, where) + "\n")
 		return
 	}
 	start := max(len(s.Agents)-maxFeedEvents, 0)

@@ -83,22 +83,57 @@ func (m Model) renderSystem() string {
 		// Nothing rendered above: a kernel or NPU-only host used to miss
 		// this and got both a segment and the "no sensors" line.
 		ident = append(ident, dim("no sensors found"))
-	case len(cpuTemps) > shownTemps:
-		// Counted on the filtered list: GPU readings already render as their
-		// own segments, so they are neither hidden nor counted here.
-		ident = append(ident, dim(fmt.Sprintf("+%d more", len(cpuTemps)-shownTemps)))
 	}
 
 	// The strip is a panel with no title row: frame(padBlock) draws it the same
 	// way panel does, without lipgloss's border and padding pass over a block
 	// this function had already cut to one known width.
+	//
+	// A row that ran out of cells reports what it left out rather than ending
+	// mid-list: on a host with several accelerators the vitals row stops after
+	// the first GPU and says nothing, which reads as one GPU on the machine.
+	// The identity row counts the temperatures its cap never turned into
+	// segments together with the ones the pack shed, so one "+N more" covers
+	// the whole row.
 	rows := 1
-	content := padBlock(joinSpreadLeft(vitals, w), w, 1)
+	content := padBlock(packSegs(vitals, w, 0), w, 1)
 	if len(ident) > 0 && m.stripTwoRows() { // must match systemStripRows' budget
-		content += "\n" + padBlock(joinSpreadLeft(ident, w), w, 1)
+		content += "\n" + padBlock(packSegs(ident, w, len(cpuTemps)-shownTemps), w, 1)
 		rows = 2
 	}
 	return frame(content, w, rows)
+}
+
+// packSegs fits segs into w cells and, when some do not fit, ends the row with
+// the number left out. Segments are shed from the right, and a kept segment is
+// given up if the count will not fit beside it: an unaccounted-for reading is
+// the worse of the two losses.
+//
+// extraHidden counts readings that never became segments at all (the
+// temperature cap), which have to land in the same number as the ones the pack
+// shed, or the row carries two "+N more" a reader cannot tell apart.
+func packSegs(segs []string, w int, extraHidden int) string {
+	_, kept := joinSpreadLeft(segs, w)
+	hidden := extraHidden + len(segs) - kept
+	if hidden == 0 {
+		return spreadRow(segs)
+	}
+	for kept > 0 {
+		if row := spreadRow(slices.Concat(segs[:kept], []string{
+			dim(fmt.Sprintf("+%d more", hidden)),
+		})); widthOf(row) <= w {
+			return row
+		}
+		kept--
+		hidden++
+	}
+	return dim(fmt.Sprintf("+%d more", hidden))
+}
+
+// spreadRow joins segs with the strip's separator, for the one place that has
+// to rebuild a packed row instead of appending to it.
+func spreadRow(segs []string) string {
+	return strings.Join(segs, dim(" │ "))
 }
 
 // hostSegmentLimits caps each identity segment's cells. The SYS strip packs

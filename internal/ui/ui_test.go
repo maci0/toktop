@@ -933,6 +933,39 @@ func TestSystemStripCountsFilteredTempsInMore(t *testing.T) {
 	}
 }
 
+// The SYS strip packs its readings left to right and sheds from the right, so
+// a host with several accelerators loses all but the first one on a narrow
+// pane. A row that silently stops mid-list reads as one GPU on the machine, so
+// what it dropped has to be counted, on both rows.
+func TestSystemStripCountsShedSegments(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
+		Sys: &core.SysSample{
+			MemTotal: 32 << 30, MemUsed: 16 << 30,
+			GPUs: []core.GPUDevice{
+				{Vendor: "nvidia", Index: 0, MilliC: 70000, MemTotal: 80 << 30, MemUsed: 40 << 30, PowerW: 297},
+				{Vendor: "nvidia", Index: 1, MilliC: 71000, MemTotal: 80 << 30, MemUsed: 41 << 30, PowerW: 301},
+				{Vendor: "nvidia", Index: 2, MilliC: 72000, MemTotal: 80 << 30, MemUsed: 42 << 30, PowerW: 288},
+				{Vendor: "nvidia", Index: 3, MilliC: 73000, MemTotal: 80 << 30, MemUsed: 43 << 30, PowerW: 290},
+			},
+		},
+	}
+	m.w, m.h, m.ready = 100, 40, true
+	out := strip(m.renderSystem())
+	if !strings.Contains(out, "nv0") {
+		t.Fatalf("strip = %q, want the first GPU rendered:\n%s", out, out)
+	}
+	if !strings.Contains(out, "more") {
+		t.Errorf("strip = %q, want the GPUs it could not fit counted:\n%s", out, out)
+	}
+	// The count has to name the whole row, not one group of it: exactly one.
+	if n := strings.Count(out, "more"); n != 1 {
+		t.Errorf("strip = %q, want one overflow count, got %d", out, n)
+	}
+	assertFitsPane(t, "100x40 sys strip", m.renderSystem(), m.w, m.h)
+}
+
 // The timescale toggle lives in the chart title; both modes must show the
 // current one plus a clearly delimited key, not a run-together "←t".
 func TestThroughputTitleAdvertisesTimescaleToggle(t *testing.T) {
@@ -943,6 +976,33 @@ func TestThroughputTitleAdvertisesTimescaleToggle(t *testing.T) {
 	m.chartCompressed = false
 	if got := strip(m.throughputTitle(80, 0)); !strings.Contains(got, "uniform") || !strings.Contains(got, "[t]") {
 		t.Errorf("uniform title = %q, want mode word plus [t] switch", got)
+	}
+}
+
+// The two charts are stacked with no axis labels on either, so a reader reads
+// them as one time axis. The timescale toggle must move both: a prompt plot
+// left on the uniform cadence put the pair on different time bases with nothing
+// on screen to say so, and toggling t looked like it had broken the second one.
+func TestTimescaleToggleMovesBothCharts(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = busySnap()
+	m.w, m.h, m.ready = 120, 40, true
+
+	for _, tc := range []struct {
+		compressed bool
+		wantBounds bool
+	}{{true, true}, {false, false}} {
+		m.chartCompressed = tc.compressed
+		for _, out := range []bool{true, false} {
+			vals, bounds := m.rateSeries(100, time.Second, out)
+			if len(vals) == 0 {
+				t.Fatalf("compressed=%v out=%v: empty series", tc.compressed, out)
+			}
+			if (len(bounds) > 0) != tc.wantBounds {
+				t.Errorf("compressed=%v out=%v: boundaries = %v, want %v",
+					tc.compressed, out, bounds, tc.wantBounds)
+			}
+		}
 	}
 }
 
@@ -1247,7 +1307,7 @@ func TestTimedSeriesUsesSampleStamps(t *testing.T) {
 	s := core.Snapshot{Providers: []core.ProviderSnapshot{
 		{OutStamps: stamps(t0, 2, 2*time.Second), OutHist: []float64{1, 2}},
 	}}
-	tv := timedSeries(s, 2*time.Second)
+	tv := timedSeries(s, true, 2*time.Second)
 	if len(tv) != 2 {
 		t.Fatalf("len = %d, want 2", len(tv))
 	}

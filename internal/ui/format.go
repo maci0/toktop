@@ -346,13 +346,20 @@ func joinSpread(left, right string, width int) string {
 	return left + strings.Repeat(" ", gap) + right
 }
 
-// joinSpreadLeft packs segments left-to-right up to w visible cells.
-func joinSpreadLeft(segs []string, w int) string {
+// joinSpreadLeft packs segments left-to-right up to w visible cells and
+// reports how many it kept. It sheds from the right, so the caller controls
+// priority by the order it builds segs in.
+//
+// The kept count is returned so a caller that ends the row with an overflow
+// count can drop whole segments from segs, rather than take the packed row
+// apart again on the separator it happens to have joined with.
+func joinSpreadLeft(segs []string, w int) (string, int) {
 	var b strings.Builder
 	used := 0
-	for i, s := range segs {
+	kept := 0
+	for _, s := range segs {
 		seg := dim(" │ ") + s
-		if i == 0 {
+		if kept == 0 {
 			seg = s
 		}
 		sw := widthOf(seg)
@@ -361,8 +368,9 @@ func joinSpreadLeft(segs []string, w int) string {
 		}
 		b.WriteString(seg)
 		used += sw
+		kept++
 	}
-	return b.String()
+	return b.String(), kept
 }
 
 func dim(s string) string { return styleDim.Render(s) }
