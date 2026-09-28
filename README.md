@@ -603,9 +603,13 @@ toktop update     subcommand: install the latest release (--check to only
                   stdout is the release URL and nothing else, or nothing at
                   all when the release names no GitHub release page, which
                   stderr then says
-toktop help       same as --help (-h); `toktop help update` / `toktop help version`
+toktop help       same as --help (-h); `toktop help update` / `toktop help
+                  version` / `toktop help completion` print their own screens
 toktop version    same as --version (-v), which `toktop help`, `toktop version`
                   and `toktop update` all accept
+toktop completion <bash|zsh|fish>
+                  print a shell completion script on stdout, so installing
+                  is one redirect (see Shell completion below)
 --demo            simulated fleet, zero setup
 --add URL         attach an openai-compatible http(s) endpoint (repeatable,
                   once per endpoint; host required; no userinfo, query or
@@ -709,6 +713,23 @@ and the timestamps do not; the JSON report then omits `demo_origin`.
 `--probe` keeps that promise under `--demo`: the auto-probe cadence is
 simulated too, so how many probe waves ran and the instant each is stamped
 follow the run rather than how long the process took.
+
+## Shell completion
+
+`toktop completion <bash|zsh|fish>` prints a completion script on stdout and
+nothing else, so installing it is one redirect:
+
+```sh
+toktop completion bash > /etc/bash_completion.d/toktop     # or ~/.local/share/bash-completion/completions/toktop
+toktop completion zsh  > "${fpath[1]}/_toktop"             # a directory on your $fpath
+toktop completion fish > ~/.config/fish/completions/toktop.fish
+```
+
+The script is generated from the flags this build actually defines, so a new
+flag is completed the day it lands and the completion never goes stale. It
+completes the subcommands and their own flags (`toktop update --<TAB>` offers
+`--check` and `--repo`, not the top-level flags), and offers a file list only
+where a flag takes a path (`--ssh-key`).
 
 ## Environment variables
 

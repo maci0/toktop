@@ -71,6 +71,8 @@ func runMain() int {
 			return runHelp(os.Stdout, os.Args[2:])
 		case "version":
 			return runVersion(os.Stdout, os.Args[2:])
+		case "completion":
+			return runCompletion(os.Stdout, os.Args[2:])
 		}
 	}
 	// The flag package reports a bad flag in its own single-dash spelling;
@@ -137,6 +139,8 @@ func runMain() int {
 		return runHelp(os.Stdout, remoteTargets)
 	case "version":
 		return runVersion(os.Stdout, nil)
+	case "completion":
+		return runCompletion(os.Stdout, remoteTargets)
 	}
 	// Targets are parsed here, before the TTY check below, so a malformed
 	// ssh:// URL is named as the mistake it is rather than reported as

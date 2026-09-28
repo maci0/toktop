@@ -126,7 +126,9 @@ func usage(w io.Writer) error {
 Usage:
   toktop [flags] [ssh://user@host ...]
   toktop update [--check] [--repo owner/name]   install the latest release
-  toktop help [update|version]                  this screen; update has its own
+  toktop completion <bash|zsh|fish>              print a shell completion script
+  toktop help [update|version|completion]        this screen; update and
+                                                 completion have their own
   toktop version                                print version and exit
 
 Examples:
@@ -147,13 +149,14 @@ Flags:
 `)
 	buf.WriteString(flagDocs(topFS))
 	fmt.Fprint(&buf, `
-Positional arguments are ssh:// targets and may repeat; help and version
-are also accepted as commands. 'toktop help update', 'toktop --help update'
-and 'toktop update --help' print the update screen; 'toktop help version'
-and 'toktop version --help' both print this one, since version takes no
-flags of its own. http(s) URLs are rejected with an --add hint;
-anything else points at --help. --add URLs must be http(s) with a host and
-must not embed userinfo. ssh:// targets must be ssh://[user@]host[:port]
+Positional arguments are ssh:// targets and may repeat; help, version and
+completion are also accepted as commands. 'toktop help update', 'toktop
+--help update' and 'toktop update --help' print the update screen; the same
+three spellings print the completion screen for 'toktop help completion'.
+'toktop help version' and 'toktop version --help' both print this one, since
+version takes no flags of its own. http(s) URLs are rejected with an --add
+hint; anything else points at --help. --add URLs must be http(s) with a host
+and must not embed userinfo. ssh:// targets must be ssh://[user@]host[:port]
 and must not embed a password (use $TOKTOP_SSH_PASSWORD or --ssh-key); a
 host or user carrying a bidi control, zero-width or other invisible
 character is refused, since the name shown is not the one ssh dials.
@@ -353,6 +356,11 @@ func runHelp(out io.Writer, args []string) int {
 			return rejectExtra("toktop update", args[1])
 		}
 		return runUpdate(context.Background(), out, []string{"--help"})
+	case "completion":
+		if len(args) > 1 {
+			return rejectExtra("toktop completion", args[1])
+		}
+		return outputStatus(completionUsage(out))
 	case "version":
 		if len(args) > 1 {
 			return rejectExtra("toktop version", args[1])
@@ -406,6 +414,8 @@ func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 	switch args[0] {
 	case "help":
 		return "help", args[1:], nil
+	case "completion":
+		return "completion", args[1:], nil
 	case "version":
 		if len(args) > 1 {
 			return "", nil, fmt.Errorf("toktop version: unexpected argument %q (see 'toktop version --help')", args[1])
@@ -435,7 +445,7 @@ func unexpectedArg(arg string) error {
 	switch {
 	case arg == "update":
 		return fmt.Errorf("toktop: unexpected argument %q (the update subcommand must be first: toktop update)", arg)
-	case arg == "help" || arg == "version":
+	case arg == "help" || arg == "version" || arg == "completion":
 		return fmt.Errorf("toktop: unexpected argument %q (the %s subcommand must be first: toktop %s)", arg, arg, arg)
 	case strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://"):
 		return fmt.Errorf("toktop: unexpected argument %q (did you mean --add %s?)", arg, arg)

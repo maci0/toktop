@@ -643,33 +643,33 @@ func TestUsage(t *testing.T) {
 	usage(&buf)
 	got := buf.String()
 	for _, want := range []string{
-		"toktop -",              // what the tool is
-		"Usage:",                // invocation line
-		"[ssh://user@host ...",  // positional targets documented
-		"toktop help",           // git-style help command
-		"toktop version",        // git-style version command
-		"help [update|version]", // both extra commands are help topics
-		"Examples:",             // worked examples section
-		"-demo",                 // generated flag docs survive
-		"-interval",             // PrintDefaults, not just the examples
-		"-add",                  // repeatable backend flag
-		"1s or 500ms",           // --interval names the duration format
-		"min 50ms",              // --interval floor (bare numbers are nanoseconds)
-		"OMNIROUTE_API_KEY",     // env fallbacks named
-		"--add",                 // http(s) leftovers hint at --add
-		"userinfo",              // --add must not embed credentials
-		"TOKTOP_SSH_PASSWORD",   // ssh URL must not embed a password
-		"ssh://[user@]host",     // ssh target shape
-		"host:port",             // --ingest listen address shape
-		"piping",                // --once is the non-TTY path
-		"needs a terminal",      // live dashboard vs --once
-		"Exit codes:",           // the scripting contract
-		"130",                   // Ctrl+C
-		"stderr",                // status never lands on stdout
-		"Environment",           // env table lives in --help, not only the README
-		"TOKTOP_LOG_LEVEL",      // the env vars a run actually reads
-		"TOKTOP_COLUMNS",        // --once frame overrides
-		"a flag always wins",    // flag beats the variable it mirrors
+		"toktop -",                         // what the tool is
+		"Usage:",                           // invocation line
+		"[ssh://user@host ...",             // positional targets documented
+		"toktop help",                      // git-style help command
+		"toktop version",                   // git-style version command
+		"help [update|version|completion]", // the extra commands are help topics
+		"Examples:",                        // worked examples section
+		"-demo",                            // generated flag docs survive
+		"-interval",                        // PrintDefaults, not just the examples
+		"-add",                             // repeatable backend flag
+		"1s or 500ms",                      // --interval names the duration format
+		"min 50ms",                         // --interval floor (bare numbers are nanoseconds)
+		"OMNIROUTE_API_KEY",                // env fallbacks named
+		"--add",                            // http(s) leftovers hint at --add
+		"userinfo",                         // --add must not embed credentials
+		"TOKTOP_SSH_PASSWORD",              // ssh URL must not embed a password
+		"ssh://[user@]host",                // ssh target shape
+		"host:port",                        // --ingest listen address shape
+		"piping",                           // --once is the non-TTY path
+		"needs a terminal",                 // live dashboard vs --once
+		"Exit codes:",                      // the scripting contract
+		"130",                              // Ctrl+C
+		"stderr",                           // status never lands on stdout
+		"Environment",                      // env table lives in --help, not only the README
+		"TOKTOP_LOG_LEVEL",                 // the env vars a run actually reads
+		"TOKTOP_COLUMNS",                   // --once frame overrides
+		"a flag always wins",               // flag beats the variable it mirrors
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() missing %q", want)
