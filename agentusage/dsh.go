@@ -271,9 +271,12 @@ func (w *Watcher) ownsZstd(path string, f *os.File) (mine, decided bool) {
 	buf := make([]byte, dshHeaderBytes)
 	n, err := io.ReadFull(f, buf)
 	if err != nil && err != io.EOF && err != io.ErrUnexpectedEOF {
+		w.auditOwns(path, err)
 		return false, false
 	}
 	if n == 0 {
+		// No frame has been flushed yet, so there is nothing to attribute.
+		// This is the case the retry is for and it is not a failure to report.
 		return false, false
 	}
 	plain, consumed, derr := decodeZstdPrefix(buf[:n])
@@ -288,6 +291,9 @@ func (w *Watcher) ownsZstd(path string, f *os.File) (mine, decided bool) {
 			"error", core.RedactHome(core.Snippet([]byte(derr.Error()))))
 	}
 	if consumed == 0 {
+		if derr != nil {
+			w.auditOwns(path, derr)
+		}
 		return false, false
 	}
 	for line := range bytes.SplitSeq(plain, []byte("\n")) {

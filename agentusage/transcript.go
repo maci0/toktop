@@ -45,6 +45,7 @@ func (w *Watcher) readNew(path string) {
 		w.forgetCounts(path)
 		w.offsets[path] = 0
 		delete(w.owner, path)
+		delete(w.ownsFailed, path)
 		// The carry is the unterminated tail of the bytes just abandoned, and
 		// the rewind below reads the new version from byte zero. Left in place
 		// it would be prepended to that version's first line, which then fails
@@ -69,6 +70,7 @@ func (w *Watcher) readNew(path string) {
 	if !mine {
 		w.offsets[path] = fi.Size() // keep skipping it cheaply
 		w.stamps[path] = stamp
+		delete(w.ownsFailed, path)
 		return
 	}
 	if w.ad.snapshot {
@@ -109,6 +111,7 @@ func (w *Watcher) readNew(path string) {
 		return // read failed: nothing counted, offset and stamp unchanged, retried next poll
 	}
 	w.auditRead(path, nil)
+	delete(w.ownsFailed, path)
 	for _, v := range recs {
 		w.applyRecord(path, v)
 	}
@@ -126,38 +129,52 @@ func (w *Watcher) readNew(path string) {
 // The offset is the file's length after a successful read, so an unchanged
 // file still short-circuits on its stamp; a rewrite is read from the start
 // even when the new text is the same length as the old.
+//
+// Every failure leaves the offset and the stamp unset, so the file is re-read
+// on every poll for the life of the watcher. That is what makes an unaudited
+// failure here the same defect as an unaudited one in the record path: the
+// document's usage is never counted and nothing says why.
 func (w *Watcher) readSnapshot(path string, size int64, stamp fileStamp) {
 	f, err := w.openTranscript(path)
 	if err != nil {
+		w.auditRead(path, err)
 		return
 	}
 	defer f.Close()
-	v, ok := w.snapshotValue(f)
+	v, ok, err := w.snapshotValue(f)
 	if !ok {
+		w.auditRead(path, err)
 		return
 	}
+	w.auditRead(path, nil)
 	w.applyRecord(path, v)
 	w.offsets[path] = size
 	w.stamps[path] = stamp
 }
 
-// snapshotValue reads one snapshot document from the start of f.
-func (w *Watcher) snapshotValue(f *os.File) (values, bool) {
+// snapshotValue reads one snapshot document from the start of f. The error
+// names the cause where the read produced one; a document the adapter simply
+// rejected, or one that belongs to another directory, carries none, and the
+// caller reports those under the generic errTranscriptUnread.
+func (w *Watcher) snapshotValue(f *os.File) (values, bool, error) {
 	if w.ad.parseFile == nil {
-		return values{}, false
+		return values{}, false, nil
 	}
 	if _, err := f.Seek(0, 0); err != nil {
-		return values{}, false
+		return values{}, false, err
 	}
 	data, err := io.ReadAll(io.LimitReader(f, int64(maxLineBytes)+1))
-	if err != nil || len(data) > maxLineBytes {
-		return values{}, false
+	if err != nil {
+		return values{}, false, err
+	}
+	if len(data) > maxLineBytes {
+		return values{}, false, nil
 	}
 	v, cwd, ok := w.ad.parseFile(data)
 	if !ok || (cwd != "" && !w.sameDir(cwd)) {
-		return values{}, false
+		return values{}, false, nil
 	}
-	return v, true
+	return v, true, nil
 }
 
 // consumeAppend reads from off to EOF, returning parsed records and the
@@ -351,6 +368,7 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 	}
 	f, err := w.openTranscript(path)
 	if err != nil {
+		w.auditOwns(path, err)
 		return false, false // transient: retry next poll
 	}
 	defer f.Close()
@@ -375,6 +393,7 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 		lines++
 	}
 	if err := sc.Err(); err != nil {
+		w.auditOwns(path, err)
 		return false, false
 	}
 	// No cwd anywhere in what was written. A root that is already one

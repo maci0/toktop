@@ -78,6 +78,11 @@ type Watcher struct {
 	// The entry is cleared by the first read that commits, which makes the
 	// next failure a new thing to report.
 	readFailed map[string]bool
+	// ownsFailed latches the same for the attribution scan, which never
+	// commits and so has no read to clear the latch. An undecided file is
+	// retried on every poll for the life of the watcher, so without this the
+	// one case that never resolves reports nothing at all.
+	ownsFailed map[string]bool
 
 	// sourceBase is per-session counters at attach for a sessionSource
 	// (crush). completion_tokens and prompt_tokens are cumulative for the
@@ -165,7 +170,7 @@ func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 		base: map[string]int{}, baseThink: map[string]int{},
 		baseInput: map[string]int{},
 		seen:      map[string]values{}, total: map[string]int{},
-		readFailed: map[string]bool{},
+		readFailed: map[string]bool{}, ownsFailed: map[string]bool{},
 	}
 	// Record where existing files end before anything is counted. Every
 	// transcript already in the store is seeded, not only the ones written in
@@ -450,6 +455,25 @@ func (w *Watcher) auditRead(path string, err error) {
 		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 }
 
+// auditOwns records a transcript whose attribution could not be decided. An
+// undecided file is retried on every poll and never advances an offset, so
+// the whole session's usage goes uncounted; without a line naming it, the
+// agent simply never appears on the dashboard and nothing says why. The name
+// is latched per file because the retry never ends. A file that is simply not
+// there any more is not a failure worth a line.
+func (w *Watcher) auditOwns(path string, err error) {
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if w.ownsFailed[path] {
+		return
+	}
+	w.ownsFailed[path] = true
+	auditLogger().Warn("agent usage transcript could not be attributed to a directory; its usage is not counted",
+		"path", core.RedactHome(path),
+		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+}
+
 // auditBaseline records a seed that did not commit, naming the transcript
 // so the operator can find the session whose totals are overstated. A file
 // that vanished between the listing and this open is a normal race and is
@@ -487,9 +511,12 @@ func (w *Watcher) seedBaseline(path string) {
 	}
 	defer f.Close()
 	if w.ad.snapshot {
-		v, ok := w.snapshotValue(f)
+		v, ok, verr := w.snapshotValue(f)
 		if !ok {
-			auditBaseline(path, errTranscriptUnread)
+			if verr == nil {
+				verr = errTranscriptUnread
+			}
+			auditBaseline(path, verr)
 			return
 		}
 		w.base[path] = v.output

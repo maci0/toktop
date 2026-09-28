@@ -117,8 +117,16 @@ func lockStore(path string, fn func() error) (err error) {
 		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if err == nil {
 			if cerr := f.Close(); cerr != nil {
-				os.Remove(lock)
-				return fmt.Errorf("%s: cannot write the lock: %w", lock, cerr)
+				// A lock file that survives the failed write makes every
+				// later connect report a lock held by no process, so the
+				// failure to clear it rides along with the failure that
+				// left it there.
+				lerr := fmt.Errorf("%s: cannot write the lock: %w", lock, cerr)
+				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+					lerr = errors.Join(lerr,
+						fmt.Errorf("left a lock file at %s that must be deleted: %w", lock, rerr))
+				}
+				return lerr
 			}
 			defer func() {
 				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
@@ -137,13 +145,21 @@ func lockStore(path string, fn func() error) (err error) {
 		// A stale lock is only retried once the break actually took. A lock
 		// that cannot be unlinked (read-only config dir, a peer recreating
 		// it between the Stat and the Remove) would otherwise keep the stale
-		// arm true and spin here with no sleep and no deadline check.
+		// arm true and spin here with no sleep and no deadline check. The
+		// reason the break failed is carried to the give-up message: without
+		// it an unremovable lock is reported as one another toktop holds,
+		// which is not true and leaves the operator with nothing to act on.
+		var breakErr error
 		if info, serr := os.Stat(lock); serr == nil && time.Since(info.ModTime()) > storeLockStale {
-			if os.Remove(lock) == nil {
+			if breakErr = os.Remove(lock); breakErr == nil {
 				continue
 			}
 		}
 		if time.Now().After(deadline) {
+			if breakErr != nil {
+				return fmt.Errorf("%s is locked by another toktop; the stale lock at %s could not be removed: %w",
+					path, lock, breakErr)
+			}
 			return fmt.Errorf("%s is locked by another toktop; giving up after %s", path, storeLockWait)
 		}
 		time.Sleep(storeLockPoll)
@@ -429,8 +445,11 @@ func malformedPin(path string, n int, line, why string) error {
 // atomicWriteFile writes contents to path through a temp file in the same
 // directory, so a reader never sees a half-written store. The temp file is
 // owner-only from the moment it is created, and it is removed unless the
-// rename landed.
-func atomicWriteFile(path, contents string) error {
+// rename landed. A removal that fails is reported with the failure that
+// triggered it: the staging file holds this host's pinned keys, so an
+// operator told only "cannot write the store" has no way to know the
+// directory now holds one.
+func atomicWriteFile(path, contents string) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), knownHostsTempPrefix+"*")
 	if err != nil {
 		return err
@@ -438,7 +457,14 @@ func atomicWriteFile(path, contents string) error {
 	tmpName := tmp.Name()
 	defer func() {
 		tmp.Close()
-		os.Remove(tmpName) // no-op once the rename succeeded
+		if err == nil {
+			os.Remove(tmpName) // no-op once the rename succeeded
+			return
+		}
+		if rerr := os.Remove(tmpName); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			err = errors.Join(err,
+				fmt.Errorf("left a staging file at %s that must be deleted: %w", tmpName, rerr))
+		}
 	}()
 	if _, err := tmp.WriteString(contents); err != nil {
 		return err

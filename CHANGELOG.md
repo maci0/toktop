@@ -59,6 +59,27 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   counted twice. An incomplete walk now leaves the watcher's listing unstamped
   and its bookkeeping alone, and the next poll re-walks.
 
+- A transcript the watcher could not attribute to a working directory was
+  retried on every poll and reported nowhere, so the whole session's usage
+  went uncounted with the agent simply absent from the dashboard. The failing
+  file is now named once on the audit log, with the cause the read gave.
+
+- A hot-reload watcher that could not stat the running executable said
+  nothing and kept polling, so a `go build` landing in that window was never
+  noticed and the session ran the old image. The audit log now reports the
+  reload going off and coming back.
+
+- A failed write to the host key store could leave its staging file, holding
+  pinned host keys, behind with nothing but the write's own error; the
+  leftover is now named with the path to delete. A stale store lock that could
+  not be removed was reported as held by another toktop, which is not true;
+  the message now carries the removal failure instead.
+
+- A probe response body that stopped partway was quoted as the engine's own
+  error text, which is indistinguishable from a short but complete one. The
+  read failure is now wrapped into the error, as the provider path already
+  did.
+
 - A value the flag package could not parse ended in its bare `parse error`,
   which names neither the expectation nor a value that would work, and every
   numeric flag reported it identically. `--frames abc`, `--probe 1.5` and

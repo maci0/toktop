@@ -456,12 +456,16 @@ func (w *Watcher) forgetIdle(live []string) {
 	for path := range w.preexisting {
 		consider(path)
 	}
-	// The read-failure latch is per-file bookkeeping like the rest, and a
-	// transcript that never opened is in none of the maps above: it has no
-	// stamp and no offset to age it out. Without this a store that fails to
-	// read (a partial mount, a store written by a newer build) leaves one
-	// latch entry per file it ever failed on, for the life of the run.
+	// The failure latches are per-file bookkeeping like the rest, and a
+	// transcript that never opened or was never attributed is in none of the
+	// maps above: it has no stamp and no offset to age it out. Without this a
+	// store that fails to read or to attribute (a partial mount, a store
+	// written by a newer build) leaves one latch entry per file it ever failed
+	// on, for the life of the run.
 	for path := range w.readFailed {
+		consider(path)
+	}
+	for path := range w.ownsFailed {
 		consider(path)
 	}
 	for _, path := range drop {
@@ -557,7 +561,7 @@ func (w *Watcher) forgetCounts(path string) {
 //
 // The read-failure latch goes the same way. Only a committed read clears it, so
 // a transcript that failed once and then aged out kept its path for the life
-// of the process.
+// of the process, as does the attribution latch.
 func (w *Watcher) dropFile(path string) {
 	delete(w.stamps, path)
 	delete(w.offsets, path)
@@ -565,5 +569,6 @@ func (w *Watcher) dropFile(path string) {
 	delete(w.preexisting, path)
 	delete(w.zstdCarry, path)
 	delete(w.readFailed, path)
+	delete(w.ownsFailed, path)
 	w.forgetCounts(path)
 }

@@ -550,12 +550,19 @@ func postJSON(ctx context.Context, url string, body []byte) (*http.Response, err
 	}
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
+		b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
 		msg := fmt.Sprintf("%s: http %s", url, resp.Status)
 		if s := core.Snippet(b); s != "" {
 			msg += ": " + s
 		}
-		se := &httpStatusError{status: resp.StatusCode, err: errors.New(msg)}
+		cause := error(errors.New(msg))
+		if rerr != nil {
+			// A body that stopped partway is a fragment, not what the engine
+			// said. The cause is wrapped, not spelled into the text, so a
+			// caller can still tell a truncated transfer from a bad payload.
+			cause = fmt.Errorf("%s: %w", msg, rerr)
+		}
+		se := &httpStatusError{status: resp.StatusCode, err: cause}
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
 			se.after = parseRetryAfter(resp)
 		}
