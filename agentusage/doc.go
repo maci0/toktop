@@ -61,6 +61,20 @@
 // under the sqlite build tag. Without it the package still compiles, and
 // Supported reports those agents unreadable.
 //
+// Three things a program needs sit beside that workflow rather than in it.
+// MatchingEndpoints and ConnectedTo answer whether an agent's tokens are
+// already being counted by an engine the program watches, matching a process's
+// connections against the endpoints an engine is advertised on. They read the
+// process table through Peers, and an unreadable one answers "not connected"
+// rather than raising an error. SetLogger sends the lines this package audits
+// (a transcript walk that
+// could not finish) to the logger the embedding program already writes to,
+// defaulting to the one from log/slog. SameDir and DirKey answer whether two
+// recorded paths name one directory and give that comparison a map key, which
+// is a per-platform question this package settles rather than each caller
+// spelling out: two spellings of one directory differ byte for byte on macOS
+// and Windows and name two directories on Linux.
+//
 // Agents differ in what they print to stdout: some report token usage as they
 // stream, some only at exit, some never. They agree on something else, though,
 // which is that they keep a structured session transcript, and that transcript

@@ -10,6 +10,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,6 +111,35 @@ func ExampleLoadDefinitions() {
 	err := agentusage.LoadDefinitions("/no/such/agents.json")
 	fmt.Println(err)
 	// Output: <nil>
+}
+
+// A definitions file this build cannot use is one error, told apart from the
+// ordinary case of a machine with no definitions at all by errors.Is rather
+// than by reading the message: a file that is missing is no error, and a
+// malformed, unreadable or oversized one wraps ErrInvalidDefinitions, which
+// covers two names colliding after normalization through
+// ErrCollidingDefinitions. A colliding file leaves the registry as it was, so
+// a program that reports the error keeps reading the agents it already had.
+func ExampleLoadDefinitions_error() {
+	dir, err := os.MkdirTemp("", "agentusage-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(path, []byte("{oops"), 0o644); err != nil {
+		fmt.Println(err)
+		return
+	}
+	err = agentusage.LoadDefinitions(path)
+	fmt.Println(errors.Is(err, agentusage.ErrInvalidDefinitions))
+	// The message names the file, with $HOME folded to "~" so the line can be
+	// pasted into an issue as it stands.
+	fmt.Println(strings.Contains(err.Error(), path))
+	// Output:
+	// true
+	// true
 }
 
 // A test that loads a definitions file leaves the process-wide registry

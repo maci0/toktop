@@ -236,8 +236,9 @@ already on disk belong to an earlier run. `errors.Is` matches `ErrEmptyTool`
 and `ErrNoRoots` on a rejected spec, `ErrInvalidDefinitions` on a malformed
 definitions file, and `ErrCollidingDefinitions` on two agent names in one file
 that reduce to the same key; a file that exists but cannot be read
-returns the wrapped `os` error instead, matching neither, and a missing
-one is not an error. `SpecFor` is the read side: it reports the transcript
+matches `ErrInvalidDefinitions` as well, with the `os` error joined so
+`errors.Is` against `fs.ErrPermission` and `errors.As` against `*fs.PathError`
+still reach it, and a missing one is not an error. `SpecFor` is the read side: it reports the transcript
 location registered for an agent, roots as written, which is how a program
 finds out which entries a definitions file registered and which it skipped
 (the agents read by a compiled-in adapter are not reported, so a `usage` entry

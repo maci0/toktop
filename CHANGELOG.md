@@ -27,6 +27,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `agentusage.LoadDefinitions` returned a bare `os` error for a definitions
+  file that exists but cannot be read, so a program checking
+  `errors.Is(err, agentusage.ErrInvalidDefinitions)` for "this file is
+  unusable" saw that answer for malformed JSON and no answer for a permission
+  failure, a directory, or a path below a regular file. Every refusal of a file
+  that exists now carries that error, with the `os` failure joined, so
+  `errors.Is` and `errors.As` still reach the cause underneath.
+
 - `HEAD /healthz` answered with a different header set than the `GET` it
   stands in for: no `Content-Length`, because the answer left the length to
   the runtime and `net/http` derives it from the body a `HEAD` never sends.

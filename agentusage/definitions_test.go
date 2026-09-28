@@ -6,6 +6,7 @@ package agentusage
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -153,6 +154,28 @@ func TestLoadDefinitionsEmptyObjects(t *testing.T) {
 func TestLoadDefinitionsMissingFileIsNotAnError(t *testing.T) {
 	if err := LoadDefinitions(filepath.Join(t.TempDir(), "absent.json")); err != nil {
 		t.Fatalf("missing file = %v, want nil", err)
+	}
+}
+
+// A path that is there but cannot be read is refused the same way a malformed
+// one is, so a caller asking errors.Is whether this file is usable gets one
+// answer rather than two. A directory stands in for every unreadable path: the
+// read fails, no platform reaches the definition parser, and the test says
+// nothing about what a permission failure looks like on a run as root.
+func TestLoadDefinitionsRejectsUnreadablePath(t *testing.T) {
+	dir := t.TempDir()
+	err := LoadDefinitions(dir)
+	if err == nil {
+		t.Fatal("a directory was accepted as a definitions file")
+	}
+	if !errors.Is(err, ErrInvalidDefinitions) {
+		t.Fatalf("unreadable path = %v, want ErrInvalidDefinitions", err)
+	}
+	if _, ok := errors.AsType[*fs.PathError](err); !ok {
+		t.Fatalf("unreadable path = %v, want the I/O failure still wrapped as *fs.PathError", err)
+	}
+	if !strings.Contains(err.Error(), dir) {
+		t.Fatalf("error = %v, want the path %q in the message", err, dir)
 	}
 }
 
