@@ -105,8 +105,13 @@ against.
 - `cmd/toktop/deps_test.go`: a direct require that nothing imports, or that has
   no entry in this file, fails the test run. The same file requires an entry
   here for every `tool` directive and every pin in the requirements files, a
-  version on every `go run`/`bunx` invocation the Makefile fetches with, and an
-  entry here for the tool that invocation names.
+  version on every `go run`/`bunx`/`uvx`/`npx`/`pip install` invocation the
+  Makefile or a workflow step fetches with, and an entry here for the tool that
+  invocation names.
+- `TestWorkflowActionsAreCommitPinned`, same file: every third-party `uses:`
+  in `.github/workflows/` is a 40-character commit id. A tag or a branch is a
+  name the publisher can move, and the action runs with the job's token and
+  network, so a moved ref changes what CI executes with no review in the tree.
 
 A release ships the checksums file and the SBOM, not a sigstore attestation, so
 a downloaded binary is verified against the checksum its own release page

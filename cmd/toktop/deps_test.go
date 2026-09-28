@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"go/parser"
 	"go/token"
 	"os"
@@ -478,12 +479,22 @@ func expandVars(s string, vars map[string]string) string {
 	}
 }
 
-// fetchedTool is one tool a Makefile recipe pulls from a registry or a proxy
-// while the recipe runs: the coordinate the recipe names, and the line it came
-// from.
+// fetchedTool is one tool a recipe pulls from a registry or a proxy while the
+// recipe runs: the file and line it came from, and the coordinate the recipe
+// names.
 type fetchedTool struct {
-	line string
-	tool string
+	source string
+	line   string
+	tool   string
+}
+
+// allFetchedTools returns every tool the Makefile and the CI workflows fetch.
+// A job that runs a package by coordinate is a dependency of this tree whether
+// the recipe is a Makefile target or a step, so both are scanned by the same
+// two gates below.
+func allFetchedTools(t *testing.T) []fetchedTool {
+	t.Helper()
+	return append(fetchedTools(t), workflowFetchedTools(t)...)
 }
 
 // fetchedTools returns every tool in the Makefile a recipe fetches, in the
@@ -504,6 +515,7 @@ func fetchedTools(t *testing.T) []fetchedTool {
 			continue
 		}
 		fields := strings.Fields(expandVars(line, vars))
+		source := "Makefile"
 		// A recipe line may start with the silent `@`, so every launcher is
 		// matched with it stripped.
 		launch := func(i int) string { return strings.TrimPrefix(fields[i], "@") }
@@ -517,7 +529,7 @@ func fetchedTools(t *testing.T) []fetchedTool {
 					if strings.HasPrefix(next, "-") {
 						continue
 					}
-					fetched = append(fetched, fetchedTool{line: line, tool: next})
+					fetched = append(fetched, fetchedTool{source: source, line: line, tool: next})
 					break
 				}
 				continue
@@ -529,7 +541,7 @@ func fetchedTools(t *testing.T) []fetchedTool {
 			// `run` after an ordinary word is a recipe running something
 			// local, or the prose of a target's help line.
 			if (field == "run" && strings.HasPrefix(fields[i-1], "$(")) || launch(i) == "bunx" {
-				fetched = append(fetched, fetchedTool{line: line, tool: fields[i+1]})
+				fetched = append(fetched, fetchedTool{source: source, line: line, tool: fields[i+1]})
 			}
 		}
 	}
@@ -553,15 +565,111 @@ func toolCoordinate(coord string) (name, version string, pinned bool) {
 	return coord, "", false
 }
 
+// workflowFiles returns the workflow YAML under .github/workflows, the same
+// set the Makefile's WORKFLOWS wildcard names. A job runs with the
+// permissions, the environment and the network a workflow gives it, so a
+// package a step fetches is as much a dependency as one a recipe fetches.
+func workflowFiles(t *testing.T) []string {
+	t.Helper()
+	paths, err := filepath.Glob(filepath.Join(moduleRoot, ".github", "workflows", "*.yml"))
+	if err != nil {
+		t.Fatalf("glob workflows: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no workflow files under .github/workflows; the gate below would pass on an empty set")
+	}
+	return paths
+}
+
+// workflowFetchedTools returns every tool a workflow step pulls from a
+// registry while the job runs. `go run` and `go install name@version` resolve
+// through the module proxy, `bunx` and `npx` through the npm registry, `uvx`
+// and `pip install` through PyPI. A `go install` without a version is not
+// matched: `go install tool` names the tool directive in go.mod, which the
+// module graph already pins.
+func workflowFetchedTools(t *testing.T) []fetchedTool {
+	t.Helper()
+	var fetched []fetchedTool
+	for _, path := range workflowFiles(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for number, line := range strings.Split(string(raw), "\n") {
+			line = strings.TrimSpace(line)
+			if line == "" || strings.HasPrefix(line, "#") {
+				continue
+			}
+			fields := strings.Fields(line)
+			add := func(i int, coord string) {
+				if coord == "" {
+					return
+				}
+				fetched = append(fetched, fetchedTool{
+					source: fmt.Sprintf(".github/workflows/%s:%d", filepath.Base(path), number+1),
+					line:   line,
+					tool:   coord,
+				})
+			}
+			for i, field := range fields {
+				// The launchers that take flags of their own before the
+				// coordinate: the first field after the launcher that is not
+				// a flag is the package.
+				for _, launcher := range []string{"uvx", "bunx", "npx"} {
+					if field == launcher {
+						for _, next := range fields[i+1:] {
+							if strings.HasPrefix(next, "-") {
+								continue
+							}
+							add(i, next)
+							break
+						}
+					}
+				}
+				// `pip install` names its package after a run of flags, the
+				// same shape as the launchers above. A requirements file is
+				// not a coordinate: `uv pip install -r file` installs what
+				// the file pins, and the file is the place that is checked.
+				if (field == "pip" || field == "pip3") && i+1 < len(fields) && fields[i+1] == "install" {
+					rest := fields[i+2:]
+					for j := 0; j < len(rest); j++ {
+						if rest[j] == "-r" || rest[j] == "--requirement" {
+							j++
+							continue
+						}
+						if strings.HasPrefix(rest[j], "-") {
+							continue
+						}
+						add(i, rest[j])
+						break
+					}
+				}
+				if field != "go" || i+2 >= len(fields) {
+					continue
+				}
+				switch fields[i+1] {
+				case "run":
+					add(i, fields[i+2])
+				case "install":
+					if strings.Contains(fields[i+2], "@") {
+						add(i, fields[i+2])
+					}
+				}
+			}
+		}
+	}
+	return fetched
+}
+
 // TestToolPinsAreExact fails when a recipe fetches a tool without naming a
 // version: `go run` without @version resolves whatever the proxy serves that
 // minute, and `bunx` without @version installs the latest release. A pin held
 // in an assignment counts, because that is where the version pins live.
 func TestToolPinsAreExact(t *testing.T) {
-	for _, f := range fetchedTools(t) {
+	for _, f := range allFetchedTools(t) {
 		_, version, ok := toolCoordinate(f.tool)
 		if !ok || version == "" || strings.ContainsAny(version, "$ ") {
-			t.Errorf("Makefile fetches a tool without a version: %s; pin it in a variable above the recipe", f.line)
+			t.Errorf("%s fetches a tool without a version: %s; pin it in a variable above the recipe", f.source, f.line)
 		}
 	}
 }
@@ -575,10 +683,71 @@ func TestFetchedToolsAreDocumented(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read %s: %v", dependencyTable, err)
 	}
-	for _, f := range fetchedTools(t) {
+	for _, f := range allFetchedTools(t) {
 		module, _, _ := toolCoordinate(f.tool)
 		if !strings.Contains(string(reasoned), module) {
-			t.Errorf("Makefile fetches %s and it has no entry in %s; record why it is here", module, dependencyTable)
+			t.Errorf("%s fetches %s and it has no entry in %s; record why it is here", f.source, module, dependencyTable)
 		}
+	}
+}
+
+// isCommitSHA reports whether ref is a full 40-character lowercase hex commit
+// id, the only action ref that names one immutable tree. A tag or a branch is
+// a name the publisher can move, and a run resolves it at dispatch time.
+func isCommitSHA(ref string) bool {
+	if len(ref) != 40 {
+		return false
+	}
+	for _, r := range ref {
+		if (r < '0' || r > '9') && (r < 'a' || r > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// TestWorkflowActionsAreCommitPinned fails when a workflow uses an action by
+// tag or branch. Every third-party action in these workflows is a package a
+// release depends on: it runs with the job's token and its network, so a moved
+// ref changes what CI executes without a review. A local action (a path under
+// this repository) names no ref and is left alone.
+func TestWorkflowActionsAreCommitPinned(t *testing.T) {
+	pinned := 0
+	for _, path := range workflowFiles(t) {
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		for number, line := range strings.Split(string(raw), "\n") {
+			_, after, ok := strings.Cut(line, "uses:")
+			if !ok {
+				continue
+			}
+			// The version a reader wants trails the coordinate as a comment;
+			// GitHub resolves the ref alone.
+			if hash := strings.Index(after, "#"); hash >= 0 {
+				after = after[:hash]
+			}
+			value := strings.Trim(strings.TrimSpace(after), `"'`)
+			if value == "" {
+				continue
+			}
+			if strings.HasPrefix(value, "./") || strings.HasPrefix(value, "docker://") {
+				continue
+			}
+			action, ref, ok := strings.Cut(value, "@")
+			if !ok {
+				t.Errorf("%s:%d uses %s with no ref; name the commit", filepath.Base(path), number+1, value)
+				continue
+			}
+			if !isCommitSHA(ref) {
+				t.Errorf("%s:%d uses %s at %q, a tag or a branch; pin the 40-character commit id", filepath.Base(path), number+1, action, ref)
+				continue
+			}
+			pinned++
+		}
+	}
+	if pinned == 0 {
+		t.Fatal("no pinned action ref found in the workflows; the parser no longer understands them")
 	}
 }
