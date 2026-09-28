@@ -91,6 +91,33 @@ func TestTargetUserHost(t *testing.T) {
 	}
 }
 
+// The audit log keeps the host and drops the account: a line that outlives the
+// run gets quoted into a bug report, and a login names a person on the host.
+// RedactUser is the same fold for an error text a dial already prefixed with
+// the target, and it must leave the host and every other word alone.
+func TestTargetLogHostAndRedactUser(t *testing.T) {
+	tgt := Target{User: "root", Host: "box"}
+	if got := tgt.LogHost(); got != "box" {
+		t.Errorf("LogHost = %q, want %q", got, "box")
+	}
+	for _, tc := range []struct{ msg, want string }{
+		{"ssh root@box: unable to authenticate", "ssh @box: unable to authenticate"},
+		{"root@box twice: root@box", "@box twice: @box"},
+		{"refused by a server named root@box.example", "refused by a server named @box.example"},
+		{"no account in this one", "no account in this one"},
+	} {
+		if got := tgt.RedactUser(tc.msg); got != tc.want {
+			t.Errorf("RedactUser(%q) = %q, want %q", tc.msg, got, tc.want)
+		}
+	}
+	// An empty user is not the empty string to be replaced everywhere: the
+	// fold would turn every bare "@" in the text into a match.
+	anon := Target{Host: "box"}
+	if got := anon.RedactUser("a@b and @box"); got != "a@b and @box" {
+		t.Errorf("RedactUser with no user = %q, want it unchanged", got)
+	}
+}
+
 func TestTargetUserOr(t *testing.T) {
 	if got := (Target{User: "root", Host: "box"}).userOr("fallback"); got != "root" {
 		t.Errorf("userOr = %q, want the explicit user", got)

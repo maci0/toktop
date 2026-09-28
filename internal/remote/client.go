@@ -223,13 +223,13 @@ func Connect(ctx context.Context, t Target) (*Client, error) {
 		// dashboard with no engines on it. The audit line is the record that
 		// outlives the frame.
 		audit().Warn("toktop: ssh connect failed",
-			"target", logcfg.RedactedField(t.UserHost(), 256),
+			"target", logcfg.RedactedField(t.LogHost(), 256),
 			"port", t.Port,
-			"error", logcfg.RedactedField(err.Error(), 256))
+			"error", logcfg.RedactedField(t.RedactUser(err.Error()), 256))
 		return nil, errors.New(core.RedactHome(err.Error()))
 	}
 	audit().Info("toktop: ssh connected",
-		"target", logcfg.RedactedField(t.UserHost(), 256),
+		"target", logcfg.RedactedField(t.LogHost(), 256),
 		"port", t.Port,
 		"dial", time.Since(c.connectedAt).Round(time.Millisecond))
 	return c, nil
@@ -359,7 +359,7 @@ func (c *Client) keepalive() {
 			// keepalive and a peer that closed the socket need different
 			// investigations and the wire error alone cannot tell them apart.
 			audit().Warn("toktop: ssh peer stopped answering keepalives",
-				"target", logcfg.RedactedField(c.Target.UserHost(), 256),
+				"target", logcfg.RedactedField(c.Target.LogHost(), 256),
 				"misses", misses,
 				"probe_every", keepaliveEvery)
 			c.conn.Close() // unblocks any probe still awaiting a reply
@@ -540,7 +540,7 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		// a network blip and a host to investigate, so it is recorded before
 		// the error reaches the caller that will drop the target.
 		audit().Warn("toktop: ssh channel open unanswered",
-			"target", logcfg.RedactedField(c.Target.UserHost(), 256),
+			"target", logcfg.RedactedField(c.Target.LogHost(), 256),
 			"wait", sessionOpenTimeout)
 		c.conn.Close()
 		// conn.Close is what releases the parked open; the session it may
@@ -754,10 +754,10 @@ func (c *Client) auditForwardFailure(rport int, err error) {
 	c.forwardWarnAt[rport] = now
 	c.forwardWarnMu.Unlock()
 	audit().Warn("toktop: ssh forward failed",
-		"target", logcfg.RedactedField(c.Target.UserHost(), 256),
+		"target", logcfg.RedactedField(c.Target.LogHost(), 256),
 		"port", c.Target.Port,
 		"forwarded_port", rport,
-		"error", logcfg.RedactedField(err.Error(), 256))
+		"error", logcfg.RedactedField(c.Target.RedactUser(err.Error()), 256))
 }
 
 // acquireRelay records local as a connection this client is piping, or refuses
@@ -881,9 +881,9 @@ func (c *Client) watchClose() {
 	// engines stop answering and the vitals loop gives up. Up to here the only
 	// record was one stderr line under the alt screen.
 	audit().Error("toktop: ssh connection lost",
-		"target", logcfg.RedactedField(c.Target.UserHost(), 256),
+		"target", logcfg.RedactedField(c.Target.LogHost(), 256),
 		"port", c.Target.Port,
 		"uptime", time.Since(c.connectedAt).Round(time.Second),
-		"error", logcfg.RedactedField(c.Err().Error(), 256))
+		"error", logcfg.RedactedField(c.Target.RedactUser(c.Err().Error()), 256))
 	close(c.closed)
 }

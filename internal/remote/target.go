@@ -147,13 +147,35 @@ func parseURLTarget(raw string) (Target, error) {
 }
 
 // UserHost names the target the way the operator wrote it, minus anything
-// the key path would add. It is what goes into the ssh argv, so it is also
-// the one spelling every log line and error names a target by.
+// the key path would add. It is what goes into the ssh argv and what the
+// message on the operator's own terminal carries.
 func (t Target) UserHost() string {
 	if t.User == "" {
 		return t.Host
 	}
 	return t.User + "@" + t.Host
+}
+
+// LogHost is UserHost without the account name, for an audit line. The line
+// outlives the run and is the copy kept by whatever ran toktop, quoted into a
+// bug report and read by whoever handles it, and a login names a person on
+// the host rather than a port to check. logcfg.HomeHandler folds $HOME out of
+// every line, and a user@host is not a path under it, so the account is
+// dropped here instead. The host alone still tells a reader which target a
+// line is about; the port beside it separates two of them on one host.
+func (t Target) LogHost() string {
+	return t.Host
+}
+
+// RedactUser folds the account name out of msg, for the error texts a dial
+// prefixes with the target. The host survives, so the line still names the
+// peer it is about, and a user the operator did not type (a ~/.ssh/config
+// User, the local login name) is dropped with the rest.
+func (t Target) RedactUser(msg string) string {
+	if t.User == "" {
+		return msg
+	}
+	return strings.ReplaceAll(msg, t.User+"@", "@")
 }
 
 // sshConfigEntry is the subset of ~/.ssh/config toktop understands.

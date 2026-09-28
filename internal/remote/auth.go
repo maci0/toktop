@@ -3,6 +3,7 @@ package remote
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 	"golang.org/x/crypto/ssh"
 	"golang.org/x/crypto/ssh/agent"
 	"golang.org/x/term"
@@ -48,15 +50,18 @@ func loadSigner(path string) (ssh.Signer, error) {
 // keyFileAuth builds an AuthMethod from one key file. required marks the
 // target's own key (--ssh-key, or IdentityFile from ~/.ssh/config): its load
 // failure must reach the operator instead of degrading into a confusing
-// generic auth rejection; the ~/.ssh defaults are best effort and may return
-// an error the caller ignores.
+// generic auth rejection. A ~/.ssh default is best effort, and most of them
+// are absent: a name that is not there is the normal case and is silent, but
+// one that is there and will not load (wrong permissions, a passphrase this
+// client cannot ask for) returns its error, so the caller can say the chain
+// is weaker than it looks.
 func keyFileAuth(path string, required bool) (ssh.AuthMethod, error) {
 	if path == "" {
 		return nil, nil
 	}
 	s, err := loadSigner(path)
 	if err != nil {
-		if !required {
+		if !required && errors.Is(err, fs.ErrNotExist) {
 			return nil, nil
 		}
 		return nil, err
@@ -224,9 +229,13 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 	for _, p := range defaultKeyPaths() {
 		m, err := keyFileAuth(p, false)
 		if err != nil {
+			// The reason is folded to "~" before it is written, like every
+			// other audit line here: a read failure carries the path it failed
+			// on in full, and a path under $HOME names the account the line
+			// is otherwise careful not to.
 			audit().Warn("toktop: default ssh key unusable, continuing without it",
 				"key", core.RedactHome(p),
-				"error", core.Snippet([]byte(err.Error())))
+				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 			continue
 		}
 		if m != nil {
@@ -236,9 +245,12 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 	if sock := agentSock(); sock != "" {
 		ag, ac, err := dialAgent(sock)
 		if err != nil {
+			// The socket is $SSH_AUTH_SOCK, environment input rather than a
+			// constant, so it is capped and folded like the rest of the line's
+			// text; the dial error names the same socket and is folded with it.
 			audit().Warn("toktop: ssh agent unreachable, continuing without it",
-				"socket", sock,
-				"error", core.Snippet([]byte(err.Error())))
+				"socket", logcfg.Field(core.RedactHome(sock), 256),
+				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 		} else {
 			methods = append(methods, ssh.PublicKeysCallback(ag.Signers))
 			old := cleanup

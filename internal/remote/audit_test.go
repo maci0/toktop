@@ -3,6 +3,8 @@ package remote
 import (
 	"bytes"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -61,6 +63,15 @@ func linesWith(buf *syncBuffer, sub string) []string {
 	return out
 }
 
+// namesTarget reports whether an audit line names the peer it is about and
+// leaves the account out of it. testTarget is the target every audit test
+// connects with, so "tester" is the account a line must not carry: these
+// lines outlive the run and get quoted into bug reports, and a login names a
+// person on the host.
+func namesTarget(line string) bool {
+	return strings.Contains(line, "target=127.0.0.1") && !strings.Contains(line, "tester@")
+}
+
 // A remote that stops answering has to say so in the audit log, not only on
 // the frame that happens to be drawn: the alt screen takes the dashboard's own
 // notice with it. One line when the outage starts and one when it ends, so a
@@ -90,7 +101,7 @@ func TestVitalsOutageIsAuditedOnceEachWay(t *testing.T) {
 	if len(fails) != 1 {
 		t.Fatalf("audited failures = %d, want 1 for three failed polls: %v", len(fails), fails)
 	}
-	if !strings.Contains(fails[0], "tester@127.0.0.1") {
+	if !namesTarget(fails[0]) {
 		t.Errorf("failure line does not name the target: %q", fails[0])
 	}
 	if !strings.Contains(fails[0], "level=WARN") {
@@ -153,7 +164,7 @@ func TestConnectionDropIsAudited(t *testing.T) {
 	if len(drops) != 1 {
 		t.Fatalf("drop audit lines = %d, want 1: %v", len(drops), drops)
 	}
-	if !strings.Contains(drops[0], "level=ERROR") || !strings.Contains(drops[0], "tester@127.0.0.1") {
+	if !strings.Contains(drops[0], "level=ERROR") || !namesTarget(drops[0]) {
 		t.Errorf("drop line = %q, want an error naming the target", drops[0])
 	}
 	cli.Close()
@@ -176,7 +187,44 @@ func TestConnectFailureIsAudited(t *testing.T) {
 	if len(fails) != 1 {
 		t.Fatalf("connect failure audit lines = %d, want 1: %v", len(fails), fails)
 	}
-	if !strings.Contains(fails[0], "level=WARN") || !strings.Contains(fails[0], "tester@127.0.0.1") {
+	if !strings.Contains(fails[0], "level=WARN") || !namesTarget(fails[0]) {
 		t.Errorf("connect failure line = %q, want a warn naming the target", fails[0])
+	}
+}
+
+// A default key that is there and will not load is skipped with a line saying
+// so, and that line's reason is where a path under the operator's home can
+// sneak back in: a read failure names the file it failed on, and the file is
+// ~/.ssh/id_rsa. The audit copy outlives the run and gets pasted into issues,
+// so the home has to be folded out of the reason the way it already is out of
+// the key attribute beside it. A name that is not there at all stays silent:
+// most machines have no key under one of these three, and a line per absent
+// name would bury the ones that matter.
+func TestUnusableDefaultKeyIsAuditedWithoutTheHomePath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir reads this one on Windows
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, ".ssh", "id_ed25519"), []byte("not a key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	disableAgent(t)
+	logs := captureAudit(t)
+
+	if _, _, err := (Target{Host: "box"}).authMethods(); err != nil {
+		t.Fatalf("authMethods: %v", err)
+	}
+	warns := linesWith(logs, "default ssh key unusable")
+	if len(warns) != 1 {
+		t.Fatalf("audit lines for one unusable default key = %d, want 1: %v", len(warns), warns)
+	}
+	if strings.Contains(warns[0], home) {
+		t.Errorf("audit line carries the home directory: %q", warns[0])
+	}
+	// The two names that are absent must not have produced a line of their own.
+	if got := linesWith(logs, "id_rsa"); len(got) != 0 {
+		t.Errorf("an absent default key was audited: %v", got)
 	}
 }

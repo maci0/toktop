@@ -99,8 +99,12 @@ the only way to write a line that has not been through that fold.
 
 Diagnostics name the file that failed, but the home directory is rewritten to
 `~` first: an absolute path under `$HOME` names the account, and these lines
-are what gets pasted into issues. An `ssh://` target is reported as you typed
-it, since that host and user are the ones you pointed toktop at.
+are what gets pasted into issues. An `ssh://` target is named in the audit log
+by host and port, without the account: a login names a person on the host, and
+the home fold above does not reach one, so it is dropped where the line is
+written. The host alone says which target a line is about, and the account
+still appears in the message toktop prints to your own terminal, next to the
+password prompt when one is needed.
 
 ## The website
 

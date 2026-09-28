@@ -79,11 +79,14 @@ func kimiWire(dir, agent string) string {
 }
 
 // The key is the CLI's own naming, with the slug it prints in front of the
-// hash: both pairs were read off a live store.
+// hash. The pairs are paths shaped like the ones a live store holds, with the
+// account and the worktree a previous session ran in left out: a committed
+// fixture is published with the repository, and those name a person and a run
+// of theirs.
 func TestKimiWorkDirKeyMatchesTheCLI(t *testing.T) {
 	for _, tc := range []struct{ cwd, key string }{
-		{"/home/maci/Desktop/7dtd/zdtd", "a0a18387af9f"},
-		{"/home/maci/gauntlet/.gauntlet/worktrees/20260825T180119Z-5eaf-l2-25-llm-review", "ba62bd4208d9"},
+		{"/home/dev/Desktop/7dtd/zdtd", "db33aaa9ffae"},
+		{"/home/dev/src/toktop-demo/.worktrees/20260101T000000Z-abcd-l1-lane-9", "889009087ad7"},
 	} {
 		if got := kimiWorkDirKey(tc.cwd); got != tc.key {
 			t.Errorf("kimiWorkDirKey(%q) = %q, want %q", tc.cwd, got, tc.key)

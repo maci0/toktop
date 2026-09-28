@@ -11,14 +11,17 @@ import (
 )
 
 func TestPathSlugMatchesTheStoresOnDisk(t *testing.T) {
-	// These are directory names taken from a real ~/.dsh/sessions and
-	// ~/.cursor/projects. The slug is the absolute path with separators
-	// folded to '-', and dsh wraps that in '--'.
-	const dir = "/home/maci/Desktop/vllm-spark-0731"
-	if got, want := pathSlug(dir), "home-maci-Desktop-vllm-spark-0731"; got != want {
+	// Shaped like the directory names a ~/.dsh/sessions and ~/.cursor/projects
+	// actually hold, with the account and the machine they were read from left
+	// out: a committed fixture is published with the repository, and a home
+	// path in it names whoever ran the session that produced it. The slug is
+	// the absolute path with separators folded to '-', and dsh wraps that in
+	// '--'.
+	const dir = "/home/dev/Desktop/vllm-spark-0731"
+	if got, want := pathSlug(dir), "home-dev-Desktop-vllm-spark-0731"; got != want {
 		t.Fatalf("pathSlug = %q, want %q", got, want)
 	}
-	if got, want := dshDirName("/home/maci/Desktop/fastrouter"), "--home-maci-Desktop-fastrouter--"; got != want {
+	if got, want := dshDirName("/home/dev/Desktop/fastrouter"), "--home-dev-Desktop-fastrouter--"; got != want {
 		t.Fatalf("dshDirName = %q, want %q", got, want)
 	}
 	// A drive letter cannot remain a colon: that is not a directory name.

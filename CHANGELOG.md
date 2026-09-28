@@ -13,6 +13,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Changed
+
+- The audit log names an `ssh://` target by host and port, without the
+  account. A login names a person on the host, no redaction folds one out of
+  a line, and these lines outlive the run into whatever ran toktop. The
+  account still appears in the message toktop prints to your own terminal.
+
 ### Fixed
 
 - The ssh host-key store keeps a copy of itself. Every write leaves one at
@@ -23,6 +30,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the pins are gone. The copy lives in the store's own directory: back up
   that directory to cover losing it.
 
+- A `~/.ssh` default key that is there and will not load (wrong permissions,
+  a key that needs a passphrase) says so in the audit log. The chain was
+  quietly one credential shorter, and the rejection that followed named the
+  host key instead. A name that is not there stays silent.
 - Grok's tok/s is the turn's own tokens over the time the model spent.
   The counts arrive once, when the turn ends. A rate taken from the gap
   since the previous turn never formed, and dividing by the whole turn
