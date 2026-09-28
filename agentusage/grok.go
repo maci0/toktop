@@ -6,6 +6,7 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/url"
 	"path/filepath"
 	"strings"
@@ -62,11 +63,20 @@ func grokSessionCwd(path string) (string, bool) {
 		return "", false
 	}
 	decoded, err := url.PathUnescape(encoded)
-	if err != nil || !filepath.IsAbs(decoded) {
+	// A NUL byte survives the decode as %00 and names no directory on any
+	// platform, so a session under one is not attributed to a working
+	// directory at all.
+	if err != nil || !filepath.IsAbs(decoded) || strings.ContainsRune(decoded, 0) {
 		return "", false
 	}
 	return decoded, true
 }
+
+// grokMaxTurnMS is the largest turn length that converts to a duration. The
+// counters arrive as milliseconds and the span is nanoseconds, so a value past
+// this wraps the product negative and a rate taken over it reports tokens per
+// second with the wrong sign.
+const grokMaxTurnMS = math.MaxInt64 / int64(time.Millisecond)
 
 // parseGrokUpdate reads one updates.jsonl line. Only a completed turn
 // carries counts. Anything else in the log, including the same word inside
@@ -119,7 +129,11 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 		ms = rec.Params.Update.ElapsedMS
 	}
 	if ms > 0 {
-		v.span = time.Duration(ms) * time.Millisecond
+		n := int64(ms)
+		if n > grokMaxTurnMS {
+			n = grokMaxTurnMS
+		}
+		v.span = time.Duration(n) * time.Millisecond
 	}
 	if !v.present() {
 		return values{}, "", false

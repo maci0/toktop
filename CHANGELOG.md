@@ -66,6 +66,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - `scripts/screenshot.py --help --bogus` exits 2 naming the flag. The help
   flag answered before the options were looked at, so a mistyped flag next
   to it exited 0 having printed help.
+
+- A grok transcript reporting an absurd turn length no longer wraps its span
+  negative, which reported the turn's rate with the wrong sign.
+- An agy conversation named under two workspaces in
+  `cache/last_conversations.json` is attributed to one of them now, not to
+  whichever the read happened to reach first. The smallest path wins, so the
+  same conversation does not move between polls.
+- A session directory name that decodes to a path carrying a NUL byte is no
+  longer read as a working directory, for grok and for anything else matching
+  that spelling.
+- A definition pointed at a log that reports its token total under `total`
+  (what the Gemini CLI writes, and what opencode writes in a message) reads
+  that total instead of reporting no context size.
+
 - Grok's tok/s is the turn's own tokens over the time the model spent.
   The counts arrive once, when the turn ends. A rate taken from the gap
   since the previous turn never formed, and dividing by the whole turn

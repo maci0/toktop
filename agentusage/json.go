@@ -60,6 +60,11 @@ var (
 	}
 	totalKeys = map[string]bool{
 		"total_tokens": true, "totaltokens": true, "totaltokencount": true,
+		// The bare spelling, which is what the Gemini CLI writes under
+		// "tokens" and what opencode writes in a message's data column. Left
+		// out, a definition pointed at one of those logs read a total it
+		// could not recognize and reported no context size at all.
+		"total": true,
 	}
 	inputKeys = map[string]bool{
 		"input_tokens": true, "inputtokens": true, "prompt_tokens": true,

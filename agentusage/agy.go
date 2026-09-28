@@ -10,6 +10,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -250,7 +251,18 @@ func loadAgyLast(path string) (map[string]string, bool) {
 		return nil, false
 	}
 	ids := make(map[string]string, len(raw))
-	for ws, id := range raw {
+	// Two workspaces can name the same conversation id, and only one of them
+	// is recorded. Go randomizes map iteration, so ranging over raw would pick
+	// that one at random and re-read the same file would attribute the
+	// conversation to a different directory. The smallest workspace wins, the
+	// same rule the JSONL walker applies to the competing keys of one record.
+	workspaces := make([]string, 0, len(raw))
+	for ws := range raw {
+		workspaces = append(workspaces, ws)
+	}
+	slices.Sort(workspaces)
+	for _, ws := range workspaces {
+		id := raw[ws]
 		if ws == "" || id == "" {
 			continue
 		}
