@@ -41,7 +41,13 @@ type Server struct {
 	srv   http.Server
 	ln    net.Listener
 	addr  string
-	log   *slog.Logger
+	// hostGuard refuses a request whose Host names something other than the
+	// loopback interface, and is nil when the listener was bound wider (an
+	// explicit --ingest on a routable address), where the host is whatever
+	// the operator's peers call it and no allowlist is right. Set in
+	// newServer; nil on a Server built as a literal, which skips the check.
+	hostGuard func(host string) bool
+	log       *slog.Logger
 }
 
 // idleTimeout reaps keep-alive connections that sit between requests. Without
@@ -84,6 +90,7 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 		lg = slog.New(slog.DiscardHandler)
 	}
 	s := &Server{rec: rec, now: time.Now, ln: ln, addr: ln.Addr().String(), log: lg}
+	s.hostGuard = loopbackHostGuard(ln.Addr())
 	s.srv = http.Server{
 		Handler:           s.routes(),
 		ReadHeaderTimeout: readHeaderTimeout,
@@ -130,6 +137,51 @@ func setSecurityHeaders(h http.Header) {
 	h.Set("Referrer-Policy", "no-referrer")
 }
 
+// loopbackHostGuard returns the Host check for a listener bound to ln, or nil
+// when the listener is not loopback-only.
+//
+// The Origin check in handlePost stops a page on another site from forging
+// rows into the feed, and DNS rebinding defeats it: a page that resolves its
+// own name to 127.0.0.1 for one fetch is same-origin with this endpoint, so
+// the browser sends no Origin at all and the request sails past the guard. The
+// Host header is what a rebound request still carries, and it carries the
+// attacker's name, so this is the check that closes it.
+//
+// Only a loopback listener gets one. A --ingest bound to a routable address is
+// reached under whatever name the operator's peers use for the box, and an
+// allowlist there would refuse the very traffic the operator asked for; that
+// bind is already the state main warns about, and the rebinding page reaches
+// it only through the loopback interface anyway.
+func loopbackHostGuard(addr net.Addr) func(string) bool {
+	tcp, ok := addr.(*net.TCPAddr)
+	if !ok || !tcp.IP.IsLoopback() {
+		return nil
+	}
+	// A listener bound to the wildcard reports a nil IP, and IsLoopback is
+	// false for it, so this covers only an explicit loopback bind.
+	return func(host string) bool {
+		name := host
+		if h, _, err := net.SplitHostPort(host); err == nil {
+			name = h
+		}
+		name = strings.TrimSuffix(strings.TrimSuffix(name, "]"), "[")
+		if name == "" {
+			return false
+		}
+		if ip := net.ParseIP(name); ip != nil {
+			return ip.IsLoopback()
+		}
+		// The name form a browser or a curl on the same box uses for this
+		// endpoint. Folded ASCII over NFC, the way every other host
+		// comparison in the tree folds one: localhost is an ASCII literal and
+		// strings.ToLower would also fold runes whose lowercase form is
+		// ASCII, so a U+212A in the name would satisfy a compare the operator
+		// never wrote.
+		folded := core.FoldASCII(norm.NFC.String(name))
+		return folded == "localhost" || strings.HasSuffix(folded, ".localhost")
+	}
+}
+
 // wrap is the single ingest handler: security headers, request id, panic
 // recover, and the 404/405 rejections with their audit lines. Both come
 // from the endpoint table, so the 404 lists exactly what is served and a 405
@@ -168,6 +220,17 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}()
 
+		// Ahead of the routing table, not after it: a rebound request must
+		// learn nothing about what this endpoint serves, so the 404's
+		// endpoint list and the 405's Allow header are both downstream of
+		// this. It sits ahead of the method guard too, since only the POST
+		// handler reads the Origin header and putting it here is what
+		// covers /healthz as well.
+		if s.hostGuard != nil && !s.hostGuard(r.Host) {
+			http.Error(w, "host is not this machine; refusing a request addressed to another name", http.StatusForbidden)
+			s.logRequest(r, id, http.StatusForbidden, 0, 0, time.Since(start), "host refused")
+			return
+		}
 		e, known := lookupEndpoint(r.URL.Path)
 		if !known {
 			http.Error(w, notFoundMessage(), http.StatusNotFound)

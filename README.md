@@ -385,8 +385,14 @@ and not a fault: wait the named second and resend the same request, under the
 same `Idempotency-Key` if it had one. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
 refused with `403`, so a web page cannot forge rows into a running
-dashboard. Wrong methods on these paths answer `405` with `Allow` and a
-body naming the path and the methods it takes.
+dashboard. When the endpoint is bound to loopback (the default), a request
+whose `Host` names anything but the loopback interface, `localhost`, or a
+name under `.localhost` is refused with `403` before routing, which also
+closes DNS rebinding: a rebound page is same-origin with the endpoint, so
+the browser sends no `Origin` at all. An endpoint bound off loopback with
+`--ingest` applies no such rule, because its peers reach it under whatever
+name they use for the machine. Wrong methods on these paths answer `405` with
+`Allow` and a body naming the path and the methods it takes.
 Unknown paths answer `404` naming the two endpoints and the methods each one
 takes, so a POST to `/events` is not a generic not-found page. Error bodies are
 short plain-text reasons

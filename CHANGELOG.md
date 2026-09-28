@@ -52,6 +52,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   case-insensitive volume keeps apart, matched, and one checkout's tokens were
   billed to the other.
 
+- An ingest endpoint bound to loopback refuses a request whose `Host` names
+  anything but the loopback interface, `localhost`, or a name under
+  `.localhost`. The `Origin` check already refused a cross-site page, but DNS
+  rebinding defeats it: a page that points its own name at `127.0.0.1` for one
+  fetch is same-origin with the endpoint, so the browser sends no `Origin` at
+  all and the request forged rows into the feed unchecked. The `Host` header
+  is what such a request still carries, and it carries the attacker's name.
+  The check runs ahead of routing, so a rebound request also cannot read the
+  endpoint list a `404` names. An endpoint bound off loopback with `--ingest`
+  applies no such rule: its peers reach it under whatever name they use for
+  the machine.
+
 - The directory key a macOS or Windows watcher maps recorded working
   directories by is folded with `core.FoldCase`, the case fold
   `strings.EqualFold` compares by, rather than `strings.ToLower`. The two

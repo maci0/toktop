@@ -319,7 +319,11 @@ func TestHandlePostAcceptsUTF8BOM(t *testing.T) {
 	defer s.Close()
 
 	bomBody := []byte("\xef\xbb\xbf{\"agent\":\"coder\",\"output_tokens\":50}\n")
-	req := httptest.NewRequest(http.MethodPost, "/v1/events", bytes.NewReader(bomBody))
+	// The absolute target names the endpoint the way a real request does, so
+	// the Host header is the loopback address a sender on this box would use.
+	// A relative one leaves httptest's placeholder host in place, which the
+	// loopback host guard refuses.
+	req := httptest.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", bytes.NewReader(bomBody))
 	rr := httptest.NewRecorder()
 	s.srv.Handler.ServeHTTP(rr, req)
 	if rr.Code != http.StatusAccepted {
@@ -797,6 +801,89 @@ func TestIngestRejectsBrowserOriginatedPost(t *testing.T) {
 	}
 	if len(rec.evs) != 0 {
 		t.Fatalf("events = %d, want none from a browser-originated post", len(rec.evs))
+	}
+}
+
+// DNS rebinding defeats the Origin guard: a page that points its own name at
+// 127.0.0.1 for one fetch is same-origin with this endpoint, so the browser
+// sends no Origin at all. The Host header is what such a request still
+// carries, and it carries the attacker's name, so a loopback-bound endpoint
+// refuses it.
+func TestIngestRejectsReboundHost(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	for _, host := range []string{"evil.example", "evil.example:8420", "attacker.test", "[2001:db8::1]:8420"} {
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events",
+			strings.NewReader(`{"agent":"forger","output_tokens":9999}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("Host %q: status = %d, want 403", host, resp.StatusCode)
+		}
+	}
+	if len(rec.evs) != 0 {
+		t.Fatalf("events = %d, want none from a rebound request", len(rec.evs))
+	}
+}
+
+// The guard is scoped to what a loopback bind can be called: a request naming
+// the loopback interface, localhost, or a name under the reserved .localhost
+// suffix still reaches the endpoint. A sender that names the machine
+// differently would be broken by a wider rule than the one under test.
+func TestIngestAcceptsLoopbackHostNames(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	_, port, err := net.SplitHostPort(s.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{s.Addr(), "localhost:" + port, "dashboard.localhost:" + port, "LOCALHOST:" + port} {
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events",
+			strings.NewReader(`{"agent":"harness","output_tokens":1}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Host = host
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusAccepted {
+			t.Errorf("Host %q: status = %d, want 202", host, resp.StatusCode)
+		}
+	}
+}
+
+// An endpoint the operator bound off loopback is reached under whatever name
+// their peers use for the box, so no Host allowlist applies there: the check
+// belongs to a loopback listener alone.
+func TestIngestSkipsHostGuardOffLoopback(t *testing.T) {
+	rec := &memRecorder{}
+	s, err := newServer("127.0.0.1:0", rec, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if s.hostGuard == nil {
+		t.Fatal("a loopback listener carries no host guard")
+	}
+	if got := loopbackHostGuard(&net.TCPAddr{IP: net.IPv4zero}); got != nil {
+		t.Errorf("a wildcard listener carries a host guard; it names no host to allow")
+	}
+	if got := loopbackHostGuard(&net.TCPAddr{IP: net.ParseIP("10.0.0.5")}); got != nil {
+		t.Errorf("a routable listener carries a host guard")
 	}
 }
 

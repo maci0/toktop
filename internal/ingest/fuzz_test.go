@@ -3,6 +3,7 @@ package ingest
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/rivo/uniseg"
+	"golang.org/x/text/unicode/norm"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -138,4 +140,47 @@ func assertRenderSafe(t *testing.T, i int, field, s string) {
 	if got := core.SanitizeText(s); got != s {
 		t.Fatalf("event %d: %s retains unsanitized text: %q -> %q", i, field, s, got)
 	}
+}
+
+// FuzzIngestHostGuard pins the loopback Host check: a name this endpoint can
+// be reached under is admitted, and nothing else is. The admitted side is the
+// interesting half. Folding, case, a bracketed IPv6 literal and the reserved
+// .localhost suffix all decide it, and a fold wide enough to admit a
+// Unicode lookalike of "localhost" is the same bug the bearer and ssh host
+// comparisons are written against.
+func FuzzIngestHostGuard(f *testing.F) {
+	for _, host := range []string{
+		"127.0.0.1:8420", "127.0.0.1", "localhost:8420", "LOCALHOST", "localhost.",
+		"dashboard.localhost:8420", "[::1]:8420", "::1", "[127.0.0.1]:8420",
+		"evil.example", "evil.example:8420", "notlocalhost", "localhost.evil.example",
+		"", ":8420", "[2001:db8::1]:8420", "10.0.0.5", "127.0.0.2",
+	} {
+		f.Add(host)
+	}
+	guard := loopbackHostGuard(&net.TCPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if guard == nil {
+		f.Fatal("a loopback listener carries no host guard")
+	}
+	f.Fuzz(func(t *testing.T, host string) {
+		if guard(host) {
+			// An admitted host must resolve to this machine and nothing else.
+			// Anything outside that is the rebinding hole, whatever shape it
+			// took on the way in.
+			name := host
+			if h, _, err := net.SplitHostPort(host); err == nil {
+				name = h
+			}
+			name = strings.TrimSuffix(strings.TrimSuffix(name, "]"), "[")
+			if ip := net.ParseIP(name); ip != nil {
+				if !ip.IsLoopback() {
+					t.Fatalf("admitted a routable literal: %q", host)
+				}
+				return
+			}
+			folded := core.FoldASCII(norm.NFC.String(name))
+			if folded != "localhost" && !strings.HasSuffix(folded, ".localhost") {
+				t.Fatalf("admitted a name outside the localhost set: %q folds to %q", host, folded)
+			}
+		}
+	})
 }
