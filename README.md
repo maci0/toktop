@@ -132,10 +132,11 @@ block matters here (launch fields are ignored):
 ```
 
 `roots` are searched directories, `suffix` filters the files under them
-(default `.jsonl`), `suffixes` does the same for an agent that writes more
-than one extension, `cumulative` marks counters that already include
-everything before them, and `header_cwd` says the working directory appears
-once in a session header rather than on every record. A root may contain
+(default `.jsonl`, the package's `agentusage.DefaultSuffix`), `suffixes` does
+the same for an agent that writes more than one extension, `cumulative` marks
+counters that already include everything before them, and `header_cwd` says
+the working directory appears once in a session header rather than on every
+record. A root may contain
 `{dir}`, which stands for the agent process's working directory, for an agent
 that keeps its transcripts inside the project it works in:
 
@@ -157,7 +158,11 @@ go get github.com/maci0/toktop/agentusage
 
 It needs Go 1.27, the version `go.mod` pins, and the `sqlite` build tag if you
 want crush and opencode (`go build -tags sqlite`); without it the package still
-compiles and `Supported` reports those two unreadable. Import
+compiles and `Supported` reports those two unreadable. Reading transcripts
+works on every platform, but `Discover` and `Peers` need a process table to
+read (procfs on Linux, `ps` on macOS) and report nothing elsewhere, so a
+program that runs on more than one platform should read an empty result as
+"no local agents here". Import
 `github.com/maci0/toktop/agentusage` to discover agent processes and read the
 token counts they already write:
 
@@ -248,9 +253,11 @@ between two of them from `Sample.Delta`, which reports nothing when a
 transcript was rewritten under the watcher rather than a negative count.
 `Rate` is output
 tokens per second between two samples; `InputRate` is the same for billed
-prompt tokens, and `ThinkingRate` for the reasoning share. All three report
-whether a rate could be computed at all, and none of them extrapolates from
-one reading. `Watcher.SetNow` replaces the clock that stamps published
+prompt tokens, and `ThinkingRate` for the reasoning share. All three divide
+by the time the model spent (`Sample.Span`) when the transcript recorded it,
+and by the gap between the two readings when it did not, and all three report
+whether a rate could be computed at all. None of them extrapolates from one
+reading. `Watcher.SetNow` replaces the clock that stamps published
 samples, so a program driving a simulated timeline gets samples stamped on
 it, and the recency and rescan windows age on that clock rather than on wall
 time. Transcript mtimes and `since` stay wall time, because that is the clock

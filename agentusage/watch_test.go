@@ -462,6 +462,38 @@ func TestRateNeedsPositiveSpanAndGrowth(t *testing.T) {
 	}
 }
 
+// A transcript that records how long the model spent is reporting the
+// generation interval, and that is the interval a rate is over. The wall gap
+// between two readings is a different one: a grok turn's counts arrive when
+// the turn ends, so the gap since the previous turn covers the turn's whole
+// wall time and the tool calls in it.
+func TestRateUsesRecordedSpanOverTheWallGap(t *testing.T) {
+	t0 := time.Unix(1_000_000, 0)
+	prev := Sample{Output: 100, Input: 400, Thinking: 20, Span: 4 * time.Second, At: t0}
+	cur := Sample{
+		Output: 700, Input: 1000, Thinking: 70,
+		Span: 14 * time.Second, At: t0.Add(time.Minute),
+	}
+	if r, ok := Rate(prev, cur); !ok || r != 60 {
+		t.Errorf("Rate over the recorded span = %v,%v want 60,true", r, ok)
+	}
+	if r, ok := InputRate(prev, cur); !ok || r != 60 {
+		t.Errorf("InputRate over the recorded span = %v,%v want 60,true", r, ok)
+	}
+	if r, ok := ThinkingRate(prev, cur); !ok || r != 5 {
+		t.Errorf("ThinkingRate over the recorded span = %v,%v want 5,true", r, ok)
+	}
+	// A transcript that recorded no span for the interval still rates over
+	// the wall gap, which is the only interval it leaves a caller.
+	if r, ok := Rate(prev, Sample{Output: 700, At: t0.Add(time.Second)}); !ok || r != 600 {
+		t.Errorf("Rate with no recorded span = %v,%v want 600,true", r, ok)
+	}
+	// Growth with neither interval is silence, not a rate.
+	if r, ok := Rate(prev, Sample{Output: 700}); ok || r != 0 {
+		t.Errorf("Rate with no interval at all = %v,%v want 0,false", r, ok)
+	}
+}
+
 // A delta is the interval a caller reports, so a rewrite under the watcher
 // (counts that went down) must not read as growth, and reasoning on its own
 // is growth a caller would otherwise drop.
@@ -681,8 +713,8 @@ func TestSpecSuffixIsTrimmed(t *testing.T) {
 	if !ok {
 		t.Fatal("a spec with roots should resolve to an adapter")
 	}
-	if got := ad.fileSuffixes(); len(got) != 1 || got[0] != defaultSuffix {
-		t.Fatalf("suffixes %q, want the default %q", got, defaultSuffix)
+	if got := ad.fileSuffixes(); len(got) != 1 || got[0] != DefaultSuffix {
+		t.Fatalf("suffixes %q, want the default %q", got, DefaultSuffix)
 	}
 }
 

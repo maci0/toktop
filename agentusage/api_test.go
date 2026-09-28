@@ -24,6 +24,13 @@ var publicTypes = map[string][]string{
 	"Watcher": nil,
 }
 
+// publicConsts are the constants other modules compile against. A new one is
+// additive; renaming or removing one is a breaking change.
+var publicConsts = []string{
+	"DefaultPollInterval",
+	"DefaultSuffix",
+}
+
 var publicFuncs = []string{
 	"Agents",
 	"ConnectedTo",
@@ -85,6 +92,7 @@ func TestPublicAPI(t *testing.T) {
 	}
 
 	gotTypes := map[string][]string{}
+	gotConsts := map[string]bool{}
 	gotFuncs := map[string]bool{}
 	gotMethods := map[string][]string{}
 	gotVars := map[string]bool{}
@@ -92,6 +100,20 @@ func TestPublicAPI(t *testing.T) {
 		for _, decl := range f.Decls {
 			switch d := decl.(type) {
 			case *ast.GenDecl:
+				if d.Tok == token.CONST {
+					for _, spec := range d.Specs {
+						vs, ok := spec.(*ast.ValueSpec)
+						if !ok {
+							continue
+						}
+						for _, n := range vs.Names {
+							if n.IsExported() {
+								gotConsts[n.Name] = true
+							}
+						}
+					}
+					continue
+				}
 				if d.Tok == token.VAR {
 					for _, spec := range d.Specs {
 						vs, ok := spec.(*ast.ValueSpec)
@@ -157,6 +179,17 @@ func TestPublicAPI(t *testing.T) {
 	for name := range publicTypes {
 		if _, ok := gotTypes[name]; !ok {
 			t.Errorf("public type %s is missing from the package", name)
+		}
+	}
+
+	for name := range gotConsts {
+		if !slices.Contains(publicConsts, name) {
+			t.Errorf("exported const %s is not in the public API snapshot; add it (additive) or unexport it", name)
+		}
+	}
+	for _, name := range publicConsts {
+		if !gotConsts[name] {
+			t.Errorf("public const %s is missing from the package", name)
 		}
 	}
 

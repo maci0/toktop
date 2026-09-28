@@ -219,8 +219,12 @@ var (
 	ErrUnsupportedTool = errors.New("agent has no readable usage source")
 )
 
-// defaultSuffix is the transcript extension a [Spec] that names none matches.
-const defaultSuffix = ".jsonl"
+// DefaultSuffix is the transcript extension a [Spec] that names none
+// matches, the one an agent writing ordinary JSONL needs. It is exported for
+// the reason [DefaultPollInterval] is: a caller naming an extension
+// explicitly passes the package's own default rather than a string copied
+// out of the documentation, which drifts the moment either side changes.
+const DefaultSuffix = ".jsonl"
 
 // specAdapter builds the file adapter a definition's spec describes. Pure: it
 // writes nothing, so both RegisterSpec and adapterFor can use it.
@@ -254,7 +258,7 @@ func specAdapter(spec Spec) (adapter, bool) {
 	if len(suffixes) > 0 {
 		suffix = ""
 	} else if suffix == "" {
-		suffix = defaultSuffix
+		suffix = DefaultSuffix
 	}
 	kind := perMessage
 	if spec.Cumulative {

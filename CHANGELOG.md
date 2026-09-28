@@ -13,6 +13,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- `agentusage.DefaultSuffix` is the transcript extension a `Spec` that names
+  none matches. A program defining an agent in Go had to write `.jsonl` out by
+  hand, where `DefaultPollInterval` already carries its default.
+
 ### Breaking
 
 - `agentusage.Sample` and `agentusage.Delta` gained a `Span time.Duration`
@@ -58,6 +64,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   since the previous turn never formed, and dividing by the whole turn
   counted tool time as generation. Cached prompt tokens that are already
   inside the reported input are not added again.
+- `agentusage.Rate`, `InputRate` and `ThinkingRate` divide by the recorded
+  model time (`Sample.Span`) when the transcript reported one, and by the
+  gap between the two readings when it did not. A program using this package
+  to show a rate had to make that choice itself, and the gap is the wrong
+  interval for an agent that reports a turn's length: the counts arrive when
+  the turn ends, so the gap also covers the tool calls the turn spent
+  waiting. Samples with no recorded span rate as they did before.
 
 ## [0.18.2] - 2026-09-28
 

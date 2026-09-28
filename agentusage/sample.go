@@ -26,8 +26,10 @@ type Sample struct {
 	// Input is billed prompt tokens, accrued per request the same way Output is.
 	Input int
 	// Span is how long the model spent producing the tokens in this sample,
-	// when the transcript records it. Zero means the caller derives a rate
-	// from the time between samples instead.
+	// when the transcript records it. [Rate] and its siblings divide by it
+	// when it grew, and by the time between the two samples when it did
+	// not, which is the only interval a transcript without a recorded span
+	// leaves a caller.
 	Span time.Duration
 	// At is when the counters last changed, which is when the reading was
 	// taken. A poll that observed nothing does not move it, so a stalled
@@ -55,7 +57,8 @@ type Delta struct {
 	// Input is billed prompt tokens since the previous sample.
 	Input int
 	// Span is how long the model spent producing this interval's tokens,
-	// when the transcript recorded it. Zero means it did not.
+	// when the transcript recorded it. Zero means it did not, and the rate
+	// for the interval is the growth over the time between the two samples.
 	Span time.Duration
 	// At is when the current sample was read, whether or not anything grew, so
 	// a caller can stamp the interval the samples span.
@@ -97,15 +100,24 @@ func (s Sample) Delta(prev Sample) (Delta, bool) {
 // a first sample whose counter has already grown. It never extrapolates:
 // without two readings and a positive span there is no rate to report.
 // Prompt growth is InputRate.
+//
+// The span it divides by is the time the model spent producing the interval's
+// tokens when the transcript recorded one ([Sample.Span]), and the wall gap
+// between the two readings otherwise. A transcript that reports a turn's
+// length reports it because the gap is not the same interval: a grok turn's
+// counts arrive when the turn ends, and the gap since the previous one covers
+// that turn's whole wall time, tool calls included, so dividing by it
+// reports a rate of a generation that was never continuous.
 func Rate(prev, cur Sample) (float64, bool) {
-	return deltaRate(prev.At, cur.At, prev.Output, cur.Output)
+	return deltaRate(prev, cur, prev.Output, cur.Output)
 }
 
 // InputRate returns billed prompt tokens per second between two samples, and
-// whether it could be computed. Same rules as Rate: both samples need a
-// timestamp, and no positive span or no growth means no rate, not a zero.
+// whether it could be computed. Same rules as Rate: the recorded span where
+// there is one, and both timestamps needed otherwise, and no positive span or
+// no growth means no rate, not a zero.
 func InputRate(prev, cur Sample) (float64, bool) {
-	return deltaRate(prev.At, cur.At, prev.Input, cur.Input)
+	return deltaRate(prev, cur, prev.Input, cur.Input)
 }
 
 // ThinkingRate returns reasoning tokens per second between two samples, and
@@ -113,18 +125,25 @@ func InputRate(prev, cur Sample) (float64, bool) {
 // share of Output rather than all of it. An agent that does not report
 // reasoning separately never grows it, so this reports no rate for one.
 func ThinkingRate(prev, cur Sample) (float64, bool) {
-	return deltaRate(prev.At, cur.At, prev.Thinking, cur.Thinking)
+	return deltaRate(prev, cur, prev.Thinking, cur.Thinking)
 }
 
-func deltaRate(prevAt, curAt time.Time, prevN, curN int) (float64, bool) {
-	if prevAt.IsZero() || curAt.IsZero() {
+func deltaRate(prev, cur Sample, prevN, curN int) (float64, bool) {
+	if curN <= prevN {
 		return 0, false
 	}
-	span := curAt.Sub(prevAt).Seconds()
-	if span <= 0 || curN <= prevN {
+	n := float64(curN - prevN)
+	if span := cur.Span - prev.Span; span > 0 {
+		return n / span.Seconds(), true
+	}
+	if prev.At.IsZero() || cur.At.IsZero() {
 		return 0, false
 	}
-	return float64(curN-prevN) / span, true
+	span := cur.At.Sub(prev.At).Seconds()
+	if span <= 0 {
+		return 0, false
+	}
+	return n / span, true
 }
 
 // values is one record's contribution, before it is folded into a [Sample].

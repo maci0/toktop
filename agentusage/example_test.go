@@ -63,6 +63,21 @@ func ExampleRate() {
 	// Output: 250 true
 }
 
+// A transcript that records how long the model spent is reporting the
+// interval the tokens were generated over, and the rate is that one rather
+// than the wall gap between two readings. A turn whose counts arrive when it
+// ends is the case: the gap since the previous turn also covers the tool
+// calls the turn spent waiting, and dividing by it reports a generation rate
+// for a run that never happened.
+func ExampleRate_recordedSpan() {
+	t0 := time.Unix(1_000_000, 0)
+	prev := agentusage.Sample{Output: 100, Span: 4 * time.Second, At: t0}
+	cur := agentusage.Sample{Output: 700, Span: 14 * time.Second, At: t0.Add(time.Minute)}
+	r, ok := agentusage.Rate(prev, cur)
+	fmt.Println(int(r), ok)
+	// Output: 60 true
+}
+
 func ExampleInputRate() {
 	t0 := time.Unix(1_000_000, 0)
 	prev := agentusage.Sample{Input: 80, At: t0}

@@ -72,7 +72,7 @@ type Spec struct {
 	//
 	// Roots name directories; the suffix chooses the files inside them.
 	Roots []string `json:"roots"`
-	// Suffix filters transcript files (default ".jsonl"). Surrounding
+	// Suffix filters transcript files (default [DefaultSuffix]). Surrounding
 	// whitespace is trimmed, and a value left blank by that falls back to the
 	// default rather than matching nothing.
 	Suffix string `json:"suffix,omitempty"`

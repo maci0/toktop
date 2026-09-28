@@ -10,10 +10,10 @@
 // machine-wide SQLite store; crush is read whenever the sqlite build tag is
 // on.
 //
-// An agent is read one of two ways. Transcript agents (claude, qwen, dsh,
-// clanker, copilot, codex, kimi) appear in the adapters table, each naming
-// where its logs live under a working directory and how one line becomes a
-// Sample.
+// An agent is read one of two ways. Transcript agents (agy, claude,
+// clanker, codex, copilot, cursor-agent, dsh, gemini, grok, kimi, qwen)
+// appear in the adapters table, each naming where its logs live under a
+// working directory and how one line becomes a Sample.
 // RegisterSpec adds one this package does not ship with, and LoadDefinitions
 // reads the same declaration from a JSON file, DefinitionsPath being the
 // default location.
@@ -25,6 +25,13 @@
 // Discover finds the agent processes running now, and Watch reads the
 // transcripts of the one working in a directory, so a caller can take a
 // Sample on an interval without knowing which agent is underneath.
+//
+// Both of those, and Peers, need a process table to read: procfs on Linux,
+// ps(1) on macOS. Every other platform reports nothing, which is "cannot
+// tell" rather than an error, and a program that runs on more than one of
+// them should treat an empty Discover as no local agents there. Watch is
+// unaffected: it reads transcripts, and a caller that knows the agent name
+// and its working directory gets usage on any platform.
 //
 // The agent registry is process-wide, since one process reports one set of
 // agents. RegisterSpec and UnregisterSpec add and remove an adapter, and
