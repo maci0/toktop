@@ -1,0 +1,132 @@
+# Architecture
+
+How toktop's packages relate, and the rule that keeps them relating that way.
+
+The rule is one line: **a package imports only packages in a strictly lower
+tier.** `cmd/toktop/deps_test.go` holds the tiers in a Go slice and fails the
+build when an import points at or above its own tier, so a new package is
+placed deliberately rather than inheriting a direction by omission. This
+document is the map; the test is the enforcement.
+
+## Tiers
+
+| Tier | Packages | What lives here |
+|------|----------|-----------------|
+| 0 | `internal/core` | the data model every other package speaks in, plus the string helpers (sanitize, truncate, fold, redact, clamp) that have no dependency of their own |
+| 1 | `internal/logcfg` | how the audit log is written: level from the environment, `$HOME` and address redaction, capped fields |
+| 2 | `internal/bearer`, `internal/procs`, `internal/selfreload`, `agentusage` | one job each, no peers: the bearer token, local engine discovery from process tables, executable watching, agent token usage |
+| 3 | `internal/gpu`, `internal/probe`, `internal/provider`, `internal/demo`, `internal/selfupdate`, `internal/ui` | the work that has a shape specific to its subject: accelerator telemetry, streaming probe requests, engine scraping, the simulated fleet, release install, the dashboard |
+| 4 | `internal/sysmon`, `internal/ingest`, `internal/agentwatch` | collection and event intake: host vitals, the localhost events endpoint, the bridge from `agentusage` watchers to the dashboard |
+| 5 | `internal/remote`, `internal/collector` | the two fan-ins: the ssh client and host-relayed stats, and the poller every engine-side package reports into |
+| 6 | `cmd/toktop` | the only package allowed to wire the rest together |
+
+`logcfg` sits below its consumers rather than beside them. `procs`, `gpu` and
+`ingest` all reach for the redaction helpers, so a tier that held `logcfg`
+alongside them would be a layer importing sideways into itself.
+
+## Package map
+
+- `agentusage` (top level, not `internal/`): the public Go package other
+  programs embed. It reports tokens for AI coding agents read from the
+  transcripts those agents already write. It is tier 2 and imports
+  `internal/core` for string helpers only; no type from `internal/` appears in
+  its exported API.
+- `cmd/toktop`: flag parsing, validation and warnings (`flags.go`,
+  `validate.go`), endpoint and target wiring (`attach.go`, `endpoints.go`), the
+  subcommands (`help.go`, `update.go`, `version.go`), and `main.go`, which is
+  the whole startup sequence in one function.
+- `internal/bearer`: one process-wide optional `Bearer` token for gateways
+  that require an API key.
+- `internal/collector`: polls providers on an interval, derives rates, and is
+  the `core.AgentRecorder` that posted events land on.
+- `internal/core`: `Snapshot` and everything in it, plus generic sorted-ring
+  helpers (`AppendSorted`, `InsertSorted`, `AppendRetained`) and the `Tick`
+  cadence every poller uses.
+- `internal/demo`: a seeded simulated fleet, so `--demo` and the tests have
+  something to render.
+- `internal/gpu`: accelerator telemetry across vendors.
+- `internal/ingest`: a tiny localhost HTTP endpoint (`POST /v1/events`) that
+  harnesses and agents post usage into.
+- `internal/logcfg`: the audit-log vocabulary every other package that logs
+  builds its logger from.
+- `internal/probe`: small streaming generations at backends, to measure
+  throughput rather than read a counter.
+- `internal/procs`: finds local inference engines by inspecting running
+  processes, over procfs on linux and the OS tooling elsewhere.
+- `internal/provider`: engine discovery and metric scraping for local
+  OpenAI-compatible backends.
+- `internal/remote`: attaches to engines on other hosts over one ssh
+  connection, with known-hosts checking and a relayed host-stats sampler.
+- `internal/selfreload`: watches the running executable for a rebuild and
+  signals the process to restart.
+- `internal/selfupdate`: replaces the running binary with a newer release.
+- `internal/sysmon`: host vitals (RAM, swap, load, temperatures, CPU) and
+  GPU readings, which is why it sits above `gpu`.
+- `internal/ui`: the bubbletea dashboard, and the plain and JSON reports that
+  `--once` renders through the same `core.Snapshot`.
+
+## Platform files
+
+A package's platform split is by build tag, and the file name repeats the tag
+so the split is readable without opening the file. `_darwin.go`, `_linux.go`
+and `_windows.go` name one platform. A file with no platform suffix holds
+what every build shares, and a test file with none is a test that runs
+everywhere.
+
+`_unix.go` is not one meaning, and the build tag is the authority in every
+case. Four files use it for `!windows` (`cmd/toktop/pipe_unix.go`,
+`internal/remote/auth_unix.go`, `internal/selfreload/exec_unix.go`,
+`internal/selfreload/stat_unix.go`), which is the opposite of the POSIX
+platforms. `internal/gpu/procattr_unix.go` uses it for the stricter `unix`
+constraint Go provides, pairing with `procattr_other.go` on `!unix`. A file
+whose tag names a subset of the POSIX platforms takes no suffix, because a
+suffix would claim more than the tag delivers.
+
+`internal/sysmon` is the one place that goes further: `sysmon_darwin_host.go`
+and `sysmon_windows_host.go` pair a platform with its host-reading half,
+because the darwin and windows samplers are built from different primitives
+and are not variants of one another.
+
+## How a run starts
+
+`main()` in `cmd/toktop/main.go` is the whole sequence, in order, and reads
+top to bottom:
+
+1. Ignore `SIGPIPE`, take a subcommand before flag parsing, parse and validate
+   the flags, parse `--origin`, hand `logcfg.Logger()` to `agentusage`.
+2. Parse the ssh targets, resolve `--ssh-key`, open opencode's database if it
+   was asked for, warn about flags and environment variables this run will not
+   read.
+3. Pick a data source: `demo.NewSource` under `--demo`, otherwise
+   `attachEngines` followed by `collector.New`. Either way a `chan
+   core.Snapshot` and a `core.AgentRecorder` come out, and every later step is
+   the same in both modes.
+4. Start the agent watcher, then the ingest endpoint, both guarded on the
+   recorder existing.
+5. Hand a `ui.Config` to either `runOnce` or `runTUI`.
+
+The two modes differ only at step 3. That is the payoff of the tier rule:
+`demo` and `collector` are interchangeable because neither knows about the
+other, and neither knows that a UI exists.
+
+## Where new code goes
+
+- New behaviour on an existing subject goes in that subject's package, beside
+  the code it sits next to. A change that makes you look for a second home is
+  a change that wants a new package.
+- A new package needs a tier in `cmd/toktop/deps_test.go` and a row in the
+  table above. It imports only lower tiers; if it cannot be placed, the
+  boundary it straddles is not where the code is.
+- A package that does one job and has no peers belongs in tier 2. Promoted out
+  of it only when it grows a second concern.
+- Nothing in `internal/` may be imported from outside the module, and only
+  `agentusage` is a published surface. If code reaches for an `internal`
+  package from outside, the shared part belongs in `agentusage` or in `core`,
+  not in a widened `internal/`.
+
+## Related
+
+- [DEPENDENCIES.md](DEPENDENCIES.md): every external package and the reason it
+  is here.
+- [THREAT_MODEL.md](THREAT_MODEL.md): what toktop trusts, per package.
+- [PRIVACY.md](PRIVACY.md): what it reads, sends and stores.

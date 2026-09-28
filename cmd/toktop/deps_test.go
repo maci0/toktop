@@ -205,6 +205,28 @@ func tierOf(t *testing.T) map[string]int {
 	return tier
 }
 
+// TestArchitectureMapCoversEveryPackage fails when a package in the tree has
+// no entry in the architecture map, so the map answers "where does this go"
+// for a package that actually exists. tiers is the enforcement; this is the
+// document the two drift apart in, and a package named in neither is a package
+// nobody placed.
+func TestArchitectureMapCoversEveryPackage(t *testing.T) {
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, "docs", "ARCHITECTURE.md"))
+	if err != nil {
+		t.Fatalf("read docs/ARCHITECTURE.md: %v", err)
+	}
+	present, err := packageDirs(moduleRoot)
+	if err != nil {
+		t.Fatalf("walk module: %v", err)
+	}
+	for dir := range present {
+		rel := strings.TrimPrefix(dir, modulePath+"/")
+		if !strings.Contains(string(raw), "`"+rel+"`") {
+			t.Errorf("package %q is in no entry in docs/ARCHITECTURE.md; add it to the map", rel)
+		}
+	}
+}
+
 // importPathOf names a directory the walk handed back by its import path. The
 // walk spells paths with the platform separator and echoes the root it was
 // given verbatim, so on Windows the root arrives as "../.." and the path under

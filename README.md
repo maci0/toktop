@@ -713,7 +713,9 @@ make test-dist VERSION=x.y.z    # every release platform into dist/
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, the edit-test loop,
-and what CI runs, [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the
+and what CI runs, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
+package map, the tier rule every import follows, and where new code goes,
+[docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the
 attack surface, what toktop trusts, and the mitigations already in place,
 [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for every external package and
 the reason it is here, and [docs/PRIVACY.md](docs/PRIVACY.md) for what it

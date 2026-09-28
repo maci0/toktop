@@ -1,3 +1,9 @@
+// Command toktop watches local and remote inference engines, reports token
+// throughput and host vitals, and accepts usage events from AI coding agents.
+//
+// It is the only package allowed to wire the rest of the module together: every
+// internal package is a leaf that something here starts and stops, so the
+// layering in docs/ARCHITECTURE.md is enforced rather than merely described.
 package main
 
 import (
