@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"encoding/hex"
 	"fmt"
+	"math"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -124,17 +125,26 @@ func readTCPTable(path string, want map[uint64]bool, into map[uint64]netip.AddrP
 
 	sc := bufio.NewScanner(f)
 	sc.Scan() // header
+	// The tables are walked on every discovery tick and hold every socket on
+	// the host, while a matched line is one or two. Splitting every line into
+	// its fields allocated a slice and a dozen strings per connection to throw
+	// all but two away, and sc.Text() allocated the line again on top: tcpField
+	// walks in place, and only a line whose inode is wanted pays the string the
+	// address parser takes.
+	//
+	// sl local rem st tx:rx retr uid timeout inode
+	const (
+		remField   = 2
+		inodeField = 9
+	)
 	for sc.Scan() {
-		fields := strings.Fields(sc.Text())
-		// sl local rem st tx:rx retr uid timeout inode
-		if len(fields) < 10 {
+		line := sc.Bytes()
+		inode, ok := tcpInode(tcpField(line, inodeField))
+		if !ok || !want[inode] {
 			continue
 		}
-		inode, err := strconv.ParseUint(fields[9], 10, 64)
-		if err != nil || !want[inode] {
-			continue
-		}
-		if ap, ok := parseHexAddrPort(fields[2]); ok && ap.Port() != 0 && !ap.Addr().IsUnspecified() {
+		rem := tcpField(line, remField)
+		if ap, ok := parseHexAddrPort(string(rem)); ok && ap.Port() != 0 && !ap.Addr().IsUnspecified() {
 			into[inode] = ap
 		}
 	}
@@ -145,6 +155,51 @@ func readTCPTable(path string, want map[uint64]bool, into map[uint64]netip.AddrP
 		return fmt.Errorf("scan %s: %w", path, err)
 	}
 	return nil
+}
+
+// tcpField returns the n-th space-separated field of a /proc/net/tcp line, or
+// nil when the line holds fewer than n+1. The bytes are a window into line, so
+// the result is only valid while line is.
+func tcpField(line []byte, n int) []byte {
+	i := 0
+	for ; n >= 0; n-- {
+		for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+			i++
+		}
+		if i >= len(line) {
+			return nil
+		}
+		start := i
+		for i < len(line) && line[i] != ' ' && line[i] != '\t' {
+			i++
+		}
+		if n == 0 {
+			return line[start:i]
+		}
+	}
+	return nil
+}
+
+// tcpInode parses a socket inode out of a table field, refusing anything that
+// is not a plain decimal number. The kernel writes the inode as one, and a
+// field that is anything else belongs to a line this build does not read, so
+// the accumulator stops rather than wrapping a malformed field into a value
+// that could match a wanted inode.
+func tcpInode(f []byte) (uint64, bool) {
+	if len(f) == 0 {
+		return 0, false
+	}
+	var n uint64
+	for _, c := range f {
+		if c < '0' || c > '9' {
+			return 0, false
+		}
+		if n > (math.MaxUint64-uint64(c-'0'))/10 {
+			return 0, false
+		}
+		n = n*10 + uint64(c-'0')
+	}
+	return n, true
 }
 
 // parseHexAddrPort decodes the kernel's "0100007F:1F90" spelling, which is the
