@@ -145,10 +145,29 @@ func TestCrushSourceCountsOneDatabaseOnce(t *testing.T) {
 
 // A tree crush has never run in reports nothing, which is not an error.
 func TestCrushSourceWithoutADatabase(t *testing.T) {
-	got, ok := (crushDBSource{}).sessions([]string{t.TempDir()}, time.Now())
-	if !ok || len(got) != 0 {
-		t.Fatalf("sessions %+v (ok=%v) from a tree with no crush database", got, ok)
+	dir := t.TempDir()
+	got, ok := (crushDBSource{}).sessions([]string{dir}, time.Now())
+	if !ok {
+		t.Fatalf("a tree with no crush database is an answer, not a failed read (sessions %+v)", got)
 	}
+	// The walk climbs to a project root, so a store a parent of the temporary
+	// tree happens to hold is a legitimate find and asserting on it would
+	// make the test a statement about the machine rather than about the code.
+	// What is the code's is the tree itself: nothing under it is read.
+	for path := range got {
+		if withinTree(path, dir) {
+			t.Fatalf("read a store out of a tree that has none: %s", path)
+		}
+	}
+}
+
+// withinTree reports whether path is dir or sits under it.
+func withinTree(path, dir string) bool {
+	rel, err := filepath.Rel(dir, path)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // Watch routes crush through this source, which is what makes the counts
@@ -291,34 +310,46 @@ func TestCrushDBSymlinkOutsideProjectIsIgnored(t *testing.T) {
 	crushDB(t, outside, map[string][3]int64{
 		"stolen": {9999, 0, time.Now().UnixMilli()},
 	})
+	outsidePath := filepath.Join(outside, ".crush", "crush.db")
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".crush"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.Symlink(
-		filepath.Join(outside, ".crush", "crush.db"),
+		outsidePath,
 		filepath.Join(dir, ".crush", "crush.db"),
 	); err != nil {
 		t.Skip("symlinks:", err)
 	}
-	if path := crushDBPath(dir); path != "" {
+	// The claim is about the store behind the link, not about finding none:
+	// the walk climbs to a project root, so a store a parent of the
+	// temporary tree holds is a legitimate find and asserting on it would
+	// make the test a statement about the machine rather than about the code.
+	// Following the link shows up as a store inside the tree, because the
+	// path is built from the project root rather than from the link target.
+	if path := crushDBPath(dir); withinTree(path, dir) {
 		t.Fatalf("followed a crush.db symlink out of the project: %s", path)
 	}
-	// The tree is read successfully and contributes nothing: the refusal is
-	// the symlink being skipped, which a failed read would also produce.
-	if out, in, ok := crushSessionSum([]string{dir}, time.Time{}); !ok || out != 0 || in != 0 {
-		t.Fatalf("read outside crush store via file symlink: output=%d input=%d ok=%v", out, in, ok)
+	// The tree is read successfully and the linked store contributes nothing:
+	// the refusal is the symlink being skipped, which a failed read would
+	// also produce.
+	if got, ok := (crushDBSource{}).sessions([]string{dir}, time.Time{}); !ok {
+		t.Fatalf("skipping the symlink must not fail the read (sessions %+v)", got)
+	} else if sess, found := got[outsidePath]; found {
+		t.Fatalf("read outside crush store via file symlink: %+v", sess)
 	}
 
 	dir2 := t.TempDir()
 	if err := os.Symlink(filepath.Join(outside, ".crush"), filepath.Join(dir2, ".crush")); err != nil {
 		t.Fatal(err)
 	}
-	if path := crushDBPath(dir2); path != "" {
+	if path := crushDBPath(dir2); withinTree(path, dir2) {
 		t.Fatalf("followed a .crush directory symlink out of the project: %s", path)
 	}
-	if out, in, ok := crushSessionSum([]string{dir2}, time.Time{}); !ok || out != 0 || in != 0 {
-		t.Fatalf("read outside crush store via dir symlink: output=%d input=%d ok=%v", out, in, ok)
+	if got, ok := (crushDBSource{}).sessions([]string{dir2}, time.Time{}); !ok {
+		t.Fatalf("skipping the symlink must not fail the read (sessions %+v)", got)
+	} else if sess, found := got[outsidePath]; found {
+		t.Fatalf("read outside crush store via dir symlink: %+v", sess)
 	}
 }
 
