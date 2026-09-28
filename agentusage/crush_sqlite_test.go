@@ -48,7 +48,9 @@ func crushDB(t *testing.T, dir string, sessions map[string][3]int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer tx.Rollback() //nolint:errcheck // committed below; rollback is the error path
+	// Committed below, so the deferred rollback is the error path and its
+	// error is not the one worth reporting.
+	defer func() { _ = tx.Rollback() }()
 	for id, v := range sessions {
 		if _, err := tx.Exec(
 			`INSERT INTO sessions (id, completion_tokens, prompt_tokens, updated_at) VALUES (?, ?, ?, ?)`,

@@ -487,9 +487,9 @@ type fetchedTool struct {
 }
 
 // fetchedTools returns every tool in the Makefile a recipe fetches, in the
-// order the recipes spell them. `go run` resolves through the module proxy and
-// `bunx` through the npm registry, so each is a package this tree takes a
-// dependency on at build time.
+// order the recipes spell them. `go run` resolves through the module proxy,
+// `bunx` through the npm registry and `uvx` through PyPI, so each is a package
+// this tree takes a dependency on at build time.
 func fetchedTools(t *testing.T) []fetchedTool {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(moduleRoot, "Makefile"))
@@ -504,14 +504,31 @@ func fetchedTools(t *testing.T) []fetchedTool {
 			continue
 		}
 		fields := strings.Fields(expandVars(line, vars))
+		// A recipe line may start with the silent `@`, so every launcher is
+		// matched with it stripped.
+		launch := func(i int) string { return strings.TrimPrefix(fields[i], "@") }
 		for i, field := range fields {
+			// `uvx` takes uv's own flags before the coordinate (`uvx -q
+			// yamllint@1.38.0`), so the tool is the first field after it that
+			// is not one. Read before the i == 0 guard below, because a recipe
+			// is allowed to start with the launcher.
+			if launch(i) == "uvx" {
+				for _, next := range fields[i+1:] {
+					if strings.HasPrefix(next, "-") {
+						continue
+					}
+					fetched = append(fetched, fetchedTool{line: line, tool: next})
+					break
+				}
+				continue
+			}
 			if i == 0 || i+1 >= len(fields) {
 				continue
 			}
 			// `$(GO) run` and `bunx` fetch from a registry or a proxy. A bare
 			// `run` after an ordinary word is a recipe running something
 			// local, or the prose of a target's help line.
-			if (field == "run" && strings.HasPrefix(fields[i-1], "$(")) || field == "bunx" {
+			if (field == "run" && strings.HasPrefix(fields[i-1], "$(")) || launch(i) == "bunx" {
 				fetched = append(fetched, fetchedTool{line: line, tool: fields[i+1]})
 			}
 		}
@@ -522,13 +539,27 @@ func fetchedTools(t *testing.T) []fetchedTool {
 	return fetched
 }
 
+// toolCoordinate splits a fetched coordinate into its package name and the
+// version it pins. npm and the Go proxy spell the separator `@`, uv spells it
+// `==`, so both count; without a separator the recipe resolved whatever the
+// registry served that minute, which is the thing the caller below refuses.
+func toolCoordinate(coord string) (name, version string, pinned bool) {
+	if name, version, ok := strings.Cut(coord, "@"); ok {
+		return name, version, true
+	}
+	if name, version, ok := strings.Cut(coord, "=="); ok {
+		return name, version, true
+	}
+	return coord, "", false
+}
+
 // TestToolPinsAreExact fails when a recipe fetches a tool without naming a
 // version: `go run` without @version resolves whatever the proxy serves that
 // minute, and `bunx` without @version installs the latest release. A pin held
 // in an assignment counts, because that is where the version pins live.
 func TestToolPinsAreExact(t *testing.T) {
 	for _, f := range fetchedTools(t) {
-		_, version, ok := strings.Cut(f.tool, "@")
+		_, version, ok := toolCoordinate(f.tool)
 		if !ok || version == "" || strings.ContainsAny(version, "$ ") {
 			t.Errorf("Makefile fetches a tool without a version: %s; pin it in a variable above the recipe", f.line)
 		}
@@ -545,7 +576,7 @@ func TestFetchedToolsAreDocumented(t *testing.T) {
 		t.Fatalf("read %s: %v", dependencyTable, err)
 	}
 	for _, f := range fetchedTools(t) {
-		module, _, _ := strings.Cut(f.tool, "@")
+		module, _, _ := toolCoordinate(f.tool)
 		if !strings.Contains(string(reasoned), module) {
 			t.Errorf("Makefile fetches %s and it has no entry in %s; record why it is here", module, dependencyTable)
 		}

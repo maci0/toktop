@@ -180,7 +180,7 @@ in day-to-day work:
 | `make test` | all tests, `-race -shuffle=on` (same flags as CI); `RACE=0` skips `-race` |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` + the doc guards |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
@@ -198,6 +198,7 @@ in day-to-day work:
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
+| `make check-yaml` | fail unless every workflow in `.github/workflows/` is valid YAML and passes the `.yamllint` rule set, at the Makefile's `YAMLLINT_VERSION` pin (`make check` runs it) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
@@ -230,7 +231,7 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
 the Linux leg of the test job runs every `make check` guard
-(`check-ci-tags`, `check-ci-platforms`, `check-help-docs`).
+(`check-ci-tags`, `check-ci-platforms`, `check-yaml`, `check-help-docs`).
 Vulnerability analysis follows the host platform's build constraints.
 `staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
 Linux, macOS and Windows, plus cross-compiles of linux/amd64, linux/arm64,
@@ -257,8 +258,9 @@ locally:
 make pr
 ```
 
-That is `make ci` (gofmt, tidy, staticcheck, vet, govulncheck, race tests for
-both sqlite tag halves), `make site-lint` (biome formatter and linter over the
+That is `make ci` (gofmt, tidy, staticcheck, vet, yamllint over the
+workflows, govulncheck, race tests for both sqlite tag halves),
+`make site-lint` (biome formatter and linter over the
 Worker and the jsonc configs, at the `BIOME` pin in the Makefile, config in
 `biome.jsonc`; run
 `make site-fmt` to apply the formatter), `make site-check`

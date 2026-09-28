@@ -684,6 +684,21 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 		exit 1; \
 	fi
 
+# Every merge gate in this repo is a step in a workflow, and a workflow is the
+# one file here no analyzer reads: gofmt, staticcheck, vet, biome, ruff, mypy
+# and black all look elsewhere. A YAML error there is worse than an unused
+# import, because the step it breaks is a gate, and a gate that does not parse
+# is a gate that does not run. yamllint at the version pinned below, via uvx
+# like govulncheck's `go run @version`, so no lockfile and no install into the
+# repo's own env, in the `tool@version` form bunx uses, so the fetch is the
+# one TestToolPinsAreExact and TestFetchedToolsAreDocumented already watch.
+# The rule set and its three deviations are in .yamllint. Only
+# .github/workflows: site/wrangler.jsonc is jsonc, and biome owns it.
+YAMLLINT_VERSION := 1.38.0
+.PHONY: check-yaml
+check-yaml: ## fail if a workflow is invalid YAML or breaks the .yamllint rule set
+	@uvx --quiet yamllint@$(YAMLLINT_VERSION) --config-file .yamllint $(WORKFLOWS)
+
 # `make help` and the CONTRIBUTING.md target table both enumerate what a
 # contributor runs, and a target that reaches them through one and not the
 # other is the discovery gap: documented in the table but absent from the
@@ -809,9 +824,10 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 	$(SCRIPTS_BIN)/python scripts/screenshot.py $(CAPTURE) $(OUT) $(SCALE) $(COLS) $(ROWS)
 
 .PHONY: check
-check: ## verify go.mod, gofmt -s formatting, vet, staticcheck and the doc guards (CI parity)
+check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the workflow YAML and the doc guards (CI parity)
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-platforms
+	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \

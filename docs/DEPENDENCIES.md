@@ -52,6 +52,7 @@ hold both halves of it: the version and the reason.
 | `SBOM_TOOL` | `github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod` | Apache-2.0 | Writes the CycloneDX inventory a release ships, licenses included. |
 | `BIOME` | `@biomejs/biome` | MIT OR Apache-2.0 | Formats and lints the Worker. The Rust binary, not a JS tree, so the Worker keeps no manifest. |
 | `WRANGLER` | `wrangler` | MIT OR Apache-2.0 | Publishes and rolls back the Worker. The only thing here that talks to Cloudflare. |
+| `YAMLLINT_VERSION` | `yamllint` | LGPL-2.1 | Parses and lints `.github/workflows/`, where every merge gate is a step. No other analyzer in the tree reads a workflow, and a YAML error there is a gate that stops running rather than one that fails. |
 
 The two `go run` tools are pinned outside the module graph on purpose: their x/tools
 requirement is newer than the shipped build's, so joining the module graph would drag
