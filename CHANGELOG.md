@@ -13,6 +13,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Breaking
+
+- `agentusage.Sample` and `agentusage.Delta` gained a `Span time.Duration`
+  field: how long the model spent on the tokens in the sample, when the
+  transcript records it. Zero means the transcript said nothing, and the rate
+  comes from the gap between samples, as it did for every sample before. A Go
+  caller that builds either as an unkeyed struct literal has to name the new
+  field; a caller that reads fields by name is unaffected.
+
 ### Changed
 
 - The audit log names an `ssh://` target by host and port, without the
@@ -34,6 +43,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   a key that needs a passphrase) says so in the audit log. The chain was
   quietly one credential shorter, and the rejection that followed named the
   host key instead. A name that is not there stays silent.
+
+- The key reference (`?` or `h`) says what each key does from inside it. `q`,
+  `esc` and `?` close the box, and a line says the action keys are muted while
+  it is up; before, `esc` was described by whichever view was behind the help,
+  so the list named an outcome the open help could not produce.
+- The minimal view prints no tok/s for an engine that is down. It showed
+  `0.0 tok/s` beside the down marker, naming two states at once; the full view
+  already printed an error and no stats row.
+- An engine's model name in the provider block is dim, so the engine and the
+  model no longer render as one bold run.
 - Grok's tok/s is the turn's own tokens over the time the model spent.
   The counts arrive once, when the turn ends. A rate taken from the gap
   since the previous turn never formed, and dividing by the whole turn

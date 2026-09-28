@@ -296,7 +296,11 @@ release is written under them. Run it locally with
 Keep one heading per impact, in the order the file uses: `Breaking`, then
 `Added`, `Security`, `Changed`, `Fixed`. A change a sender or a Go caller
 would notice belongs under `Breaking` even at 0.x, and it names the before
-and after plus what to do about it.
+and after plus what to do about it. The same gate reads the heading and the
+previous release's version: a `Breaking` entry under a patch bump fails,
+because 0.x still owes the caller a minor, not a patch, for a break. Adding a
+field to an exported `agentusage` struct lands there, since a Go caller
+building it unkeyed no longer compiles.
 
 The source stamp is empty. `make build` writes `dev` via `-ldflags
 -X main.version=...`; a release tag writes the version with the `v` prefix

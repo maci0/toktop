@@ -5,6 +5,10 @@ VERSION ?= dev
 # VERSION is interpolated into -ldflags and dist filenames. Refuse values
 # that would break the shell, the linker flag, or the artifact name.
 CHECK_VERSION = printf '%s' '$(VERSION)' | grep -qE '^[A-Za-z0-9._+-]+$$' || { echo "make: VERSION must match [A-Za-z0-9._+-]+ (got '$(VERSION)')" >&2; exit 1; }
+# A cut leaves an empty '## [Unreleased]' stub, and the stub is a heading
+# without a version. Only a versioned heading closes the section and names the
+# version the bump is compared against, so a stub anywhere below the new
+# section cannot pass for the release that preceded it.
 CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
 	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "] ") == 1 || $$0 == "\#\# [" v "]" {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md missing '\#\# [$(VERSION)]' section" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'index($$0, "[Unreleased]: ") == 1 {f=1} END{exit !f}' CHANGELOG.md || { echo "make: CHANGELOG.md missing '[Unreleased]:' link reference" >&2; exit 1; }; \
@@ -17,7 +21,7 @@ CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
 	awk -v v='$(VERSION)' 'index($$0, "\#\# [" v "]") == 1 {f=1;next} /^\#\# \[/{f=0} f && /^\#\#\# /{if (seen[$$0]++) d=1} END{exit (d==1)}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) repeats an impact heading; one heading per impact" >&2; exit 1; }; \
 	awk -v v='$(VERSION)' 'BEGIN{ if (v !~ /^[0-9]+\.[0-9]+\.[0-9]+$$/) exit 0 } \
 		index($$0, "\#\# [" v "]") == 1 {f=1; next} \
-		/^\#\# \[/ {if (f==1) {f=0; if (match($$0, /\#\# \[[0-9]+\.[0-9]+\.[0-9]+/)) prev=substr($$0, RSTART+4, RLENGTH-4)} next} \
+		/^\#\# \[/ {if (f==1 && $$0 != "\#\# [Unreleased]") {f=0; if (match($$0, /\#\# \[[0-9]+\.[0-9]+\.[0-9]+\]/)) prev=substr($$0, RSTART+4, RLENGTH-5)} next} \
 		f==1 && $$0 == "\#\#\# Breaking" {breaking=1} \
 		END { \
 			if (!breaking || prev == "") exit 0; \
