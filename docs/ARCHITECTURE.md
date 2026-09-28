@@ -33,8 +33,8 @@ alongside them would be a layer importing sideways into itself.
   its exported API.
 - `cmd/toktop`: flag parsing, validation and warnings (`flags.go`,
   `validate.go`), endpoint and target wiring (`attach.go`, `endpoints.go`), the
-  subcommands (`help.go`, `update.go`, `version.go`), and `main.go`, which is
-  the whole startup sequence in one function.
+  subcommands (`help.go`, `update.go`, `version.go`), and `main.go`, whose
+  `runMain` is the whole startup sequence in one function.
 - `internal/bearer`: one process-wide optional `Bearer` token for gateways
   that require an API key.
 - `internal/collector`: polls providers on an interval, derives rates, and is
@@ -90,14 +90,15 @@ and are not variants of one another.
 
 ## How a run starts
 
-`main()` in `cmd/toktop/main.go` is the whole sequence, in order, and reads
-top to bottom:
+`runMain()` in `cmd/toktop/main.go` is the whole sequence, in order, and reads
+top to bottom (`main()` is the `os.Exit` around it, split out so the exit
+skips the defers):
 
 1. Ignore `SIGPIPE`, take a subcommand before flag parsing, parse and validate
    the flags, parse `--origin`, hand `logcfg.Logger()` to `agentusage`.
-2. Parse the ssh targets, resolve `--ssh-key`, open opencode's database if it
-   was asked for, warn about flags and environment variables this run will not
-   read.
+2. Parse the ssh targets, validate the `--ssh-key` flag, open opencode's
+   database if it was asked for, warn about flags and environment variables
+   this run will not read, then resolve `--ssh-key` to a real path.
 3. Pick a data source: `demo.NewSource` under `--demo`, otherwise
    `attachEngines` followed by `collector.New`. Either way a `chan
    core.Snapshot` and a `core.AgentRecorder` come out, and every later step is

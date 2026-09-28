@@ -368,8 +368,9 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
     <li><b>Probes</b><p>Real generations measuring TTFT and decode speed.</p><code>press p · or --probe N to auto-probe</code></li>
     <li><b>System</b><p>GPU/NPU, VRAM, temps, power beside the throughput.</p><code>nv0 82° 69% · vram 57G/80G · 397W</code></li>
   </ul>
-  <p class="dim">Transcripts: claude, codex, qwen, copilot, kimi, pi,
-  prime-agent, feynman, clanker and dsh keep JSONL;
+  <p class="dim">Transcripts: claude, codex, qwen, copilot, kimi, gemini, grok,
+  agy, cursor-agent, pi, prime-agent, feynman, omp, clanker, and dsh
+  (zstd or plain JSONL);
   opencode and crush keep SQLite (needs the <code>sqlite</code> tag).
   Agents on a watched engine show <code>via &lt;engine&gt;</code>, counted once.</p>
   </section>

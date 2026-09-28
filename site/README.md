@@ -79,7 +79,7 @@ dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). `/favicon.ico` is the one exception, and it has to be: a crawler, a
 bookmark or a client that ignored the `<link rel="icon">` data URI asks for
-that path blind, and the catch-all answered it with the whole page, 3,606 bytes
+that path blind, and the catch-all answered it with the whole page, 12,942 bytes
 of `text/html` for a request that wants an image. The Worker answers it with
 the icon the page already carries inline, from the same bytes, with no asset
 binding and no second request, and a browser that reads the `<link>` still
@@ -128,11 +128,11 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. That ranking is a
 constant list in the Worker rather than a comparison of bodies, because the
-page is a constant too: brotli 3,643 bytes, gzip 4,328, zstd 4,566. zstd
+page is a constant too: brotli 3,785 bytes, gzip 4,472, zstd 4,705. zstd
 lands behind gzip here, so a client that named only `zstd, gzip` still gets
 gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,328 bytes rather than 12,524 bytes in the local Worker response test.
+transfers 4,472 bytes rather than 12,942 bytes in the local Worker response test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
@@ -167,7 +167,7 @@ Worker spent before writing the response, failures included: a failed request
 is the one a visitor reports, and a timing series that covered only the served
 requests would describe exactly the ones nobody is asking about. A byte-count
 test cannot see a
-regression here: the page can send the same 3,759 bytes slowly. With the
+regression here: the page can send the same 3,785 bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
 has to be added to the page to collect it.
@@ -238,10 +238,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 12,890 bytes identity / 4,442 gzip /
-3,759 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,759 bytes
-plus the 10,577-byte 768w capture, 14,336 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 12,942 bytes identity / 4,472 gzip /
+3,785 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,785 bytes
+plus the 10,577-byte 768w capture, 14,362 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no

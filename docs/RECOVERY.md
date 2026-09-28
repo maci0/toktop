@@ -7,19 +7,23 @@ claim to fix first.
 
 ## What state exists
 
-toktop is a terminal dashboard. It writes one file, and there is nothing
-else.
+toktop is a terminal dashboard. What it writes is the ssh pin store and,
+during an update, files next to the binary. Everything else it touches is
+somebody else's data.
 
 | State | Where | Written by |
 | --- | --- | --- |
-| ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts` (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
+| ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts`; a config directory that is itself unusable names no store, and the run fails at connect (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
 | a copy of the store, refreshed by every write | the same path plus `.bak` (`writeBackup`) | `writeBackup` |
 | the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`) | `replaceFile` |
 | the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
+| a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/selfupdate.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
 | the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/selfupdate.go`, `installDisplacing`) | `installDisplacing` |
 | the installed binary | the running executable's own path | `install` |
 
-Everything else toktop touches is read-only, and belongs to something else:
+The two files beside the binary hold no state worth recovering: both are
+rebuilt by running `toktop update` again. Everything else toktop touches is
+read-only, and belongs to something else:
 
 - agent transcripts and session databases (`--agents`): JSONL and zstd files
   under `~/.claude`, `~/.codex`, `~/.kimi-code` and the rest, plus SQLite
