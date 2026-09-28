@@ -149,6 +149,52 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the very variable the operator had already set, and read as a first run that
   had never authenticated.
 
+- A transcript whose zstd frame the reader rejected was audited as read
+  every poll, and the latch that keeps a failing path out of the read loop was
+  cleared each time. The agent that owned it read as one being polled with
+  nothing to show, and the same frame was decoded again on every tick. A
+  rejected decode now carries the same error the first-baseline read reports
+  it under, so a path that never advances is latched and named once.
+
+- The two copies written beside the host-key pin store are read freshest
+  first, not in a fixed order. A store lost or emptied is recovered from a
+  copy, and a fixed order recovered it from whichever copy predated the
+  other, so every host pinned after that write was dropped and the next
+  connection to it was refused as unpinned. mtime picks the copy instead of an
+  assumption about which one a write leaves behind.
+
+- A directory name carrying the note separator is no longer read as a
+  breakdown the note never wrote. The working directory a process reports is
+  whatever its checkout was named, and a checkout called `proj · counted by
+  engine ollama` attributed the agent's output to an engine that never saw
+  it, in the dashboard, the `--json` report and the audit log. The separator
+  character itself becomes a hyphen, so every separator left in a note is one
+  the note wrote.
+
+- A remote error naming a home under the peer's own account is folded out of
+  the diagnostics toktop prints, not only out of the audit lines it kept to
+  `HOST` and port. The message reached the dashboard, the `--json` report and
+  the reload path with the account's home in it, and those are the surfaces
+  that get pasted into a ticket.
+
+- A UTC audit stamp no longer sorts before the whole second it belongs to.
+  RFC3339Nano drops trailing zeros and drops the point entirely on a whole
+  second, so `12:00:00.9Z` sorted ahead of `12:00:00Z` and a whole-second line
+  sorted to the end of its own second, which is the one order a UTC stamp is
+  chosen for. Stamps carry a fixed nine-digit fraction, so lines from
+  several machines interleave the way they are read.
+
+- An agent's clock offset is no longer forgotten when a superseded row ages
+  out of the ledger. Agent, offset and instant identify one reading, so
+  dropping a row that was read again at the same value took the offset with
+  it and the agent's events went back onto the sender's own timeline. A row
+  still in force survives the ageing of the one it replaced.
+
+- An interval computed from a clock that stepped backwards is read as the
+  zero it is rather than as a negative duration. The per-process sampler and
+  the provider health panel divided by a raw subtraction, so a backward step
+  charged a frame's tokens against an interval of the wrong sign.
+
 ## [0.19.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

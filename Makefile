@@ -30,6 +30,55 @@ CHECK_CHANGELOG = if [ '$(VERSION)' != 'dev' ]; then \
 		}' CHANGELOG.md || { echo "make: CHANGELOG.md section for $(VERSION) carries a 'Breaking' entry but $(VERSION) is a patch bump; the project is 0.x, so a breaking change rides a minor bump" >&2; exit 1; }; \
 fi
 
+# The module's public packages: the importable ones a Go program can name.
+# `cmd` and `internal` are not on that list, so a change to either cannot move
+# this contract.
+PUBLIC_PKGS = ./agentusage
+
+# The declarations each public package exports, taken from `go doc` with the
+# prose dropped by scripts/api-surface.awk. A removed or reshaped declaration
+# is a breaking change a Go caller meets as a compile error in their tree, and
+# nothing here can see it: this tree still builds, the tests still pass, and the
+# CI platforms still cross-compile. The rule matches the changelog gate's, since
+# both answer the same question: the project is 0.x, so a breaking change rides
+# a minor bump and a patch is refused. A checkout with no released tag before
+# HEAD^ has no base to diff and is let past.
+CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
+	if ! git rev-parse HEAD >/dev/null 2>&1; then \
+		echo "make: check-api needs a git checkout; the exported surface is read from the tree" >&2; \
+		exit 1; \
+	fi; \
+	base=$$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null) || exit 0; \
+	if [ -z "$$base" ]; then echo "make: check-api found no released tag before HEAD^; nothing to compare the surface to" >&2; exit 0; fi; \
+	work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
+	git archive "$$base" | tar -x -C "$$work" || exit 1; \
+	awk=$$(pwd)/scripts/api-surface.awk; \
+	[ -f "$$awk" ] || awk="$$work/scripts/api-surface.awk"; \
+	fail=0; \
+	for pkg in $(PUBLIC_PKGS); do \
+		( cd "$$work" && $(GO) doc -all "$$pkg" ) | awk -f "$$awk" | sort -u > "$$work/base.txt" || exit 1; \
+		$(GO) doc -all "$$pkg" | awk -f "$$awk" | sort -u > "$$work/head.txt" || exit 1; \
+		gone=$$(comm -23 "$$work/base.txt" "$$work/head.txt"); \
+		if [ -n "$$gone" ]; then \
+			prev=$$(printf '%s' "$$base" | sed 's/^v//'); \
+			major=$$(printf '%s' "$(VERSION)" | cut -d. -f1); \
+			minor=$$(printf '%s' "$(VERSION)" | cut -d. -f2); \
+			pmajor=$$(printf '%s' "$$prev" | cut -d. -f1); \
+			pminor=$$(printf '%s' "$$prev" | cut -d. -f2); \
+			if [ "$$major" = "$$pmajor" ] && [ "$$minor" = "$$pminor" ]; then \
+				echo "make: $(VERSION) removes from $$pkg, what $$base exported:" >&2; \
+				printf '%s\n' "$$gone" | sed 's/^/  /' >&2; \
+				echo "  a Go caller compiled against these is broken; ride a minor bump, or restore them" >&2; \
+				fail=1; \
+			else \
+				echo "make: $(VERSION) removes from $$pkg, what $$base exported (a minor bump, so this is allowed):" >&2; \
+				printf '%s\n' "$$gone" | sed 's/^/  /' >&2; \
+				echo "  record each one under a 'Breaking' heading in CHANGELOG.md" >&2; \
+			fi; \
+		fi; \
+	done; \
+	exit $$fail
+
 GO          ?= go
 # go.mod's go line is the compiler pin. GOTOOLCHAIN=auto would keep a newer
 # host toolchain (and its GOEXPERIMENT defaults), so two machines would emit
@@ -928,6 +977,10 @@ check-changelog: ## verify CHANGELOG.md contains release section and link for VE
 	@$(CHECK_VERSION)
 	@$(CHECK_CHANGELOG)
 
+.PHONY: check-api
+check-api: ## verify VERSION removes nothing PUBLIC_PKGS exported at the last release
+	@$(CHECK_API)
+
 # A release packages the working tree, so the two states that leave the bytes
 # unreproducible have to be refused before they are packaged rather than
 # recorded after: an uncommitted change, which buildinfo would name a commit
@@ -969,7 +1022,7 @@ check-release-source: ## fail unless a non-dev VERSION builds from a clean, git-
 # that order is guaranteed by listing prerequisites, so .NOTPARALLEL below
 # inserts a .WAIT between them.
 .PHONY: release
-release: check-changelog check-release-source sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
+release: check-changelog check-api check-release-source sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
 
 # Without this, `make -j release` runs the three prerequisites above at once:
 # dist-clean would delete the binaries test-dist is writing, and the checksums
