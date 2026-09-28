@@ -10,21 +10,22 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-const vitalsDump = `3.10 2.20 1.05 4/900 12345
-%toktop%
+const vitalsDump = `%toktop%loadavg
+3.10 2.20 1.05 4/900 12345
+%toktop%meminfo
 MemTotal:       16096680 kB
 MemAvailable:   8000000 kB
 SwapTotal:       2000000 kB
 SwapFree:        1000000 kB
-%toktop%
+%toktop%uptime
 183729.42 712000.11
-%toktop%
+%toktop%cpu
 AMD Ryzen 9 7950X 16-Core Processor
-%toktop%
+%toktop%os
 "Debian GNU/Linux 12 (bookworm)"
-%toktop%
+%toktop%kernel
 6.1.0-18-amd64
-%toktop%
+%toktop%gpu
 0, NVIDIA GeForce RTX 4090, 54, 12345, 24564, 97, 410.2, 550.54.15
 1, NVIDIA A100-SXM4-40GB, 61, 30000, 40960, 80, 250.0, [N/A]
 `
@@ -117,7 +118,7 @@ func TestParseVitalsInfLoadAndHugeUptime(t *testing.T) {
 func TestParseVitalsPartial(t *testing.T) {
 	var s core.SysSample
 	s.CPUModel = "keep me"
-	parseVitals("\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n", &s)
+	parseVitals(vitalsDumpFrom("", "", "", "", "", "", ""), &s)
 	if s.CPUModel != "keep me" || s.OsName != "" || s.Kernel != "" || len(s.GPUs) != 0 {
 		t.Errorf("empty sections must not clobber: %+v", s)
 	}
@@ -152,9 +153,9 @@ func TestParseVitalsEmptyGPUSectionClears(t *testing.T) {
 func TestParseVitalsTruncatedDumpKeepsGPUs(t *testing.T) {
 	s := core.SysSample{}
 	parseVitals(vitalsDump, &s)
-	// Five markers: sections 0..5 plus the trailing one, so gpuSection is
-	// absent and the run is treated as cut short.
-	parseVitals("\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n%toktop%\n", &s)
+	// Five sections, the last of them named kernel: the GPU section never
+	// arrives, so the run is treated as cut short.
+	parseVitals(vitalsDumpFrom("1.0 1.0 1.0", "", "", "", "", "6.1.0-18-amd64"), &s)
 	if len(s.GPUs) == 0 || s.Drivers["nvidia"] == "" {
 		t.Errorf("a truncated dump must not drop the last GPU: %+v", s)
 	}
@@ -370,9 +371,22 @@ func TestMergeReplacesDriversWithTheRemoteGPUs(t *testing.T) {
 
 const rocmJSON = `{"card0":{"Temperature (Sensor edge) (C)":"52.0","GPU use (%)":"88","Used Memory (VRAM)":"12271640576","Total Memory (VRAM)":"17163091968"}}`
 
-// vitalsDumpFrom builds a full vitals payload from ordered sections.
+// sectionNames is the order vitalsScript writes its sections, which is the
+// order vitalsDumpFrom's parts are supplied in.
+var sectionNames = []string{secLoadavg, secMeminfo, secUptime, secCPU, secOS, secKernel, secGPU}
+
+// vitalsDumpFrom builds a full vitals payload, one named section per part, in
+// the order the script writes them.
 func vitalsDumpFrom(parts ...string) string {
-	return strings.Join(parts, "\n"+sectionMark+"\n") + "\n"
+	var b strings.Builder
+	for i, part := range parts {
+		b.WriteString(sectionMark)
+		b.WriteString(sectionNames[i])
+		b.WriteString("\n")
+		b.WriteString(part)
+		b.WriteString("\n")
+	}
+	return b.String()
 }
 
 func TestParseVitalsRocmGPUs(t *testing.T) {
@@ -397,13 +411,77 @@ func TestParseVitalsRocmGPUs(t *testing.T) {
 }
 
 func TestSplitSectionsConsecutiveEmpty(t *testing.T) {
-	secs := splitSections("\n" + sectionMark + "\n" + sectionMark + "\ndata\n" + sectionMark + "\n")
-	// lines: "", MARK, MARK, "data", MARK, "" -> four sections incl. trailing
-	if len(secs) != 4 {
-		t.Fatalf("sections = %q", secs)
+	secs := splitSections("\n" + sectionMark + secMeminfo + "\n" + sectionMark + secCPU +
+		"\ndata\n" + sectionMark + secKernel + "\n")
+	// A named section with an empty body is present and empty, which is how
+	// parseVitals tells "the remote reported no GPU" from "the dump stopped
+	// before the GPU section".
+	if body, ok := secs[secMeminfo]; !ok || strings.TrimSpace(body) != "" {
+		t.Errorf("meminfo = %q, present = %t; want a present empty section", body, ok)
 	}
-	if strings.TrimSpace(secs[2]) != "data" {
-		t.Errorf("section 2 = %q, want data", secs[2])
+	if body := strings.TrimSpace(secs[secCPU]); body != "data" {
+		t.Errorf("cpu = %q, want data", body)
+	}
+	if body, ok := secs[secKernel]; !ok || strings.TrimSpace(body) != "" {
+		t.Errorf("kernel = %q, present = %t; want a present empty section", body, ok)
+	}
+	if len(secs) != 3 {
+		t.Errorf("sections = %q, want the three named ones and nothing else", secs)
+	}
+}
+
+// A section is read by name, so the order the script writes them in carries
+// no meaning. This is the property that makes the two sides of the dump
+// independent: a section added, removed or moved in the script changes one
+// field rather than shifting every field after it into the neighbour's slot.
+func TestParseVitalsIgnoresSectionOrder(t *testing.T) {
+	scrambled := sectionMark + secKernel + "\n6.1.0-18-amd64\n" +
+		sectionMark + secOS + "\n\"Debian GNU/Linux 12 (bookworm)\"\n" +
+		sectionMark + secCPU + "\nAMD Ryzen 9 7950X 16-Core Processor\n" +
+		sectionMark + secUptime + "\n183729.42 712000.11\n" +
+		sectionMark + secMeminfo + "\nMemTotal:       16096680 kB\n" +
+		sectionMark + secLoadavg + "\n3.10 2.20 1.05 4/900 12345\n"
+
+	var s core.SysSample
+	if loadsOK := parseVitals(scrambled, &s); !loadsOK {
+		t.Fatal("scrambled dump reported no loads")
+	}
+	if s.Load1 != 3.10 || s.CPUModel != "AMD Ryzen 9 7950X 16-Core Processor" ||
+		s.OsName != "Debian GNU/Linux 12 (bookworm)" || s.Kernel != "6.1.0-18-amd64" {
+		t.Errorf("fields landed in the wrong sections: %+v", s)
+	}
+	if want := uint64(16096680) << 10; s.MemTotal != want {
+		t.Errorf("memtotal = %d want %d", s.MemTotal, want)
+	}
+}
+
+// The dump is a protocol between a shell script and a parser, and this is the
+// only thing that holds the two together: a section the script writes and the
+// parser never reads is a field that silently stops arriving, and nothing
+// else in the build would say so. A section the parser reads and the script
+// never writes is the same failure pointing the other way.
+func TestScriptSectionsCoverParser(t *testing.T) {
+	written := map[string]bool{}
+	for line := range strings.SplitSeq(vitalsScript(), "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "echo "+sectionMark); ok {
+			if name = strings.TrimSpace(name); name != "" {
+				written[name] = true
+			}
+		}
+	}
+	read := map[string]bool{
+		secLoadavg: true, secMeminfo: true, secUptime: true,
+		secCPU: true, secOS: true, secKernel: true, secGPU: true,
+	}
+	for name := range read {
+		if !written[name] {
+			t.Errorf("parseVitals reads the %q section, which vitalsScript never writes", name)
+		}
+	}
+	for name := range written {
+		if !read[name] {
+			t.Errorf("vitalsScript writes a %q section, which parseVitals never reads", name)
+		}
 	}
 }
 

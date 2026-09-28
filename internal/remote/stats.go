@@ -70,15 +70,31 @@ func (s *Stats) instant() time.Time {
 	return s.now()
 }
 
-// sectionMark separates the vitals dump into ordered sections. Chosen to be
+// sectionMark prefixes every section marker in the vitals dump. Chosen to be
 // unlikely to appear in any of the read files.
 const sectionMark = "%toktop%"
 
-// gpuSection is the position of the GPU section in that dump: loadavg,
-// meminfo, uptime, CPU model, OS name, kernel, then the vendor CLI's output.
-// Its presence is the script's end-of-run signal, which is how parseVitals
-// tells "the remote reported no GPU" from "the dump stopped early".
-const gpuSection = 6
+// The section names, which the script writes after sectionMark and the
+// parser looks up by.
+//
+// The dump is a protocol between a shell script and a parser, and naming the
+// sections is what holds the two together. An earlier version cut the dump on
+// bare markers and read it by position, so the script and parseVitals agreed
+// only by being edited together: inserting one section in the script shifted
+// every field after it into the neighbour's slot, and the parser read a
+// kernel release as a CPU model with nothing to say so. The names make the
+// order irrelevant, a section that arrives twice harmless, and a script edit
+// local. TestScriptSectionsCoverParser pins the two sides together, so a
+// section the parser stopped reading fails the build rather than the poll.
+const (
+	secLoadavg = "loadavg"
+	secMeminfo = "meminfo"
+	secUptime  = "uptime"
+	secCPU     = "cpu"
+	secOS      = "os"
+	secKernel  = "kernel"
+	secGPU     = "gpu"
+)
 
 // stalenessWindow is how long a remote sample still counts as fresh. Past it
 // the overlay is dropped rather than merged: a remote that stopped answering
@@ -87,17 +103,18 @@ const stalenessWindow = 20 * time.Second
 
 // vitalsScript dumps load, memory, uptime, CPU model, OS name, kernel and GPU
 // telemetry (NVIDIA via nvidia-smi, AMD via rocm-smi; whichever is present) in
-// one round trip, sections separated by sectionMark lines. Load and memory
-// come from /proc and degrade to empty on non-Linux remotes; CPU model, OS
-// name, kernel and uptime have Darwin fallbacks. Darwin uptime is
-// kern.boottime vs date(1): the remote is a shell one-liner, so CLOCK_MONOTONIC
-// is not available the way the local Darwin sampler uses it.
+// one round trip, each block introduced by a named sectionMark line. Load and
+// memory come from /proc and degrade to empty on non-Linux remotes; CPU model,
+// OS name, kernel and uptime have Darwin fallbacks. Darwin uptime is
+// kern.boottime vs date(1): the remote is a shell one-liner, so
+// CLOCK_MONOTONIC is not available the way the local Darwin sampler uses it.
 func vitalsScript() string {
 	return `
+echo ` + sectionMark + secLoadavg + `
 cat /proc/loadavg 2>/dev/null
-echo ` + sectionMark + `
+echo ` + sectionMark + secMeminfo + `
 cat /proc/meminfo 2>/dev/null
-echo ` + sectionMark + `
+echo ` + sectionMark + secUptime + `
 cut -d' ' -f1 /proc/uptime 2>/dev/null
 boot=$(sysctl -n kern.boottime 2>/dev/null)
 sec=${boot#*sec = }
@@ -106,20 +123,20 @@ case $sec in
   ''|*[!0-9]*) ;;
   *) echo $(($(date +%s) - sec));;
 esac
-echo ` + sectionMark + `
+echo ` + sectionMark + secCPU + `
 cpu=$(sed -n 's/^model name[[:space:]]*:[[:space:]]*//p' /proc/cpuinfo 2>/dev/null | sed -n 1p)
 [ -n "$cpu" ] || cpu=$(sysctl -n machdep.cpu.brand_string 2>/dev/null)
 echo "$cpu"
-echo ` + sectionMark + `
+echo ` + sectionMark + secOS + `
 os=""
 [ -r /etc/os-release ] && . /etc/os-release && os="$PRETTY_NAME"
 if [ -z "$os" ] && command -v sw_vers >/dev/null 2>&1; then
   os="macOS $(sw_vers -productVersion 2>/dev/null)"
 fi
 echo "$os"
-echo ` + sectionMark + `
+echo ` + sectionMark + secKernel + `
 uname -r 2>/dev/null
-echo ` + sectionMark + `
+echo ` + sectionMark + secGPU + `
 if command -v nvidia-smi >/dev/null 2>&1; then
   nvidia-smi ` + gpu.NvidiaQuery + ` ` + gpu.NvidiaFormat + ` 2>/dev/null
 elif command -v rocm-smi >/dev/null 2>&1; then
@@ -304,41 +321,37 @@ func (s *Stats) host() string {
 
 // parseVitals reads the vitalsScript dump: loadavg, meminfo, uptime seconds,
 // CPU model, OS name, kernel release and GPU telemetry (nvidia-smi CSV or
-// rocm-smi JSON), separated by sectionMark lines. Missing sections leave the
+// rocm-smi JSON), each introduced by a named sectionMark line. Sections are
+// read by name rather than by position, so the order the script writes them
+// in carries no meaning and a section the remote left out leaves the
 // corresponding fields alone.
 // It reports whether usable load readings were present; a remote whose
 // loadavg is missing or all-zero leaves the local readings in place instead
-// of zeroing them. The GPU section, which the script always emits, is the one
-// exception: it replaces the previous readings even when it is empty.
+// of zeroing them. The GPU section, which the script always introduces, is the
+// one exception: it replaces the previous readings even when it is empty.
 func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 	sections := splitSections(out)
-	section := func(i int) string {
-		if i >= len(sections) {
-			return ""
-		}
-		return sections[i]
-	}
 
-	if load := firstLine(section(0)); load != "" {
+	if load := firstLine(sections[secLoadavg]); load != "" {
 		if l1, l5, l15 := sysmon.ParseLoadavg(load); l1 > 0 || l5 > 0 || l15 > 0 {
 			s.Load1, s.Load5, s.Load15 = l1, l5, l15
 			loadsOK = true
 		}
 	}
-	if mem := section(1); strings.TrimSpace(mem) != "" {
+	if mem := sections[secMeminfo]; strings.TrimSpace(mem) != "" {
 		sysmon.ParseMeminfo([]byte(mem), s)
 	}
 	// firstLine never returns a blank line, so Fields is non-empty here.
-	if up := firstLine(section(2)); up != "" {
+	if up := firstLine(sections[secUptime]); up != "" {
 		s.HostUptime = sysmon.ParseUptimeSecs(strings.Fields(up)[0])
 	}
-	if cpu := firstLine(section(3)); cpu != "" {
+	if cpu := firstLine(sections[secCPU]); cpu != "" {
 		s.CPUModel = vitalsField(cpu)
 	}
-	if osName := trimQuotes(firstLine(section(4))); osName != "" {
+	if osName := trimQuotes(firstLine(sections[secOS])); osName != "" {
 		s.OsName = vitalsField(osName)
 	}
-	if kern := firstLine(section(5)); kern != "" {
+	if kern := firstLine(sections[secKernel]); kern != "" {
 		s.Kernel = vitalsField(kern)
 	}
 	// The GPU section is the one a dump can legitimately deliver empty: the
@@ -349,8 +362,8 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 	// the dashboard for the rest of the run. A section that never arrived
 	// (a dump cut short before the last marker) leaves the last reading
 	// alone, like every other section.
-	if gpuSection < len(sections) {
-		devs := parseGPUs(sections[gpuSection])
+	if section, ok := sections[secGPU]; ok {
+		devs := parseGPUs(section)
 		s.GPUs = devs
 		s.Drivers = nil
 		if len(devs) > 0 {
@@ -383,23 +396,40 @@ func firstLine(s string) string {
 	return ""
 }
 
-// splitSections cuts a vitals dump on standalone sectionMark lines. Line-wise
-// matching is essential: substring splitting mis-nests consecutive empty
-// sections because adjacent markers share their newline.
-func splitSections(out string) []string {
-	var secs []string
+// splitSections cuts a vitals dump into the named sections its sectionMark
+// lines introduce, keyed on the name that follows the mark. Line-wise matching
+// is essential: substring splitting mis-nests consecutive empty sections
+// because adjacent markers share their newline.
+//
+// A marker with no name, and any text before the first one, is dropped: this
+// dump has no positional fallback left to put an unnamed block in, and a
+// block nobody named is a block no field reads. A name that appears twice
+// keeps the later block, the one the script wrote last.
+func splitSections(out string) map[string]string {
+	secs := make(map[string]string)
+	var name string
 	var cur strings.Builder
+	flush := func() {
+		if name != "" {
+			secs[name] = cur.String()
+		}
+		cur.Reset()
+	}
 	for line := range strings.SplitSeq(out, "\n") {
 		line = strings.TrimRight(line, "\r")
-		if strings.TrimSpace(line) == sectionMark {
-			secs = append(secs, cur.String())
-			cur.Reset()
+		// A marker is a line of the mark alone or the mark plus one name, so
+		// a data line that merely starts with the mark is still data.
+		if mark, ok := strings.CutPrefix(strings.TrimSpace(line), sectionMark); ok &&
+			mark != "" && !strings.ContainsAny(mark, " \t") {
+			flush()
+			name = mark
 			continue
 		}
 		cur.WriteString(line)
 		cur.WriteByte('\n')
 	}
-	return append(secs, cur.String())
+	flush()
+	return secs
 }
 
 // trimQuotes strips one layer of matching quotes (PRETTY_NAME style) with
