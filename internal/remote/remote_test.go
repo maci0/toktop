@@ -1543,6 +1543,20 @@ func TestDefaultKnownHostsPathXDG(t *testing.T) {
 	}
 }
 
+// The fallback behind XDG_CONFIG_HOME is built from $HOME, which nothing
+// checks: a relative one produces a relative config directory, and the pin
+// store lands under the working directory, vanishing with the cwd and
+// re-TOFUing the next run. A home that cannot place an absolute store names
+// none, and the run fails at connect.
+func TestDefaultKnownHostsPathRejectsRelativeHome(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("HOME", "relative/home")
+	t.Setenv("USERPROFILE", "relative/home") // os.UserConfigDir on windows
+	if got := defaultKnownHostsPath(); got != "" {
+		t.Fatalf("defaultKnownHostsPath() = %q, want no store for a relative home", got)
+	}
+}
+
 // A password read from a file keeps its trailing newline, and the server
 // would reject it as an ordinary authentication failure. A password that
 // merely ends in a space must survive.

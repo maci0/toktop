@@ -40,6 +40,7 @@ var publicFuncs = []string{
 	"DirKey",
 	"Discover",
 	"EnableOpenCodeDB",
+	"HomeDir",
 	"InputRate",
 	"KimiStorePath",
 	"LoadDefinitions",
@@ -53,7 +54,9 @@ var publicFuncs = []string{
 	"SpecFor",
 	"Supported",
 	"ThinkingRate",
+	"UnknownUsageKeys",
 	"UnregisterSpec",
+	"UsageKeyNames",
 	"Watch",
 }
 

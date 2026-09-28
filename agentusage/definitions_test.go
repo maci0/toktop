@@ -700,3 +700,133 @@ func TestKnownAgentsAreReadableApartFromTheDatabaseOnes(t *testing.T) {
 		}
 	}
 }
+
+// A key the usage block has no field for is read by nobody, and a block
+// naming only such a key registers no transcripts, so the agent reads as one
+// that used no tokens. The file is gauntlet's and a newer gauntlet may add a
+// key here, so the answer is a report rather than a refusal: the load succeeds
+// and names what it could not read.
+func TestLoadDefinitionsReportsUnknownUsageKeys(t *testing.T) {
+	path := writeDefs(t, `{
+		"zeta":  {"usage": {"root": ["~/.zeta/sessions"]}},
+		"alpha": {"usage": {"roots": ["~/.alpha/sessions"], "sufix": ".jsonl", "header_cwd": true}},
+		"mid":   {"usage": {"roots": ["~/.mid/sessions"], "cumulative": true}}
+	}`)
+	dropDefs(t, "zeta", "alpha", "mid")
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"alpha: sufix", "zeta: root"}
+	if got := UnknownUsageKeys(); !slices.Equal(got, want) {
+		t.Errorf("UnknownUsageKeys() = %q, want %q", got, want)
+	}
+	// A block whose only unrecognized key is the typo registers nothing, and
+	// the keys beside it are read as written.
+	if _, ok := SpecFor("alpha"); !ok {
+		t.Error("alpha not registered; the roots key beside the typo was ignored")
+	}
+	if _, ok := SpecFor("mid"); !ok {
+		t.Error("mid not registered")
+	}
+	if _, ok := SpecFor("zeta"); ok {
+		t.Error("zeta registered from an unrecognized root key")
+	}
+}
+
+// A file naming no key outside the set reports nothing, and the answer follows
+// the file in force rather than accumulating across loads.
+func TestUnknownUsageKeysFollowsTheFileInForce(t *testing.T) {
+	known := writeDefs(t, `{"alpha": {"usage": {"roots": ["~/.alpha/sessions"], "suffix": ".jsonl"}}}`)
+	if err := LoadDefinitions(known); err != nil {
+		t.Fatal(err)
+	}
+	if got := UnknownUsageKeys(); len(got) != 0 {
+		t.Errorf("UnknownUsageKeys() = %q for a file naming only known keys, want none", got)
+	}
+	typo := writeDefs(t, `{"beta": {"usage": {"roots": ["~/.beta/sessions"], "sufixes": [".jsonl"]}}}`)
+	dropDefs(t, "beta")
+	if err := LoadDefinitions(typo); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := UnknownUsageKeys(), []string{"beta: sufixes"}; !slices.Equal(got, want) {
+		t.Errorf("UnknownUsageKeys() = %q, want %q", got, want)
+	}
+}
+
+// usageKeyNames has to name every key the usage struct decodes, or the message
+// printed beside an unrecognized key omits one that does work. Spelling one
+// entry per known key and getting no report back is the assertion that binds
+// the list to the decoder.
+func TestUsageKeyNamesAreAllDecoded(t *testing.T) {
+	values := map[string]string{
+		"cumulative": "true",
+		"header_cwd": "true",
+		"roots":      `["~/.alpha/sessions"]`,
+		"suffix":     `".jsonl"`,
+		"suffixes":   `[".jsonl"]`,
+	}
+	names := UsageKeyNames()
+	if !slices.Equal(names, []string{"cumulative", "header_cwd", "roots", "suffix", "suffixes"}) {
+		t.Errorf("UsageKeyNames() = %q, want the sorted set of decoded keys", names)
+	}
+	for _, key := range names {
+		value, ok := values[key]
+		if !ok {
+			t.Errorf("UsageKeyNames() names %q, which this test spells no value for", key)
+			continue
+		}
+		path := writeDefs(t, `{"alpha": {"usage": {"`+key+`": `+value+`}}}`)
+		dropDefs(t, "alpha")
+		if err := LoadDefinitions(path); err != nil {
+			t.Fatal(err)
+		}
+		if got := UnknownUsageKeys(); len(got) != 0 {
+			t.Errorf("key %q is decoded but reported unknown: %q", key, got)
+		}
+	}
+}
+
+// A home that is relative, or that cannot be located at all, names no store.
+// The rule GAUNTLET_HOME, KIMI_CODE_HOME and the XDG base directories are held
+// to is that an unusable value resolves to nothing rather than to a path under
+// the directory the run started in, where a missing store is an empty one and
+// every agent reports no tokens.
+func TestHomeDirRejectsUnusableHome(t *testing.T) {
+	for _, tt := range []struct{ name, value string }{
+		{"relative", filepath.Join("relative", "home")},
+		{"dot", "."},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("HOME", tt.value)
+			t.Setenv("USERPROFILE", tt.value) // os.UserHomeDir on windows
+			t.Setenv("GAUNTLET_HOME", "")
+			t.Setenv("XDG_DATA_HOME", "")
+			t.Setenv("KIMI_CODE_HOME", "")
+			if got := HomeDir(); got != "" {
+				t.Fatalf("HomeDir() = %q, want \"\"", got)
+			}
+			// Every store built from it: the built-in roots, the definitions
+			// file and kimi's sessions.
+			for _, got := range []string{
+				home(".claude", "projects"),
+				DefinitionsPath(),
+				kimiStore(),
+			} {
+				if got != "" {
+					t.Errorf("store path %q, want \"\" for an unusable home", got)
+				}
+			}
+		})
+	}
+}
+
+// The absolute home is the one the stores are built from, so the guard above
+// cannot reject a value every platform accepts.
+func TestHomeDirAcceptsAbsoluteHome(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
+	if got := HomeDir(); got != home {
+		t.Fatalf("HomeDir() = %q, want %q", got, home)
+	}
+}

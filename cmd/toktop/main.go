@@ -195,6 +195,10 @@ func runMain() int {
 			fmt.Fprintf(os.Stderr, "toktop: %s\n", core.RedactHome(err.Error()))
 			return 2
 		}
+		// The definitions file was found, so a home that cannot place the
+		// built-in stores did not stop the run; say so rather than leaving
+		// every compiled-in agent reporting no tokens.
+		warnIgnoredUserHome()
 	}
 
 	if !f.once && !term.IsTerminal(int(os.Stdout.Fd())) {
@@ -757,5 +761,29 @@ func loadAgentDefs() error {
 	if path == "" {
 		return errors.New("cannot locate agents.json: no home directory and no absolute GAUNTLET_HOME")
 	}
-	return agentusage.LoadDefinitions(path)
+	if err := agentusage.LoadDefinitions(path); err != nil {
+		return err
+	}
+	warnUnknownUsageKeys(path)
+	return nil
+}
+
+// warnUnknownUsageKeys names the usage keys a definitions file spells that
+// agentusage has no field for. The file is gauntlet's, so an unrecognized key
+// is a version this build is older than rather than an error, and refusing to
+// start over one would break a run on a newer gauntlet than this build. It is
+// still named, because a key nobody reads is usually a key nobody spelled: one
+// with no counterpart in the known set leaves the agent with whatever the rest
+// of its block said, and a block naming only that key registers no transcripts
+// at all, which on the dashboard is an agent that used no tokens.
+//
+// One line, on stderr with the rest of the startup warnings, with the home
+// folded out of the path the way every other line naming the file folds it.
+func warnUnknownUsageKeys(path string) {
+	unknown := agentusage.UnknownUsageKeys()
+	if len(unknown) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "toktop: %s: ignoring unknown usage key(s) %s (this build reads %s)\n",
+		core.RedactHome(path), strings.Join(unknown, ", "), strings.Join(agentusage.UsageKeyNames(), ", "))
 }

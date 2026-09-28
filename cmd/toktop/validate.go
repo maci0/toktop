@@ -142,6 +142,29 @@ func warnIgnoredGauntletHome(agents bool) {
 		core.RedactHome(path))
 }
 
+// warnIgnoredUserHome names a home directory the built-in agent stores cannot
+// be built from. Every store this binary knows is a path under it
+// (~/.claude/projects and its siblings), and the rule the XDG and GAUNTLET
+// variables are held to is that an unusable value names no path rather than a
+// path under the directory the run started in, where a missing store is an
+// empty one and the agent reports no tokens.
+//
+// A home that is unset or not absolute stops the run before this is reached:
+// loadAgentDefs cannot place agents.json without one, and refuses to start.
+// The one run that gets past it is a GAUNTLET_HOME naming an absolute
+// directory, where the definitions file is read and the built-in stores are
+// not, so that is the only case this has to say anything about.
+func warnIgnoredUserHome() {
+	if agentusage.HomeDir() != "" {
+		return
+	}
+	if dir, err := os.UserHomeDir(); err == nil {
+		fmt.Fprintf(os.Stderr, "toktop: the home directory %q is not an absolute path; no built-in agent store is read\n", dir)
+		return
+	}
+	fmt.Fprintln(os.Stderr, "toktop: the home directory cannot be located; no built-in agent store is read")
+}
+
 // warnIgnoredXDGHome names an $XDG_DATA_HOME, $XDG_CONFIG_HOME or
 // $KIMI_CODE_HOME that is set but not a path DefinitionsPath-style consumers
 // can use. Every reader honors its variable only when it is absolute, so a

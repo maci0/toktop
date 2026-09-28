@@ -118,8 +118,11 @@ at startup rather than silently shrinking the watch to the built-in agents.
 The file and each agent entry must be JSON objects, not `null`; use `{}`
 for an empty definitions file. Invalid files leave the loaded registry unchanged.
 Set `GAUNTLET_HOME` to read that file from somewhere else; a value that is not
-an absolute path is ignored and named at startup. Only the `usage`
-block matters here (launch fields are ignored):
+an absolute path is ignored and named at startup. Every other store is read
+from the home directory, which has to be an absolute path: one that is not
+places no store at all rather than one under the working directory, and a run
+that read its definitions file from `GAUNTLET_HOME` says so at startup. Only
+the `usage` block matters here (launch fields are ignored):
 
 ```json
 {
@@ -130,6 +133,11 @@ block matters here (launch fields are ignored):
   }
 }
 ```
+
+A `usage` key this build has no field for (`roots`, `suffix`, `suffixes`,
+`cumulative`, `header_cwd`) is reported at startup and skipped, so a typo is
+named rather than leaving the agent with nothing to read. The key is not an
+error: the file is gauntlet's, and a newer gauntlet can add one.
 
 `roots` are searched directories, `suffix` filters the files under them
 (default `.jsonl`, the package's `agentusage.DefaultSuffix`), `suffixes` does

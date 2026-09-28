@@ -466,9 +466,29 @@ func Supported(tool string) bool {
 	return ok
 }
 
-func home(parts ...string) string {
+// HomeDir is the home directory every built-in agent store is built from:
+// os.UserHomeDir, accepted only when it names an absolute path.
+//
+// The absolute check is the same one GAUNTLET_HOME, KIMI_CODE_HOME and the XDG
+// base directories get, applied to the fallback they all end at. A relative
+// $HOME is the case that reaches it: an init system that starts the process
+// with HOME set to a relative name, or unset outright, gets a store path under
+// whatever directory the run started in, where a missing store is not an error
+// and every agent reports no tokens. "" is the answer in both cases: a root
+// the walk and the transcript open drop, rather than one that silently follows
+// the working directory.
+func HomeDir() string {
 	dir, err := os.UserHomeDir()
-	if err != nil {
+	if err != nil || !filepath.IsAbs(dir) {
+		return ""
+	}
+	return dir
+}
+
+// home is [HomeDir] joined with the parts of one built-in store.
+func home(parts ...string) string {
+	dir := HomeDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(append([]string{dir}, parts...)...)

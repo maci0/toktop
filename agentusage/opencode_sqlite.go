@@ -66,8 +66,8 @@ func openCodeDBPath() string {
 	if data := os.Getenv("XDG_DATA_HOME"); filepath.IsAbs(data) {
 		return filepath.Join(data, "opencode", "opencode.db")
 	}
-	dir, err := os.UserHomeDir()
-	if err != nil {
+	dir := HomeDir()
+	if dir == "" {
 		return ""
 	}
 	return filepath.Join(dir, ".local", "share", "opencode", "opencode.db")

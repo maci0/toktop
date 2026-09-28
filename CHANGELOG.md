@@ -65,6 +65,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   read as broken and latched a `probe failed` audit line. The whole-body parse
   counts the reasoning fields the streaming parse already counted.
 
+- A `$HOME` that is not an absolute path, or is unset, put every built-in
+  agent store under the directory the run started in: `filepath.Join` drops
+  the missing first element, so `~/.claude/projects` became
+  `.claude/projects`, where a missing store is an empty one and every agent
+  reports no tokens. The XDG, `KIMI_CODE_HOME` and `GAUNTLET_HOME` variables
+  are already held to the rule that an unusable value names no path; the home
+  every one of them falls back to now is held to it too, and `--agents` names
+  it when `GAUNTLET_HOME` placed the definitions file and the run continued.
+  The same rule now covers the ssh host-key store's `os.UserConfigDir`
+  fallback, which a relative home resolved under the working directory.
+
+- A `usage` key in `~/.gauntlet/agents.json` that this build has no field for
+  was ignored in silence, so a misspelled `roots` left the agent with nothing
+  to read and it reported no tokens for the whole run, which is what an agent
+  nobody defined also looks like. `agentusage.UnknownUsageKeys` reports them and
+  `toktop --agents` names them at startup, with the keys it does read. The load
+  still succeeds: the file is gauntlet's, and a newer gauntlet can name a key
+  this build does not read yet.
+
 - `agentusage.LoadDefinitions` returned a bare `os` error for a definitions
   file that exists but cannot be read, so a program checking
   `errors.Is(err, agentusage.ErrInvalidDefinitions)` for "this file is

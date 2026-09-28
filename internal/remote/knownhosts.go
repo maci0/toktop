@@ -29,6 +29,12 @@ import (
 // would vanish with the cwd, and a second run would re-TOFU. A relative value
 // falls through to os.UserConfigDir, which rejects it by name, so the run
 // fails at connect instead of quietly writing pins somewhere else.
+//
+// The fallback gets the same check. os.UserConfigDir builds its answer from
+// $HOME when XDG_CONFIG_HOME is unset, and a relative $HOME yields a relative
+// config directory, which is the store that vanishes with the cwd all over
+// again. An unusable home therefore names no store, and the run fails at
+// connect rather than writing pins under the working directory.
 var knownHostsPath = defaultKnownHostsPath
 
 func defaultKnownHostsPath() string {
@@ -36,7 +42,7 @@ func defaultKnownHostsPath() string {
 		return filepath.Join(dir, "toktop", "known_hosts")
 	}
 	dir, err := os.UserConfigDir()
-	if err != nil {
+	if err != nil || !filepath.IsAbs(dir) {
 		return ""
 	}
 	return filepath.Join(dir, "toktop", "known_hosts")

@@ -529,6 +529,38 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 	}
 }
 
+// A home the built-in stores cannot be built from is named at startup, next to
+// the definitions file that did resolve: without it every compiled-in agent
+// reports no tokens and nothing else says why.
+func TestWarnIgnoredUserHome(t *testing.T) {
+	t.Run("absolute home is silent", func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
+		if got := captureStderr(t, func() { warnIgnoredUserHome() }); got != "" {
+			t.Fatalf("warnIgnoredUserHome() printed %q, want silence", got)
+		}
+	})
+
+	t.Run("relative home is named", func(t *testing.T) {
+		t.Setenv("HOME", filepath.Join("relative", "home"))
+		t.Setenv("USERPROFILE", filepath.Join("relative", "home"))
+		got := captureStderr(t, func() { warnIgnoredUserHome() })
+		if !strings.Contains(got, "not an absolute path") {
+			t.Fatalf("warnIgnoredUserHome() printed %q, want the relative home named", got)
+		}
+	})
+
+	t.Run("unlocatable home is named", func(t *testing.T) {
+		t.Setenv("HOME", "")
+		t.Setenv("USERPROFILE", "")
+		got := captureStderr(t, func() { warnIgnoredUserHome() })
+		if !strings.Contains(got, "cannot be located") {
+			t.Fatalf("warnIgnoredUserHome() printed %q, want the cause named", got)
+		}
+	})
+}
+
 // writeAgentsJSON points GAUNTLET_HOME at a temp dir holding the given file
 // body ("" writes nothing, leaving agents.json absent).
 func writeAgentsJSON(t *testing.T, body string) string {
@@ -573,6 +605,22 @@ func TestLoadAgentDefs(t *testing.T) {
 		}
 		if !slices.Contains(agentusage.Agents(), "deftest-agent") {
 			t.Fatalf("defined agent missing from %v", agentusage.Agents())
+		}
+	})
+
+	t.Run("an unread usage key is named, not refused", func(t *testing.T) {
+		t.Setenv("GAUNTLET_HOME", writeAgentsJSON(t,
+			`{"deftest-agent":{"usage":{"roots":["~/.deftest/sessions"],"sufix":".jsonl"}}}`))
+		var err error
+		got := captureStderr(t, func() { err = loadAgentDefs() })
+		if err != nil {
+			t.Fatalf("loadAgentDefs() = %v, want nil: an unknown key is a version this build is older than", err)
+		}
+		if !strings.Contains(got, "deftest-agent: sufix") {
+			t.Fatalf("loadAgentDefs() printed %q, want the unknown key named", got)
+		}
+		if !strings.Contains(got, "header_cwd") {
+			t.Fatalf("loadAgentDefs() printed %q, want the keys this build reads", got)
 		}
 	})
 

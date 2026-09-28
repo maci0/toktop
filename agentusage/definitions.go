@@ -128,7 +128,24 @@ var (
 	// poll; the spec it reads cannot have changed unless this moved, so an
 	// unchanged counter turns that rebuild into a load.
 	defsGen atomic.Uint64
+	// unknownKeys is what the file most recently read named in a usage block
+	// without a key to decode it from, as "agent: key" entries. Reset on every
+	// load, so it describes the file in force rather than every file ever read.
+	unknownKeys []string
 )
+
+// UnknownUsageKeys reports the usage keys the definitions file most recently
+// read through [LoadDefinitions] named that this package does not decode, one
+// "agent: key" entry per key and sorted. Nothing until a file is read, and
+// nothing when every key it names is one [Spec] has a field for.
+//
+// A load that was refused leaves the previous answer in place: the file that
+// would have named these keys is not the one in force.
+func UnknownUsageKeys() []string {
+	defsMu.RLock()
+	defer defsMu.RUnlock()
+	return slices.Clone(unknownKeys)
+}
 
 func bumpDefsGen() { defsGen.Add(1) }
 
@@ -211,6 +228,53 @@ type Definition struct {
 // accepts; a nil one marshals as `null`, which it refuses, so a program
 // writing this file declares the map rather than leaving it unset.
 type Definitions map[string]*Definition
+
+// usageKeyNames lists the keys the usage block above decodes, in the order
+// [UsageKeyNames] spells them to an operator. The two lists have to agree:
+// the struct tags name what is read, this names what an operator can type.
+var usageKeyNames = []string{"cumulative", "header_cwd", "roots", "suffix", "suffixes"}
+
+// UsageKeyNames lists the keys a definitions file's usage block can spell, so
+// a caller reporting an unknown one can say what the known set is without
+// repeating it.
+func UsageKeyNames() []string { return slices.Clone(usageKeyNames) }
+
+// unknownUsageKeys returns one "agent: key" entry per key a usage block names
+// that the struct above does not decode, sorted, or nothing when every key is
+// one this package reads.
+//
+// A misspelled key is otherwise silent: "root" leaves the agent with no usable
+// root, so it registers nothing and the dashboard shows an agent producing no
+// tokens, which is what an agent that was never defined also looks like.
+// Rejecting the file instead would be wrong in the other direction, since the
+// file is gauntlet's format and a newer gauntlet may add a key here that this
+// build does not read yet, so the key is reported rather than refused.
+//
+// The agent name is the one the file spells, not the canonical form, so the
+// operator can find the line. The second decode reads the same bytes the typed
+// one accepted, so a shape it rejects cannot reach here.
+func unknownUsageKeys(data []byte) []string {
+	var raw map[string]struct {
+		Usage map[string]json.RawMessage `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil
+	}
+	known := make(map[string]bool, len(usageKeyNames))
+	for _, k := range usageKeyNames {
+		known[k] = true
+	}
+	var out []string
+	for agent, entry := range raw {
+		for key := range entry.Usage {
+			if !known[key] {
+				out = append(out, agent+": "+key)
+			}
+		}
+	}
+	slices.Sort(out)
+	return out
+}
 
 // maxDefinitionsBytes bounds the agent definitions file. It is a JSON object
 // of transcript locations, so a real one is a few kilobytes; a file past this
@@ -371,6 +435,7 @@ func LoadDefinitions(path string) error {
 	}
 	defsMu.Lock()
 	defer defsMu.Unlock()
+	unknownKeys = unknownUsageKeys(data)
 	for _, p := range pending {
 		defs[p.name] = p.spec
 	}
@@ -423,8 +488,8 @@ func DefinitionsPath() string {
 	if h := os.Getenv("GAUNTLET_HOME"); filepath.IsAbs(h) {
 		return filepath.Join(h, "agents.json")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := HomeDir()
+	if home == "" {
 		return ""
 	}
 	return filepath.Join(home, ".gauntlet", "agents.json")
