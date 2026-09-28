@@ -43,6 +43,11 @@ var (
 // so a swap made mid-run moves their windows under the goroutines reading
 // them. It does not touch the I/O the sampler does, the way a request
 // deadline stays real time.
+//
+// gpu is forwarded to because Sample calls it inside the same pass: its
+// vendor-CLI memo and outage latch age the same windows as the caches here,
+// and left on the wall clock a frame's GPU strip would not be reproducible
+// for the reason the host strip is not.
 func SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
@@ -50,6 +55,7 @@ func SetNow(fn func() time.Time) {
 	clockMu.Lock()
 	clock = fn
 	clockMu.Unlock()
+	gpu.SetNow(fn)
 }
 
 // instant reads the injected clock, calling it outside the lock. The cache

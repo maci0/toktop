@@ -1538,6 +1538,34 @@ func TestDropFileReleasesReadFailedLatch(t *testing.T) {
 	}
 }
 
+// A frame the zstd reader rejects carries no error of its own, and the audit
+// reads a nil error as "the read committed". Left that way the same broken
+// frame is reread on every poll and the session's usage is silently
+// uncounted, which is indistinguishable from an idle session.
+func TestZstdDecodeFailureLatchesReadFailed(t *testing.T) {
+	store := withStore(t, "dsh")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl.zstd")
+
+	w := Watch("dsh", work, time.Now())
+	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\n"))
+	w.poll(nil)
+	if w.offsets[path] == 0 {
+		t.Fatal("the header frame was not read, so the decode failure below proves nothing")
+	}
+
+	// A well-formed frame whose content checksum no longer matches: the
+	// reader walks the frame, then rejects it.
+	broken := zstdFrame(t, dshUsageChunk(10, 0, 0)+"\n")
+	broken[len(broken)-1] ^= 0xFF
+	appendBytes(t, path, broken)
+	w.poll(nil)
+
+	if !w.readFailed[path] {
+		t.Fatal("a rejected zstd frame cleared the read-failure latch instead of setting it")
+	}
+}
+
 // A shared transcript listing that no watcher has refreshed must leave the
 // process-wide cache. Clanker (and {dir} specs) key it on the project path,
 // so a dashboard that follows agents through many trees would otherwise pin

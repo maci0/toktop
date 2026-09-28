@@ -41,11 +41,11 @@ var amdCards struct {
 func amdCardDirs() []string {
 	amdCards.Lock()
 	defer amdCards.Unlock()
-	if core.Age(time.Now(), amdCards.at) < toolRetry {
+	if core.Age(instant(), amdCards.at) < toolRetry {
 		return amdCards.dirs
 	}
 	amdCards.dirs = findAmdCards(defaultDrmRoot)
-	amdCards.at = time.Now()
+	amdCards.at = instant()
 	return amdCards.dirs
 }
 

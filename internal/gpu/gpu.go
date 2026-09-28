@@ -74,15 +74,46 @@ func toolWindow(ok bool) time.Duration {
 // lookPath is exec.LookPath, swapped in tests.
 var lookPath = exec.LookPath
 
+// clock is the instant every cache in this package ages against: the vendor
+// CLI path memo, the platform lookups, and the tool outage latch. It is a var
+// so SetNow can expose it, matching sysmon and provider. Left on the wall
+// clock, a sampler whose frames are stamped on a seeded timeline would decide
+// its own frame's contents by how long the process happened to run, which is
+// the one thing a replay cannot reproduce.
+var (
+	clockMu sync.RWMutex
+	clock   = time.Now
+)
+
+// SetNow overrides the clock this package's caches age against, restoring the
+// wall clock for nil. Call it before sampling starts, the way
+// sysmon.SetNow asks.
+func SetNow(fn func() time.Time) {
+	if fn == nil {
+		fn = time.Now
+	}
+	clockMu.Lock()
+	clock = fn
+	clockMu.Unlock()
+}
+
+// instant reads the injected clock, calling it outside the lock.
+func instant() time.Time {
+	clockMu.RLock()
+	fn := clock
+	clockMu.RUnlock()
+	return fn()
+}
+
 func lookup(name string) (string, bool) {
 	if v, ok := tools.Load(name); ok {
 		ti := v.(*toolInfo)
-		if core.Age(time.Now(), ti.at) < toolWindow(ti.ok) {
+		if core.Age(instant(), ti.at) < toolWindow(ti.ok) {
 			return ti.path, ti.ok
 		}
 	}
 	p, err := lookPath(name)
-	ti := &toolInfo{path: p, ok: err == nil, at: time.Now()}
+	ti := &toolInfo{path: p, ok: err == nil, at: instant()}
 	tools.Store(name, ti)
 	return ti.path, ti.ok
 }
@@ -148,7 +179,7 @@ func noteRunFailure(path string, err error) {
 	t.mu.Lock()
 	first := !t.failed
 	if first {
-		t.failed, t.since = true, time.Now()
+		t.failed, t.since = true, instant()
 	}
 	t.mu.Unlock()
 	if !first {
@@ -173,7 +204,7 @@ func noteRunOK(path string) {
 		return
 	}
 	t.failed = false
-	downFor := time.Since(t.since)
+	downFor := instant().Sub(t.since)
 	t.mu.Unlock()
 	audit().Info("toktop: gpu vendor tool answering again",
 		"tool", logcfg.Field(path, 256),

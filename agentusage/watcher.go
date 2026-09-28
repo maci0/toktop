@@ -421,9 +421,11 @@ func openUnder(root, path string) (*os.File, error) {
 
 var errOutsideRoot = errors.New("path is outside the transcript root")
 
-// errBaselineUnread names the one seedBaseline failure that carries no
-// error of its own: a decode the reader rejected without surfacing a cause.
-var errBaselineUnread = errors.New("transcript body could not be decoded")
+// errTranscriptUnread names the one read failure that carries no error of
+// its own: a decode the reader rejected without surfacing a cause. Both
+// readNew and seedBaseline need it, so a path that never advances is latched
+// and logged under the same name.
+var errTranscriptUnread = errors.New("transcript body could not be decoded")
 
 // auditRead records a transcript that would not open or read, so an agent
 // whose store is unreadable is distinguishable from one that is idle. The
@@ -487,7 +489,7 @@ func (w *Watcher) seedBaseline(path string) {
 	if w.ad.snapshot {
 		v, ok := w.snapshotValue(f)
 		if !ok {
-			auditBaseline(path, errBaselineUnread)
+			auditBaseline(path, errTranscriptUnread)
 			return
 		}
 		w.base[path] = v.output
@@ -522,7 +524,7 @@ func (w *Watcher) seedBaseline(path string) {
 		if rerr != nil {
 			auditBaseline(path, rerr)
 		} else {
-			auditBaseline(path, errBaselineUnread)
+			auditBaseline(path, errTranscriptUnread)
 		}
 		return
 	}
