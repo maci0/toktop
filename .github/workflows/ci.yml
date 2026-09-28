@@ -33,7 +33,13 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-15, windows-2022]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 20
+    # Raised from 20 for the Linux address-sanitizer step. -asan is a
+    # different build of every package, so it shares none of the race run's
+    # build cache: the SQLite driver alone recompiles from scratch, and a
+    # timeout here kills a job that would have passed. The extra 10 minutes is
+    # only spent on ubuntu; the macOS and Windows legs run the same steps as
+    # before.
+    timeout-minutes: 30
     # bash on Windows too: pwsh does not fail the step when a native command
     # in a multi-line script returns non-zero, so the last staticcheck/vet
     # could hide an earlier failure.
@@ -121,6 +127,18 @@ jobs:
         env:
           CGO_ENABLED: "1"
         run: go test -mod=readonly -tags "sqlite timetzdata" -race -shuffle=on ./agentusage/...
+      # The address sanitizer, the same second run of `make test-asan`. It
+      # cannot share a command line with -race, so it is a step of its own
+      # rather than a flag on the two above, and it wants cgo for the
+      # runtime's shadow memory for the same reason. Linux only: the two
+      # release artifacts every other runner compiles are the same bytes from
+      # the same source, and an out-of-bounds access in a decoder does not
+      # depend on the host it runs on.
+      - name: test (address sanitizer)
+        if: runner.os == 'Linux'
+        env:
+          CGO_ENABLED: "1"
+        run: make test-asan
 
   # The site worker and the screenshot script ship in this repo, so they gate
   # here too: their tests and checks ran nowhere before.

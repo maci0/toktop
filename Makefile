@@ -100,6 +100,29 @@ export CGO_ENABLED := 0
 # the artifact (GOFLAGS=-race on make build, extra experiments on codegen).
 export GOFLAGS :=
 export GOEXPERIMENT :=
+# Drop ambient GODEBUG for the same reason GOEXPERIMENT is dropped: it is a
+# build input the compiler reads (gotypesalias=1 changes type identity), so a
+# developer debugging with GODEBUG=httplaxcontentlength=1 would get a binary
+# the merge gate never saw. GOEXPERIMENT's defaults come from go.mod's go
+# line, so an empty GODEBUG keeps those and loses nothing.
+export GODEBUG :=
+# Ignore the go command's own persistent config file (~/.config/go/env, or
+# whatever `go env -w` wrote). It is the one ambient state that can still
+# change these bytes: `go env -w GOAMD64=v3` or `GOEXPERIMENT=loopvar` beats
+# nothing here, it is read before the exports above reach the go command, and
+# a value set there wins over the env. Everything the build needs is stated
+# in this file or in go.mod, so the config file is only ever drift. CI has
+# none, which is why the gap only shows on a developer machine and only after
+# someone has run `go env -w`.
+export GOENV := off
+# Same ambient-state hole, from the environment: any of these makes the go
+# command skip the checksum database and accept a module the go.sum lines do
+# not cover, so a tampered or repackaged module builds here and nowhere else.
+# -mod=readonly governs which versions resolve, not whether their bytes were
+# checked.
+export GOPRIVATE :=
+export GONOSUMDB :=
+export GOINSECURE :=
 # Strip paths, omit git stamps (checkout vs tarball would disagree), honor
 # go.sum, produce a PIE.
 GO_BUILDFLAGS := -trimpath -buildvcs=false -mod=readonly -buildmode=pie
@@ -386,8 +409,11 @@ run: build ## build, then run against local engines
 demo: build ## build, then run the simulated fleet
 	./$(BINARY) --demo
 
-# -race links runtime/cgo. Honor CC when set; otherwise gcc, then clang
-# (Go's search order). make build keeps CGO off; only race tests need this.
+# -race and -asan both link runtime/cgo. Honor CC when set; otherwise gcc,
+# then clang (Go's search order). make build keeps CGO off; only the test
+# builds turn it on. Called, not expanded: $1 names the command that needs the
+# compiler and $2 the way to run without it, so `make test-asan` is not told to
+# pass RACE=0, which is a flag to `make test` and does nothing here.
 NEED_CC = cc="$${CC:-}"; \
 	if [ -z "$$cc" ]; then \
 		if command -v gcc >/dev/null 2>&1; then cc=gcc; \
@@ -395,17 +421,51 @@ NEED_CC = cc="$${CC:-}"; \
 		fi; \
 	fi; \
 	if [ -z "$$cc" ] || ! command -v "$$cc" >/dev/null 2>&1; then \
-		echo "make: go test -race needs a C compiler (gcc or clang) on PATH" >&2; \
-		echo "  CGO stays off for make build; only the race tests need it." >&2; \
-		echo "  Pass RACE=0 to skip race detection: make test RACE=0" >&2; \
+		echo "make: $(1) needs a C compiler (gcc or clang) on PATH" >&2; \
+		echo "  CGO stays off for make build; only the test builds turn it on." >&2; \
+		[ -z "$(2)" ] || echo "  $(2)" >&2; \
 		exit 1; \
 	fi
+RACE_CC_HINT := Pass RACE=0 to skip race detection: make test RACE=0
 
 .PHONY: test
 test: ## run all tests shuffled (both sqlite tag halves); RACE=0 skips -race
-	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
+	@if [ "$(RACE)" != "0" ]; then $(call NEED_CC,go test -race,$(RACE_CC_HINT)); fi
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS_BARE) $(race_flag)-shuffle=on ./...
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS) $(race_flag)-shuffle=on ./agentusage/...
+
+# The address sanitizer, over both halves of the sqlite tag gate. The race
+# detector and -asan are mutually exclusive, so this is a target and not a
+# flag on `test`: the go command refuses `-race -asan` together, and a rule
+# that only ran under RACE=0 would leave the default loop unsanitized.
+#
+# What it buys over the race detector: -race finds a data race on memory the
+# program already dereferences correctly, and says nothing about the read or
+# write that was never in bounds to begin with. toktop parses JSONL and
+# SQLite session rows written by other tools, so an out-of-range slice or a
+# bad cast in a decoder is the shape of bug this catches and the race
+# detector cannot. The instrumentation is in the test binary only, so the
+# released artifact is untouched: `test-dist` never passes -asan.
+#
+# It costs a C compiler (it needs cgo for the runtime's shadow memory) and
+# roughly double the run time of the plain loop, which is why it is its own
+# target and not part of the edit-test cycle. ci.yml runs it as its own step
+# and `make ci` runs it, so the local gate and the merge gate are the same
+# list.
+#
+# ASAN_SKIP is the one test that cannot run here, skipped by name and not by
+# package: TestStaticFrameAllocBudget asserts an exact per-frame allocation
+# count, and -asan swaps Go's allocator for the runtime's own, so the number
+# the assertion reads is the sanitizer's, not the frame path's. The budget is
+# a performance ratchet, and the plain loop above still asserts it on the
+# uninstrumented allocator, where the count means what it says. Everything
+# else runs, so an out-of-bounds access anywhere in the tree still fails here.
+ASAN_SKIP := TestStaticFrameAllocBudget
+.PHONY: test-asan
+test-asan: ## run all tests under the address sanitizer (needs cgo; not combinable with -race)
+	@$(call NEED_CC,go test -asan,)
+	CGO_ENABLED=1 $(GO) test -mod=readonly $(GOTAGS_BARE) -asan -shuffle=on -skip '$(ASAN_SKIP)' ./...
+	CGO_ENABLED=1 $(GO) test -mod=readonly $(GOTAGS) -asan -shuffle=on -skip '$(ASAN_SKIP)' ./agentusage/...
 
 # Same flags and toolchain as `make test`. PKG is required; RUN (or TEST) and
 # TESTTAGS are optional. Unset TESTTAGS on ./agentusage runs both halves of the
@@ -424,7 +484,7 @@ test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite
 		echo "  optional: RUN=TestName (or TEST=TestName)  TESTTAGS=sqlite  RACE=0" >&2; \
 		exit 1; \
 	fi
-	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
+	@if [ "$(RACE)" != "0" ]; then $(call NEED_CC,go test -race,$(RACE_CC_HINT)); fi
 	@if [ -n "$(RUN_TO_CHECK)" ]; then $(CHECK_RUN_MATCHES); fi
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags "$(strip $(TESTTAGS) $(ZONE_TAG))" $(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)"
 	@if [ -n "$(BOTH_HALVES)" ]; then \
@@ -472,7 +532,7 @@ endef
 
 .PHONY: cover
 cover: ## test coverage summary per package into dist/
-	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
+	@if [ "$(RACE)" != "0" ]; then $(call NEED_CC,go test -race,$(RACE_CC_HINT)); fi
 	mkdir -p $(DIST)
 	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS) $(race_flag)-shuffle=on -coverprofile=$(DIST)/coverage.out ./...
 	$(GO) tool cover -func=$(DIST)/coverage.out | tail -1
@@ -975,10 +1035,11 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the workflow YAM
 	@$(MAKE) vet
 
 .PHONY: ci
-ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests
+ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests
 	@$(MAKE) check
 	@$(MAKE) govulncheck
 	@$(MAKE) test RACE=1
+	@$(MAKE) test-asan
 
 .PHONY: pr
 pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + check-wrangler-doc + scripts-check + repro-check-pair

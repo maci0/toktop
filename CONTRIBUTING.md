@@ -25,6 +25,16 @@
   build when the host does not have it; nothing reads whatever `python3` the
   machine happens to offer. `target-version` in `pyproject.toml` is the
   floor the code must keep supporting, not the interpreter it runs on.
+- No go command state to keep. `make` exports `GOENV=off` and clears
+  `GOFLAGS`, `GOEXPERIMENT`, `GODEBUG`, `GOPRIVATE`, `GONOSUMDB` and
+  `GOINSECURE`, so the go command reads neither the environment it inherits
+  nor `~/.config/go/env`, whatever `go env -w` last wrote there. A value in
+  that file is read before the Makefile's exports reach the go command and
+  wins over them, so a machine carrying `go env -w GOAMD64=v3` would build a
+  different binary from every other machine, and one carrying
+  `GOPRIVATE=github.com/*` would skip the checksum database on modules the
+  go.sum lines cover. Everything the build needs is in the Makefile,
+  `go.mod` and `GOWORK=off`.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
 - Only to regenerate the README screenshot (below), and never for the
@@ -185,10 +195,11 @@ in day-to-day work:
 | `make prereqs` | check go, a C compiler, bun and uv against the pins, naming every gap at once |
 | `make demo` / `make run` | build, then launch |
 | `make test` | all tests, `-race -shuffle=on` (same flags as CI); `RACE=0` skips `-race` |
+| `make test-asan` | all tests again under `-asan` (both sqlite tag halves); the go command refuses `-race -asan` together, so this is a second run and not a flag on `make test`. It skips `TestStaticFrameAllocBudget` by name, because an instrumented allocator makes an exact allocation count meaningless; `make test` still asserts that budget. Linux CI and `make ci` run it; it needs a C compiler and does not enter the edit-test loop |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
 | `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-platforms`, `check-yaml`, `check-help-docs`) |
-| `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
+| `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
 | `make fix` | apply `go fix` modernization autofixes, then gofmt |
