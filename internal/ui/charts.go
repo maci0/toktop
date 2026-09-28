@@ -21,13 +21,17 @@ func (m Model) renderCharts() string {
 	outH, _, _ := m.sectionHeights()
 	agg, grid := m.outSeries(w, cad)
 	out := panel(
-		m.throughputTitle(),
+		m.throughputTitle(w, seriesPeak(agg)),
 		BrailleChart(agg, w, outH, ChartStyle{Heat: heatColor, Grid: grid}),
 		w, outH,
 	)
+	inVals := aggHist(m.snap, false, w, cad)
 	in := panel(
-		"PROMPT "+styleInfo.Render("▼ "+fmtRate(m.aggIn())+" tok/s"),
-		BrailleChart(aggHist(m.snap, false, w, cad), w, 1,
+		// Same text alternative as THROUGHPUT: the prompt plot is one braille
+		// row, so the current rate in the title is the only number on the frame
+		// and the peak is what says how high the window got.
+		promptTitle(w, seriesPeak(inVals), m.aggIn()),
+		BrailleChart(inVals, w, 1,
 			ChartStyle{Heat: func(float64) lipgloss.Color { return cCyan }}),
 		w, 1,
 	)
@@ -52,7 +56,19 @@ func (m Model) outSeries(w int, cadence time.Duration) ([]float64, map[int]bool)
 	return vals, bounds
 }
 
-func (m Model) throughputTitle() string {
+// throughputTitle is the chart heading: the current rate, the peak the plot is
+// scaled against, the timescale mode and the key that changes it.
+//
+// The peak is the plot's text alternative (WCAG 1.1.1). Braille marks are one
+// wall of dot patterns: a screen reader announces them as pattern glyphs or
+// skips them, and a monochrome terminal loses the height encoding entirely, so
+// the shape of the curve survives only as a number. The current rate says where
+// the plot is now; the peak says how tall the window has got, which is the one
+// measurement that gives the rest of the curve meaning.
+//
+// A panel title is not clipped by panel(), and an over-wide one stretches every
+// row below it past the pane, so the peak joins only while it fits.
+func (m Model) throughputTitle(w int, peak float64) string {
 	kind := dim("  decode")
 	if len(m.snap.Providers) == 0 {
 		kind = dim("  output")
@@ -66,7 +82,26 @@ func (m Model) throughputTitle() string {
 	if !m.chartCompressed {
 		mode = dim(" · uniform ")
 	}
-	return title + mode + styleInfo.Render("[t]")
+	tail := mode + styleInfo.Render("[t]")
+	if peak > 0 {
+		p := dim(" · peak ▲") + styleValue.Render(fmtRate(peak)) + dim(" tok/s")
+		if lipgloss.Width(title)+lipgloss.Width(p)+lipgloss.Width(tail) <= w {
+			title += p
+		}
+	}
+	return title + tail
+}
+
+// promptTitle is the PROMPT heading: the current input rate, plus the window
+// peak when there is room for it. Same rule as throughputTitle.
+func promptTitle(w int, peak, now float64) string {
+	title := "PROMPT " + styleInfo.Render("▼ "+fmtRate(now)+" tok/s")
+	if peak > 0 {
+		if p := dim(" · peak ▼") + styleValue.Render(fmtRate(peak)) + dim(" tok/s"); lipgloss.Width(title)+lipgloss.Width(p) <= w {
+			title += p
+		}
+	}
+	return title
 }
 
 // timedVal is one sample with its absolute timestamp, its rate, and the
@@ -248,8 +283,16 @@ func spanCap(w int) int {
 
 // chartCadence is the sampling interval charts are drawn at.
 func (m Model) chartCadence() time.Duration {
-	if m.cfg.PollEvery > 0 {
-		return m.cfg.PollEvery
+	return cadenceOf(m.cfg.PollEvery)
+}
+
+// cadenceOf is the sampling interval every rate in the frame is drawn at: the
+// configured poll cadence, or a second when the run set none. Shared with the
+// plain report, which states the window its peaks were measured over and would
+// otherwise name a span the charts do not use.
+func cadenceOf(poll time.Duration) time.Duration {
+	if poll > 0 {
+		return poll
 	}
 	return time.Second
 }

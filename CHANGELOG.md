@@ -15,6 +15,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- The THROUGHPUT and PROMPT panel titles name the peak their braille plot is
+  scaled against, and `--once --plain` prints a `THROUGHPUT` section with
+  both peaks and the window they were measured over. The plots were the one
+  thing on the frame that carried a measurement no screen reader could read,
+  and the only account of the curve's shape was the drawing itself.
+
+- The key reference scrolls with the arrow keys, page keys or ctrl+n/ctrl+p
+  on a pane too short for the whole list, and says how many rows are off
+  screen. The rows it could not show were the flags at the bottom, and no key
+  reached them.
+
+### Fixed
+
+- An agent the snapshot cannot date shows `time unknown` in the agents table
+  and the plain report instead of a blank cell. A blank read as a missing
+  value, which is not what "no instant to measure against" means.
+
 - `agentusage.Definitions` and `agentusage.Definition` model the agent
   definitions file (`agents.json`) as Go values, so a program that writes or
   edits one marshals the same shape `LoadDefinitions` reads instead of

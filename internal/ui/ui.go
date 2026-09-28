@@ -43,13 +43,17 @@ type Config struct {
 // viewport size and the transient state a frame cannot be rebuilt from
 // (pause, help, which panel estate is in focus, a pending notice).
 type Model struct {
-	cfg         Config
-	ch          <-chan core.Snapshot
-	snap        core.Snapshot
-	w, h        int
-	ready       bool
-	paused      bool
-	help        bool
+	cfg    Config
+	ch     <-chan core.Snapshot
+	snap   core.Snapshot
+	w, h   int
+	ready  bool
+	paused bool
+	help   bool
+	// helpScroll is the first key row the help box shows. A pane too short for
+	// the whole reference scrolls it: the rows it cannot show are the flags at
+	// the bottom, and clipping them left no key that could reach them.
+	helpScroll  int
 	focusAgents bool // agents get the panel estate; engines keep header, charts, strip
 	clock       time.Time
 	// tickAt is the newest wall time bubbletea delivered, which keeps
@@ -242,12 +246,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		key := msg.String()
 		// Help is a full-screen replacement view: action keys must not act
 		// blind on the dashboard it covers (space silently paused mid-read,
-		// p fired real probe generations). Only the dismiss and toggle keys
-		// stay live while help is up.
+		// p fired real probe generations). Only the dismiss, toggle and scroll
+		// keys stay live while help is up.
 		if m.help {
 			switch key {
 			case "q", "Q", "ctrl+c", "esc", "?", "h", "H", "enter":
 				m.help = false
+				m.helpScroll = 0
+				return m, nil
+			case "up", "ctrl+p", "pgup":
+				m.helpScroll = max(m.helpScroll-1, 0)
+				return m, nil
+			case "down", "ctrl+n", "pgdown":
+				m.helpScroll = min(m.helpScroll+1, m.helpScrollMax())
 				return m, nil
 			default:
 				return m, nil
@@ -324,6 +335,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "?", "h", "H":
 			m.help = !m.help
+			// Reopening starts at the top: a reader who scrolled to the flags
+			// and came back wants the list from its first row.
+			m.helpScroll = 0
 			return m, nil
 		}
 	}

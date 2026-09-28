@@ -69,6 +69,10 @@ func keyMsg(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeySpace}
 	case "esc":
 		return tea.KeyMsg{Type: tea.KeyEscape}
+	case "up":
+		return tea.KeyMsg{Type: tea.KeyUp}
+	case "down":
+		return tea.KeyMsg{Type: tea.KeyDown}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -933,11 +937,11 @@ func TestSystemStripCountsFilteredTempsInMore(t *testing.T) {
 // current one plus a clearly delimited key, not a run-together "←t".
 func TestThroughputTitleAdvertisesTimescaleToggle(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
-	if got := strip(m.throughputTitle()); !strings.Contains(got, "compressed") || !strings.Contains(got, "[t]") {
+	if got := strip(m.throughputTitle(80, 0)); !strings.Contains(got, "compressed") || !strings.Contains(got, "[t]") {
 		t.Errorf("compressed title = %q, want mode word plus [t] switch", got)
 	}
 	m.chartCompressed = false
-	if got := strip(m.throughputTitle()); !strings.Contains(got, "uniform") || !strings.Contains(got, "[t]") {
+	if got := strip(m.throughputTitle(80, 0)); !strings.Contains(got, "uniform") || !strings.Contains(got, "[t]") {
 		t.Errorf("uniform title = %q, want mode word plus [t] switch", got)
 	}
 }
@@ -2690,5 +2694,117 @@ func TestMinimalHintFitsThePane(t *testing.T) {
 		if !strings.Contains(hint, "62×30") {
 			t.Errorf("hint in a %d-cell pane lost the minimum: %q", w, hint)
 		}
+	}
+}
+
+// The braille plots are the one thing on the frame that no assistive
+// technology can read, so the one number that gives the curve its shape is
+// spelled out in the title. A title is not clipped by panel(), so a peak that
+// does not fit is dropped whole rather than stretched across the pane.
+func TestThroughputTitleNamesChartPeak(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.aggLast = 12
+	if got := strip(m.throughputTitle(120, 45)); !strings.Contains(got, "peak ▲45.0 tok/s") {
+		t.Errorf("title = %q, want the chart's peak as text", got)
+	}
+	if got := strip(m.throughputTitle(120, 0)); strings.Contains(got, "peak") {
+		t.Errorf("title = %q, want no peak for a window that never rose", got)
+	}
+	// A pane too narrow for the base title plus the peak gets the base alone:
+	// panel() does not clip a title, so an over-wide one stretches every row
+	// below it past the pane.
+	if got := strip(m.throughputTitle(60, 45000)); strings.Contains(got, "peak") {
+		t.Errorf("title = %q, want the peak dropped rather than the pane stretched", got)
+	}
+}
+
+// The same alternative in the linear report: peaks and the window they were
+// measured over, since the rates on the status line only say "now".
+func TestPlainFrameNamesChartPeak(t *testing.T) {
+	now := time.Now()
+	s := core.Snapshot{
+		At: now,
+		Providers: []core.ProviderSnapshot{{
+			Label: "vllm", Kind: "vllm", OK: true,
+			OutTokPS: 20, InTokPS: 5,
+			// One sample per cadence bucket, so the peak is the tallest column
+			// rather than every sample landing on the same one.
+			OutHist:   []float64{10, 20, 30},
+			OutStamps: []time.Time{now.Add(-2 * time.Second), now.Add(-time.Second), now},
+			InHist:    []float64{1, 2, 3},
+			InStamps:  []time.Time{now.Add(-2 * time.Second), now.Add(-time.Second), now},
+		}},
+	}
+	out := PlainTextFrame(Config{Version: "t"}, s)
+	if !strings.Contains(out, "THROUGHPUT") || !strings.Contains(out, "30.0 tok/s out") ||
+		!strings.Contains(out, "3.0 tok/s in") {
+		t.Errorf("plain frame missing the chart peaks:\n%s", out)
+	}
+	if strings.Contains(PlainTextFrame(Config{Version: "t"}, core.Snapshot{At: now}),
+		"THROUGHPUT") {
+		t.Error("plain frame printed a peak section for a frame with no rate at all")
+	}
+}
+
+// A pane too short for the whole key reference used to clip the tail, which
+// held every flag, with no key that could reach them. It scrolls instead, and
+// says which way there is more.
+func TestHelpScrollsToTheLastRow(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.help, m.w, m.h, m.ready = true, 40, 8, true
+	rows := m.helpRows()
+	if len(rows) <= m.helpWindow() {
+		t.Fatalf("test needs a list taller than the window: %d rows, window %d",
+			len(rows), m.helpWindow())
+	}
+	first := strip(m.View())
+	if !strings.Contains(first, "more") {
+		t.Errorf("truncated help says nothing about the rows it hides:\n%s", first)
+	}
+	for pressKey(&m, "down"); m.helpScroll < m.helpScrollMax(); {
+		pressKey(&m, "down")
+	}
+	last := rows[len(rows)-1]
+	if out := strip(m.View()); !strings.Contains(out, last[0]) || !strings.Contains(out, last[1]) {
+		t.Errorf("scrolled to the end and %q is still off screen:\n%s", last[0], out)
+	}
+	assertFitsPane(t, "scrolled help", m.View(), 40, 8)
+	// A pane that fits the list never grows a scroll affordance.
+	m.helpScroll = 0
+	m.w, m.h = 80, 40
+	if out := strip(m.View()); strings.Contains(out, "more") {
+		t.Errorf("help in a full-size pane advertises scrolling:\n%s", out)
+	}
+}
+
+// Up and down are muted with every other action key, so the one that scrolls
+// has to be back inside the box when it is reopened.
+func TestHelpScrollResetsOnReopen(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready = 40, 8, true
+	pressKey(&m, "?")
+	for pressKey(&m, "down"); m.helpScroll > 0; pressKey(&m, "up") {
+		pressKey(&m, "up")
+	}
+	pressKey(&m, "down")
+	pressKey(&m, "esc")
+	pressKey(&m, "?")
+	if m.helpScroll != 0 {
+		t.Errorf("reopened help at row %d, want the top of the list", m.helpScroll)
+	}
+}
+
+// "Not recent" and "no timeline to judge against" are different claims, so an
+// undated agent must not leave a blank cell a reader takes for the first.
+func TestAgentRowNamesUnknownRecency(t *testing.T) {
+	rows := agentRows([]core.AgentRate{{Agent: "claude", Tokens: 10}}, time.Now())
+	if !strings.Contains(strip(rows[0]), "time unknown") {
+		t.Errorf("agent row = %q, want the undated third state spelled out", strip(rows[0]))
+	}
+	out := PlainTextFrame(Config{Version: "t", Agents: true}, core.Snapshot{
+		Agents: []core.AgentEvent{{Agent: "claude", OutputTokens: 5}},
+	})
+	if !strings.Contains(out, "time unknown") {
+		t.Errorf("plain report drops the undated recency:\n%s", out)
 	}
 }

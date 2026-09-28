@@ -537,6 +537,9 @@ technology:
 
   5/5 engines up · out 1.5k tok/s · in 10k tok/s · 2 agents · session 24s
 
+  THROUGHPUT
+  peak 1.9k tok/s out, 10k tok/s in, over the last 3m0s
+
   ENGINES
   up   vllm-a100 (vllm)
          Qwen/Qwen2.5-32B-Instruct-AWQ
@@ -554,6 +557,11 @@ technology:
   03:29:23 note ops-agent model Qwen/Qwen2.5-32B-Instruct-AWQ prompt 9.2k output 783 note browser(search docs)
   ```
 
+- **The chart is named, not just drawn** - the braille plots are the one
+  thing on the frame no assistive technology reads, so each panel title
+  carries the peak its plot is scaled against, and `--once --plain` states
+  both peaks and the window they were measured over. A key reference taller
+  than the pane scrolls with the arrow keys instead of clipping its tail.
 - **Tested contrast** - unit tests hold the palette to WCAG 2.2 AA: text
   colors at >= 4.5:1 on the background, and chart marks at >= 3:1 even at
   the deepest point of the age fade (`internal/ui/theme_test.go`).

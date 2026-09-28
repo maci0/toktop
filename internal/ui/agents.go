@@ -148,6 +148,12 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 			since = styleOK.Render("● live")
 		case recencyIdle:
 			since = dim("idle " + fmtDur(d))
+		default:
+			// The empty cell a snapshot with no usable instant used to leave
+			// reads as a missing value, and it is a third state: agentIdle
+			// separates "not recent" from "no timeline to judge against", so
+			// the row has to as well.
+			since = dim("time unknown")
 		}
 		rateCells[i], tokCells[i], sinceCells[i] = rate, tok, since
 		nameW = max(nameW, lipgloss.Width(names[i]))

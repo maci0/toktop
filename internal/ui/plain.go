@@ -92,11 +92,35 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	}
 	b.WriteString("\n")
 
+	writeThroughputPlain(&b, s, cfg)
 	writeEnginesPlain(&b, s)
 	writeSystemPlain(&b, s.Sys)
 	writeProbesPlain(&b, s)
 	writeFeedPlain(&b, s, cfg, rates)
 	return b.String()
+}
+
+// writeThroughputPlain is the text alternative for the dashboard's two braille
+// charts: the status line above already carries the current output and input
+// rates, and this names the peaks those plots are scaled against and the window
+// they span (WCAG 1.1.1). The chart body is braille dot patterns, which a screen
+// reader announces as pattern glyphs and a monochrome terminal cannot read as
+// height at all, so without these two lines the throughput history has no
+// account of itself anywhere in the product.
+//
+// A run with no rate anywhere prints nothing: a peak of 0 on an empty window
+// is a measurement of nothing.
+func writeThroughputPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
+	cad := cadenceOf(cfg.PollEvery)
+	outPeak := seriesPeak(aggHist(s, true, core.HistoryLen, cad))
+	inPeak := seriesPeak(aggHist(s, false, core.HistoryLen, cad))
+	if outPeak <= 0 && inPeak <= 0 {
+		return
+	}
+	window := fmtDur(time.Duration(core.HistoryLen-1) * cad)
+	b.WriteString("\nTHROUGHPUT\n")
+	fmt.Fprintf(b, "peak %s tok/s out, %s tok/s in, over the last %s\n",
+		fmtRate(outPeak), fmtRate(inPeak), window)
 }
 
 // writeEnginesPlain lists every backend as its own block of lines, healthy or
@@ -314,6 +338,7 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	outPS, inPS := sumOwn(sum.Own)
 	b.WriteString("no inference engines detected; --add URL attaches one\n")
 	fmt.Fprintf(b, "out %s tok/s · in %s tok/s\n", fmtRate(outPS), fmtRate(inPS))
+	writeThroughputPlain(b, s, cfg)
 	writeSystemPlain(b, s.Sys)
 	b.WriteString("\nAGENTS\n")
 	rates := sum.Rates
@@ -326,6 +351,8 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 			recency = "live"
 		case recencyIdle:
 			recency = "idle " + fmtDur(d)
+		default:
+			recency = "time unknown"
 		}
 		// The engine is named once, where the rate it replaces would go, so
 		// the recency word keeps its own job. This mirrors the AGENT FEED
@@ -346,12 +373,7 @@ func writeAgentsPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 		if r.Thinking > 0 {
 			line += " thinking " + fmtCount(r.Thinking)
 		}
-		// Only when there is a recency to name: an event the snapshot
-		// cannot date yields "", and the report is a fixed-column text
-		// format, so an unconditional space left a trailing one.
-		if recency != "" {
-			line += " " + recency
-		}
+		line += " " + recency
 		b.WriteString(line + "\n")
 		rows++
 	}

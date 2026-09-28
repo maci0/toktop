@@ -16,12 +16,7 @@ func tailCols(vals []float64, w int) ([]float64, float64) {
 	if len(vs) > w {
 		vs = vs[len(vs)-w:]
 	}
-	vMax := 0.0
-	for _, v := range vs {
-		if !math.IsNaN(v) && v > vMax {
-			vMax = v
-		}
-	}
+	vMax := seriesPeak(vs)
 	if vMax <= 0 {
 		vMax = 1
 	}
@@ -29,6 +24,21 @@ func tailCols(vals []float64, w int) ([]float64, float64) {
 	cols := make([]float64, pad+len(vs))
 	copy(cols[pad:], vs)
 	return cols, vMax
+}
+
+// seriesPeak is the largest value in vals, NaN skipped, and 0 for an empty
+// series. It is the vertical scale a chart is drawn against, and the callers
+// that publish it (throughputTitle, the plain report) are what give the braille
+// plot a text alternative: the marks themselves carry no value a screen reader
+// or a monochrome terminal can read.
+func seriesPeak(vals []float64) float64 {
+	peak := 0.0
+	for _, v := range vals {
+		if !math.IsNaN(v) && v > peak {
+			peak = v
+		}
+	}
+	return peak
 }
 
 // brailleRowMask is the pair of dots a filled sub-row sets, both columns at

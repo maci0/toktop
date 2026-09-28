@@ -137,6 +137,33 @@ func (m Model) renderEmpty() string {
 	return composeFrame(body, m.renderFooter(), m.w, m.h)
 }
 
+// helpChromeRows is what the key box spends around its rows: the border and
+// the padding above and below, plus the KEYS title and the mute line. The
+// remainder is the key list itself.
+const helpChromeRows = 6
+
+// helpContentRows is how many key rows the box has left after its chrome.
+func (m Model) helpContentRows() int {
+	return max(m.h-helpChromeRows, 1)
+}
+
+// helpWindow is how many key rows the box shows at once. A list taller than
+// the box gives up one row to the indicator naming what is off-screen, so the
+// row that indicator replaces is a row the reader can still scroll to.
+func (m Model) helpWindow() int {
+	n := m.helpContentRows()
+	if len(m.helpRows()) > n {
+		n--
+	}
+	return max(n, 1)
+}
+
+// helpScrollMax is the furthest the list can be scrolled: the rows that do not
+// fit below the first window.
+func (m Model) helpScrollMax() int {
+	return max(len(m.helpRows())-m.helpWindow(), 0)
+}
+
 func (m Model) renderHelp() string {
 	var b strings.Builder
 	// The overlay replaces the whole screen, so it carries the same bold
@@ -145,19 +172,45 @@ func (m Model) renderHelp() string {
 	// This view mutes every action key (Update), so the reference has to say
 	// so: pressing space here and watching nothing happen is the difference
 	// between "read the list first" and "this thing is broken".
+	// The scroll affordance is the indicator row below, not a note on this
+	// line: "↓ 3 more" names the key that reaches the rows a short pane cannot
+	// show, and it stays inside the box on a pane this narrow. A hint spelled
+	// out here was the longest line in it, and clipped the box.
 	b.WriteString(dim("action keys are muted here") + "\n")
-	for _, r := range m.helpRows() {
+	// A pane too short for the whole list is scrolled, not clipped: dropping
+	// the tail from the bottom left the flag list unreachable with no key that
+	// could reach it (WCAG 2.1.1).
+	rows := m.helpRows()
+	first := min(m.helpScroll, m.helpScrollMax())
+	shown := rows[first:min(first+m.helpWindow(), len(rows))]
+	for _, r := range shown {
 		key := styleInfo.Render(padTo(r[0], 12))
 		b.WriteString(key + dim(r[1]) + "\n")
 	}
+	if above, below := first, len(rows)-first-len(shown); above > 0 || below > 0 {
+		b.WriteString(styleInfo.Render(helpScrollLabel(above, below)) + "\n")
+	}
 	box := helpStyle.Render(strings.TrimSuffix(b.String(), "\n"))
-	// A pane that advertises "?" may be smaller than this box. Centering a
-	// too-tall box pads the top and overflows the bottom; clip in place.
+	// A pane that advertises "?" may be narrower than this box. Centering a
+	// too-wide or too-tall box overflows an edge; clip in place.
 	if lipgloss.Width(box) > m.w || lipgloss.Height(box) > m.h {
 		return clipBlock(box, m.w, m.h)
 	}
 	placed := lipgloss.Place(m.w, m.h, lipgloss.Center, lipgloss.Center, box)
 	return clipBlock(placed, m.w, m.h)
+}
+
+// helpScrollLabel says what up and down will reach, so the reader knows the
+// list continues rather than guessing from a row that stops mid-list.
+func helpScrollLabel(above, below int) string {
+	switch {
+	case above > 0 && below > 0:
+		return fmt.Sprintf("↑ %d above · ↓ %d more", above, below)
+	case above > 0:
+		return fmt.Sprintf("↑ %d above", above)
+	default:
+		return fmt.Sprintf("↓ %d more", below)
+	}
 }
 
 // helpRows is the in-app key reference. It lists the same keys the footer
