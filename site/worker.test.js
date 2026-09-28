@@ -25,6 +25,17 @@ const DUR_SUFFIX_RE = /dur=\d+(?:\.\d+)?$/;
 const IMG_TAG_RE = /<img\b[^>]*>/g;
 const IMG_SIZE_RE = /width="(\d+)" height="(\d+)"/;
 const INLINED_ICON_RE = /rel="icon" href="data:image\/svg\+xml,([^"]+)"/;
+// The h1 is the terminal's own bold title; the brand above it is bold too.
+const H1_RULE_RE = /h1 \{ font-size: var\(--fs-h1\); font-weight: 700;/;
+const BRAND_RULE_RE = /\.brand \{ font-weight: 700;/;
+const FONT_WEIGHT_RE = /font-weight:\s*(\d+)/g;
+const H1_RULE_END = "font-weight: 700; margin: 0; }";
+const SPACE_STEP_RE = /--space-(?:tight|section|runout):\s*([\d.]+rem);/g;
+const SECTION_GAP_RE = /h2 \{[^}]*margin: var\(--space-section\) 0 \.7rem;/;
+const TIGHT_GAP_RE = /\.shot \+ h2, h2 \+ pre \+ h2 \{ margin-top: var\(--space-tight\); \}/;
+const RUNOUT_GAP_RE = /footer \{ margin-top: var\(--space-runout\);/;
+// A section gap written as a literal instead of one of the three steps above.
+const LITERAL_GAP_RE = /margin(?:-top)?: [^;]*\b(?:1\.5|2\.8)rem\b/;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -251,7 +262,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4328);
+    expect(bytes.byteLength).toBe(4367);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -642,6 +653,30 @@ test("every step of the type scale is in the same unit", () => {
   expect([...new Set(steps.map(([, , , unit]) => unit))]).toEqual(["rem"]);
 });
 
+// The hero is the terminal's own title, and the terminal draws that title bold
+// (internal/ui/theme.go, wordmark). At the default weight the largest type on
+// the page read lighter than the sticky wordmark directly above it, so the
+// first thing a reader saw had less presence than the navigation. Weight marks
+// the top of the scale and nothing below it: bold on an h2 or a paragraph
+// would put a second idea beside size on the levels the scale has to carry.
+test("the hero wordmark is the terminal's bold title, and weight stops there", () => {
+  expect(identityBody).toMatch(H1_RULE_RE);
+  expect(identityBody).toMatch(BRAND_RULE_RE);
+  const afterH1 = identityBody.slice(identityBody.indexOf(H1_RULE_END) + H1_RULE_END.length);
+  expect([...new Set([...afterH1.matchAll(FONT_WEIGHT_RE)].map(([, w]) => w))]).toEqual(["600"]);
+});
+
+// The gaps between sections are a rhythm, not a number per rule. A literal in
+// each rule that wants one leaves a page with nothing to retune: changing the
+// rhythm means finding every copy, and the copy drifts.
+test("vertical rhythm is three named steps, never a literal in a margin", () => {
+  expect([...new Set([...identityBody.matchAll(SPACE_STEP_RE)].map(([, v]) => v))].length).toBe(3);
+  expect(identityBody).toMatch(SECTION_GAP_RE);
+  expect(identityBody).toMatch(TIGHT_GAP_RE);
+  expect(identityBody).toMatch(RUNOUT_GAP_RE);
+  expect(identityBody).not.toMatch(LITERAL_GAP_RE);
+});
+
 // A link is underlined at rest so color is not its only cue, and hover
 // thickens that underline. A second device alongside it, a border that filled
 // on hover, drew a rule two pixels under the one already there: every link the
@@ -836,9 +871,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12524);
-  expect(gzipped).toBe(4328);
-  expect(brotli).toBe(3643);
+  expect(identity).toBe(12672);
+  expect(gzipped).toBe(4367);
+  expect(brotli).toBe(3692);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -897,7 +932,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_220);
+  expect(visit).toBe(14_269);
   expect(visit).toBeLessThan(25_000);
 });
 

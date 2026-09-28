@@ -124,10 +124,12 @@ const HTML = htmlForWire(`<!doctype html>
     --fg: var(--dark-fg); --dim: var(--dark-dim);
     --accent: var(--dark-accent); --warm: var(--dark-warm);
     --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
-    /* The type scale, one named step per level. Size is the only thing that
-       marks a level here: no uppercase, no tracking, no color change, so a
-       section start has to be legible as one. The page is monospaced, so a
-       level is read as size alone. The h1 is exactly double the h2, and every
+    /* The type scale, one named step per level. Size is what separates the
+       levels: no uppercase, no tracking, no color change, so a section start
+       has to be legible as one. The page is monospaced, so a level is read as
+       size. The h1 is bold, the one weight on the page, and it marks the top
+       of the scale rather than any step within it. The h1 is exactly double
+       the h2, and every
        step below that one is within a few pixels of the next, so no level on
        the page can be read as the level under it. Every step is in rem, the
        last three included: a step in pixels holds its size while the three
@@ -136,6 +138,15 @@ const HTML = htmlForWire(`<!doctype html>
        such a reader loses. */
     --fs-h1: 2.6rem; --fs-h2: 1.3rem; --fs-lead: 1.05rem;
     --fs-body: 0.9375rem; --fs-small: 0.84375rem; --fs-micro: 0.78125rem;
+    /* The vertical rhythm, three named steps. A page whose every gap is a
+       literal in the rule that wants it has no rhythm to tune, only a set of
+       numbers copied around: retuning the page then means finding each one.
+       --space-section separates two sections, --space-tight the smaller gap
+       where a section opens right under something already boxed, so the
+       tighter step is a statement about what follows rather than a value that
+       happens to be smaller, and --space-runout is the last one before the
+       footer. */
+    --space-tight: 1.5rem; --space-section: 2.8rem; --space-runout: 4rem;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -173,7 +184,14 @@ const HTML = htmlForWire(`<!doctype html>
   nav { display: flex; gap: 1.1rem; font-size: var(--fs-small); margin-left: auto; }
   nav a { color: var(--dim); white-space: nowrap; padding: .3rem 0; }
   .hero { padding-top: 2.6rem; }
-  h1 { font-size: var(--fs-h1); margin: 0; }
+  /* The h1 is bold for the same reason the wordmark above it is: the dashboard
+     draws its title in a bold face (internal/ui/theme.go, wordmark), and the
+     page is a picture of that terminal. At the default weight the largest type
+     on the page read lighter than the brand line directly above it, so the
+     page's first line had less presence than its own navigation. Weight marks
+     the top of the scale only, and only there; every level below the h1 is
+     still size alone, so the section structure reads without it. */
+  h1 { font-size: var(--fs-h1); font-weight: 700; margin: 0; }
   /* Blinking content that starts automatically must be pausable/stoppable
      (WCAG 2.2.2); honoring prefers-reduced-motion is the static-page remedy,
      so the cursor only blinks for users who have not asked for stillness. */
@@ -187,8 +205,9 @@ const HTML = htmlForWire(`<!doctype html>
      and small enough to stay the same idea as the wordmark above it.
      Install/Run sit tight under the capture; the manifesto heading after
      the list keeps the larger gap. */
-  h2 { font-size: var(--fs-h2); color: var(--fg); font-weight: 600; margin: 2.8rem 0 .7rem; }
-  .shot + h2, h2 + pre + h2 { margin-top: 1.5rem; }
+  h2 { font-size: var(--fs-h2); color: var(--fg); font-weight: 600;
+       margin: var(--space-section) 0 .7rem; }
+  .shot + h2, h2 + pre + h2 { margin-top: var(--space-tight); }
   pre {
     background: var(--panel); border: 1px solid var(--line);
     padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem; font-size: var(--fs-small);
@@ -239,7 +258,7 @@ const HTML = htmlForWire(`<!doctype html>
   a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px;
       text-decoration-thickness: 1px; }
   a:hover { text-decoration-thickness: 2px; }
-  footer { margin-top: 4rem; padding-top: 1.25rem; border-top: 1px solid var(--line);
+  footer { margin-top: var(--space-runout); padding-top: 1.25rem; border-top: 1px solid var(--line);
            color: var(--dim); font-size: var(--fs-small); display: flex; gap: 1.5rem; flex-wrap: wrap; }
   /* A small/1.6 line box is ~21px tall, under the 24px target-size floor
      (WCAG 2.2 AA SC 2.5.8); vertical padding makes each footer item a real

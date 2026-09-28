@@ -41,9 +41,18 @@ the page writes a size, one per level from `--fs-micro` to `--fs-h1`, and
 `bun test site/` checks the steps descend and that no rule sizes text in
 its own rems (the wordmark's bare `2rem` inside the `max-width: 640px` query
 is the one exemption it allows). The page has no uppercase, no tracking and
-no color change on a level, so size is the only thing that marks one; a step
-out of order or a size written in a rule is a heading the eye can no longer
-find.
+no color change on a level, so size is what marks one; a step out of order or
+a size written in a rule is a heading the eye can no longer find. The h1 is
+the one weight on the page: the terminal draws its own title bold
+(`internal/ui/theme.go`), and at the default weight the largest type on the
+page read lighter than the wordmark directly above it. Every level below the
+h1 is size alone.
+
+The vertical rhythm is the same idea turned down a notch: `--space-tight`,
+`--space-section` and `--space-runout` in `:root` are the only places the page
+writes a gap between sections. A literal in each rule that wants one leaves a
+page with nothing to retune, and the copies drift; `bun test site/` fails on
+a section gap written as a rem.
 
 The layout follows the capture it is showing: the four panes under "What it
 shows" are laid out the way the dashboard lays them out, with System running
