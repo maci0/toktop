@@ -813,10 +813,17 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 # and pathspec arrived at whatever the registry served that minute, unhashed
 # and unreviewed, on the one gate in the tree with no fixed closure. A gate
 # whose linter can change under it is a gate nobody can reproduce a failure of.
+# dependabot.yml is not a workflow, but it is the file that keeps the pinned
+# action SHAs, the go module and the Python pins current, and GitHub reads it
+# the same way: a YAML error in it does not fail a run, it stops every update
+# from being offered and the tree keeps building on pins nobody offered to
+# move. Same argument as the workflows, so the same gate.
+GITHUB_YAML := $(WORKFLOWS) .github/dependabot.yml
+
 .PHONY: check-yaml
-check-yaml: ## fail if a workflow is invalid YAML or breaks the .yamllint rule set
+check-yaml: ## fail if a workflow or .github/dependabot.yml is invalid YAML or breaks the .yamllint rule set
 	@$(MAKE) --no-print-directory scripts-env
-	@$(SCRIPTS_BIN)/yamllint --config-file .yamllint $(WORKFLOWS)
+	@$(SCRIPTS_BIN)/yamllint --config-file .yamllint $(GITHUB_YAML)
 
 # `make help` and the CONTRIBUTING.md target table both enumerate what a
 # contributor runs, and a target that reaches them through one and not the
