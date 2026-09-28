@@ -499,7 +499,7 @@ func TestIngestRejectionsNameTheServedEndpoints(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 	for _, e := range ingestEndpoints {
-		if want := e.primary() + " " + e.path; !strings.Contains(string(body), want) {
+		if want := e.allow() + " " + e.path; !strings.Contains(string(body), want) {
 			t.Errorf("404 body %q missing %q", body, want)
 		}
 	}
@@ -951,6 +951,66 @@ func TestHealthzHEADHasNoBody(t *testing.T) {
 	if got := resp.Header.Get("Content-Type"); got != "text/plain; charset=utf-8" {
 		t.Errorf("HEAD /healthz content-type = %q, want text/plain; charset=utf-8", got)
 	}
+}
+
+// The endpoint table serves HEAD beside GET, so a probe that asks one has to
+// read the same answer either way: RFC 9110 gives a HEAD the GET's headers and
+// no body, and net/http derives the length from the body it withheld, so an
+// answer that leaves the length to the runtime reaches a HEAD with a header
+// set its GET does not have. Both the healthy answer and the degraded one are
+// checked, because they are written separately.
+func TestHealthzStatesItsLengthOnGETAndHEAD(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	probe := func(method string) (int, string, string) {
+		t.Helper()
+		req, err := http.NewRequest(method, "http://"+s.Addr()+"/healthz", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return resp.StatusCode, resp.Header.Get("Content-Length"), string(body)
+	}
+	assertParity := func(label string) {
+		t.Helper()
+		getCode, getLen, getBody := probe(http.MethodGet)
+		headCode, headLen, headBody := probe(http.MethodHead)
+		if getCode != headCode {
+			t.Errorf("%s: HEAD = %d, GET = %d; the two must answer alike", label, headCode, getCode)
+		}
+		if getLen == "" {
+			t.Errorf("%s: GET states no Content-Length", label)
+		}
+		if headLen != getLen {
+			t.Errorf("%s: HEAD Content-Length = %q, GET = %q", label, headLen, getLen)
+		}
+		if headBody != "" {
+			t.Errorf("%s: HEAD body = %q, want empty", label, headBody)
+		}
+		if getLen != "" && getLen != strconv.Itoa(len(getBody)) {
+			t.Errorf("%s: GET Content-Length = %q, want the %d bytes it sent", label, getLen, len(getBody))
+		}
+	}
+	assertParity("healthy")
+
+	// Every decode slot held, so the probe answers degraded. Filled directly:
+	// nothing else is in flight, so the count is exact.
+	for len(eventSlots) < cap(eventSlots) {
+		eventSlots <- struct{}{}
+	}
+	defer func() {
+		for len(eventSlots) > 0 {
+			<-eventSlots
+		}
+	}()
+	assertParity("degraded")
 }
 
 func TestIngestSecurityHeaders(t *testing.T) {

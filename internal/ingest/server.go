@@ -270,6 +270,11 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, sto
 const (
 	eventsPath = "/v1/events"
 	healthPath = "/healthz"
+	// healthOK is the whole healthy answer, newline included: http.Error
+	// appends one, the 202 ack writes one, and the site's own /health answers
+	// the same. A probe that reads a whole line rather than trimming should
+	// not have to special-case this one.
+	healthOK = "ok\n"
 )
 
 // endpoint is one served path, the methods it answers, and the handler that
@@ -304,11 +309,14 @@ func lookupEndpoint(path string) (endpoint, bool) {
 }
 
 // notFoundMessage names every served endpoint, so an unknown path is a route
-// mistake a sender can act on rather than a dead end.
+// mistake a sender can act on rather than a dead end. Each is named with the
+// methods it actually takes, the list the 405 on a known path builds its Allow
+// header and its own body from: a sender correcting one typo from the methods
+// the primary alone would not tell it not to repeat.
 func notFoundMessage() string {
 	advertised := make([]string, 0, len(ingestEndpoints))
 	for _, e := range ingestEndpoints {
-		advertised = append(advertised, e.primary()+" "+e.path)
+		advertised = append(advertised, e.allow()+" "+e.path)
 	}
 	return "not found; endpoints: " + strings.Join(advertised, ", ")
 }
@@ -524,24 +532,32 @@ func (b *progressBody) stallReason() string {
 // It reports degraded rather than ok while every decode slot is held. At that
 // point the endpoint answers 503 to every POST, so a probe that keeps saying
 // ok describes a service that accepts nothing.
-func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	// The body and the status are settled before a byte is written, so the
+	// length below is the length of the answer actually sent.
+	body, status := healthOK, http.StatusOK
 	slots := eventSlots
 	if in := len(slots); in >= cap(slots) {
 		// The same Retry-After the refused POSTs carry: a 503 that names no
 		// delay leaves a client to invent one, and the slot frees as soon as a
 		// stalled body gives up.
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
-		w.WriteHeader(http.StatusServiceUnavailable)
-		fmt.Fprintf(w, "degraded: %d/%d event streams in flight; events are being refused\n", in, cap(slots))
+		status = http.StatusServiceUnavailable
+		body = fmt.Sprintf("degraded: %d/%d event streams in flight; events are being refused\n", in, cap(slots))
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	// Stated here rather than left to the runtime, and for the same reason
+	// errorResponse states it: a HEAD carries the GET's headers and no body
+	// (RFC 9110), and net/http derives the length from the body it withheld,
+	// so a HEAD answered this way carries a header set the GET it stands in
+	// for does not. The endpoint table serves HEAD alongside GET, so a probe
+	// that asks one has to read the same answer either way.
+	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
+	w.WriteHeader(status)
+	if r.Method == http.MethodHead {
 		return
 	}
-	w.WriteHeader(http.StatusOK)
-	// The newline the degraded line and every other body here already end
-	// with: http.Error appends one, the 202 ack writes one, and the site's
-	// own /health answers "ok\n". A probe that reads a whole line rather than
-	// trimming should not have to special-case this one.
-	fmt.Fprint(w, "ok\n")
+	fmt.Fprint(w, body)
 }
 
 func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {

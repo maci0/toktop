@@ -46,7 +46,8 @@ alongside them would be a layer importing sideways into itself.
   something to render.
 - `internal/gpu`: accelerator telemetry across vendors.
 - `internal/ingest`: a tiny localhost HTTP endpoint (`POST /v1/events`) that
-  harnesses and agents post usage into.
+  harnesses and agents post usage into, plus the `GET`/`HEAD` `/healthz`
+  liveness probe.
 - `internal/logcfg`: the audit-log vocabulary every other package that logs
   builds its logger from.
 - `internal/probe`: small streaming generations at backends, to measure

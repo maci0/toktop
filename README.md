@@ -331,7 +331,7 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 | endpoint | purpose |
 |---|---|
 | `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
-| `GET`, `HEAD` `/healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held |
+| `GET`, `HEAD` `/healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held. A `HEAD` carries the `GET`'s headers and no body, `Content-Length` included, so a probe reads the same answer either way |
 
 Event fields are all optional; anything omitted gets the default:
 
@@ -368,8 +368,9 @@ same `Idempotency-Key` if it had one. A POST carrying an
 refused with `403`, so a web page cannot forge rows into a running
 dashboard. Wrong methods on these paths answer `405` with `Allow` and a
 body naming the path and the methods it takes.
-Unknown paths answer `404` naming the two endpoints, so a POST to `/events`
-is not a generic not-found page. Error bodies are short plain-text reasons
+Unknown paths answer `404` naming the two endpoints and the methods each one
+takes, so a POST to `/events` is not a generic not-found page. Error bodies are
+short plain-text reasons
 that name the field or expected shape, and a malformed line in a stream also
 names the body offset it failed at; unknown fields are ignored, so
 harnesses can include their own. The request `Content-Type` header is not

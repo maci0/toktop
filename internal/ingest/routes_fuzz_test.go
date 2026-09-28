@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -108,8 +109,8 @@ func FuzzRoute(f *testing.F) {
 				t.Errorf("404 carries Allow %q", w.Header().Get("Allow"))
 			}
 			for _, e := range ingestEndpoints {
-				if !strings.Contains(respBody, e.primary()+" "+e.path) {
-					t.Fatalf("404 for %q omits endpoint %s %s: %q", path, e.primary(), e.path, respBody)
+				if !strings.Contains(respBody, e.allow()+" "+e.path) {
+					t.Fatalf("404 for %q omits endpoint %s %s: %q", path, e.allow(), e.path, respBody)
 				}
 			}
 			if len(rec.evs) != 0 {
@@ -142,8 +143,20 @@ func FuzzRoute(f *testing.F) {
 			if path != healthPath {
 				t.Fatalf("200 for %q", path)
 			}
-			if respBody != "ok\n" {
-				t.Errorf("health body = %q", respBody)
+			// A HEAD carries the GET's headers and no body (RFC 9110), and
+			// states the length it withheld, so the recorder sees an empty
+			// body and the GET's Content-Length rather than the line itself.
+			if method == http.MethodHead {
+				if respBody != "" {
+					t.Errorf("HEAD health body = %q, want empty", respBody)
+				}
+				if got, want := w.Header().Get("Content-Length"), strconv.Itoa(len(healthOK)); got != want {
+					t.Errorf("HEAD health Content-Length = %q, want %q", got, want)
+				}
+				break
+			}
+			if respBody != healthOK {
+				t.Errorf("health body = %q, want %q", respBody, healthOK)
 			}
 		case http.StatusAccepted:
 			if path != eventsPath || method != http.MethodPost {

@@ -27,6 +27,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `HEAD /healthz` answered with a different header set than the `GET` it
+  stands in for: no `Content-Length`, because the answer left the length to
+  the runtime and `net/http` derives it from the body a `HEAD` never sends.
+  A probe that asked for the `HEAD` could not tell a healthy `ok\n` from an
+  empty body. The healthy and the degraded answer now state their length, as
+  every other answer on that endpoint's surface already did.
+
+- The `404` an unknown path answers names each served endpoint with the
+  methods it actually takes, so it reads `GET, HEAD /healthz` where it read
+  `GET /healthz`. The two error bodies are built from the same endpoint table
+  and now advertise the same method list a `405` puts in its `Allow` header,
+  so a sender correcting a typo from the `404` is not told a method the path
+  refuses.
+
 - `toktop --demo --ingest` deduplicates agent events through a bounded
   15-minute id ledger, the way the live collector does. It answered a replay
   from the retained feed, which holds a couple of minutes of generated
