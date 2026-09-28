@@ -188,6 +188,13 @@ func TestRedactUserHomeFoldsTheNamedAccountsHome(t *testing.T) {
 		{"me", "/home/mem/.bashrc", "/home/mem/.bashrc"},
 		{"me", "/home/me-too/.bashrc", "/home/me-too/.bashrc"},
 		{"me", "/srv/engines/model: truncated", "/srv/engines/model: truncated"},
+		// A home under a Windows volume whose match is left alone (a longer
+		// account name) keeps the volume: the branch that copies the match
+		// back verbatim must not swallow "C:" on its way there, or the
+		// message names a drive-relative path that was never in it.
+		{"me", `C:\Users\me-too\x`, `C:\Users\me-too\x`},
+		{"me", `C:\Users\mem\x`, `C:\Users\mem\x`},
+		{"me", `copy C:\Users\me-a to C:\Users\me\b`, `copy C:\Users\me-a to ~\b`},
 		// No account, nothing to fold: the caller has no user for the target
 		// (a bare host, a ~/.ssh/config entry toktop did not read a User from).
 		{"", "/home/me/.bashrc", "/home/me/.bashrc"},

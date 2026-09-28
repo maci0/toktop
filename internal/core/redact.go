@@ -121,16 +121,21 @@ func foldUserHomePrefix(msg, home string) string {
 			b.WriteString(msg)
 			return b.String()
 		}
-		b.WriteString(msg[:volumeStart(msg, at)])
 		if nameContinues(msg[at+n:]) {
 			// Another account's name begins here. Copy the matched bytes
 			// rather than the pattern, which folds to them and need not be
 			// spelled the same way, and resume after them so the search does
-			// not stall on the same prefix.
+			// not stall on the same prefix. Everything up to the match is
+			// copied whole: the drive letter is only pulled along when the
+			// "~" below replaces the match, and writing msg[:at] here is what
+			// keeps "C:\Users\me-too" from losing its "C:" to a match that
+			// is going to be copied back verbatim anyway.
+			b.WriteString(msg[:at])
 			b.WriteString(msg[at : at+n])
 			msg = msg[at+n:]
 			continue
 		}
+		b.WriteString(msg[:volumeStart(msg, at)])
 		b.WriteByte('~')
 		msg = msg[at+n:]
 	}

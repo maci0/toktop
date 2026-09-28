@@ -64,6 +64,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   in-app key reference now says what `esc` does from the dashboard as well as
   from the help overlay.
 
+- A remote error naming a *different* account that starts with the watched
+  user's name no longer loses the drive letter on a Windows path. The
+  `C:\Users\me-too\...` a peer reports about itself came back as
+  `\Users\me-too\...`, a drive-relative path the peer never mentioned, in the
+  dashboard, the `--json` report and the audit log. A home that is folded
+  keeps its `C:`.
+
 - `toktop --demo --ingest` deduplicates agent events through a bounded
   15-minute id ledger, the way the live collector does. It answered a replay
   from the retained feed, which holds a couple of minutes of generated
