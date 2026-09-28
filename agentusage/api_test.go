@@ -17,11 +17,13 @@ import (
 // name is additive; removing or renaming one, or dropping a struct field, is
 // a breaking change that needs a changelog entry.
 var publicTypes = map[string][]string{
-	"Delta":   {"Output", "Thinking", "Input", "Span", "At"},
-	"Process": {"PID", "Tool", "Dir", "Started", "AllDirs"},
-	"Sample":  {"Output", "Thinking", "Total", "Input", "Span", "At"},
-	"Spec":    {"Roots", "Suffix", "Suffixes", "Cumulative", "HeaderCwd"},
-	"Watcher": nil,
+	"Definition":  {"Usage"},
+	"Definitions": nil,
+	"Delta":       {"Output", "Thinking", "Input", "Span", "At"},
+	"Process":     {"PID", "Tool", "Dir", "Started", "AllDirs"},
+	"Sample":      {"Output", "Thinking", "Total", "Input", "Span", "At"},
+	"Spec":        {"Roots", "Suffix", "Suffixes", "Cumulative", "HeaderCwd"},
+	"Watcher":     nil,
 }
 
 // publicConsts are the constants other modules compile against. A new one is

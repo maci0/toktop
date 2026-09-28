@@ -33,11 +33,16 @@ var knownAgents = []string{
 	"prime-agent", "qwen",
 }
 
-// Agents lists every agent name this package knows: the recognized CLIs in
-// [knownAgents] (most of which keep no transcript worth reading), the ones
-// [LoadDefinitions] registered, and the ones [RegisterSpec] added. Sorted and
-// deduplicated, so an agent several of those name appears once. Use
-// [Supported] to tell which of them can be read.
+// Agents lists every agent name this package knows: the recognized CLIs it was
+// compiled with, the definitions [LoadDefinitions] registered, and the agents
+// [RegisterSpec] added. Sorted and deduplicated, so an agent several of those
+// name appears once.
+//
+// It is a list of names, not a promise: recognition and readability are
+// separate questions, and the only two built-in names nothing here can read
+// are crush and opencode, which need the sqlite build tag, opencode needing
+// [EnableOpenCodeDB] on top. Use [Supported] to tell which of the names can be
+// read on this machine right now.
 func Agents() []string {
 	out := slices.Clone(knownAgents)
 	defsMu.RLock()
@@ -185,19 +190,27 @@ func SpecFor(tool string) (Spec, bool) {
 	return s, ok
 }
 
-// definitionFile mirrors the agent definitions gauntlet keeps in
-// ~/.gauntlet/agents.json. Only the transcript location matters here: the rest
-// of that file describes how to launch an agent, which is not this package's
-// business.
-type definitionFile map[string]*struct {
-	Usage *struct {
-		Roots      []string `json:"roots"`
-		Suffix     string   `json:"suffix,omitempty"`
-		Suffixes   []string `json:"suffixes,omitempty"`
-		Cumulative bool     `json:"cumulative,omitempty"`
-		HeaderCwd  bool     `json:"header_cwd,omitempty"`
-	} `json:"usage,omitempty"`
+// Definition is one agent's entry in a definitions file. It is the type a
+// program generates the file with, or edits it with, since the file is a
+// documented input: an entry carrying only a usage block is what this package
+// reads, and the rest describes how to launch an agent, which is not its
+// business. A definition with no usage is kept by a round trip rather than
+// dropped, so editing a file this package ignored does not delete the
+// launch fields beside it.
+type Definition struct {
+	Usage *Spec `json:"usage,omitempty"`
 }
+
+// Definitions is a whole definitions file, keyed by agent name as written
+// rather than canonicalized: LoadDefinitions canonicalizes on load, and a
+// program rewriting a file should leave the spellings a person wrote alone.
+// A nil entry is the `null` the file format forbids, and LoadDefinitions
+// refuses the file rather than skipping it.
+//
+// An empty Definitions marshals as `{}`, the empty file LoadDefinitions
+// accepts; a nil one marshals as `null`, which it refuses, so a program
+// writing this file declares the map rather than leaving it unset.
+type Definitions map[string]*Definition
 
 // maxDefinitionsBytes bounds the agent definitions file. It is a JSON object
 // of transcript locations, so a real one is a few kilobytes; a file past this
@@ -309,7 +322,7 @@ func LoadDefinitions(path string) error {
 		return defsErr([]error{ErrInvalidDefinitions, err}, "%s: %s: %v", ErrInvalidDefinitions, path, err)
 	}
 	data = bytes.TrimPrefix(data, utf8BOM)
-	var file definitionFile
+	var file Definitions
 	if err := json.Unmarshal(data, &file); err != nil {
 		return defsErr([]error{ErrInvalidDefinitions, err}, "%s: %s: %v", ErrInvalidDefinitions, path, err)
 	}
@@ -344,13 +357,9 @@ func LoadDefinitions(path string) error {
 				"%s: %s: %s: %q and %q both reduce to %q",
 				ErrInvalidDefinitions, path, ErrCollidingDefinitions, prev, name, canonical)
 		}
-		spec := Spec{
-			Roots:      slices.Clone(def.Usage.Roots),
-			Suffix:     def.Usage.Suffix,
-			Suffixes:   slices.Clone(def.Usage.Suffixes),
-			Cumulative: def.Usage.Cumulative,
-			HeaderCwd:  def.Usage.HeaderCwd,
-		}
+		// The decoded value is this call's own, and the registry takes it as it
+		// stands, so there is nothing to copy out of.
+		spec := *def.Usage
 		if len(specRoots(spec)) == 0 {
 			// A spec with no root registers nothing, so it cannot hold a
 			// canonical name: recording it in seen would let a definition the

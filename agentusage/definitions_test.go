@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -625,5 +626,77 @@ func TestResetDefinitionsRestoresBuiltins(t *testing.T) {
 	}
 	if !Supported("feynman") {
 		t.Error("Supported(feynman) = false after restoring the compiled-in definition")
+	}
+}
+
+// A program that generates or edits agents.json goes through Definitions, so
+// the exported type has to be the file this package reads: a round trip
+// through it registers the same spec, keeps the launch fields an entry beside
+// it carries (this package ignores them, a round trip must not delete them),
+// and reads back the spelling a person wrote rather than the canonical one.
+func TestDefinitionsRoundTripLoads(t *testing.T) {
+	file := Definitions{
+		"myagent": {Usage: &Spec{
+			Roots:      []string{"~/.myagent/sessions"},
+			Suffixes:   []string{".jsonl", ".jsonl.zstd"},
+			Cumulative: true,
+			HeaderCwd:  true,
+		}},
+		"launchonly": {},
+	}
+	data, err := json.Marshal(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := writeDefs(t, string(data))
+	if err := LoadDefinitions(path); err != nil {
+		t.Fatal(err)
+	}
+	dropDefs(t, "myagent")
+
+	spec, ok := SpecFor("myagent")
+	if !ok {
+		t.Fatal("the round-tripped definition was not registered")
+	}
+	want := Spec{
+		Roots:      []string{"~/.myagent/sessions"},
+		Suffixes:   []string{".jsonl", ".jsonl.zstd"},
+		Cumulative: true,
+		HeaderCwd:  true,
+	}
+	if !slices.Equal(spec.Roots, want.Roots) || !slices.Equal(spec.Suffixes, want.Suffixes) ||
+		spec.Suffix != want.Suffix || spec.Cumulative != want.Cumulative || spec.HeaderCwd != want.HeaderCwd {
+		t.Errorf("SpecFor(myagent) = %+v, want %+v", spec, want)
+	}
+	if _, ok := SpecFor("launchonly"); ok {
+		t.Error("an entry carrying no usage block should register nothing")
+	}
+
+	// The same bytes unmarshal back into the value that produced them, so a
+	// program that rewrites the file keeps the keys as written.
+	var back Definitions
+	if err := json.Unmarshal(data, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(slices.Sorted(maps.Keys(back)), slices.Sorted(maps.Keys(file))) {
+		t.Errorf("round trip changed the agent names: %v, want %v", maps.Keys(back), maps.Keys(file))
+	}
+}
+
+// Agents documents that the two database-backed agents are the only built-in
+// names a build may not be able to read, and the rest are readable whatever
+// the sqlite tag says. The registry is read here rather than the names
+// Agents returns, since that list also carries whatever a neighbouring test
+// registered.
+func TestKnownAgentsAreReadableApartFromTheDatabaseOnes(t *testing.T) {
+	for _, name := range knownAgents {
+		if name == "crush" || name == "opencode" {
+			// Both are behind the sqlite build tag, and opencode behind
+			// EnableOpenCodeDB on top, so neither has one answer to assert.
+			continue
+		}
+		if !Supported(name) {
+			t.Errorf("Supported(%q) = false, want true", name)
+		}
 	}
 }

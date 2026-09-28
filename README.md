@@ -150,6 +150,12 @@ that keeps its transcripts inside the project it works in:
 }
 ```
 
+A program that writes that file marshals `agentusage.Definitions`, a map of
+agent name to `Definition` whose `Usage` field is the `Spec` above, so what it
+writes is the file `LoadDefinitions` reads. An entry carrying fields beside
+`usage` survives a round trip, since the same file also describes how to
+launch an agent and this package leaves those alone.
+
 ### Using the Go package
 
 ```

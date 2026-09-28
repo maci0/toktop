@@ -15,6 +15,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- `agentusage.Definitions` and `agentusage.Definition` model the agent
+  definitions file (`agents.json`) as Go values, so a program that writes or
+  edits one marshals the same shape `LoadDefinitions` reads instead of
+  hand-building the `usage` wrapper. An entry carrying fields beside `usage`
+  survives a round trip, since the same file also describes how to launch an
+  agent and this package leaves those fields alone.
+
 - The audit log names a run of agent events the retained feed window refused,
   once when it starts and once when an event lands again. A sender whose clock
   lags has every event sorted behind the window, and the only record was

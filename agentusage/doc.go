@@ -16,7 +16,8 @@
 // working directory and how one line becomes a Sample.
 // RegisterSpec adds one this package does not ship with, and LoadDefinitions
 // reads the same declaration from a JSON file, DefinitionsPath being the
-// default location.
+// default location. Definitions is that file as a Go value, so a program
+// writing or editing one marshals it rather than hand-building the shape.
 //
 // Database agents are registered as sources instead: crush is built in,
 // opencode is added by EnableOpenCodeDB because its store is machine-wide

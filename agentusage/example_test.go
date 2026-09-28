@@ -5,6 +5,7 @@ package agentusage_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -335,4 +336,24 @@ func ExampleSupported() {
 			fmt.Println(tool)
 		}
 	}
+}
+
+// A program that writes agents.json marshals a Definitions value, so what it
+// writes is the file LoadDefinitions reads rather than a hand-rolled copy of
+// the format. An entry this package ignores is carried through untouched:
+// definitions also describe how to launch an agent, which is not this
+// package's business to keep or drop.
+func ExampleDefinitions() {
+	file := agentusage.Definitions{
+		"myagent": {Usage: &agentusage.Spec{
+			Roots: []string{"{dir}/.myagent/sessions"},
+		}},
+	}
+	data, err := json.Marshal(file)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(data))
+	// Output: {"myagent":{"usage":{"roots":["{dir}/.myagent/sessions"]}}}
 }
