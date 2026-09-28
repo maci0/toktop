@@ -12,23 +12,42 @@ import (
 	"testing"
 )
 
-func TestDirVariantsCoverBothNormalizationForms(t *testing.T) {
-	nfc := "caf\u00e9"  // precomposed
-	nfd := "cafe\u0301" // e + combining acute
-
-	got := dirVariants(nfc)
-	if !slices.Equal(got, []string{nfc, nfd}) {
-		t.Errorf("dirVariants(nfc) = %q, want [%q %q]", got, nfc, nfd)
+// dirVariants must hand a lookup every spelling the volume resolves to the
+// directory it was given: each entry has to be one spellingEqual accepts, the
+// given spelling has to stay first for callers that prefer it, and the fold
+// dirKey maps the path to has to be among them, so the form a map collapses
+// two spellings into is a form a lookup actually tries.
+func checkDirVariants(t *testing.T, p string, wantAny ...string) {
+	t.Helper()
+	got := dirVariants(p)
+	if got[0] != p {
+		t.Errorf("dirVariants(%q)[0] = %q, want the given spelling first", p, got[0])
 	}
-
-	got = dirVariants(nfd)
-	if !slices.Equal(got, []string{nfd, nfc}) {
-		t.Errorf("dirVariants(nfd) = %q, want [%q %q]", got, nfd, nfc)
+	for _, w := range slices.Concat(wantAny, []string{dirKey(p)}) {
+		if !slices.Contains(got, w) {
+			t.Errorf("dirVariants(%q) = %q, missing %q", p, got, w)
+		}
 	}
+	for _, v := range got {
+		if !sameSpelling(p, v) {
+			t.Errorf("dirVariants(%q) added %q, which the volume would not resolve", p, v)
+		}
+	}
+}
 
-	// Pure ASCII has nothing to vary; it must not grow variants.
-	if got := dirVariants("/Users/mw/projects"); !slices.Equal(got, []string{"/Users/mw/projects"}) {
-		t.Errorf("dirVariants(ascii) = %q, want a single spelling", got)
+func TestDirVariantsCoverNormalizationAndCase(t *testing.T) {
+	// A volume is reached by any normalization form and any case, so a session
+	// recorded from "Users/Foo" is found from the spelling the watcher
+	// resolved, and an accented name from either normalization form.
+	checkDirVariants(t, "/Users/Foo/Caf\u00e9",
+		"/Users/Foo/Caf\u00e9",  // NFC
+		"/Users/Foo/Cafe\u0301", // NFD
+	)
+	checkDirVariants(t, "caf\u00e9", "cafe\u0301")
+
+	// A path already in folded form with nothing to decompose adds nothing.
+	if got, want := dirVariants("/users/mw/projects"), 1; len(got) != want {
+		t.Errorf("dirVariants(folded ascii) = %q, want %d spelling", got, want)
 	}
 }
 

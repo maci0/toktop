@@ -22,11 +22,18 @@ import (
 // spelling would silently vanish from a watcher resolved through NFD paths.
 
 // dirVariants lists the spellings p can be recorded under: itself, then its
-// NFC and NFD forms when they differ. The given spelling stays first so
-// callers preferring it keep seeing it first.
+// NFC and NFD forms and their case folds when they differ. The given spelling
+// stays first so callers preferring it keep seeing it first.
+//
+// The case folds are the ones dirKey already applies, so a spelling
+// spellingEqual calls this one is also a spelling a lookup tries: a volume
+// storing "Users" is reached by an agent started from "users", and without
+// them SameDir calls the two one directory while a watcher looking for the
+// recorded sessions under the resolved one finds nothing.
 func dirVariants(p string) []string {
+	nfc, nfd := norm.NFC.String(p), norm.NFD.String(p)
 	out := []string{p}
-	for _, v := range []string{norm.NFC.String(p), norm.NFD.String(p)} {
+	for _, v := range []string{nfc, nfd, core.FoldCase(nfc), core.FoldCase(nfd)} {
 		if !slices.Contains(out, v) {
 			out = append(out, v)
 		}

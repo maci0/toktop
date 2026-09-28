@@ -21,6 +21,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   thing on the frame that carried a measurement no screen reader could read,
   and the only account of the curve's shape was the drawing itself.
 
+- The spellings a macOS watcher looks a working directory's sessions up under
+  now include its case folds, the way the Windows ones already did. A volume
+  storing `Users` is reached by an agent started from `users`, and the module
+  already called the two spellings one directory: `SameDir` matched them and
+  `DirKey` gave them one map entry, while a lookup still tried only the
+  normalization forms, so a session recorded under the other spelling went
+  uncounted. The added forms are the same fold `DirKey` applies, so every one
+  of them is a spelling the volume resolves to the directory looked up.
+
 - The key reference scrolls with the arrow keys, page keys or ctrl+n/ctrl+p
   on a pane too short for the whole list, and says how many rows are off
   screen. The rows it could not show were the flags at the bottom, and no key
