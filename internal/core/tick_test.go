@@ -71,20 +71,21 @@ func TestTick(t *testing.T) {
 				defer mu.Unlock()
 				count++
 			}
-			Tick(ctx, 5*time.Millisecond, prober, prober)
-			<-time.After(30 * time.Millisecond) // several ticks
+			done := Tick(ctx, 5*time.Millisecond, prober, prober)
+			<-time.After(32 * time.Millisecond) // several ticks
+			cancel()
+			<-done // wait for the ticker loop to exit
 			mu.Lock()
-			before := count
+			final := count
 			mu.Unlock()
-			if before == 0 {
+			if final == 0 {
 				t.Fatal("the ticker never fired, so stopping it proves nothing")
 			}
-			cancel()
 			<-time.After(20 * time.Millisecond) // past several ticks
 			mu.Lock()
 			defer mu.Unlock()
-			if count != before {
-				t.Fatalf("prober ran %d more times after cancel", count-before)
+			if count != final {
+				t.Fatalf("prober ran %d more times after cancel", count-final)
 			}
 		})
 	})
