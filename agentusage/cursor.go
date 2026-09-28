@@ -3,13 +3,16 @@
 
 package agentusage
 
-import "path/filepath"
+import (
+	"path/filepath"
+	"time"
+)
 
 // cursorRoots is the agent-transcripts directory for one working directory.
 // ~/.cursor/projects names that directory with pathSlug, and the transcripts
 // live under agent-transcripts/ inside it. A line with no token usage
 // contributes nothing; the directory is what says which project it is.
-func cursorRoots(dir string) []string {
+func cursorRoots(dir string, _ time.Time) []string {
 	base := home(".cursor", "projects")
 	if base == "" {
 		return nil

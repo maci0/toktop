@@ -192,6 +192,10 @@ func TestProbeFailuresAreAuditedOnce(t *testing.T) {
 
 	c := New([]provider.Provider{(&fakeProvider{label: "engine", addr: srv.URL}).asProvider()}, time.Second)
 	c.lastModel[srv.URL] = "m"
+	// The latch ages on the collector clock, so a run replaying on a pinned
+	// one reports the same down_for the frames carry.
+	clock := time.Unix(1_700_000_000, 0).UTC()
+	c.SetNow(func() time.Time { return clock })
 	logs := captureAudit(t)
 
 	wave := func() {
@@ -215,6 +219,7 @@ func TestProbeFailuresAreAuditedOnce(t *testing.T) {
 	}
 
 	backend.broken.Store(false)
+	clock = clock.Add(90 * time.Second)
 	// The 503 above armed the Retry-After backoff, and a wave inside it is
 	// skipped without reaching the engine. The test waits the backout out
 	// rather than the 15 seconds it names.
@@ -229,6 +234,11 @@ func TestProbeFailuresAreAuditedOnce(t *testing.T) {
 	}
 	if !strings.Contains(logs.String(), "down_for=") {
 		t.Errorf("recovery line does not carry how long the failures ran:\n%s", logs.String())
+	}
+	// The 90 seconds the clock was stepped by, and not the wall time the test
+	// spent waiting out the waves.
+	if !strings.Contains(logs.String(), "down_for=1m30s") {
+		t.Errorf("down_for is not the collector clock's span:\n%s", logs.String())
 	}
 	// A wave that keeps answering is the steady state, not a transition: a
 	// line per --probe tick is the noise this latch exists to prevent.

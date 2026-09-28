@@ -58,7 +58,7 @@ func withStore(t *testing.T, tool string) string {
 	adaptersMu.Lock()
 	orig := adapters[tool]
 	patched := orig
-	patched.roots = func(string) []string { return []string{dir} }
+	patched.roots = func(string, time.Time) []string { return []string{dir} }
 	adapters[tool] = patched
 	adaptersMu.Unlock()
 	t.Cleanup(func() {
@@ -737,15 +737,15 @@ func TestUnregisterSpecRestoresTheDisplacedAdapter(t *testing.T) {
 	}
 	t.Cleanup(func() { UnregisterSpec("codex") })
 	got, ok := adapterFor("codex")
-	if !ok || !slices.Equal(got.roots("/work"), []string{store}) {
-		t.Fatalf("registered roots = %v, want the spec's %q", got.roots("/work"), store)
+	if !ok || !slices.Equal(got.roots("/work", time.Time{}), []string{store}) {
+		t.Fatalf("registered roots = %v, want the spec's %q", got.roots("/work", time.Time{}), store)
 	}
 	if !UnregisterSpec("codex") {
 		t.Fatal("UnregisterSpec should report the registration it removed")
 	}
 	got, ok = adapterFor("codex")
-	if !ok || got.suffix != builtin.suffix || !slices.Equal(got.roots("/work"), builtin.roots("/work")) {
-		t.Fatalf("after unregister roots = %v, want the built-in %v", got.roots("/work"), builtin.roots("/work"))
+	if !ok || got.suffix != builtin.suffix || !slices.Equal(got.roots("/work", time.Time{}), builtin.roots("/work", time.Time{})) {
+		t.Fatalf("after unregister roots = %v, want the built-in %v", got.roots("/work", time.Time{}), builtin.roots("/work", time.Time{}))
 	}
 }
 

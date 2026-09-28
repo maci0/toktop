@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Kimi Code CLI writes one event log per session and per agent:
@@ -96,9 +98,9 @@ func kimiWorkDirKey(dir string) string {
 // a decomposable character hashes differently in each Unicode form while the
 // file system treats them as one directory, and the agent hashes whichever
 // form it was started with.
-func kimiRoots(dir string) []string {
+func kimiRoots(dir string, now time.Time) []string {
 	store := kimiStore()
-	names := kimiStoreDirs(store)
+	names := kimiStoreDirs(store, now)
 	if len(names) == 0 {
 		return nil // no store yet: nothing to read, and nothing to report either
 	}
@@ -200,10 +202,10 @@ type kimiListing struct {
 // kimiStoreDirs returns the directory names under store, from the shared
 // listing when it is fresh. A store that cannot be read is not remembered, so
 // the next caller tries again rather than serving an empty store for a window.
-func kimiStoreDirs(store string) []string {
+func kimiStoreDirs(store string, now time.Time) []string {
 	kimiListMu.Lock()
 	defer kimiListMu.Unlock()
-	if c, ok := kimiListMap[store]; ok && time.Since(c.at) < kimiStoreEvery {
+	if c, ok := kimiListMap[store]; ok && core.Age(now, c.at) < kimiStoreEvery {
 		return c.dirs
 	}
 	entries, err := os.ReadDir(store)
@@ -220,6 +222,6 @@ func kimiStoreDirs(store string) []string {
 	if len(kimiListMap) >= kimiListMax {
 		clear(kimiListMap)
 	}
-	kimiListMap[store] = kimiListing{dirs: dirs, at: time.Now()}
+	kimiListMap[store] = kimiListing{dirs: dirs, at: now}
 	return dirs
 }

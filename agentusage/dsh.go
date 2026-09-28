@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/klauspost/compress/zstd"
 
@@ -336,7 +337,7 @@ func dshDirName(dir string) string {
 // dshRoots is the project directory inside each dsh store. The store holds
 // every project, so the walk is the one directory this working directory
 // names rather than the whole tree.
-func dshRoots(dir string) []string {
+func dshRoots(dir string, _ time.Time) []string {
 	var out []string
 	for _, root := range []string{home(".dsh", "sessions"), home(".dsh-native", "sessions")} {
 		if root == "" {
@@ -356,7 +357,7 @@ func dshRoots(dir string) []string {
 // dshHostRoots is both session stores, not one project's directory. dsh web
 // writes into whichever project it was asked about; the server process's
 // own cwd is the harness, which is not one of those projects.
-func dshHostRoots(string) []string {
+func dshHostRoots(string, time.Time) []string {
 	var out []string
 	for _, root := range []string{home(".dsh", "sessions"), home(".dsh-native", "sessions")} {
 		if root != "" {

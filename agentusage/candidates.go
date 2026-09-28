@@ -317,11 +317,11 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 	// is why refreshAdapter drops them, and kimi keeps one session directory
 	// per working directory: a watcher that attached before the agent's first
 	// session in this directory has to see that directory appear. roots() is a
-	// function of the working directory alone, and this is one call per rescan
-	// window rather than one per poll.
+	// function of the working directory and this walk's instant, and this is
+	// one call per rescan window rather than one per poll.
 	w.roots = nil
 	var out []string
-	for _, root := range w.rootsLocked() {
+	for _, root := range w.rootsLocked(now) {
 		if root == "" {
 			continue
 		}

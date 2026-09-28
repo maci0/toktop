@@ -565,8 +565,8 @@ func TestLoadDefinitionsSkipsBuiltinAgent(t *testing.T) {
 		t.Error("SpecFor registered a spec no watcher would read")
 	}
 	ad, ok := adapterFor("claude")
-	if !ok || !slices.Equal(ad.roots("/tmp"), []string{home(".claude", "projects")}) {
-		t.Errorf("the compiled-in claude adapter changed: %v %t", ad.roots("/tmp"), ok)
+	if !ok || !slices.Equal(ad.roots("/tmp", time.Time{}), []string{home(".claude", "projects")}) {
+		t.Errorf("the compiled-in claude adapter changed: %v %t", ad.roots("/tmp", time.Time{}), ok)
 	}
 	if !Supported("claude") {
 		t.Error("claude stopped being readable")

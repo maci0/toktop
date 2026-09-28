@@ -26,7 +26,7 @@ import (
 // equals input plus output. The cached fields are added only when the total
 // is larger than that sum by the cache.
 
-func grokRoots(dir string) []string {
+func grokRoots(dir string, _ time.Time) []string {
 	store := home(".grok", "sessions")
 	if store == "" {
 		return nil

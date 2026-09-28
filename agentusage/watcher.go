@@ -343,7 +343,7 @@ func uniqueRoots(roots []string) []string {
 // writable store cannot pull in a file from elsewhere.
 func (w *Watcher) openTranscript(path string) (*os.File, error) {
 	refused := false
-	for _, root := range w.rootsLocked() {
+	for _, root := range w.rootsLocked(w.clock()()) {
 		if root == "" {
 			continue
 		}
@@ -366,12 +366,14 @@ func (w *Watcher) openTranscript(path string) (*os.File, error) {
 // ad.roots re-expands ~ and substitutes {dir} on every call; the roots of a
 // fixed adapter and directory do not move between walks, so they are computed
 // once per walk (walkCandidates drops them), and once more when refreshAdapter
-// swaps the adapter.
+// swaps the adapter. now is the walk's own instant, which an adapter caching
+// what it read ages that cache on, so the listing is re-read on the timeline
+// the walk runs on rather than on wall time.
 //
 // Caller holds pollMu.
-func (w *Watcher) rootsLocked() []string {
+func (w *Watcher) rootsLocked(now time.Time) []string {
 	if w.roots == nil {
-		w.roots = w.ad.roots(w.dir)
+		w.roots = w.ad.roots(w.dir, now)
 	}
 	return w.roots
 }

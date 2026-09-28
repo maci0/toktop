@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // transcript is one fuzz iteration's file on disk. consumeAppend takes a real
@@ -209,7 +210,7 @@ func FuzzOwnsHeaderScan(f *testing.F) {
 			kind:       perMessage,
 			parse:      parseGeneric,
 			sessionCwd: genericSessionCwd,
-			roots:      func(string) []string { return []string{dir} },
+			roots:      func(string, time.Time) []string { return []string{dir} },
 		}
 		tr := newTranscript(t, dir, data)
 

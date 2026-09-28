@@ -16,10 +16,13 @@ import (
 )
 
 type adapter struct {
-	// roots are directories to scan, given the process's working directory.
-	// Most agents keep transcripts under $HOME and ignore it; agents that keep
-	// them inside the project (clanker) use it.
-	roots func(dir string) []string
+	// roots are directories to scan, given the process's working directory and
+	// the instant the walk is running on the watcher's clock. Most agents keep
+	// transcripts under $HOME and ignore it; agents that keep them inside the
+	// project (clanker) use it. An adapter that caches what it read (kimi
+	// lists the store itself) ages that cache on now, so the walk's own
+	// timeline decides when it is re-read.
+	roots func(dir string, now time.Time) []string
 	// suffix filters transcript files under a root by literal suffix match.
 	suffix string
 	// suffixes, when set, replaces suffix: dsh writes `.jsonl.zstd` by
@@ -62,7 +65,7 @@ var adaptersMu sync.RWMutex
 
 var adapters = map[string]adapter{
 	"claude": {
-		roots:  func(string) []string { return []string{home(".claude", "projects")} },
+		roots:  func(string, time.Time) []string { return []string{home(".claude", "projects")} },
 		suffix: ".jsonl",
 		kind:   perMessage,
 		parse:  parseClaude,
@@ -70,7 +73,7 @@ var adapters = map[string]adapter{
 	// qwen-code keeps per-project chat transcripts with Gemini-style
 	// usageMetadata on each assistant message.
 	"qwen": {
-		roots:  func(string) []string { return []string{home(".qwen", "projects")} },
+		roots:  func(string, time.Time) []string { return []string{home(".qwen", "projects")} },
 		suffix: ".jsonl",
 		kind:   perMessage,
 		parse:  parseQwen,
@@ -104,7 +107,7 @@ var adapters = map[string]adapter{
 	// clanker keeps its own token log inside the repository it runs in, one
 	// record per request, so the project directory is the attribution.
 	"clanker": {
-		roots:  func(dir string) []string { return []string{filepath.Join(dir, "state")} },
+		roots:  func(dir string, _ time.Time) []string { return []string{filepath.Join(dir, "state")} },
 		suffix: "token_stats.jsonl",
 		kind:   perMessage,
 		parse:  parseGeneric,
@@ -115,14 +118,14 @@ var adapters = map[string]adapter{
 	// data.context.cwd); the assistant.message records carry OpenAI-shaped
 	// usage, which the generic parser already reads.
 	"copilot": {
-		roots:      func(string) []string { return []string{home(".copilot", "session-state")} },
+		roots:      func(string, time.Time) []string { return []string{home(".copilot", "session-state")} },
 		suffix:     "events.jsonl",
 		kind:       perMessage,
 		parse:      parseGeneric,
 		sessionCwd: genericSessionCwd,
 	},
 	"codex": {
-		roots:      func(string) []string { return []string{home(".codex", "sessions")} },
+		roots:      func(string, time.Time) []string { return []string{home(".codex", "sessions")} },
 		suffix:     ".jsonl",
 		kind:       cumulative,
 		parse:      parseCodex,
@@ -151,7 +154,7 @@ var adapters = map[string]adapter{
 	// ~/.gemini/tmp/<project>/chats. A gemini record's tokens are that turn's
 	// own counts. The project directory is named by .project_root beside chats/.
 	"gemini": {
-		roots:          func(string) []string { return []string{home(".gemini", "tmp")} },
+		roots:          func(string, time.Time) []string { return []string{home(".gemini", "tmp")} },
 		suffix:         ".jsonl",
 		kind:           perMessage,
 		parse:          parseGemini,
@@ -163,7 +166,7 @@ var adapters = map[string]adapter{
 	// records for that conversation id, or cache/last_conversations.json
 	// when the history has no line for it. The step itself does not name it.
 	"agy": {
-		roots:          func(string) []string { return []string{home(".gemini", "antigravity-cli")} },
+		roots:          func(string, time.Time) []string { return []string{home(".gemini", "antigravity-cli")} },
 		suffix:         "transcript.jsonl",
 		kind:           perMessage,
 		parse:          parseAgy,
@@ -229,7 +232,7 @@ func specAdapter(spec Spec) (adapter, bool) {
 	if len(patterns) == 0 {
 		return adapter{}, false
 	}
-	rootsFor := func(dir string) []string {
+	rootsFor := func(dir string, _ time.Time) []string {
 		out := make([]string, 0, len(patterns))
 		for _, r := range patterns {
 			out = append(out, core.ExpandHome(strings.ReplaceAll(r, "{dir}", dir)))

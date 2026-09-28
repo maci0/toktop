@@ -94,7 +94,7 @@ func TestDshRootsNamesBothStores(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	work := filepath.Join(home, "proj")
 	name := dshDirName(work)
-	got := dshRoots(work)
+	got := dshRoots(work, time.Now())
 	want := []string{
 		filepath.Join(home, ".dsh", "sessions", name),
 		filepath.Join(home, ".dsh-native", "sessions", name),

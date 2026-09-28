@@ -309,3 +309,34 @@ func TestKimiSessionCwdRefusesALinkedStateFile(t *testing.T) {
 		t.Fatalf("a linked state.json answered %q", cwd)
 	}
 }
+
+// The store listing is cached for kimiStoreEvery, and the window is measured
+// on the walker's clock, not on wall time. A replay steps that clock, so a
+// cache aged on wall time either never expires (a pinned clock is behind the
+// stamp it would be compared to) or expires on how long the replay took
+// rather than on how far the run advanced, and two runs of the same seed walk
+// a different number of directories.
+func TestKimiStoreListingAgesOnTheGivenClock(t *testing.T) {
+	store := t.TempDir()
+	mkdir := func(name string) {
+		if err := os.MkdirAll(filepath.Join(store, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mkdir("wd_a_key")
+	origin := time.Unix(1_700_000_000, 0).UTC()
+
+	if got := kimiStoreDirs(store, origin); len(got) != 1 || got[0] != "wd_a_key" {
+		t.Fatalf("first listing = %v, want the one directory", got)
+	}
+	// A second project appears while the cached listing is still fresh: the
+	// window has not passed, so the cache answers and the new directory is
+	// not there yet.
+	mkdir("wd_b_key")
+	if got := kimiStoreDirs(store, origin.Add(kimiStoreEvery-time.Second)); len(got) != 1 {
+		t.Fatalf("listing inside the window = %v, want the cached one", got)
+	}
+	if got := kimiStoreDirs(store, origin.Add(kimiStoreEvery)); len(got) != 2 {
+		t.Fatalf("listing past the window = %v, want the store re-read", got)
+	}
+}

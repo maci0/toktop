@@ -776,7 +776,12 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 	} else {
 		first = !d.failed
 		if first {
-			d.since = time.Now()
+			// The collector clock, not the wall clock: the sample's At, the
+			// probe-wave gate and the 429 backoff all follow it, so a latch
+			// stamped from time.Now ages against a timeline none of them
+			// shares and a run replaying on a seeded clock reports a
+			// down_for no seed can reproduce.
+			d.since = c.instant()
 		}
 		d.failed = true
 	}
@@ -790,7 +795,7 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 	}
 	if s.OK {
 		if first {
-			attrs = append(attrs, "down_for", time.Since(since).Round(time.Second))
+			attrs = append(attrs, "down_for", core.Age(c.instant(), since).Round(time.Second))
 			lg.Info("toktop: probe answering again", attrs...)
 		}
 		return
