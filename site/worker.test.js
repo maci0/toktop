@@ -23,6 +23,12 @@ const EDGE_DUR_RE = /^edge;dur=(\d+)$/;
 const HOVER_BORDER_RE = /a:hover[^}]*border-/;
 const DUR_SUFFIX_RE = /dur=\d+(?:\.\d+)?$/;
 const IMG_TAG_RE = /<img\b[^>]*>/g;
+// The transfer sizes site/README.md states as prose, and the phone visit it
+// derives from them.
+const README_SIZES_RE = /([\d,]+) bytes identity \/ ([\d,]+) gzip \/\s*([\d,]+) brotli/;
+const README_VISIT_RE =
+  /whole visit is those ([\d,]+) bytes[\s\S]*?([\d,]+) bytes in two requests/g;
+const thousandsStripped = (value) => Number(value.replaceAll(",", ""));
 const IMG_SIZE_RE = /width="(\d+)" height="(\d+)"/;
 const INLINED_ICON_RE = /rel="icon" href="data:image\/svg\+xml,([^"]+)"/;
 // The h1 is the terminal's own bold title; the brand above it is bold too.
@@ -939,6 +945,32 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   expect(brotli).toBeLessThan(budget);
   expect(brotli).toBeLessThan(gzipped);
   expect(gzipped).toBeLessThan(identity);
+});
+
+// The three numbers above are the only record anybody keeps of how heavy the
+// page got, and site/README.md restates them as prose. Prose is not measured:
+// a copy edit moved the page 30 bytes and the README kept quoting the old
+// three, so the one document that says how fast the site is described a page
+// this repo no longer serves. The README is read here and its figures are
+// compared against the bodies just measured, so a re-record is a test failure
+// with the new numbers in it rather than a silent drift.
+test("the README records the transfer sizes the page actually ships", async () => {
+  const readme = readFileSync(join(import.meta.dir, "README.md"), "utf8");
+  const recorded = readme.match(README_SIZES_RE);
+  expect(recorded).not.toBeNull();
+  const stated = recorded.slice(1).map(thousandsStripped);
+  const visit = [...readme.matchAll(README_VISIT_RE)].map((match) =>
+    match.slice(1).map(thousandsStripped),
+  );
+  for (const [index, coding] of ["", "gzip", "br"].entries()) {
+    const bytes = new Uint8Array(
+      await (await call(coding ? { "accept-encoding": coding } : {})).arrayBuffer(),
+    ).byteLength;
+    expect(stated[index]).toBe(bytes);
+  }
+  // The same pair the phone test bounds above, stated as the whole visit.
+  expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
+  expect(visit[0][1]).toBe(14_378);
 });
 
 const PUBLIC = join(import.meta.dir, "public");

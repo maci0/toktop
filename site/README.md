@@ -79,7 +79,7 @@ dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). `/favicon.ico` is the one exception, and it has to be: a crawler, a
 bookmark or a client that ignored the `<link rel="icon">` data URI asks for
-that path blind, and the catch-all answered it with the whole page, 12,942 bytes
+that path blind, and the catch-all answered it with the whole page, 12,972 bytes
 of `text/html` for a request that wants an image. The Worker answers it with
 the icon the page already carries inline, from the same bytes, with no asset
 binding and no second request, and a browser that reads the `<link>` still
@@ -240,10 +240,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 12,942 bytes identity / 4,472 gzip /
-3,785 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,785 bytes
-plus the 10,577-byte 768w capture, 14,362 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 12,972 bytes identity / 4,479 gzip /
+3,801 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,801 bytes
+plus the 10,577-byte 768w capture, 14,378 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no
