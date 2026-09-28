@@ -36,9 +36,26 @@ release (`make sbom`).
 ## Go, tooling only
 
 `honnef.co/go/tools` is pinned by the `tool` directive and run with `go tool`, so
-no analyzer lands in the binary. `govulncheck` and `cyclonedx-gomod` run from a
-`go run` version pin in the Makefile, not from the module graph, so their
-newer x/tools requirement cannot drag the shipped build up.
+no analyzer lands in the binary.
+
+## Fetched by a recipe
+
+These are dependencies too: each is resolved through a registry while a target
+runs, and a Makefile target that reaches for one without a row here is a package
+this tree took a dependency on with no record of why. The pin lives in the named
+Makefile variable, and `TestToolPinsAreExact` and `TestFetchedToolsAreDocumented`
+hold both halves of it: the version and the reason.
+
+| Makefile pin | Tool | License | Why it is here |
+| --- | --- | --- | --- |
+| `GOVULNCHECK` | `golang.org/x/vuln/cmd/govulncheck` | BSD-3-Clause | Reachable-call-graph advisory scan for the standard library and every module above. |
+| `SBOM_TOOL` | `github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod` | Apache-2.0 | Writes the CycloneDX inventory a release ships, licenses included. |
+| `BIOME` | `@biomejs/biome` | MIT OR Apache-2.0 | Formats and lints the Worker. The Rust binary, not a JS tree, so the Worker keeps no manifest. |
+| `WRANGLER` | `wrangler` | MIT OR Apache-2.0 | Publishes and rolls back the Worker. The only thing here that talks to Cloudflare. |
+
+The two `go run` tools are pinned outside the module graph on purpose: their x/tools
+requirement is newer than the shipped build's, so joining the module graph would drag
+every released binary up with them.
 
 ## Python, scripts/ only
 
@@ -80,10 +97,9 @@ against.
   ships next to the binaries.
 - `cmd/toktop/deps_test.go`: a direct require that nothing imports, or that has
   no entry in this file, fails the test run. The same file requires an entry
-  here for every `tool` directive and every pin in the requirements files, and
-  a version on every `go run`/`bunx` invocation the Makefile fetches with. A
-  `go run` or `bunx` tool missing from this table is not caught by a test; it
-  belongs here by the same rule.
+  here for every `tool` directive and every pin in the requirements files, a
+  version on every `go run`/`bunx` invocation the Makefile fetches with, and an
+  entry here for the tool that invocation names.
 
 A release ships the checksums file and the SBOM, not a sigstore attestation, so
 a downloaded binary is verified against the checksum its own release page

@@ -478,27 +478,32 @@ func expandVars(s string, vars map[string]string) string {
 	}
 }
 
-// unpinnedTools returns every tool in the Makefile that a recipe fetches
-// without naming a version: `go run` without @version resolves whatever the
-// proxy serves that minute, and `bunx` without @version installs the latest
-// release. A pin held in an assignment counts, because that is where the
-// version pins live.
-func unpinnedTools(t *testing.T) []string {
+// fetchedTool is one tool a Makefile recipe pulls from a registry or a proxy
+// while the recipe runs: the coordinate the recipe names, and the line it came
+// from.
+type fetchedTool struct {
+	line string
+	tool string
+}
+
+// fetchedTools returns every tool in the Makefile a recipe fetches, in the
+// order the recipes spell them. `go run` resolves through the module proxy and
+// `bunx` through the npm registry, so each is a package this tree takes a
+// dependency on at build time.
+func fetchedTools(t *testing.T) []fetchedTool {
 	t.Helper()
 	raw, err := os.ReadFile(filepath.Join(moduleRoot, "Makefile"))
 	if err != nil {
 		t.Fatalf("read Makefile: %v", err)
 	}
 	vars := makeVars(t)
-	var unpinned []string
-	found := 0
+	var fetched []fetchedTool
 	for _, line := range strings.Split(string(raw), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
 		fields := strings.Fields(expandVars(line, vars))
-		var tool string
 		for i, field := range fields {
 			if i == 0 || i+1 >= len(fields) {
 				continue
@@ -507,26 +512,42 @@ func unpinnedTools(t *testing.T) []string {
 			// `run` after an ordinary word is a recipe running something
 			// local, or the prose of a target's help line.
 			if (field == "run" && strings.HasPrefix(fields[i-1], "$(")) || field == "bunx" {
-				tool = fields[i+1]
+				fetched = append(fetched, fetchedTool{line: line, tool: fields[i+1]})
 			}
 		}
-		if tool == "" {
-			continue
-		}
-		found++
-		_, version, ok := strings.Cut(tool, "@")
-		if !ok || version == "" || strings.ContainsAny(version, "$ ") {
-			unpinned = append(unpinned, line)
-		}
 	}
-	if found == 0 {
+	if len(fetched) == 0 {
 		t.Fatal("the Makefile parsed to no tool invocations; the parser no longer understands the file")
 	}
-	return unpinned
+	return fetched
 }
 
+// TestToolPinsAreExact fails when a recipe fetches a tool without naming a
+// version: `go run` without @version resolves whatever the proxy serves that
+// minute, and `bunx` without @version installs the latest release. A pin held
+// in an assignment counts, because that is where the version pins live.
 func TestToolPinsAreExact(t *testing.T) {
-	for _, line := range unpinnedTools(t) {
-		t.Errorf("Makefile fetches a tool without a version: %s; pin it in a variable above the recipe", line)
+	for _, f := range fetchedTools(t) {
+		_, version, ok := strings.Cut(f.tool, "@")
+		if !ok || version == "" || strings.ContainsAny(version, "$ ") {
+			t.Errorf("Makefile fetches a tool without a version: %s; pin it in a variable above the recipe", f.line)
+		}
+	}
+}
+
+// TestFetchedToolsAreDocumented is the other half of the pin: the coordinate
+// has to appear in the dependency table, or the package lands with a version
+// nobody recorded a reason for. A row here costs one line, and it is what a
+// reader of the table has to check a supply chain against.
+func TestFetchedToolsAreDocumented(t *testing.T) {
+	reasoned, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
+	if err != nil {
+		t.Fatalf("read %s: %v", dependencyTable, err)
+	}
+	for _, f := range fetchedTools(t) {
+		module, _, _ := strings.Cut(f.tool, "@")
+		if !strings.Contains(string(reasoned), module) {
+			t.Errorf("Makefile fetches %s and it has no entry in %s; record why it is here", module, dependencyTable)
+		}
 	}
 }
