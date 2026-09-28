@@ -577,13 +577,23 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// Content-Type, so text/plain sails past CORS preflight) and forge rows
 	// into the live feed.
 	rc := http.NewResponseController(w)
+	// A writer that refuses the deadline leaves every response below with no
+	// bound at all: a peer that stops reading pins this goroutine to the OS
+	// TCP timeout, and the audit line would still read a clean 202. The
+	// refusal rides the request's own audit line rather than being dropped,
+	// the way progressBody.armed records whether a read deadline was accepted.
+	var writeArm []any
 	armWrite := func() {
-		_ = rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout))
+		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
+			writeArm = []any{"write_deadline_unarmed", logcfg.RedactedField(err.Error(), 256)}
+		} else {
+			writeArm = nil
+		}
 	}
 	if r.Header.Get("Origin") != "" {
 		msg := "browser-originated requests are not accepted; post from a script or agent without an Origin header"
 		armWrite()
-		reject(http.StatusForbidden, msg)
+		reject(http.StatusForbidden, msg, writeArm...)
 		return
 	}
 	// The slot covers the decode, the one part of the request that can hold a
@@ -600,7 +610,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		// the same number /healthz reports, on the same refusals.
 		reject(http.StatusServiceUnavailable,
 			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(slots)),
-			"in_flight", len(slots), "slot_cap", cap(slots))
+			append([]any{"in_flight", len(slots), "slot_cap", cap(slots)}, writeArm...)...)
 		return
 	}
 	until := time.Now().Add(maxEventLifetime)
@@ -650,7 +660,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		armWrite()
-		reject(res.status, msg, res.extra...)
+		reject(res.status, msg, append(append([]any{}, res.extra...), writeArm...)...)
 	}
 	res := s.decodeStream(dec, progress, replayKey, state)
 	n, stored = res.decoded, res.stored
@@ -667,11 +677,11 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		// The events are already recorded, so the status stands. The reason
 		// still belongs in the audit line: without it a vanished sender and a
 		// timeout mid-body are indistinguishable from success.
-		done(http.StatusAccepted, n, stored, "response write failed: "+logcfg.RedactAddrs(err.Error()))
+		done(http.StatusAccepted, n, stored, "response write failed: "+logcfg.RedactAddrs(err.Error()), writeArm...)
 		return
 	}
 	_ = rc.SetWriteDeadline(time.Time{}) // keep-alive must not inherit the write cap
-	done(http.StatusAccepted, n, stored, "")
+	done(http.StatusAccepted, n, stored, "", writeArm...)
 }
 
 // streamResult is how a decoded body ended. status is zero for a clean end of

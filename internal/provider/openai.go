@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strings"
@@ -82,8 +83,10 @@ func (o *OpenAICompat) poll(ctx context.Context) (*Metrics, error) {
 	}
 	// One of /metrics, /v1/models, or a native enrich endpoint is
 	// enough; none of them answering is a down engine, not an idle one.
+	// Both failures are reported: the one that reaches the operator is
+	// often the one they do not need to fix.
 	if !haveModels && merr != nil && !enriched {
-		return nil, fmt.Errorf("no known endpoints on %s: %w", o.base, merr)
+		return nil, fmt.Errorf("no known endpoints on %s: %w", o.base, errors.Join(merr, modelsErr))
 	}
 	if m.Version == "" {
 		m.Version = o.version.fetch(ctx, o.base)

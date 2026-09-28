@@ -259,7 +259,18 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 			}
 		case "port":
 			if inBlock && entry.Port == 0 {
-				if p, err := strconv.Atoi(val); err == nil && p > 0 && p < 65536 {
+				p, err := strconv.Atoi(val)
+				switch {
+				case err != nil:
+					// The port falls back to 22, so the failure surfaces as a
+					// connection error on a port the operator never wrote.
+					// Say which value was refused.
+					audit().Warn("toktop: ssh config Port is not a number; using the default port 22",
+						"port", core.RedactHome(core.Snippet([]byte(val))))
+				case p <= 0 || p >= 65536:
+					audit().Warn("toktop: ssh config Port is out of range; using the default port 22",
+						"port", core.RedactHome(core.Snippet([]byte(val))))
+				default:
 					entry.Port = p
 				}
 			}

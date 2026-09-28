@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/procs"
 )
 
@@ -30,7 +31,12 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 
 	// A failing /proc/net/tcp read is not fatal: hardened kernels hide it
 	// from unprivileged readers and the active probe below covers the gap.
-	if out, err := c.Run(ctx, netTCPScript); err == nil {
+	// The reason is still logged: without it, a sweep that never read a
+	// listening port is indistinguishable from a host that has none.
+	if out, err := c.Run(ctx, netTCPScript); err != nil {
+		audit().Warn("toktop: remote listening-port sweep failed, falling back to an active probe",
+			"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+	} else {
 		d.Listening = parseNetTCP(out)
 	}
 	if len(d.Listening) == 0 {
@@ -47,8 +53,13 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 
 	// Engine-port hints are optional: a failing or missing cmdline sweep just
 	// means custom-port engines are not pre-discovered; the listening-port
-	// sweep above still drives the tunnel.
-	if out, err := c.Run(ctx, procScanScript()); err == nil {
+	// sweep above still drives the tunnel. Logged, because an engine bound
+	// to a custom port then never appears and the only symptom is its
+	// absence from the dashboard.
+	if out, err := c.Run(ctx, procScanScript()); err != nil {
+		audit().Warn("toktop: remote engine scan failed; engines on custom ports will not be discovered",
+			"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+	} else {
 		d.EnginePorts = enginePorts(parseProcScan(out))
 	}
 	return d, nil

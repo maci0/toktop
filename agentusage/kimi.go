@@ -8,7 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io/fs"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -159,6 +159,12 @@ func kimiSessionCwd(wirePath string) (string, bool) {
 // walk that reaches the filesystem root is looking too far.
 const kimiSessionDepth = 4
 
+// kimiStateCap bounds the state.json read. The file holds one cwd, so
+// anything past this is not a state file toktop can use, and the store is
+// writable by the agent: an unbounded ReadFile turns a padded file into
+// memory the watcher holds on every poll.
+const kimiStateCap = 1 << 20
+
 // readKimiState reads the cwd state.json records in dir.
 func readKimiState(dir string) (string, bool) {
 	r, err := os.OpenRoot(dir)
@@ -166,8 +172,13 @@ func readKimiState(dir string) (string, bool) {
 		return "", false
 	}
 	defer r.Close()
-	b, err := fs.ReadFile(r.FS(), "state.json")
+	f, err := r.Open("state.json")
 	if err != nil {
+		return "", false
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, kimiStateCap+1))
+	if err != nil || len(b) > kimiStateCap {
 		return "", false
 	}
 	var st struct {

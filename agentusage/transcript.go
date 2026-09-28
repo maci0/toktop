@@ -77,6 +77,7 @@ func (w *Watcher) readNew(path string) {
 	}
 	f, err := w.openTranscript(path)
 	if err != nil {
+		w.auditRead(path, err)
 		return // unstamped: the next poll retries instead of treating this as done
 	}
 	defer f.Close()
@@ -86,21 +87,25 @@ func (w *Watcher) readNew(path string) {
 		return
 	}
 	if _, err := f.Seek(off, 0); err != nil {
+		w.auditRead(path, err)
 		return
 	}
 	var (
 		recs     []values
 		complete int64
 		ok       bool
+		rerr     error
 	)
 	if isDshZstd(path) {
 		recs, complete, ok = w.consumeZstd(path, f, off)
 	} else {
-		recs, complete, ok = w.consumeAppend(f, off)
+		recs, complete, ok, rerr = w.consumeAppend(f, off)
 	}
 	if !ok {
+		w.auditRead(path, rerr)
 		return // read failed: nothing counted, offset and stamp unchanged, retried next poll
 	}
+	w.auditRead(path, nil)
 	for _, v := range recs {
 		w.applyRecord(path, v)
 	}
@@ -154,8 +159,10 @@ func (w *Watcher) snapshotValue(f *os.File) (values, bool) {
 
 // consumeAppend reads from off to EOF, returning parsed records and the
 // offset just past the last committed record. ok is false on a mid-file
-// read error so the caller leaves offset and stamp alone.
-func (w *Watcher) consumeAppend(f *os.File, off int64) (recs []values, complete int64, ok bool) {
+// read error so the caller leaves offset and stamp alone, and rerr carries
+// that error so the caller can name the transcript that will not read rather
+// than treating the file as an idle session forever.
+func (w *Watcher) consumeAppend(f *os.File, off int64) (recs []values, complete int64, ok bool, rerr error) {
 	var (
 		line    []byte
 		discard bool
@@ -213,9 +220,9 @@ func (w *Watcher) consumeAppend(f *os.File, off int64) (recs []values, complete 
 					}
 				}
 			}
-			return recs, complete, true
+			return recs, complete, true, nil
 		}
-		return nil, 0, false
+		return nil, 0, false, rerr
 	}
 }
 

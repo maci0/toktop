@@ -47,7 +47,8 @@ func (tr transcript) read(t *testing.T, w *Watcher, off int64) (recs []values, c
 	if _, err := f.Seek(off, io.SeekStart); err != nil {
 		t.Fatal(err)
 	}
-	return w.consumeAppend(f, off)
+	recs, complete, ok, _ = w.consumeAppend(f, off)
+	return recs, complete, ok
 }
 
 // addTo folds one consumed record into a running total. A committed record

@@ -73,6 +73,12 @@ type Watcher struct {
 	baseInput map[string]int
 	seen      map[string]values // file -> this attach's contribution
 	total     map[string]int
+	// readFailed latches the transcripts whose read has already been audited,
+	// so a file that keeps failing is named once rather than once per poll.
+	// The entry is cleared by the first read that commits, which makes the
+	// next failure a new thing to report.
+	readFailed map[string]bool
+
 	// sourceBase is per-session counters at attach for a sessionSource
 	// (crush). completion_tokens and prompt_tokens are cumulative for the
 	// session's life, so without this a continued session would dump its
@@ -159,6 +165,7 @@ func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 		base: map[string]int{}, baseThink: map[string]int{},
 		baseInput: map[string]int{},
 		seen:      map[string]values{}, total: map[string]int{},
+		readFailed: map[string]bool{},
 	}
 	// Record where existing files end before anything is counted. Every
 	// transcript already in the store is seeded, not only the ones written in
@@ -176,6 +183,11 @@ func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 	for _, path := range w.attachCandidates() {
 		fi, err := os.Stat(path)
 		if err != nil {
+			// A file that is not there any more is the normal race between
+			// the listing and this stat. Any other failure leaves the file
+			// unseeded, so its next append is read from byte zero and the
+			// whole prior session lands on this attach; say which file.
+			auditBaseline(path, err)
 			continue
 		}
 		w.offsets[path] = fi.Size()
@@ -341,8 +353,14 @@ func uniqueRoots(roots []string) []string {
 // openTranscript opens path only if it still lives under one of this
 // watcher's roots. A symlink swapped to point outside is refused, so a
 // writable store cannot pull in a file from elsewhere.
+//
+// A store that cannot be opened (no permission, an I/O error, too many open
+// files) keeps the cause its root gave it: reporting every failure as
+// os.ErrNotExist makes an unreadable store look like an empty one, and the
+// session is then billed its whole history the moment it becomes readable.
 func (w *Watcher) openTranscript(path string) (*os.File, error) {
 	refused := false
+	cause := error(nil)
 	for _, root := range w.rootsLocked(w.clock()()) {
 		if root == "" {
 			continue
@@ -354,9 +372,15 @@ func (w *Watcher) openTranscript(path string) (*os.File, error) {
 		if errors.Is(err, errOutsideRoot) {
 			refused = true
 		}
+		if cause == nil && !errors.Is(err, fs.ErrNotExist) {
+			cause = err
+		}
 	}
 	if refused {
 		return nil, errOutsideRoot
+	}
+	if cause != nil {
+		return nil, cause
 	}
 	return nil, os.ErrNotExist
 }
@@ -399,6 +423,29 @@ var errOutsideRoot = errors.New("path is outside the transcript root")
 // errBaselineUnread names the one seedBaseline failure that carries no
 // error of its own: a decode the reader rejected without surfacing a cause.
 var errBaselineUnread = errors.New("transcript body could not be decoded")
+
+// auditRead records a transcript that would not open or read, so an agent
+// whose store is unreadable is distinguishable from one that is idle. The
+// name is latched per file: the same file fails again on every poll, and the
+// offset does not move, so one line per failure is enough. A read that
+// commits clears the latch, making the next failure a new thing to report.
+// A file that is simply not there any more is not a failure worth a line.
+func (w *Watcher) auditRead(path string, err error) {
+	if err == nil {
+		delete(w.readFailed, path)
+		return
+	}
+	if errors.Is(err, fs.ErrNotExist) {
+		return
+	}
+	if w.readFailed[path] {
+		return
+	}
+	w.readFailed[path] = true
+	audit().Warn("agent usage transcript read failed; its usage is not counted until it reads again",
+		"path", core.RedactHome(path),
+		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+}
 
 // auditBaseline records a seed that did not commit, naming the transcript
 // so the operator can find the session whose totals are overstated. A file
@@ -463,14 +510,19 @@ func (w *Watcher) seedBaseline(path string) {
 	var (
 		recs []values
 		ok   bool
+		rerr error
 	)
 	if isDshZstd(path) {
 		recs, _, ok = w.consumeZstd(path, f, 0)
 	} else {
-		recs, _, ok = w.consumeAppend(f, off)
+		recs, _, ok, rerr = w.consumeAppend(f, off)
 	}
 	if !ok {
-		auditBaseline(path, errBaselineUnread)
+		if rerr != nil {
+			auditBaseline(path, rerr)
+		} else {
+			auditBaseline(path, errBaselineUnread)
+		}
 		return
 	}
 	for _, v := range recs {

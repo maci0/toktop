@@ -74,8 +74,9 @@ func httpStatus(url string, resp *http.Response) error {
 	}
 	if rerr != nil {
 		// A body that stopped partway is a fragment, not what the engine
-		// said. Saying so keeps an operator from debugging the truncation.
-		msg += fmt.Sprintf(" (body read: %v)", rerr)
+		// said. The cause is wrapped, not spelled into the text, so a
+		// caller can still tell a truncated transfer from a bad payload.
+		return fmt.Errorf("%s: %w", msg, rerr)
 	}
 	return errors.New(msg)
 }

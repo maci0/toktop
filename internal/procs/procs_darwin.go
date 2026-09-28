@@ -46,7 +46,7 @@ func listDarwin() ([]raw, error) {
 	}
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ps -axo pid=,%cpu=,rss=,command=: %w", err)
 	}
 	return parseDarwinProcesses(string(out)), nil
 }

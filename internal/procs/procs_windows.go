@@ -66,7 +66,7 @@ func listWindows() ([]raw, error) {
 	cmd.WaitDelay = listPipeGrace
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%s -NoProfile -Command Get-CimInstance Win32_Process: %w", shell, err)
 	}
 	var procs []cimProc
 	if json.Unmarshal(out, &procs) != nil {
