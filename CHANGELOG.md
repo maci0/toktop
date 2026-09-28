@@ -13,6 +13,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-09-28
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.21.0).
+
 ### Added
 
 - `microagent` is read. It writes one session log per run under
@@ -2495,7 +2500,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/maci0/toktop/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/maci0/toktop/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/maci0/toktop/compare/v0.18.2...v0.19.0
 [0.18.2]: https://github.com/maci0/toktop/compare/v0.18.1...v0.18.2
