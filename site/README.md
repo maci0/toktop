@@ -128,11 +128,13 @@ get the identity bytes. Among the encodings a client accepts,
 the smallest body at the highest q-value wins, so a typical `gzip, deflate,
 br, zstd` request is answered with brotli rather than gzip. That ranking is a
 constant list in the Worker rather than a comparison of bodies, because the
-page is a constant too: brotli 3,785 bytes, gzip 4,472, zstd 4,705. zstd
+page is a constant too: brotli, then gzip, then zstd, sized under the pinned
+bun and measured at the bottom of this file. zstd
 lands behind gzip here, so a client that named only `zstd, gzip` still gets
 gzip. Unlisted identity
 is a fallback, not a preference over accepted compression: `gzip;q=0.5` now
-transfers 4,472 bytes rather than 12,942 bytes in the local Worker response test.
+transfers the gzip body rather than the full page in the local Worker response
+test.
 An explicit identity preference is respected. Refusing all available encodings
 returns an uncacheable 406, including conditional requests; HEAD has no body.
 
@@ -167,7 +169,7 @@ Worker spent before writing the response, failures included: a failed request
 is the one a visitor reports, and a timing series that covered only the served
 requests would describe exactly the ones nobody is asking about. A byte-count
 test cannot see a
-regression here: the page can send the same 3,785 bytes slowly. With the
+regression here: the page can send the same bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
 has to be added to the page to collect it.

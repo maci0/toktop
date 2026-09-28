@@ -85,19 +85,6 @@ HELP_FLAGS: frozenset[str] = frozenset({"-h", "--help"})
 HEX_DIGITS = 6
 
 
-def clamp8(v: int) -> int:
-    """Clamp v to a single color channel's 0-255 range."""
-    return max(0, min(255, v))
-
-
-def sgr_rgb(color: RGB | None) -> RGB | None:
-    """Clamp every channel of color, passing None (default) through."""
-    if color is None:
-        return None
-    r, g, b = color
-    return (clamp8(r), clamp8(g), clamp8(b))
-
-
 def _search(pattern: str) -> list[str]:
     hits: list[str] = []
     for root in FONT_ROOTS:
@@ -279,8 +266,8 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
             if ch == " " and line[x].bg is None and line[x].fg is None:
                 x += 1
                 continue
-            fg = sgr_rgb(ansi_or_truecolor(line[x].fg)) or FG_DEFAULT
-            bg = sgr_rgb(ansi_or_truecolor(line[x].bg))
+            fg = ansi_or_truecolor(line[x].fg) or FG_DEFAULT
+            bg = ansi_or_truecolor(line[x].bg)
             bold = line[x].bold
             if bg is not None:
                 draw.rectangle(

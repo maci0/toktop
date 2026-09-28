@@ -162,17 +162,6 @@ type jsonGPU struct {
 // is stated here rather than left to the field name.
 const bytesPerMB = 1 << 20
 
-// originStamp renders the pinned demo origin, empty for a run that started on
-// the wall clock. The instant is reported as given rather than in the local
-// zone, so a capture taken under two timezones still names the same origin.
-//
-// At full precision, because this string is the input a replay is fed. The
-// timeline is laid out from the origin, and --origin takes a fractional RFC
-// 3339 instant, so formatting to whole seconds moved every stamp in the
-// replayed run ahead of the capture by the fraction it dropped: the run whose
-// bytes the report was read to reproduce was no longer reproducible from it.
-// A whole-second origin formats without a fraction either way, so the common
-// capture is unchanged.
 // demoSeed reports the seed only in a demo run, where --seed is in effect.
 // Seed 0 is a working seed, so the field carries a pointer: a plain int with
 // omitempty would drop exactly that one and leave a replay reading a report
@@ -185,6 +174,17 @@ func demoSeed(cfg Config) *int64 {
 	return &seed
 }
 
+// originStamp renders the pinned demo origin, empty for a run that started on
+// the wall clock. The instant is reported as given rather than in the local
+// zone, so a capture taken under two timezones still names the same origin.
+//
+// At full precision, because this string is the input a replay is fed. The
+// timeline is laid out from the origin, and --origin takes a fractional RFC
+// 3339 instant, so formatting to whole seconds moved every stamp in the
+// replayed run ahead of the capture by the fraction it dropped: the run whose
+// bytes the report was read to reproduce was no longer reproducible from it.
+// A whole-second origin formats without a fraction either way, so the common
+// capture is unchanged.
 func originStamp(at time.Time) string {
 	if at.IsZero() {
 		return ""

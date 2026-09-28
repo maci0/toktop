@@ -187,7 +187,7 @@ in day-to-day work:
 | `make test` | all tests, `-race -shuffle=on` (same flags as CI); `RACE=0` skips `-race` |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` + the doc guards |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc guards |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |

@@ -555,7 +555,7 @@ func postJSON(ctx context.Context, url string, body []byte) (*http.Response, err
 		if s := core.Snippet(b); s != "" {
 			msg += ": " + s
 		}
-		cause := error(errors.New(msg))
+		cause := errors.New(msg)
 		if rerr != nil {
 			// A body that stopped partway is a fragment, not what the engine
 			// said. The cause is wrapped, not spelled into the text, so a

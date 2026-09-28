@@ -522,12 +522,12 @@ const COMPRESSIBLE = new Map([
   ["gzip", "gzip"],
 ]);
 
-// The same three codings, smallest body of this page first: brotli 3,643,
-// gzip 4,328, zstd 4,566 bytes. The page is a constant, so those sizes are
-// constants too, and ranking by them lets a request build only the coding it
-// is about to send instead of all three to compare them. zstd lands behind
-// gzip here because the page is short English words and markup, which is not
-// what a zstd dictionary is for.
+// The same three codings, smallest body of this page first. The page is a
+// constant, so those sizes are constants too, and ranking by them lets a
+// request build only the coding it is about to send instead of all three to
+// compare them. zstd lands behind gzip here because the page is short English
+// words and markup, which is not what a zstd dictionary is for. The measured
+// sizes are asserted in worker.test.js; they are not repeated here.
 const CODING_BY_SIZE = ["br", "gzip", "zstd"];
 
 async function compressFormat(format) {

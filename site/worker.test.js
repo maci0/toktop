@@ -248,9 +248,9 @@ test("accept-encoding variants negotiate correctly", async () => {
     ["gzip", "gzip"],
     ["GZIP", "gzip"],
     ["*", "br"],
-    // zstd is bigger than gzip on this page (4,585 against 4,345), so the
-    // ranking the Worker negotiates from is a list, not the order the
-    // codings are offered in, and a client naming both gets the smaller.
+    // zstd is bigger than gzip on this page, so the ranking the Worker
+    // negotiates from is a list, not the order the codings are offered in,
+    // and a client naming both gets the smaller.
     ["zstd, gzip", "gzip"],
     ["gzip, deflate, br, zstd", "br"],
     ["gzip;q=0.5, br", "br"],
@@ -922,9 +922,8 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
 // inline CSS are everything there is, so staying under this keeps first paint
 // at one round trip. The identity size is the record: a copy change that
 // grows the document fails here instead of hiding under the window ceiling.
-// The two compressed sizes are recorded as measured under the pinned bun, so
-// a copy change that grows the document fails here instead of hiding under the
-// window ceiling. Re-measure them with this test when the page changes.
+// The two compressed sizes are recorded as measured under the pinned bun.
+// Re-measure them with this test when the page changes.
 test("recorded transfer sizes stay inside the initial congestion window", async () => {
   const budget = 10 * 1460;
   const identity = new Uint8Array(await (await call()).arrayBuffer()).byteLength;
@@ -938,7 +937,6 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
-  expect(identity).toBeLessThan(budget);
   expect(brotli).toBeLessThan(gzipped);
   expect(gzipped).toBeLessThan(identity);
 });

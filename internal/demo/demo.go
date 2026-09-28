@@ -252,7 +252,9 @@ func (s *Source) frame(now time.Time) {
 		in := clamp((b.inBase*wave+burst*4)*jitter, 0, 20000)
 		s.histOut[b.label] = ring(s.histOut[b.label], out)
 		s.histIn[b.label] = ring(s.histIn[b.label], in)
-		s.ts[b.label] = ringTime(s.ts[b.label], now)
+		// the stamp ring slides alongside the value rings, so every sample
+		// keeps the simulated instant it was produced at
+		s.ts[b.label] = ring(s.ts[b.label], now)
 
 		target := 45 + 40*math.Sin(s.t/14+float64(i)) + s.rng.NormFloat64()*3
 		s.kv[i] += (clamp(target, 3, 99) - s.kv[i]) * 0.15
@@ -459,18 +461,9 @@ func tail(h []float64) float64 {
 	return h[len(h)-1]
 }
 
-func ring(h []float64, v float64) []float64 {
+func ring[T any](h []T, v T) []T {
 	if len(h) >= core.HistoryLen {
 		h = h[1:]
 	}
 	return append(h, v)
-}
-
-// ringTime slides the stamp ring alongside a value ring, so every sample
-// keeps the simulated instant it was produced at.
-func ringTime(h []time.Time, at time.Time) []time.Time {
-	if len(h) >= core.HistoryLen {
-		h = h[1:]
-	}
-	return append(h, at)
 }

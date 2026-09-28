@@ -221,9 +221,11 @@ var dialAgent = func(sock string) (agent.Agent, func(), error) {
 func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 	cleanup := func() {}
 	var methods []ssh.AuthMethod
-	if m, err := keyFileAuth(t.KeyFile, true); err != nil {
+	m, err := keyFileAuth(t.KeyFile, true)
+	if err != nil {
 		return nil, cleanup, fmt.Errorf("key %s: %w", t.KeyFile, err)
-	} else if m != nil {
+	}
+	if m != nil {
 		methods = append(methods, m)
 	}
 	for _, p := range defaultKeyPaths() {

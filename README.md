@@ -263,16 +263,13 @@ finds out which entries a definitions file registered and which it skipped
 naming one is skipped on load rather than registered). Use `RegisterSpec` to
 read such an agent elsewhere. A definition does replace a compiled-in
 *definition*, pi, prime-agent, feynman and omp. `Supported` covers every agent.
-`Watch` returns
-a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
-and matches `ErrUnsupportedTool`. Every method on it is safe to call, so a
-caller tests `w.Err() != nil` rather than the pointer. A sample is the total
+`Watch` returns a nil `*Watcher` when an agent keeps nothing readable, and
+`Watcher.Err` reports that as `ErrUnsupportedTool`. A sample is the total
 since the watcher attached, so a program reporting events takes the growth
-between two of them from `Sample.Delta`, which reports nothing when a
-transcript was rewritten under the watcher rather than a negative count.
-`Rate` is output
-tokens per second between two samples; `InputRate` is the same for billed
-prompt tokens, and `ThinkingRate` for the reasoning share. All three divide
+between two of them from `Sample.Delta`.
+`Rate` is output tokens per second between two samples; `InputRate` is the
+same for billed prompt tokens, and `ThinkingRate` for the reasoning share.
+All three divide
 by the time the model spent (`Sample.Span`) when the transcript recorded it,
 and by the gap between the two readings when it did not, and all three report
 whether a rate could be computed at all. None of them extrapolates from one

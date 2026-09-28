@@ -42,12 +42,15 @@ func agentIdle(now, last time.Time) (time.Duration, recency) {
 	if now.IsZero() || last.IsZero() {
 		return 0, recencyUnknown
 	}
-	if d := now.Sub(last); d < 0 {
+	d := now.Sub(last)
+	switch {
+	case d < 0:
 		return 0, recencyIdle
-	} else if d < agentLiveWindow {
+	case d < agentLiveWindow:
 		return d, recencyLive
+	default:
+		return d, recencyIdle
 	}
-	return now.Sub(last), recencyIdle
 }
 
 // How an agent's recency cell reads. The three states are distinct because

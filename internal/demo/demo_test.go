@@ -348,9 +348,9 @@ func TestRingTimeKeepsRealInstants(t *testing.T) {
 	base := time.Now()
 	var ts []time.Time
 	for i := range 5 {
-		ts = ringTime(ts, base.Add(time.Duration(i)*500*time.Millisecond))
+		ts = ring(ts, base.Add(time.Duration(i)*500*time.Millisecond))
 	}
-	ts = ringTime(ts, base.Add(9*time.Second)) // 6.5s stall, ticks coalesced
+	ts = ring(ts, base.Add(9*time.Second)) // 6.5s stall, ticks coalesced
 	if want := base.Add(2 * time.Second); !ts[4].Equal(want) {
 		t.Fatalf("stamp before the gap = %v, want %v", ts[4], want)
 	}
@@ -363,7 +363,7 @@ func TestRingTimeSlidesAtHistoryLen(t *testing.T) {
 	base := time.Unix(1_000_000, 0)
 	var ts []time.Time
 	for i := range core.HistoryLen + 3 {
-		ts = ringTime(ts, base.Add(time.Duration(i)*time.Second))
+		ts = ring(ts, base.Add(time.Duration(i)*time.Second))
 	}
 	if len(ts) != core.HistoryLen {
 		t.Fatalf("stamps = %d, want %d", len(ts), core.HistoryLen)
