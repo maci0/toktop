@@ -381,6 +381,39 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the provider health panel divided by a raw subtraction, so a backward step
   charged a frame's tokens against an interval of the wrong sign.
 
+- The THROUGHPUT and PROMPT plots read one timescale. They are drawn stacked
+  with no axis on either, and the prompt plot read the uniform cadence while
+  the one above it read the mode `t` selects, so a column of the lower plot
+  could span a different span of wall clock than the column above it and a
+  reader comparing the two traces had nothing on the frame to say the mode had
+  split them. Both now take the mode and the block boundaries from the same
+  series, and the prompt plot draws the grid lines the throughput one does, so
+  a shared column is visibly a shared column.
+
+- The SYS strip says what it left out. A row that ran out of cells ended
+  mid-list, so on a host with several accelerators the vitals row stopped after
+  the first GPU and said nothing, which reads as one GPU on the machine, and a
+  reader could not tell a row that had to drop a reading from a row that fitted
+  one. Both rows now end with the number of readings they shed, and the
+  identity row counts the temperatures its cap never turned into segments
+  together with the ones the pack dropped, so one `+N more` accounts for the
+  whole row rather than two counts a reader cannot tell apart.
+
+- The empty agent feed carries one sentence. The dashboard panel and
+  `--once --plain` each spelled their own version of the same advice, and the
+  two had drifted apart in wording and punctuation. They share the sentence
+  now, and differ only in where they point: the dashboard names the endpoint in
+  its panel title, the linear report spells the address out.
+
+- The panic audit line folds the home directory out of both the recovered
+  value and the stack. A panic is the one payload in the ingest path that
+  reached the line untrimmed, and it is the one this process does not author:
+  the handlers decode event fields off the wire, so a panic raised while
+  holding one carries whatever the sender wrote, and a stack frame names the
+  file it unwound through. Every other sink in the package already clipped and
+  folded its text, because the audit stream outlives the run and gets pasted
+  into issues.
+
 ## [0.19.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on
