@@ -196,7 +196,7 @@ in day-to-day work:
 | `make readme-assets` | rebuild the README's dashboard capture in `docs/images/dashboard.avif` from the same source frame, then run `bun test site/` (same tools) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
-| `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag (`make check` runs it) |
+| `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
@@ -243,7 +243,11 @@ without the embedded zone database resolves `time.Local` against the host's
 zone files, which is the fallback the released binaries no longer have, and
 after that `make test` and CI are testing two different programs.
 `make check-ci-tags` fails on any such line that lost the tag; it runs in
-`make check` and in the Linux leg of the test job. Everything
+`make check` and in the Linux leg of the test job. It fails the same way on a
+`go vet` line that lost `-tests=true`, the flag the Makefile targets pass: vet
+skips the test files without it, and a test function whose name and signature
+no longer match what `go test` runs is then never executed and never named.
+Everything
 except the three-OS test matrix and the cross-compile job is one command
 locally:
 

@@ -424,10 +424,18 @@ sbom: ## generate CycloneDX SBOM of all dependencies into dist/
 	$(GO) run $(SBOM_TOOL) \
 		mod -licenses -std -noserial -notimestamp -json -output $(DIST)/toktop-sbom-$(VERSION).cdx.json .
 
+# -tests=true turns on vet's tests analyzer, which is off by default. It reads
+# the _test.go files for a Test/Fuzz/Benchmark/Example whose name and signature
+# do not match what `go test` runs: a mis-signed case is never executed and the
+# package still reports ok. The tree passes it on both halves, so it is on
+# rather than ratcheted. ci.yml spells its go vet lines out, and check-ci-tags
+# is what keeps them from drifting; the flag goes there too.
+VET_TESTS := -tests=true
+
 .PHONY: vet
 vet: ## run go vet (both halves of the sqlite tag gate)
-	$(GO) vet -mod=readonly $(GOTAGS_BARE) ./...
-	$(GO) vet -mod=readonly $(GOTAGS) ./agentusage/...
+	$(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS_BARE) ./...
+	$(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS) ./agentusage/...
 
 # Same per-platform gate release.yml runs before shipping; PLATFORMS is the
 # single source of truth so CI and local checks cannot list different targets.
@@ -440,8 +448,8 @@ vet-cross: ## vet + staticcheck every release platform from PLATFORMS
 	@for target in $(PLATFORMS); do \
 		goos=$${target%/*}; goarch=$${target#*/}; \
 		echo "checking $$goos/$$goarch"; \
-		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(GOTAGS_BARE) ./... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(GOTAGS) ./agentusage/... || exit 1; \
+		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS_BARE) ./... || exit 1; \
+		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS) ./agentusage/... || exit 1; \
 		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS_BARE) ./... || exit 1; \
 		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS) ./agentusage/... || exit 1; \
 	done
@@ -637,14 +645,21 @@ endef
 #
 # Comment lines and step names are skipped: a comment or a `name:` may
 # mention a command it is not running. Every other line naming a go
-# toolchain command must carry the tag.
+# toolchain command must carry the tag, and every go vet line must carry
+# VET_TESTS as well, for the reason given at the `vet` target.
 WORKFLOWS := $(wildcard .github/workflows/*.yml)
 .PHONY: check-ci-tags
-check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not carry the zone tag
+check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not carry the zone tag, or a go vet line lost -tests=true
 	@missing=$$(awk '/^[[:space:]]*#/ || /^[[:space:]]*-?[[:space:]]*name:/ { next } /(^|[[:space:]])(go (test|vet|tool staticcheck)|staticcheck)[[:space:]]/ && $$0 !~ /$(ZONE_TAG)/ { print "  " FILENAME ":" FNR ": " $$0 }' $(WORKFLOWS)); \
 	if [ -n "$$missing" ]; then \
 		echo "make check-ci-tags: these workflow lines run go without -tags $(ZONE_TAG), so they analyze and test a different binary than 'make check' and 'make test':" >&2; \
 		echo "$$missing" >&2; \
+		exit 1; \
+	fi
+	@unvet=$$(awk '/^[[:space:]]*#/ || /^[[:space:]]*-?[[:space:]]*name:/ { next } /(^|[[:space:]])go vet[[:space:]]/ && $$0 !~ /$(VET_TESTS)[[:space:]]/ { print "  " FILENAME ":" FNR ": " $$0 }' $(WORKFLOWS)); \
+	if [ -n "$$unvet" ]; then \
+		echo "make check-ci-tags: these workflow lines run go vet without $(VET_TESTS), so they skip the test files that 'make vet' analyzes:" >&2; \
+		echo "$$unvet" >&2; \
 		exit 1; \
 	fi
 
