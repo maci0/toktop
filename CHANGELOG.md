@@ -63,6 +63,27 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   float64 (`1e400`) now says it is out of range, like a count past int64
   already did, rather than claiming it is not an integer.
 
+- A probe against an engine that answers with a whole JSON body instead of an
+  SSE stream no longer reports tens of millions of tokens per second. A
+  non-stream body has no first-token instant, but the reader sampled the time
+  as if it did, leaving `total - ttft` as the gap between two clock reads taken
+  nanoseconds apart around the same call. About half the time that gap came out
+  positive, and the rate was the token count over tens of nanoseconds. A rate
+  is now measured over the whole exchange, which is what a body delivered in
+  one piece allows.
+
+- A per-message transcript that folds several records into one carries the
+  span of all of them, not the first record's. The tokens of every folded
+  record were summed while the span stayed at the first, so a read that saw
+  two turns divided both turns' tokens by one turn's time and read high by
+  roughly the number of turns folded.
+
+- An accumulated model-time span saturates instead of wrapping, matching the
+  rule every token counter already followed. A single grok record may carry a
+  span near the whole int64 nanosecond range, so summing two of them on one
+  transcript wrapped negative and the sample reported a negative span for work
+  it had counted. The ceiling is the 24h the event boundary already enforces.
+
 - A bearer variable that is set but blank no longer authenticates nothing
   while the startup line claims `bearer=set`. `export TOKTOP_BEARER=$(cat key)`
   over a missing file sets it to the empty string, and a token read into a

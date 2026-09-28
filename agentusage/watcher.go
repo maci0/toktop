@@ -717,7 +717,7 @@ func (w *Watcher) read(force bool) (Sample, bool) {
 			out = satAdd(out, v.output)
 			thinking = satAdd(thinking, v.thinking)
 			input = satAdd(input, v.input)
-			span += v.span
+			span = satAddSpan(span, v.span)
 		}
 		for _, v := range w.total {
 			total = max(total, v)

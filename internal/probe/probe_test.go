@@ -893,7 +893,20 @@ func TestRunOpenAINonStreamCompletion(t *testing.T) {
 	if !s.OK || s.Tokens != 8 {
 		t.Fatalf("non-stream completion = %+v, want 8 tokens", s)
 	}
+	// A whole-body response has no first-token instant, so throughput is
+	// measured over the full exchange. Dividing by the nanosecond-scale gap
+	// between the two clock reads instead reported tens of millions of tokens
+	// per second for an 8-token answer, varying with scheduler noise.
+	if s.TokPS <= 0 || s.TokPS > maxNonStreamRateForTest {
+		t.Fatalf("non-stream rate = %v tok/s, want a whole-exchange rate; a decode window was inferred from a body with no first-token instant", s.TokPS)
+	}
 }
+
+// maxNonStreamRateForTest bounds the rate a non-stream probe may report. Even
+// an instant local engine decoding 8 tokens takes far longer than a nanosecond
+// of wall clock, so any rate past this came from a denominator of measurement
+// jitter rather than from the exchange.
+const maxNonStreamRateForTest = 1e6
 
 // Some proxies emit NDJSON without the SSE data: prefix.
 func TestRunOpenAIBareJSONLine(t *testing.T) {

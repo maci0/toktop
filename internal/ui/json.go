@@ -142,6 +142,11 @@ type jsonGPU struct {
 	Driver     string  `json:"driver,omitempty"`
 }
 
+// bytesPerMB scales the byte counts below into the *_mb fields. It is 2^20,
+// not 10^6: the figures are mebibytes, matching the MiB/GiB the TUI renderers
+// print, and the kernel's meminfo kB column is a KiB. A consumer reading
+// mem_total_mb against a 10^6-based expectation is off by 4.9%, so the unit
+// is stated here rather than left to the field name.
 const bytesPerMB = 1 << 20
 
 // originStamp renders the pinned demo origin, empty for a run that started on

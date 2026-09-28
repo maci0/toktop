@@ -4,6 +4,7 @@ package gpu
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 )
@@ -34,6 +35,17 @@ func TestParseIOAccelerator(t *testing.T) {
 	mem, util = parseIOAccelerator("no relevant keys here")
 	if mem != 0 || util != 0 {
 		t.Errorf("absent keys must yield zeros, got %d %v", mem, util)
+	}
+}
+
+// Two accelerators each near the uint64 ceiling must sum to a saturated count,
+// not wrap to a few bytes and read as an idle GPU.
+func TestParseIOAcceleratorSaturates(t *testing.T) {
+	text := `"In use GPU memory" = 18446744073709551615
+	"In use GPU memory" = 10`
+	mem, _ := parseIOAccelerator(text)
+	if mem != math.MaxUint64 {
+		t.Errorf("memUsed = %d, want a saturated %d", mem, uint64(math.MaxUint64))
 	}
 }
 

@@ -228,3 +228,27 @@ func satSub(a, b int) int {
 	}
 	return a - b
 }
+
+// satAddSpan sums two model-time spans the way satAdd sums counters: by
+// saturating at maxSaneSpan rather than wrapping. One grok record may carry a
+// span of up to grokMaxTurnMS, which is close to the whole int64 nanosecond
+// range, so two records on one transcript summed with a plain + wrapped the
+// accumulator negative and the sample reported a negative span for work that
+// was counted.
+//
+// The ceiling matches core.MaxEventSpan, the longest span the event boundary
+// will carry: past it the figure is dropped rather than reported, so
+// accumulating further only loses the information that made it unusable.
+func satAddSpan(a, b time.Duration) time.Duration {
+	if a <= 0 || b <= 0 {
+		return max(a, b, 0)
+	}
+	if a > maxSaneSpan-b {
+		return maxSaneSpan
+	}
+	return a + b
+}
+
+// maxSaneSpan bounds an accumulated model-time span. It is core.MaxEventSpan
+// by value: see satAddSpan.
+const maxSaneSpan = 24 * time.Hour

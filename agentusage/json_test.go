@@ -9,6 +9,7 @@ import (
 	"math"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The envelopes below follow the dialects the supported agents emit:
@@ -165,6 +166,45 @@ func TestSatAddSaturates(t *testing.T) {
 	}
 	if got := satAdd(math.MaxInt-1, 2); got != maxSaneTokens {
 		t.Fatalf("satAdd overflow = %d, want %d", got, maxSaneTokens)
+	}
+}
+
+func TestSatAddSpanSaturates(t *testing.T) {
+	if got := satAddSpan(3*time.Second, 4*time.Second); got != 7*time.Second {
+		t.Fatalf("satAddSpan(3s, 4s) = %v", got)
+	}
+	// A single grok record may carry close to the whole int64 nanosecond
+	// range, so the pair summed with a plain + wrapped negative and the
+	// sample reported a negative span for work it had counted.
+	if got := satAddSpan(math.MaxInt64, 4*time.Second); got != maxSaneSpan {
+		t.Fatalf("satAddSpan past maxSaneSpan = %v, want %v", got, maxSaneSpan)
+	}
+	if got := satAddSpan(maxSaneSpan-1, 10*time.Second); got != maxSaneSpan {
+		t.Fatalf("satAddSpan crossing the ceiling = %v, want %v", got, maxSaneSpan)
+	}
+	// A negative or zero operand is dropped, not summed into the result, so a
+	// corrupt span cannot subtract model time that was already accumulated.
+	if got := satAddSpan(5*time.Second, -time.Hour); got != 5*time.Second {
+		t.Fatalf("satAddSpan with a negative operand = %v, want 5s", got)
+	}
+	if got := satAddSpan(0, 0); got != 0 {
+		t.Fatalf("satAddSpan(0, 0) = %v, want 0", got)
+	}
+}
+
+// A per-message read that folds several records into one must grow the span
+// with the tokens. Folding two 4-token, 10s turns into a single record while
+// keeping the first record's span divides 8 tokens by 10s instead of 20s.
+func TestPerMessageFoldAccumulatesSpan(t *testing.T) {
+	w := &Watcher{}
+	w.ad = adapter{kind: perMessage}
+	recs := w.collectValue(nil, values{output: 4, span: 10 * time.Second}, "")
+	recs = w.collectValue(recs, values{output: 4, span: 10 * time.Second}, "")
+	if got := recs[0].output; got != 8 {
+		t.Fatalf("folded output = %d, want 8", got)
+	}
+	if got := recs[0].span; got != 20*time.Second {
+		t.Fatalf("folded span = %v, want 20s: the tokens of both records are measured over both spans", got)
 	}
 }
 

@@ -571,6 +571,10 @@ func jsonNotStream(ct string) bool {
 	return strings.Contains(ct, "json")
 }
 
+// readOpenAIJSON parses a whole-body completion, the shape an engine returns
+// when it ignores stream:true. It always reports a ttft of 0: there is no
+// first-token instant in a body that arrives in one piece, and Run accounts
+// for that by measuring throughput over the full exchange.
 func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.Duration, err error) {
 	b, err := io.ReadAll(io.LimitReader(body, probeLineMax+1))
 	if err != nil {
@@ -606,8 +610,11 @@ func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.
 	if tokens == 0 {
 		return 0, 0, fmt.Errorf("empty stream")
 	}
-	ttft = time.Since(s.At)
-	return tokens, ttft, nil
+	// Sampling the whole exchange here and returning it as the time to first
+	// token left total-ttft as the gap between two nanosecond-scale reads
+	// around the same call, so the rate became the token count over tens of
+	// nanoseconds. A 0 sends Run to the whole exchange instead.
+	return tokens, 0, nil
 }
 
 type httpStatusError struct {

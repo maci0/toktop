@@ -223,7 +223,7 @@ func parseIOAccelerator(text string) (memUsed uint64, utilPct float64) {
 		key := strings.TrimSpace(k)
 		switch key {
 		case `"In use GPU memory"`, `"gpumem_inuse"`:
-			memUsed += parseIoregNum(v)
+			memUsed = core.SatAddU64(memUsed, parseIoregNum(v))
 		case `"Device Utilization %"`, `"GPU Device Utilization %"`:
 			if u := parseIoregNum(v); float64(u) > utilPct {
 				utilPct = float64(u)
