@@ -141,6 +141,10 @@ func (m Model) renderHelp() string {
 	// The overlay replaces the whole screen, so it carries the same bold
 	// title every panel does; without one it reads as an untitled fragment.
 	b.WriteString(styleTitle.Render("KEYS") + "\n")
+	// This view mutes every action key (Update), so the reference has to say
+	// so: pressing space here and watching nothing happen is the difference
+	// between "read the list first" and "this thing is broken".
+	b.WriteString(dim("action keys are muted here") + "\n")
 	for _, r := range m.helpRows() {
 		key := styleInfo.Render(padTo(r[0], 12))
 		b.WriteString(key + dim(r[1]) + "\n")
@@ -155,15 +159,6 @@ func (m Model) renderHelp() string {
 	return clipBlock(placed, m.w, m.h)
 }
 
-// escLabel names what esc does from the current view. It is one key with
-// three outcomes, so a single fixed description would be wrong on two of them.
-func escLabel(focusAgents bool) string {
-	if focusAgents {
-		return "go back to the engines dashboard"
-	}
-	return "close help / quit"
-}
-
 // helpRows is the in-app key reference. It lists the same keys the footer
 // advertises, under the same conditions: a key with nothing to act on here
 // only earns a notice explaining that, and a reference that listed it anyway
@@ -172,19 +167,23 @@ func escLabel(focusAgents bool) string {
 // draw. The "● probing…" badge p draws lives in a panel title, not here.
 func (m Model) helpRows() [][2]string {
 	if m.w < minDashW || m.h < minDashH {
+		// Short forms: the compact box has 34 cells of body, and a longer
+		// description is clipped mid-word by the pane.
 		return [][2]string{
-			{"q / ctrl+c", "quit"},
-			{"esc", "close help / quit"},
+			{"q / ctrl+c", "close help, then quit"},
+			{"esc", "close help"},
 			{"space", "pause / resume"},
-			{"? / h", "toggle this help"},
+			{"? / h", "close help"},
 		}
 	}
 	rows := [][2]string{
-		{"q / ctrl+c", "quit"},
-		// esc has three jobs, and which one is live depends on the view:
-		// help is up (dismissed by the switch above), the agents dashboard
-		// has focus (returns to engines), otherwise it quits.
-		{"esc", escLabel(m.focusAgents)},
+		// Every key here is read from inside the help view, where q and esc
+		// close the box instead of acting on the dashboard behind it. Spelling
+		// that out is the difference between a reader who presses q, watches
+		// the overlay go away and understands, and one who reads it as a
+		// dropped keystroke.
+		{"q / ctrl+c", "close this help (press again to quit)"},
+		{"esc", "close this help"},
 		{"space", "pause / resume streaming"},
 	}
 	if m.canProbe() {
@@ -201,7 +200,7 @@ func (m Model) helpRows() [][2]string {
 		rows = append(rows, [2]string{"a", label})
 	}
 	rows = append(rows,
-		[2]string{"? / h", "toggle this help"},
+		[2]string{"? / h", "close this help"},
 		[2]string{"", ""},
 		[2]string{"(flags)", "quit, then re-run with these"},
 		[2]string{"--demo", "simulated fleet, zero setup"},
@@ -277,14 +276,19 @@ func (m Model) renderMinimal() string {
 		if !p.OK {
 			dot = dotBad
 		}
-		line := dot + " " + core.SingleLine(p.Label) + " " + fmtRate(p.OutTokPS) + " tok/s"
+		line := dot + " " + core.SingleLine(p.Label)
 		if !p.OK {
 			// ✗ matches ENGINES/probes so greyscale still reads, and "down"
-			// plus the error keep the reason the full view shows.
+			// plus the error keep the reason the full view shows. No rate: a
+			// failed engine has none, and "0.0 tok/s down" names two states at
+			// once. The full view's answer (an error line, no stats row) and
+			// probeOutcome's are the same rule.
 			line += " " + styleBad.Render("down")
 			if msg := strings.TrimSpace(core.SingleLine(p.Err)); msg != "" {
 				line += " " + dim(shorten(msg, 32))
 			}
+		} else {
+			line += " " + fmtRate(p.OutTokPS) + " tok/s"
 		}
 		lines = append(lines, clip(line, m.w))
 	}

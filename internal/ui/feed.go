@@ -66,7 +66,11 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 		add("  " + dim(fmt.Sprintf("+%d more", nRows-statsN)))
 	}
 	if m.feedDown == "" && m.cfg.IngestAddr != "" {
-		add(dim("  ← POST http://" + m.cfg.IngestAddr + "/v1/events"))
+		// Sanitized like every other render of this address (renderEmpty,
+		// PlainTextFrame): a control character in a panel title is a row the
+		// frame reads as its own output, and the title is not width-clipped
+		// by panel(), so it also stretches every row below it.
+		add(dim("  ← POST http://" + core.SanitizeText(m.cfg.IngestAddr) + "/v1/events"))
 	}
 	return title
 }

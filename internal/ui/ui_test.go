@@ -286,6 +286,13 @@ func TestMinimalViewNamesDownEngines(t *testing.T) {
 	if !strings.Contains(out, "✗") {
 		t.Errorf("minimal view marks down engines with color-only ●, not ✗:\n%s", out)
 	}
+	// A down engine has no rate. Printing its 0.0 beside the failure names two
+	// states at once, and the row reads as a measurement.
+	for _, ln := range strings.Split(out, "\n") {
+		if strings.Contains(ln, "down") && strings.Contains(ln, "tok/s") {
+			t.Errorf("minimal view prints a rate for a down engine: %q", ln)
+		}
+	}
 }
 
 // The pre-ready frame must name itself, and its status marker comes from the
@@ -996,6 +1003,60 @@ func TestHelpCoversAttachModes(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("help missing %q:\n%s", want, out)
 		}
+	}
+}
+
+// The POST target in the AGENT FEED title reaches a panel title, which does
+// not clip its own width, so an unsanitized address turns a control character
+// into a row of the frame and stretches every row under it. Every other
+// render of this string sanitizes it; this one has to as well.
+func TestFeedTitleSanitizesIngestAddr(t *testing.T) {
+	m := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420\x1b[2Jboom"}, nil)
+	m.w, m.h, m.ready = 120, 36, true
+	m.snap = core.Snapshot{Agents: []core.AgentEvent{{Agent: "a", At: time.Now()}}}
+	title := m.feedTitle(m.w-4, 0, 0, m.agentRates())
+	if strings.ContainsRune(title, '\x1b') {
+		t.Errorf("feed title kept an escape sequence: %q", title)
+	}
+	if lipgloss.Width(title) > m.w-4 {
+		t.Errorf("feed title is %d cells, over the %d it was given", lipgloss.Width(title), m.w-4)
+	}
+	assertFitsPane(t, "feed", m.View(), m.w, m.h)
+}
+
+// The help screen mutes every action key and swallows q and esc, so the
+// reference it prints has to say so: a reader who presses q on a list that
+// said "quit" and lands back on the dashboard reads it as a dropped key.
+func TestHelpSaysWhatClosesItAndThatActionsAreMuted(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		w, h int
+	}{
+		{"full", 110, 36},
+		{"compact", 40, 10},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(Config{Version: "t", Prober: func() {}}, nil)
+			m.help, m.w, m.h, m.ready = true, tc.w, tc.h, true
+			m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "e", OK: true}}}
+			out := strip(m.View())
+			for _, want := range []string{"action keys are muted", "close"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("help missing %q:\n%s", want, out)
+				}
+			}
+			// No key row may claim its key quits on its own: on this screen
+			// it does not. The blank row ends the key section; the "(flags)"
+			// heading below it is not a key.
+			for _, r := range m.helpRows() {
+				if r[0] == "" {
+					break
+				}
+				if strings.Contains(r[1], "quit") && !strings.Contains(r[1], "close") {
+					t.Errorf("help row %q claims %q quits from this view", r[0], r[1])
+				}
+			}
+		})
 	}
 }
 

@@ -100,8 +100,14 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	// No models is the normal state of a down engine, and the "-" placeholder
 	// primaryModel returns for that read as a model named "-". The plain report
 	// drops the same placeholder; the block does too.
+	//
+	// Dim, unlike the label beside it: label and model were both styleValue,
+	// so "vllm-a100 Qwen/Qwen2.5-32B" rendered as one bold run and nothing on
+	// the row said which half named the engine. The plain report already
+	// separates them (name on the head line, model on the detail line), and the
+	// stats row below is dim for the same reason.
 	if model := primaryModel(p); model != "" && model != "-" && room > modelMinCell {
-		row += " " + styleValue.Render(shorten(core.SingleLine(model), room-1))
+		row += " " + dim(shorten(core.SingleLine(model), room-1))
 		room = 0
 	}
 	if p.Version != "" && room > versionCells {
