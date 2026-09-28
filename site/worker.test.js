@@ -262,7 +262,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4367);
+    expect(bytes.byteLength).toBe(4388);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -703,6 +703,29 @@ test("the footer says what the page has not already said", () => {
   expect(footer.includes("MIT licensed")).toBe(true);
 });
 
+// The footer is the page's contentinfo landmark, and a <footer> inside <main>
+// is not one: its role is scoped to the main landmark and a screen reader
+// finds no contentinfo to jump to. It sits after </main>, not inside it.
+test("the footer is the contentinfo landmark, outside main", () => {
+  expect(identityBody).toContain("</main>\n\n<footer>");
+  const main = identityBody.slice(identityBody.indexOf("<main"), identityBody.indexOf("</main>"));
+  expect(main.includes("<footer")).toBe(false);
+  // Out of main, the footer is a body child, so it carries main's column width
+  // itself. Without it the footer spans the padded body and the two no longer
+  // line up on a wide screen.
+  expect(identityBody).toMatch(/footer \{[^}]*max-width: 76rem/);
+});
+
+// Safari drops the list semantics of any list whose markers are removed, so
+// VoiceOver reads the four feature panes as four loose paragraphs and never
+// announces the list or its length (WCAG 1.3.1). The role is the documented
+// remedy, and it is the only thing standing between the grid styling and that
+// regression, which is why it is pinned here.
+test("the feature grid keeps its list semantics under list-style: none", () => {
+  expect(identityBody).toMatch(/<ul class="grid" role="list">/);
+  expect(identityBody).toMatch(/\.grid \{[^}]*list-style: none/);
+});
+
 // The second accent is cYellow in the terminal, where amber is pressure. On
 // the page it marks the pane about pressure and nothing else: a second accent
 // alternated by position is decoration, and decoration is what makes a page
@@ -871,9 +894,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12672);
-  expect(gzipped).toBe(4367);
-  expect(brotli).toBe(3692);
+  expect(identity).toBe(12732);
+  expect(gzipped).toBe(4388);
+  expect(brotli).toBe(3706);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -932,7 +955,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_269);
+  expect(visit).toBe(14_283);
   expect(visit).toBeLessThan(25_000);
 });
 

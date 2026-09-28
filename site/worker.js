@@ -229,6 +229,10 @@ const HTML = htmlForWire(`<!doctype html>
      cells would be the card grid, not this product. */
   .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem;
     max-width: none; margin: 0 0 1rem; padding: 0; list-style: none; }
+  /* The markup carries role="list" to answer for it: Safari drops the list
+     semantics of any list styled list-style: none, so VoiceOver would read the
+     four panes as four loose paragraphs and never say "list of four" (WCAG
+     1.3.1). The role restores what the marker removal took away. */
   .grid li:last-child { grid-column: 1 / -1; }
   .grid li { margin: 0; background: var(--panel); border: 1px solid var(--line);
     border-top: 2px solid var(--accent); padding: .9rem 1rem; }
@@ -258,7 +262,12 @@ const HTML = htmlForWire(`<!doctype html>
   a { color: var(--accent); text-decoration: underline; text-underline-offset: 3px;
       text-decoration-thickness: 1px; }
   a:hover { text-decoration-thickness: 2px; }
-  footer { margin-top: var(--space-runout); padding-top: 1.25rem; border-top: 1px solid var(--line);
+  /* The footer is a sibling of main, not a child: only a footer outside the
+     landmark scopes is exposed as the contentinfo landmark (WCAG 1.3.1), and
+     the column width main sets is repeated here so moving it out of main
+     moved nothing on screen. */
+  footer { margin-top: var(--space-runout); max-width: 76rem; margin-inline: auto;
+           padding-top: 1.25rem; border-top: 1px solid var(--line);
            color: var(--dim); font-size: var(--fs-small); display: flex; gap: 1.5rem; flex-wrap: wrap; }
   /* A small/1.6 line box is ~21px tall, under the 24px target-size floor
      (WCAG 2.2 AA SC 2.5.8); vertical padding makes each footer item a real
@@ -345,7 +354,7 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
 
   <section id="shows" aria-labelledby="shows-heading">
   <h2 id="shows-heading">What it shows</h2>
-  <ul class="grid">
+  <ul class="grid" role="list">
     <li><b>Engines</b><p>Found by port and process, fingerprinted by HTTP.</p><code>Ollama · vLLM · llama.cpp · SGLang · LM Studio · MLX · +9</code></li>
     <li><b>Agents</b><p>Read from their own session logs. No cooperation needed.</p><code>claude · codex · qwen · copilot · dsh · +2 stores</code></li>
     <li><b>Probes</b><p>Real generations measuring TTFT and decode speed.</p><code>press p · or --probe N to auto-probe</code></li>
@@ -393,12 +402,12 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
   reported. Nothing estimated or inferred. An agent that reports nothing
   shows no rate, not a zero. An agent on a watched engine is counted once.</p>
   </section>
-
-  <footer>
-    <a href="https://github.com/maci0/toktop">github.com/maci0/toktop</a>
-    <span>MIT licensed</span>
-  </footer>
 </main>
+
+<footer>
+  <a href="https://github.com/maci0/toktop">github.com/maci0/toktop</a>
+  <span>MIT licensed</span>
+</footer>
 </body>
 </html>
 `);
