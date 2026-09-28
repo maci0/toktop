@@ -1477,6 +1477,38 @@ func TestEngineStateNamesAllDownEngines(t *testing.T) {
 }
 
 // The compact view stands alone: it must explain why it is compact, how to
+// The compact strip's key row is one line: a pane too narrow for the whole
+// list sheds whole keys, in the order the full footer sheds them, instead of
+// clipping a key in half and leaving the row ending on a bare separator.
+func TestCompactKeyRowShedsWholeKeys(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	m.h, m.ready = 12, true
+	for w := 12; w <= 60; w++ {
+		m.w = w
+		row := strip(m.compactKeys())
+		if strings.Contains(row, "probe") && !strings.Contains(row, "p probe") {
+			t.Errorf("width %d clipped a key: %q", w, row)
+		}
+		if strings.Contains(row, keySep) && strings.HasSuffix(row, keySep) {
+			t.Errorf("width %d left a dangling separator: %q", w, row)
+		}
+		if !strings.HasPrefix(row, "q quit") {
+			t.Errorf("width %d shed the quit key: %q", w, row)
+		}
+	}
+	// Wide enough for everything, the row is the whole list.
+	m.w = 60
+	if got, want := strip(m.compactKeys()), "q quit · space pause · p probe · ? help"; got != want {
+		t.Errorf("compact keys = %q, want %q", got, want)
+	}
+	// One cell short of that, p goes and the pointer to the help stays.
+	m.w = 38
+	if got, want := strip(m.compactKeys()), "q quit · space pause · ? help"; got != want {
+		t.Errorf("compact keys = %q, want %q", got, want)
+	}
+}
+
 // quit, and what to do when no engines are found (previously a blank pane).
 func TestMinimalViewGuidesRecovery(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
@@ -2067,6 +2099,48 @@ func TestHelpFitsCompactPane(t *testing.T) {
 	if strings.Contains(plain, "--demo") || strings.Contains(plain, "real generation") {
 		t.Errorf("compact help still lists full-dashboard keys/flags:\n%s", plain)
 	}
+}
+
+// A page key that moves one row is indistinguishable from a dropped keypress on
+// the pane that needs scrolling at all. Paging moves a window, and the two ends
+// are one press each, so the last row is not one press per row away.
+func TestHelpPagesAndJumpsToItsEnds(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.help, m.w, m.h, m.ready = true, 40, 10, true
+	// An engine in the frame adds the p row, so the list outgrows the window.
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	rows := m.helpRows()
+	if len(rows) <= m.helpWindow() {
+		t.Fatalf("test needs a list taller than the window: %d rows, window %d",
+			len(rows), m.helpWindow())
+	}
+	pressKey(&m, "pgdown")
+	if want := min(m.helpWindow(), m.helpScrollMax()); m.helpScroll != want {
+		t.Errorf("pgdown moved to row %d, want a full window (%d)", m.helpScroll, want)
+	}
+	if m.helpScroll < 2 {
+		t.Errorf("pgdown moved %d rows, want a page not a line", m.helpScroll)
+	}
+	pressKey(&m, "pgup")
+	if m.helpScroll != 0 {
+		t.Errorf("pgup left the list at row %d, want the top", m.helpScroll)
+	}
+	pressKey(&m, "end")
+	if m.helpScroll != m.helpScrollMax() {
+		t.Errorf("end left the list at row %d, want the last (%d)", m.helpScroll, m.helpScrollMax())
+	}
+	if out := strip(m.View()); !strings.Contains(out, rows[len(rows)-1][1]) {
+		t.Errorf("end did not reach the last row:\n%s", out)
+	}
+	pressKey(&m, "home")
+	if m.helpScroll != 0 {
+		t.Errorf("home left the list at row %d, want the top", m.helpScroll)
+	}
+	// The box names the jump it offers, or it is a key nobody finds.
+	if out := strip(m.View()); !strings.Contains(out, "end") {
+		t.Errorf("scrolled help does not name the key that reaches its end:\n%s", out)
+	}
+	assertFitsPane(t, "paged help", m.View(), 40, 10)
 }
 
 func TestHelpSaysFlagsNeedRerun(t *testing.T) {

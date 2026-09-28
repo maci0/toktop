@@ -254,11 +254,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.help = false
 				m.helpScroll = 0
 				return m, nil
-			case "up", "ctrl+p", "pgup":
+			case "up", "ctrl+p":
 				m.helpScroll = max(m.helpScroll-1, 0)
 				return m, nil
-			case "down", "ctrl+n", "pgdown":
+			case "down", "ctrl+n":
 				m.helpScroll = min(m.helpScroll+1, m.helpScrollMax())
+				return m, nil
+			// Page keys move a window, not a row: on the pane that needs
+			// scrolling at all, a row at a time is dozens of presses to reach
+			// the flag list, and each press looks like the key was dropped.
+			case "pgup":
+				m.helpScroll = max(m.helpScroll-m.helpWindow(), 0)
+				return m, nil
+			case "pgdown":
+				m.helpScroll = min(m.helpScroll+m.helpWindow(), m.helpScrollMax())
+				return m, nil
+			// The ends are a jump, because the flags at the bottom of the list
+			// are what a reader who had to scroll opened the box for.
+			case "home":
+				m.helpScroll = 0
+				return m, nil
+			case "end":
+				m.helpScroll = m.helpScrollMax()
 				return m, nil
 			default:
 				return m, nil

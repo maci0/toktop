@@ -4,6 +4,7 @@ package ui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -201,15 +202,20 @@ func (m Model) renderHelp() string {
 }
 
 // helpScrollLabel says what up and down will reach, so the reader knows the
-// list continues rather than guessing from a row that stops mid-list.
+// list continues rather than guessing from a row that stops mid-list. "end"
+// rides along because the rows below are usually the flags, and on a pane with
+// a two-row window a one-line key is the difference between one press and one
+// press per row.
 func helpScrollLabel(above, below int) string {
 	switch {
 	case above > 0 && below > 0:
-		return fmt.Sprintf("↑ %d above · ↓ %d more", above, below)
+		return fmt.Sprintf("↑ %d above · ↓ %d more · end", above, below)
 	case above > 0:
-		return fmt.Sprintf("↑ %d above", above)
+		return fmt.Sprintf("↑ %d above · end", above)
+	case below > 0:
+		return fmt.Sprintf("↓ %d more · end", below)
 	default:
-		return fmt.Sprintf("↓ %d more", below)
+		return ""
 	}
 }
 
@@ -283,6 +289,29 @@ func (m Model) helpRows() [][2]string {
 	)
 	return rows
 }
+
+// compactKeys is the compact strip's one-line key list, shed whole items in
+// the order renderFooter sheds them rather than clipped: a half-printed
+// "p probe", or a row ending on a dangling separator, reads as a rendering
+// fault instead of as a shorter list. p goes first, then the pointer to the
+// help that names the rest, and "q quit" is the last thing standing.
+func (m Model) compactKeys() string {
+	items := []string{"q quit", "space pause"}
+	if m.canProbe() {
+		items = append(items, "p probe")
+	}
+	items = append(items, "? help")
+	for _, shed := range []string{"p probe", "? help", "space pause"} {
+		if widthOf(strings.Join(items, keySep)) <= m.w {
+			break
+		}
+		items = slices.DeleteFunc(items, func(k string) bool { return k == shed })
+	}
+	return strings.Join(items, keySep)
+}
+
+// keySep divides the keys on a footer row.
+const keySep = " · "
 
 // minimalHint is the compact view's one line of orientation: it drops the
 // header and the footer, so this is all that says why the dashboard is not on
@@ -372,20 +401,7 @@ func (m Model) renderMinimal() string {
 	// produces it belongs beside the ones that act here. t is not (no chart on
 	// this layout) and a is not (no panels to swap); both answer the press with
 	// a notice instead. The compact help adds esc, which quits from here too.
-	//
-	// p is the one that gives way when the line is too narrow, the same order
-	// renderFooter sheds in: "? help" is how a reader finds the reference that
-	// lists the rest, so it stays and p goes rather than being clipped off the
-	// end of the row.
-	opt := ""
-	if m.canProbe() {
-		opt = " · p probe"
-	}
-	keys := "q quit · space pause" + opt + " · ? help"
-	if widthOf(keys) > m.w {
-		keys = "q quit · space pause · ? help"
-	}
-	foot := dim(clip(keys, m.w))
+	foot := dim(clip(m.compactKeys(), m.w))
 	bodyH := max(m.h-lipgloss.Height(foot)-1, 0)
 	if len(lines) > bodyH && bodyH >= 3 {
 		hidden := len(lines) - (bodyH - 1)
