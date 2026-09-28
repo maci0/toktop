@@ -19,7 +19,6 @@ files and nothing else.
 | --- | --- | --- |
 | github.com/charmbracelet/bubbletea | MIT | TUI event loop, alt-screen handling, and the key decoding that every interactive control needs. |
 | github.com/charmbracelet/lipgloss | MIT | Style, layout, and color profile detection for the theme in internal/ui. |
-| github.com/muesli/termenv | MIT | Terminal capability detection, read by the UI perf benchmark. Test-only, kept direct so the benchmark measures one pinned version. |
 | github.com/klauspost/compress | Apache-2.0, BSD-3-Clause | zstd decode for dsh session stores. stdlib has no zstd, and the zstd payloads there are large enough to matter. |
 | github.com/rivo/uniseg | MIT | Grapheme cluster iteration, so truncation and width never split an emoji or a combining sequence. |
 | golang.org/x/crypto | BSD-3-Clause | SSH client, agent, and known-hosts handling for the remote collector. |
@@ -32,6 +31,12 @@ The klauspost/compress license carries an Apache-2.0 patent grant, and
 modernc.org/sqlite ships the SQLite sources in the public domain. Both are
 compatible with this repository's MIT license; the release SBOM records them per
 release (`make sbom`).
+
+## Go, never linked into a release binary
+
+| Module | License | Why it is here |
+| --- | --- | --- |
+| github.com/muesli/termenv | MIT | Terminal capability detection, read by the UI perf benchmark. Direct so the benchmark measures one pinned version, which no released binary imports. |
 
 ## Go, tooling only
 
@@ -108,6 +113,14 @@ against.
   files, a version on every `go run`/`bunx`/`uvx`/`npx`/`pip install`
   invocation the Makefile or a workflow step fetches with, and an entry here
   for the tool that invocation names.
+- `TestPythonRuntimePinsAreUsed`, same file: every pin in
+  `scripts/requirements.txt` is either imported by a file under `scripts/` or
+  named in `pythonClosure` as a requirement of a pin that is. The install runs
+  `--no-deps`, so a pin nothing reaches for is a package fetched from PyPI on
+  every developer run and every `make scripts-check`. `pythonImportNames` holds
+  the pins whose distribution name is not the module name a file writes
+  (pillow is `PIL`), and both maps fail the test when they name a pin that is
+  gone.
 - `TestWorkflowActionsAreCommitPinned`, same file: every third-party `uses:`
   in `.github/workflows/` is a 40-character commit id. A tag or a branch is a
   name the publisher can move, and the action runs with the job's token and

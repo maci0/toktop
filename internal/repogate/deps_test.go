@@ -9,6 +9,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -430,6 +431,131 @@ func TestPythonPinsAreDocumented(t *testing.T) {
 	for _, name := range pythonPins(t) {
 		if !strings.Contains(string(reasoned), name) {
 			t.Errorf("%s is pinned by a requirements file and has no entry in %s; record why it is here", name, dependencyTable)
+		}
+	}
+}
+
+// pythonImport matches a top-level import in a file under scripts/, at any
+// indentation so the deferred imports inside a function count, and
+// captures the module both `import x` and `from x import y` name.
+var pythonImport = regexp.MustCompile(`(?m)^[ \t]*(?:from[ \t]+([A-Za-z_][A-Za-z0-9_]*)|import[ \t]+([A-Za-z_][A-Za-z0-9_]*))`)
+
+// pythonModuleNames returns every top-level module a file under scripts/
+// imports, the standard library included: a pin that is neither here nor in
+// pythonClosure is a package this tree installs and never reaches for.
+func pythonModuleNames(t *testing.T) map[string]bool {
+	t.Helper()
+	root := filepath.Join(moduleRoot, "scripts")
+	names := map[string]bool{}
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || !strings.HasSuffix(path, ".py") {
+			return err
+		}
+		raw, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		for _, match := range pythonImport.FindAllStringSubmatch(string(raw), -1) {
+			name := match[1]
+			if name == "" {
+				name = match[2]
+			}
+			names[name] = true
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk scripts: %v", err)
+	}
+	if len(names) == 0 {
+		t.Fatal("scripts/ parsed to no imports; the matcher no longer understands the files")
+	}
+	return names
+}
+
+// pythonImportNames is the top-level module a distribution in
+// scripts/requirements.txt is imported under, for the pins whose distribution
+// name is not the name a file writes. An empty value is the identity, so a pin
+// whose import name matches needs no entry.
+var pythonImportNames = map[string]string{
+	"pillow": "PIL",
+}
+
+// pythonImportName is the top-level module a distribution is imported under.
+func pythonImportName(distribution string) string {
+	if module, ok := pythonImportNames[distribution]; ok {
+		return module
+	}
+	return distribution
+}
+
+// pythonClosure is the runtime pin a distribution in scripts/requirements.txt
+// is required by, for the pins no file in scripts/ imports itself. The install
+// runs --no-deps, so a pin nothing imports has to be spelled out here or it is
+// a package the tree fetches from PyPI and never runs.
+var pythonClosure = map[string]string{
+	"wcwidth": "pyte",
+}
+
+// TestPythonRuntimePinsAreUsed fails when scripts/requirements.txt pins a
+// distribution nothing under scripts/ imports and nothing in pythonClosure
+// accounts for. The Go side has this gate for the direct require block
+// (TestDirectDependenciesAreImported); the Python side had only the
+// documentation check, so a pin outlived the import that needed it and kept
+// being installed from the index.
+func TestPythonRuntimePinsAreUsed(t *testing.T) {
+	runtime, err := os.ReadFile(filepath.Join(moduleRoot, "scripts", "requirements.txt"))
+	if err != nil {
+		t.Fatalf("read scripts/requirements.txt: %v", err)
+	}
+	var pins []string
+	for _, line := range strings.Split(string(runtime), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-r ") || strings.HasPrefix(line, "--") {
+			continue
+		}
+		name, _, _ := strings.Cut(line, "==")
+		if name = strings.TrimSpace(name); name != "" {
+			pins = append(pins, name)
+		}
+	}
+	if len(pins) == 0 {
+		t.Fatal("scripts/requirements.txt parsed to no pins; the parser no longer understands it")
+	}
+	pinned := make(map[string]bool, len(pins))
+	for _, name := range pins {
+		pinned[name] = true
+	}
+	imported := pythonModuleNames(t)
+	for _, name := range pins {
+		if imported[pythonImportName(name)] {
+			continue
+		}
+		if _, inClosure := pythonClosure[name]; inClosure {
+			continue
+		}
+		t.Errorf("%s is pinned by scripts/requirements.txt and imported nowhere under scripts/; remove the pin or record it in pythonClosure as a requirement of the pin that needs it", name)
+	}
+	for name, module := range pythonImportNames {
+		if !pinned[name] {
+			t.Errorf("pythonImportNames names %s, which scripts/requirements.txt no longer pins", name)
+		}
+		if !imported[module] {
+			t.Errorf("pythonImportNames maps %s to %s, which nothing under scripts/ imports", name, module)
+		}
+		if strings.EqualFold(name, module) {
+			t.Errorf("pythonImportNames maps %s to %s, which is the same name; the pin needs no entry", name, module)
+		}
+	}
+	for name, requiredBy := range pythonClosure {
+		if !pinned[name] {
+			t.Errorf("pythonClosure names %s, which scripts/requirements.txt no longer pins", name)
+		}
+		if !pinned[requiredBy] {
+			t.Errorf("pythonClosure says %s is required by %s, which scripts/requirements.txt no longer pins", name, requiredBy)
+		}
+		if imported[name] {
+			t.Errorf("pythonClosure says %s is required by %s, but scripts/ imports %s directly", name, requiredBy, name)
 		}
 	}
 }
