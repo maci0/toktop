@@ -1584,7 +1584,7 @@ func TestStaleRootListingIsForgotten(t *testing.T) {
 	stale := t.TempDir()
 	now := time.Now()
 	cutoff := now.Add(-time.Hour)
-	_ = listTranscripts(stale, ".jsonl", cutoff, now, true)
+	_, _ = listTranscripts(stale, ".jsonl", cutoff, now, true)
 	key := rootListKey(stale, ".jsonl")
 	rootListMu.Lock()
 	c, ok := rootLists[key]
@@ -1596,7 +1596,7 @@ func TestStaleRootListingIsForgotten(t *testing.T) {
 	rootLists[key] = c
 	rootListMu.Unlock()
 
-	_ = listTranscripts(t.TempDir(), ".jsonl", cutoff, now, true)
+	_, _ = listTranscripts(t.TempDir(), ".jsonl", cutoff, now, true)
 	rootListMu.Lock()
 	_, still := rootLists[key]
 	rootListMu.Unlock()

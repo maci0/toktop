@@ -168,7 +168,16 @@ func (a adapter) fileSuffixes() []string {
 // walk therefore runs outside the map lock, with an in-flight channel as the
 // per-root claim on it. A slower empty result still cannot overwrite a newer
 // listing: only the goroutine holding the claim writes one.
-func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []string {
+//
+// The second result says whether the listing is the whole answer for this
+// root. It is false for a walk that could not finish and for a caller that gave
+// up waiting on one, both of which report the absence of files rather than
+// their absence from the store. A caller that keeps a listing may not record
+// either as its own: stamping one bounds how long the missing half of the store
+// goes unread, and ageing bookkeeping against it releases the read positions of
+// transcripts that are still on disk, which is what re-reads them from byte
+// zero and bills a session twice.
+func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) ([]string, bool) {
 	key := rootListKey(root, suffix)
 	for {
 		rootListMu.Lock()
@@ -177,7 +186,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 		if !force && c.walk == nil && !c.at.IsZero() && core.Age(now, c.at) < rescanEvery {
 			out := append([]string(nil), c.files...)
 			rootListMu.Unlock()
-			return out
+			return out, true
 		}
 		if c.walk != nil {
 			// A walk for this root is already running. Wait for its result and
@@ -200,7 +209,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 				timer.Stop()
 				continue
 			case <-timer.C:
-				return nil
+				return nil, false
 			}
 		}
 		// This call owns the walk for key. The placeholder carries the current
@@ -232,6 +241,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 		}()
 
 		files, err := walkTranscripts(root, suffix, cutoff)
+		complete := err == nil
 		if err != nil {
 			// A walk that could not finish is not an empty store, and caching
 			// its partial result under a fresh stamp would read as one: every
@@ -244,7 +254,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			auditWalkFailure(root, err)
 			files, fresh = nil, time.Time{}
 		}
-		return append([]string(nil), files...)
+		return append([]string(nil), files...), complete
 	}
 }
 
@@ -344,14 +354,21 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 	// function of the working directory and this walk's instant, and this is
 	// one call per rescan window rather than one per poll.
 	w.roots = nil
-	var out []string
+	var (
+		out      []string
+		complete = true
+	)
 	for _, root := range w.rootsLocked(now) {
 		if root == "" {
 			continue
 		}
 		for _, suffix := range w.ad.fileSuffixes() {
 			if cache {
-				out = append(out, listTranscripts(root, suffix, cutoff, now, force)...)
+				files, ok := listTranscripts(root, suffix, cutoff, now, force)
+				if !ok {
+					complete = false
+				}
+				out = append(out, files...)
 				continue
 			}
 			files, err := walkTranscripts(root, suffix, cutoff)
@@ -368,6 +385,15 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 		}
 	}
 	if !cache {
+		return out
+	}
+	// A walk that missed part of the store is not a listing to remember. The
+	// shared cache already refuses to stamp one; stamping it here as well would
+	// keep this watcher off its roots for a rescan window, and forgetIdle would
+	// read the shortfall as files aged out and release the read positions of
+	// transcripts that are still on disk. The next poll re-walks, and the
+	// freshness stamp stays zero so the walk is claimed rather than served.
+	if !complete {
 		return out
 	}
 	w.forgetIdle(out)

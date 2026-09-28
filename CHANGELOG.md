@@ -34,6 +34,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A transcript store that could not be walked (a partial mount, a root that is
+  not a directory) left the shared listing unstamped, but the watcher reading it
+  kept the same empty answer as its own listing for a rescan window and aged its
+  per-file bookkeeping against it. A transcript it never reached lost its read
+  position, so the next append to it was read from byte zero and the session
+  counted twice. An incomplete walk now leaves the watcher's listing unstamped
+  and its bookkeeping alone, and the next poll re-walks.
+
 - A value the flag package could not parse ended in its bare `parse error`,
   which names neither the expectation nor a value that would work, and every
   numeric flag reported it identically. `--frames abc`, `--probe 1.5` and

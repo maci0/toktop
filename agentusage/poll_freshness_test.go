@@ -81,7 +81,7 @@ func TestRootListCacheDropsExpiredKeys(t *testing.T) {
 
 	dir := t.TempDir()
 	now := time.Now()
-	_ = listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+	_, _ = listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
 
 	rootListMu.Lock()
 	_, still := rootLists["stale\x00.jsonl"]
@@ -99,7 +99,7 @@ func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 		rootListKey(dir, ".jsonl"): {files: []string{"fresh.jsonl"}, at: now},
 	})()
 
-	got := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+	got, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
 	if len(got) != 1 || got[0] != "fresh.jsonl" {
 		t.Fatalf("cached hit = %+v, want [fresh.jsonl]", got)
 	}
@@ -122,7 +122,7 @@ func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 	key := rootListKey(dir, ".jsonl")
 	defer swapRootLists(t, map[string]rootListing{})()
 
-	if got := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	if got, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("empty store listed %v, want nothing", got)
 	}
 	rootListMu.Lock()
@@ -139,7 +139,8 @@ func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 	// rather than parking on a channel nobody will close.
 	done := make(chan []string, 1)
 	go func() {
-		done <- listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		files, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		done <- files
 	}()
 	select {
 	case got := <-done:
@@ -168,7 +169,8 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 	done := make(chan []string, 1)
 	go func() {
 		now := time.Now()
-		done <- listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		files, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		done <- files
 	}()
 
 	// The claim is the wait branch: a second walk would answer at once.
@@ -325,7 +327,7 @@ func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := rootListKey(root, ".jsonl")
-	if got := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("failed walk listed %v, want nothing", got)
 	}
 
@@ -372,7 +374,7 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if got := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("failed walk listed %v, want nothing", got)
 	}
 	got := lines.String()
@@ -411,7 +413,7 @@ func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 
 	now := time.Now()
 	cutoff := now.Add(-recencyWindow)
-	if got := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
 		t.Fatalf("missing root listed %v", got)
 	}
 	if strings.Contains(lines.String(), "agent transcript walk failed") {
@@ -433,12 +435,12 @@ func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 	if err := os.WriteFile(name, []byte("{\"output_tokens\":3}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
 		t.Fatalf("cached empty listing listed %v", got)
 	}
 
 	later := now.Add(rescanEvery)
-	got := listTranscripts(root, "token_stats.jsonl", cutoff, later, false)
+	got, _ := listTranscripts(root, "token_stats.jsonl", cutoff, later, false)
 	if len(got) != 1 || got[0] != name {
 		t.Fatalf("after rescan = %v, want [%s]", got, name)
 	}
@@ -502,5 +504,65 @@ func TestSetLoggerInstallsAndRestores(t *testing.T) {
 	SetLogger(nil)
 	if got := audit(); got != slog.Default() {
 		t.Fatal("SetLogger(nil) did not restore the process logger")
+	}
+}
+
+// A walk that could not finish leaves the shared listing unstamped, and the
+// watcher's own listing has to be left that way too. Stamping it would hold the
+// watcher off its roots for a rescan window, and ageing its bookkeeping against
+// a listing that missed the store would read the shortfall as files gone and
+// release the read positions of transcripts still on disk: the next append to
+// one of them would be read from byte zero and the session billed twice.
+func TestFailedWalkIsNotStampedAsTheWatchersListing(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		rootLists = map[string]rootListing{}
+		rootListMu.Unlock()
+	})
+
+	// A root that exists but is not a directory is a walk that does not finish.
+	// A path that is simply absent is an empty store, which is a whole answer.
+	root := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	spec := `{"unreadable": {"usage": {"roots": [` + jsonPath(root) + `], "suffix": ".jsonl"}}}`
+	if err := LoadDefinitions(writeDefs(t, spec)); err != nil {
+		t.Fatal(err)
+	}
+	dropDefs(t, "unreadable")
+
+	work := t.TempDir()
+	w := Watch("unreadable", work, time.Now())
+	if w == nil {
+		t.Fatal("the spec names a root, so Watch must return a watcher")
+	}
+	// Bookkeeping a transcript the walk never reached still holds its read
+	// position and its committed-bytes carry.
+	const path = "/store/session.jsonl.zstd"
+	w.offsets[path] = 4096
+	w.readFailed[path] = true
+	w.zstdCarry[path] = []byte(`{"usage":`)
+
+	if got := w.candidates(); len(got) != 0 {
+		t.Fatalf("unreadable store listed %v, want nothing", got)
+	}
+	if !w.scanned.IsZero() {
+		t.Fatal("the failed walk was stamped as this watcher's listing: the next poll would serve the empty store for a rescan window")
+	}
+	if w.cached != nil {
+		t.Fatalf("the failed walk was kept as the cached listing: %v", w.cached)
+	}
+	if w.offsets[path] != 4096 {
+		t.Fatal("a failed walk released the read position of a transcript it never reached: the next append to it would be read from byte zero")
+	}
+	if !w.readFailed[path] {
+		t.Fatal("a failed walk cleared the read-failure latch of a transcript it never reached")
+	}
+	if string(w.zstdCarry[path]) != `{"usage":` {
+		t.Fatal("a failed walk released the record carry of a transcript it never reached: the next window would start mid-record")
 	}
 }
