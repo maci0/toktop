@@ -661,6 +661,14 @@ The chart histories are not in it: they are the frame's own buffer, sized by
 how long the process ran, so a consumer wanting a series should sample
 `--once --json` at a steady `--interval` instead.
 
+An agent event carries `span_ms`, how long the model spent on its tokens, under
+the same name and unit `POST /v1/events` takes. It is the denominator of
+`agent_rates[].tok_per_s` when every event in the window reports one, so a
+consumer can check the rate against the token counts beside it; an event that
+reports none omits the field, and the rate falls back to the gap between
+events. `system.drivers` holds the host's accelerator driver versions, the ones
+the dashboard strip and `--plain` also print.
+
 A demo run reproduces from its seed and its origin, the two inputs a replay
 needs. With both, two runs render the same bytes:
 

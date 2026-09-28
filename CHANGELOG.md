@@ -76,6 +76,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   and the plain report instead of a blank cell. A blank read as a missing
   value, which is not what "no instant to measure against" means.
 
+- `--once --json` reports two fields the dashboard and `--plain` already show
+  and it dropped. An agent event carries `span_ms`, how long the model spent on
+  its tokens under the name and unit `POST /v1/events` takes, which is the
+  denominator `agent_rates[].tok_per_s` prefers: a consumer had the rate and
+  the token counts it came from with no way to check one against the other.
+  `system.drivers` carries the host's accelerator driver versions, including
+  the ones read from a remote target. An event with no span omits the field,
+  which is the same meaning an absent `span_ms` has on the wire.
+
 - `agentusage.Definitions` and `agentusage.Definition` model the agent
   definitions file (`agents.json`) as Go values, so a program that writes or
   edits one marshals the same shape `LoadDefinitions` reads instead of

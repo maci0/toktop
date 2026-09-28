@@ -79,8 +79,15 @@ type jsonAgent struct {
 	PromptTokens   int64     `json:"prompt_tokens"`
 	OutputTokens   int64     `json:"output_tokens"`
 	ThinkingTokens int64     `json:"thinking_tokens,omitempty"`
-	ViaEngine      string    `json:"via_engine,omitempty"`
-	Note           string    `json:"note,omitempty"`
+	// SpanMs is how long the model spent on this event's tokens, in
+	// milliseconds: the same name, unit and bound the ingest wire gives it.
+	// It is the denominator core.Summarize prefers, so the report's own
+	// agent_rates tok_per_s is not derivable from the report without it. Zero
+	// is omitted rather than written, and zero is the documented meaning of an
+	// absent span: the rate falls back to the gap between events.
+	SpanMs    int64  `json:"span_ms,omitempty"`
+	ViaEngine string `json:"via_engine,omitempty"`
+	Note      string `json:"note,omitempty"`
 }
 
 type jsonRate struct {
@@ -106,22 +113,28 @@ type jsonProbe struct {
 }
 
 type jsonSystem struct {
-	CPUModel    string     `json:"cpu_model,omitempty"`
-	OsName      string     `json:"os,omitempty"`
-	Kernel      string     `json:"kernel,omitempty"`
-	MemTotalMB  uint64     `json:"mem_total_mb"`
-	MemUsedMB   uint64     `json:"mem_used_mb"`
-	SwapTotalMB uint64     `json:"swap_total_mb"`
-	SwapUsedMB  uint64     `json:"swap_used_mb"`
-	Load1       float64    `json:"load1"`
-	Load5       float64    `json:"load5"`
-	Load15      float64    `json:"load15"`
-	HostUptimeS float64    `json:"host_uptime_secs"`
-	RemoteHost  string     `json:"remote_host,omitempty"`
-	RemoteErr   string     `json:"remote_error,omitempty"`
-	NPUs        []string   `json:"npus,omitempty"`
-	Temps       []jsonTemp `json:"temps,omitempty"`
-	GPUs        []jsonGPU  `json:"gpus,omitempty"`
+	CPUModel    string  `json:"cpu_model,omitempty"`
+	OsName      string  `json:"os,omitempty"`
+	Kernel      string  `json:"kernel,omitempty"`
+	MemTotalMB  uint64  `json:"mem_total_mb"`
+	MemUsedMB   uint64  `json:"mem_used_mb"`
+	SwapTotalMB uint64  `json:"swap_total_mb"`
+	SwapUsedMB  uint64  `json:"swap_used_mb"`
+	Load1       float64 `json:"load1"`
+	Load5       float64 `json:"load5"`
+	Load15      float64 `json:"load15"`
+	HostUptimeS float64 `json:"host_uptime_secs"`
+	// Drivers are the accelerator driver versions the host strip names, keyed
+	// by vendor. They are not the per-device jsonGPU driver: this map carries
+	// the runtime versions (cuda, amdgpu, the nvidia driver) and the ones read
+	// from a remote host, which the dashboard and --plain both print and this
+	// report is the only rendering that dropped.
+	Drivers    map[string]string `json:"drivers,omitempty"`
+	RemoteHost string            `json:"remote_host,omitempty"`
+	RemoteErr  string            `json:"remote_error,omitempty"`
+	NPUs       []string          `json:"npus,omitempty"`
+	Temps      []jsonTemp        `json:"temps,omitempty"`
+	GPUs       []jsonGPU         `json:"gpus,omitempty"`
 }
 
 type jsonTemp struct {
@@ -263,6 +276,7 @@ func jsonAgentOf(a core.AgentEvent) jsonAgent {
 		PromptTokens:   a.PromptTokens,
 		OutputTokens:   a.OutputTokens,
 		ThinkingTokens: a.ThinkingTokens,
+		SpanMs:         a.Span.Milliseconds(),
 		ViaEngine:      core.SanitizeText(a.ViaEngine),
 		Note:           core.SanitizeText(a.Note),
 	}
@@ -281,6 +295,30 @@ func jsonProbeOf(p core.ProbeSample) jsonProbe {
 	}
 }
 
+// jsonDrivers sanitizes the host's accelerator driver map on the way into the
+// report. A remote target's section is parsed from another host's own output,
+// so both halves of the pair are text this process did not write. A pair
+// whose vendor sanitizes to nothing is dropped rather than filed under an empty
+// key, and a map with nothing left in it is nil, so the field is omitted
+// instead of printed as {}.
+func jsonDrivers(drivers map[string]string) map[string]string {
+	if len(drivers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(drivers))
+	for vendor, version := range drivers {
+		key := core.SanitizeText(vendor)
+		if key == "" {
+			continue
+		}
+		out[key] = core.SanitizeText(version)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func jsonSystemOf(s *core.SysSample) *jsonSystem {
 	if s == nil {
 		return nil
@@ -297,6 +335,7 @@ func jsonSystemOf(s *core.SysSample) *jsonSystem {
 		Load5:       s.Load5,
 		Load15:      s.Load15,
 		HostUptimeS: s.HostUptime.Seconds(),
+		Drivers:     jsonDrivers(s.Drivers),
 		RemoteHost:  core.SanitizeText(s.RemoteHost),
 		RemoteErr:   core.SanitizeText(s.RemoteErr),
 	}
