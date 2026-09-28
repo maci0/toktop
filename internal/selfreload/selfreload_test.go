@@ -74,6 +74,64 @@ func testWatchFiresOncePerReplace(t *testing.T) {
 	}
 }
 
+// A build that writes over the live image keeps the inode and changes only
+// size and mtime. That is the case fileID's fallback covers (a file system
+// reporting neither device nor inode leaves the size and mtime carrying the
+// identity alone), so Watch has to notice it: the rename test above cannot,
+// because it moves the inode with the file.
+func TestWatchFiresOnInPlaceRewrite(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		dir := t.TempDir()
+		exe := filepath.Join(dir, "toktop")
+		writeExe(t, exe, "v1")
+
+		fired := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); Watch(ctx, exe, 5*time.Millisecond, func() { fired <- struct{}{} }) }()
+		synctest.Wait() // the baseline stat is done before the image changes
+
+		if err := os.WriteFile(exe, []byte("a much longer image"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		select {
+		case <-fired:
+		case <-time.After(5 * time.Second):
+			t.Fatal("in-place rewrite over the live image never noticed")
+		}
+	})
+}
+
+// size and mtime are what identify a file on a system that reports neither
+// device nor inode, so statIdentity has to carry them.
+func TestStatIdentityCarriesSizeAndMtime(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "toktop")
+	writeExe(t, path, "v1")
+	id, err := statIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id.size != fi.Size() {
+		t.Errorf("identity size = %d, want %d", id.size, fi.Size())
+	}
+	if id.mtimeNanos != fi.ModTime().UnixNano() {
+		t.Errorf("identity mtime = %d, want %d", id.mtimeNanos, fi.ModTime().UnixNano())
+	}
+	writeExe(t, path, "v2, longer than before")
+	next, err := statIdentity(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == id {
+		t.Errorf("rewriting the file in place left the identity unchanged: %+v", next)
+	}
+}
+
 // A binary that does not exist yet (or briefly disappears mid-rebuild) must
 // not fire: the first successful stat becomes the baseline, it is not a
 // change.

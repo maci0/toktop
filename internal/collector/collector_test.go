@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime"
 	"strings"
@@ -1164,7 +1165,11 @@ func TestEmitDoesNotLeakGoroutines(t *testing.T) {
 	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
 	c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 1} })
 	ch := make(chan core.Snapshot, 1)
-	before := runtime.NumGoroutine()
+	// The baseline is a settled count, not a single sample: the suite runs
+	// tests that leave goroutines winding down, and a baseline taken while
+	// one is still live is a number emit never has to return to, which would
+	// make the check pass on the first poll whatever emit does.
+	before := settledGoroutines(2 * time.Second)
 	c.emit(context.Background(), ch)
 	<-ch
 	// Poll rather than sample once: a goroutine on its way out still counts
@@ -1178,7 +1183,24 @@ func TestEmitDoesNotLeakGoroutines(t *testing.T) {
 			return
 		}
 	}
-	t.Fatalf("goroutines after emit = %d, want no more than the %d before it", runtime.NumGoroutine(), before)
+	t.Fatalf("goroutines after emit = %d, want no more than the settled %d before it", runtime.NumGoroutine(), before)
+}
+
+// settledGoroutines returns the goroutine count once two consecutive samples
+// agree, so a baseline is never taken mid-wind-down.
+func settledGoroutines(limit time.Duration) int {
+	deadline := time.Now().Add(limit)
+	prev := runtime.NumGoroutine()
+	for time.Now().Before(deadline) {
+		runtime.GC()
+		time.Sleep(10 * time.Millisecond)
+		got := runtime.NumGoroutine()
+		if got == prev {
+			return got
+		}
+		prev = got
+	}
+	return prev
 }
 
 // A replay that lands after the event has left the display ring is still the
@@ -2141,6 +2163,29 @@ func TestUnloadedModelClearsCachedKVPct(t *testing.T) {
 	}
 }
 
+// The other side of the cache: a model still loaded on an engine that stopped
+// publishing KV keeps reporting the last figure it gave. Blanking the row
+// would read as "context free" when the engine still holds it.
+func TestLoadedModelKeepsLastKVPctWhenEngineStopsReporting(t *testing.T) {
+	fp := &fakeProvider{
+		label: "test",
+		addr:  "fake://test",
+		m:     &provider.Metrics{Models: []core.ModelInfo{{Name: "llama3"}}, HasKV: true, KVPct: 75.0},
+	}
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
+	out := make(chan core.Snapshot, 2)
+	c.emit(context.Background(), out)
+	if got := (<-out).Providers[0].KVPct; got != 75.0 {
+		t.Fatalf("first emit KVPct = %v, want 75.0", got)
+	}
+
+	fp.m = &provider.Metrics{Models: []core.ModelInfo{{Name: "llama3"}}, HasKV: false}
+	c.emit(context.Background(), out)
+	if got := (<-out).Providers[0].KVPct; got != 75.0 {
+		t.Fatalf("second emit KVPct = %v, want the last reported 75.0 while the model stays loaded", got)
+	}
+}
+
 // A poll error is a decoder's, and encoding/json embeds the whole offending
 // literal in an UnmarshalTypeError: an engine answering /api/ps with a
 // megabyte-long number puts that megabyte in the error. The snapshot field
@@ -2168,5 +2213,48 @@ func TestProviderErrorIsCappedAndOneLine(t *testing.T) {
 	snap2 := <-ch2
 	if msg := snap2.Providers[0].Err; strings.ContainsAny(msg, "\n\t") {
 		t.Errorf("provider error %q kept a line break; the snapshot row it feeds would print as two lines", msg)
+	}
+}
+
+// The fold is memoized per provider key, so the cache has to miss on both
+// halves of its key: a downed engine that changes its error, and a process
+// whose home moves. Serving either from the memo repeats the first error
+// forever, or keeps redacting against the account the fold was made for.
+func TestProviderErrorFoldMemoFollowsErrorAndHome(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	fp := &fakeProvider{label: "ollama", addr: "http://127.0.0.1:11434",
+		err: errors.New("cannot open " + filepath.Join(home, "models", "m.safetensors"))}
+	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
+	out := make(chan core.Snapshot, 1)
+	c.emit(context.Background(), out)
+	if got := (<-out).Providers[0].Err; strings.Contains(got, "private-user") {
+		t.Fatalf("poll error kept the account name: %q", got)
+	}
+
+	// Same key, new error: the memo must miss, not serve the folded first one.
+	fp.err = errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")
+	c.emit(context.Background(), out)
+	if got := (<-out).Providers[0].Err; !strings.Contains(got, "connection refused") {
+		t.Fatalf("stale fold served after the error changed: %q", got)
+	}
+
+	// Same error, new home: the memo must miss again, or the fold keeps
+	// redacting against the account it was made for.
+	other := filepath.Join(t.TempDir(), "other-user")
+	if err := os.MkdirAll(other, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	fp.err = errors.New("cannot open " + filepath.Join(other, "models", "m.safetensors"))
+	t.Setenv("HOME", other)
+	t.Setenv("USERPROFILE", other)
+	c.emit(context.Background(), out)
+	if got := (<-out).Providers[0].Err; strings.Contains(got, "other-user") || !strings.Contains(got, "models") {
+		t.Fatalf("error after the home moved = %q, want the new home folded", got)
 	}
 }

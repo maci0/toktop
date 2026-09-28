@@ -225,13 +225,22 @@ func TestPanelFrameMatchesLipglossBorder(t *testing.T) {
 // loses whole grapheme clusters, so the result is always valid UTF-8 and
 // never ends between a base letter and its combining mark.
 func TestKindBadgeCutsBetweenClusters(t *testing.T) {
-	for _, kind := range []string{"日本語エンジン", "café latte", "café latte"} {
+	// The decomposed entry is the one that can cut between a base letter and
+	// its combining mark, and it is the one a byte- or rune-counting cut
+	// loses: the composed and decomposed spellings render one cell apart.
+	for _, kind := range []string{"日本語エンジン", "café latte", "cafe\u0301 latte", "🙂 ok"} {
 		got := kindBadge(kind)
 		if !utf8.ValidString(got) {
 			t.Errorf("kindBadge(%q) = %q, is not valid UTF-8", kind, got)
 		}
 		if strings.ContainsRune(got, '�') {
 			t.Errorf("kindBadge(%q) = %q, holds a replacement rune", kind, got)
+		}
+		if w := lipgloss.Width(got); w != kindBadgeCells {
+			t.Errorf("kindBadge(%q) renders %d cells, want %d", kind, w, kindBadgeCells)
+		}
+		if strings.HasPrefix(strings.TrimRight(got, " "), "\u0301") {
+			t.Errorf("kindBadge(%q) cut between the base letter and its mark: %q", kind, got)
 		}
 	}
 }

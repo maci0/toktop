@@ -402,8 +402,12 @@ func TestProcLineCtxCountFitsInt64(t *testing.T) {
 	got := strip(procLine(core.ProviderSnapshot{
 		Models: []core.ModelInfo{{Name: "a", CtxMax: 1 << 63}},
 	}))
-	if strings.Contains(got, "-") {
-		t.Fatalf("uint64 CtxMax printed as a negative int64: %q", got)
+	// 1<<63 token counts: a scan for a minus sign anywhere in the row would
+	// also fire on a model name like llama-3, and a wrapping conversion lands
+	// on 1<<63/1e9 = 9.2M rather than 9223372036854.8M.
+	const want = "9223372036854.8M"
+	if !strings.Contains(got, want) {
+		t.Fatalf("ctx = %q, want the unsigned 1<<63 token count %q", got, want)
 	}
 	if strings.Contains(got, "0M") {
 		t.Fatalf("ctx count collapsed to the old byte-estimate zero: %q", got)
@@ -1253,9 +1257,11 @@ func TestTimedSeriesUsesSampleStamps(t *testing.T) {
 // like every other externally sourced value in the host strip.
 func TestGPUSegmentSanitizesName(t *testing.T) {
 	g := core.GPUDevice{Vendor: "nvidia", Index: 0, Name: "A\x1b[31mB"} // no VRAM: name row renders
+	// Raw output, not strip(): the payload is what the sanitizer must remove,
+	// so checking the post-sanitize string proves nothing about gpuSegment.
 	out := gpuSegment(g)
-	if strings.ContainsRune(strip(out), '\x1b') {
-		t.Errorf("gpuSegment leaked escape bytes: %q", strip(out))
+	if strings.ContainsRune(out, '\x1b') {
+		t.Errorf("gpuSegment leaked escape bytes: %q", out)
 	}
 	if !strings.Contains(strip(out), "AB") {
 		t.Errorf("gpuSegment lost model name: %q", strip(out))
@@ -1268,14 +1274,20 @@ func TestHostSegmentsSanitizeDrivers(t *testing.T) {
 		NPUs:    []string{"ane\x1b]52;c;QUJD\x07"},
 	}
 	segs := hostSegments(sy, stripHostLimits)
+	// Raw segments: the driver key, the driver value and the NPU name each
+	// carry a payload, and each is sanitized at its own call site in
+	// hostSegments, so only the unstripped string can fail here.
 	for _, s := range segs {
-		if strings.ContainsRune(strip(s), '\x1b') || strings.ContainsRune(strip(s), '\x07') {
-			t.Errorf("hostSegments leaked escape bytes: %q", strip(s))
+		if strings.ContainsAny(s, "\x1b\x07") {
+			t.Errorf("hostSegments leaked escape bytes: %q", s)
 		}
 	}
 	joined := strip(strings.Join(segs, " "))
 	if !strings.Contains(joined, "ane") {
 		t.Errorf("hostSegments lost NPU name: %q", joined)
+	}
+	if !strings.Contains(joined, "50") {
+		t.Errorf("hostSegments lost the driver version: %q", joined)
 	}
 }
 
@@ -1572,20 +1584,24 @@ func TestFeedDeathSurfacesInDashboard(t *testing.T) {
 	if len(cmds) == 0 {
 		t.Fatal("Init returned no commands")
 	}
-	// Run every leaf: waitSnap/tickClock legitimately idle or sleep, but the
-	// pre-loaded feed channel must deliver immediately.
+	// Run every leaf: waitSnap and tickClock legitimately idle or sleep, and
+	// tickClock returns at the 1s mark, so this collects what the batch
+	// produces over a window rather than taking whichever leaf wins the race.
 	done := make(chan tea.Msg, len(cmds))
 	for _, c := range cmds {
 		go func(c tea.Cmd) { done <- c() }(c)
 	}
 	var got tea.Msg
-	select {
-	case got = <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("no Init command produced a message")
-	}
-	if _, ok := got.(feedDownMsg); !ok {
-		t.Fatalf("waiting on the feed channel produced %v, want feedDownMsg", got)
+	deadline := time.After(2 * time.Second)
+	for got == nil {
+		select {
+		case msg := <-done:
+			if _, ok := msg.(feedDownMsg); ok {
+				got = msg
+			}
+		case <-deadline:
+			t.Fatal("no Init command produced a feedDownMsg")
+		}
 	}
 	nm, again := m.Update(got)
 	m = nm.(Model)

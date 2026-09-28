@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/agentusage"
-	"github.com/maci0/toktop/internal/core"
 )
 
 // Discovery rewrites the tracking table (adding, replacing, dropping
@@ -34,10 +33,13 @@ func TestConcurrentDiscoveryChurnAndReporting(t *testing.T) {
 	w.listAgents = func() []agentusage.Process {
 		var out []agentusage.Process
 		for i := int64(0); i < live.Load(); i++ {
+			// One store, three processes: the first claims the watcher and
+			// the rest are tracked without one, the handover case discovery
+			// has to get right while the table churns.
 			out = append(out, agentusage.Process{
 				PID:     1000 + int(i),
 				Tool:    "claude",
-				Dir:     work + string(rune('a'+i)),
+				Dir:     work,
 				Started: time.Unix(0, 0),
 			})
 		}
@@ -52,11 +54,20 @@ func TestConcurrentDiscoveryChurnAndReporting(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		for range 400 {
+		out := 100
+		for range 40 {
 			live.Store(3)
-			time.Sleep(200 * time.Microsecond)
+			// Tokens keep landing while the trackers hold the store: the
+			// first write of a window is the watcher's baseline, the rest
+			// are growth it has to report against a table the next
+			// discovery pass rewrites.
+			for range 5 {
+				writeUsage(transcript, work, out)
+				out++
+				time.Sleep(time.Millisecond)
+			}
 			live.Store(0)
-			time.Sleep(200 * time.Microsecond)
+			time.Sleep(5 * time.Millisecond)
 		}
 	})
 	wg.Wait()
@@ -66,10 +77,29 @@ func TestConcurrentDiscoveryChurnAndReporting(t *testing.T) {
 	case <-time.After(30 * time.Second):
 		t.Fatal("Run did not return after cancel")
 	}
-	if n := len(rec.all()); n < 0 {
-		t.Fatal("unreachable")
+	// The goroutines discovery started reported from the table it was
+	// rewriting: without an event the whole test is -race and nothing else.
+	if got := rec.forPID(1000); len(got) == 0 {
+		t.Fatalf("no event from the stub process the churn kept alive; recorded %d events", len(rec.all()))
 	}
-	_ = core.AgentEvent{}
+	w.mu.Lock()
+	left := len(w.tracked)
+	w.mu.Unlock()
+	if left != 0 {
+		t.Errorf("%d trackers left after Run returned, want the table drained", left)
+	}
+}
+
+// writeUsage appends one assistant record to a transcript. It runs on a
+// churn goroutine, so a write failure is swallowed rather than t.Fatal'd off
+// the test goroutine.
+func writeUsage(dir, cwd string, out int) {
+	f, err := os.OpenFile(filepath.Join(dir, "s.jsonl"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(usageLine(cwd, out) + "\n")
 }
 
 // SetNow and SetOnError write the two fields every tracker's goroutine reads

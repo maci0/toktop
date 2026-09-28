@@ -174,10 +174,22 @@ func TestIngestIdempotencyKeyFillsMissingID(t *testing.T) {
 	if len(rec.evs) != 2 {
 		t.Fatalf("events = %d, want 2 (one per line, retry ignored)", len(rec.evs))
 	}
-	if rec.evs[0].ID == "" || rec.evs[1].ID == "" ||
-		rec.evs[0].ID != rec.evs[0].ID[:len(rec.evs[0].ID)-2]+":1" ||
-		rec.evs[1].ID != rec.evs[1].ID[:len(rec.evs[1].ID)-2]+":2" {
-		t.Errorf("ids = %q, %q", rec.evs[0].ID, rec.evs[1].ID)
+	// The derived id is the hashed key plus the line number, so the two
+	// lines of one POST share a prefix and that prefix is the key's hash.
+	first, second := rec.evs[0].ID, rec.evs[1].ID
+	if !strings.HasSuffix(first, ":1") || !strings.HasSuffix(second, ":2") {
+		t.Fatalf("ids = %q, %q, want the :1 and :2 line suffixes", first, second)
+	}
+	pre1 := strings.TrimSuffix(first, ":1")
+	pre2 := strings.TrimSuffix(second, ":2")
+	if len(pre1) != 16 || strings.Trim(pre1, "0123456789abcdef") != "" {
+		t.Fatalf("derived prefix = %q, want 16 hex characters", pre1)
+	}
+	if pre1 != pre2 {
+		t.Errorf("two lines of one POST got different prefixes: %q and %q", pre1, pre2)
+	}
+	if pre1 == derivedKeyPrefix("harness-batch-8") {
+		t.Error("a different Idempotency-Key hashed to the same prefix")
 	}
 	if rec.evs[0].OutputTokens != 50 || rec.evs[1].OutputTokens != 10 {
 		t.Errorf("tokens = %+v %+v", rec.evs[0], rec.evs[1])
@@ -1039,21 +1051,30 @@ func TestIngestRefusesUnstorableId(t *testing.T) {
 	}
 }
 
-// An id exactly at the cap is kept whole, and so is one written in decomposed
-// Unicode: the cap counts characters, not bytes.
+// An id exactly at the cap is kept whole, whatever its bytes cost: the cap
+// counts characters, so an id of 128 two-byte runes (256 bytes) and one of 128
+// decomposed pairs (384 bytes) are both at the cap. A cap counted in bytes
+// would cut both. The stored id is the NFC spelling, so one sender's id holds
+// one key in the collector's dedup window however the sender wrote it.
 func TestIngestKeepsIdAtCap(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
-	for _, id := range []string{strings.Repeat("x", 128), strings.Repeat("k", 64) + "café"} {
-		body := fmt.Sprintf(`{"id":%q,"agent":"coder"}`, id)
+	composed := strings.Repeat("\u00e9", 128)
+	decomposed := strings.Repeat("e\u0301", 128)
+	for i, tc := range []struct{ posted, want string }{
+		{strings.Repeat("x", 128), strings.Repeat("x", 128)},
+		{composed, composed},
+		{decomposed, composed},
+	} {
+		body := fmt.Sprintf(`{"id":%q,"agent":"coder"}`, tc.posted)
 		if code, _ := postBody(t, "http://"+s.Addr()+"/v1/events", body); code != http.StatusAccepted {
-			t.Fatalf("id of %d bytes: status = %d", len(id), code)
+			t.Fatalf("id of %d bytes: status = %d", len(tc.posted), code)
 		}
-	}
-	awaitEvents(t, rec, 2)
-	if got := rec.evs[0].ID; got != strings.Repeat("x", 128) {
-		t.Errorf("id = %q, want the whole 128 characters", got)
+		awaitEvents(t, rec, i+1)
+		if got := rec.evs[i].ID; got != tc.want {
+			t.Errorf("id = %q (%d bytes), want %q whole and NFC", got, len(got), tc.want)
+		}
 	}
 }
 
