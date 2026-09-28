@@ -132,6 +132,74 @@ func parseJSON(line []byte) (jsonEvent, bool) {
 	return ev, true
 }
 
+// mayCarryUsage reports whether line holds any key the walk recognizes, without
+// decoding it. Keys are folded with core.FoldASCII, which only lowers A-Z, so
+// comparing case-insensitively over the raw bytes cannot miss a key that would
+// have matched.
+//
+// The markers below are the shortest substrings that together cover every key
+// in outputKeys, thinkingKeys, totalKeys, inputKeys, cacheKeys and cwdKeys. A
+// match is a filter, not a lookup: it only means the record has to be decoded,
+// so a false positive costs the decode it would have paid anyway, while a key
+// holding none of them is never read again. TestUsageMarkersCoverKeys is what
+// keeps the two lists in step, and fails the build when a key is added to a
+// table without one. Grouped by first byte so a record that carries nothing
+// costs one compare per byte.
+func mayCarryUsage(line []byte) bool {
+	for i := range len(line) {
+		switch lowerASCII(line[i]) {
+		case 't':
+			if hasPrefixFold(line[i:], "token") || hasPrefixFold(line[i:], "thinking") || hasPrefixFold(line[i:], "total") {
+				return true
+			}
+		case 'o':
+			if hasPrefixFold(line[i:], "output") {
+				return true
+			}
+		case 'r':
+			if hasPrefixFold(line[i:], "reasoning") {
+				return true
+			}
+		case 'i':
+			if hasPrefixFold(line[i:], "input") {
+				return true
+			}
+		case 'c':
+			if hasPrefixFold(line[i:], "cache") || hasPrefixFold(line[i:], "cwd") {
+				return true
+			}
+		case 'w':
+			if hasPrefixFold(line[i:], "work") {
+				return true
+			}
+		case 'p':
+			if hasPrefixFold(line[i:], "project") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func hasPrefixFold(line []byte, prefix string) bool {
+	if len(line) < len(prefix) {
+		return false
+	}
+	for i := 0; i < len(prefix); i++ {
+		if lowerASCII(line[i]) != prefix[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerASCII(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
+}
+
 // maxDepth bounds the walk. Agent envelopes nest a few levels; anything deeper
 // is a tool result payload, whose contents are not this package's business.
 const maxDepth = 8
@@ -279,6 +347,15 @@ func asInt(v any) (int, bool) {
 // the stream parser does. It is what makes a defined agent's transcript
 // readable without a bespoke adapter.
 func parseGeneric(line []byte) (values, string, bool) {
+	// A record carrying no key the walk knows is nothing this function can
+	// report, whatever it holds, and most records in a generic store are a user
+	// message, a tool result or a session notice. Decoding one into an any tree
+	// allocates a map and a boxed value per key for all of that payload before
+	// the walk drops it; mayCarryUsage rules those records out off the raw
+	// bytes. A false positive costs the decode it would have paid anyway.
+	if !mayCarryUsage(line) {
+		return values{}, "", false
+	}
 	ev, ok := parseJSON(line)
 	if !ok || !ev.Usage.Has() {
 		return values{}, "", false
@@ -304,8 +381,13 @@ func parseGeneric(line []byte) (values, string, bool) {
 }
 
 // genericSessionCwd finds the working directory in a session header, whatever
-// the record is called: the first line that names one wins.
+// the record is called: the first line that names one wins. The header scan
+// reads the first records of a session, most of which are the session's own
+// content, so the same prefilter as parseGeneric applies.
 func genericSessionCwd(line []byte) (string, bool) {
+	if !mayCarryUsage(line) {
+		return "", false
+	}
 	ev, ok := parseJSON(line)
 	if !ok || ev.Cwd == "" {
 		return "", false

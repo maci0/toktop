@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -81,7 +82,7 @@ func TestRootListCacheDropsExpiredKeys(t *testing.T) {
 
 	dir := t.TempDir()
 	now := time.Now()
-	_, _ = listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+	_, _ = listTranscripts(dir, []string{".jsonl"}, now.Add(-recencyWindow), now, false)
 
 	rootListMu.Lock()
 	_, still := rootLists["stale\x00.jsonl"]
@@ -95,11 +96,11 @@ func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	defer swapRootLists(t, map[string]rootListing{
-		"stale\x00.jsonl":          {files: []string{"gone"}, at: now.Add(-rescanEvery - time.Second)},
-		rootListKey(dir, ".jsonl"): {files: []string{"fresh.jsonl"}, at: now},
+		"stale\x00.jsonl":                    {files: []string{"gone"}, at: now.Add(-rescanEvery - time.Second)},
+		rootListKey(dir, []string{".jsonl"}): {files: []string{"fresh.jsonl"}, at: now},
 	})()
 
-	got, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+	got, _ := listTranscripts(dir, []string{".jsonl"}, now.Add(-recencyWindow), now, false)
 	if len(got) != 1 || got[0] != "fresh.jsonl" {
 		t.Fatalf("cached hit = %+v, want [fresh.jsonl]", got)
 	}
@@ -119,10 +120,10 @@ func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
-	key := rootListKey(dir, ".jsonl")
+	key := rootListKey(dir, []string{".jsonl"})
 	defer swapRootLists(t, map[string]rootListing{})()
 
-	if got, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	if got, _ := listTranscripts(dir, []string{".jsonl"}, now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("empty store listed %v, want nothing", got)
 	}
 	rootListMu.Lock()
@@ -139,7 +140,7 @@ func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 	// rather than parking on a channel nobody will close.
 	done := make(chan []string, 1)
 	go func() {
-		files, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		files, _ := listTranscripts(dir, []string{".jsonl"}, now.Add(-recencyWindow), now, false)
 		done <- files
 	}()
 	select {
@@ -163,7 +164,7 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 	dir := t.TempDir()
 	walk := make(chan struct{})
 	defer swapRootLists(t, map[string]rootListing{
-		rootListKey(dir, ".jsonl"): {at: time.Now().Add(-rescanEvery - time.Second), walk: walk},
+		rootListKey(dir, []string{".jsonl"}): {at: time.Now().Add(-rescanEvery - time.Second), walk: walk},
 	})()
 
 	done := make(chan []string, 1)
@@ -176,7 +177,7 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 		// that bound instead of reporting the wait.
 		close(entered)
 		now := time.Now()
-		files, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		files, _ := listTranscripts(dir, []string{".jsonl"}, now.Add(-recencyWindow), now, false)
 		done <- files
 	}()
 	select {
@@ -192,7 +193,7 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 	// branch goes on holding.
 	for deadline := time.Now().Add(50 * time.Millisecond); time.Now().Before(deadline); {
 		rootListMu.Lock()
-		held := rootLists[rootListKey(dir, ".jsonl")].walk
+		held := rootLists[rootListKey(dir, []string{".jsonl"})].walk
 		rootListMu.Unlock()
 		if held != walk {
 			t.Fatalf("walked the same tree a second time while one was in flight, returned %+v", <-done)
@@ -205,7 +206,7 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 	// Ordering matters: the entry has to stop claiming a walk before the
 	// waiter can leave the wait branch.
 	rootListMu.Lock()
-	rootLists[rootListKey(dir, ".jsonl")] = rootListing{files: []string{"late.jsonl"}, at: time.Now()}
+	rootLists[rootListKey(dir, []string{".jsonl"})] = rootListing{files: []string{"late.jsonl"}, at: time.Now()}
 	rootListMu.Unlock()
 	close(walk)
 
@@ -346,8 +347,8 @@ func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	if err := os.WriteFile(root, []byte("x"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	key := rootListKey(root, ".jsonl")
-	if got, _ := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	key := rootListKey(root, []string{".jsonl"})
+	if got, _ := listTranscripts(root, []string{".jsonl"}, now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("failed walk listed %v, want nothing", got)
 	}
 
@@ -394,7 +395,7 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now()
-	if got, _ := listTranscripts(root, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, []string{".jsonl"}, now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("failed walk listed %v, want nothing", got)
 	}
 	got := lines.String()
@@ -424,7 +425,7 @@ func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 	defer func() { audit = old }()
 
 	root := filepath.Join(t.TempDir(), "state")
-	key := rootListKey(root, "token_stats.jsonl")
+	key := rootListKey(root, []string{"token_stats.jsonl"})
 	t.Cleanup(func() {
 		rootListMu.Lock()
 		delete(rootLists, key)
@@ -433,7 +434,7 @@ func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 
 	now := time.Now()
 	cutoff := now.Add(-recencyWindow)
-	if got, _ := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, []string{"token_stats.jsonl"}, cutoff, now, false); len(got) != 0 {
 		t.Fatalf("missing root listed %v", got)
 	}
 	if strings.Contains(lines.String(), "agent transcript walk failed") {
@@ -455,12 +456,12 @@ func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 	if err := os.WriteFile(name, []byte("{\"output_tokens\":3}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := listTranscripts(root, "token_stats.jsonl", cutoff, now, false); len(got) != 0 {
+	if got, _ := listTranscripts(root, []string{"token_stats.jsonl"}, cutoff, now, false); len(got) != 0 {
 		t.Fatalf("cached empty listing listed %v", got)
 	}
 
 	later := now.Add(rescanEvery)
-	got, _ := listTranscripts(root, "token_stats.jsonl", cutoff, later, false)
+	got, _ := listTranscripts(root, []string{"token_stats.jsonl"}, cutoff, later, false)
 	if len(got) != 1 || got[0] != name {
 		t.Fatalf("after rescan = %v, want [%s]", got, name)
 	}
@@ -584,5 +585,43 @@ func TestFailedWalkIsNotStampedAsTheWatchersListing(t *testing.T) {
 	}
 	if string(w.zstdCarry[path]) != `{"usage":` {
 		t.Fatal("a failed walk released the record carry of a transcript it never reached: the next window would start mid-record")
+	}
+}
+
+// A store holding two extensions is walked once for both: the listing is keyed
+// on the whole suffix set, so a dsh watcher pays one traversal and one stat per
+// file per rescan rather than one of each per extension. The cache holds one
+// entry for the root, which is what a single walk leaves behind.
+func TestOneWalkServesTheWholeSuffixSet(t *testing.T) {
+	dir := t.TempDir()
+	now := time.Now()
+	for _, name := range []string{"session.jsonl", "session.jsonl.zstd", "notes.txt"} {
+		if err := os.WriteFile(filepath.Join(dir, name), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	suffixes := []string{".jsonl.zstd", ".jsonl"}
+	got, complete := listTranscripts(dir, suffixes, now.Add(-recencyWindow), now, true)
+	if !complete {
+		t.Fatal("a walk of a readable store reported itself incomplete")
+	}
+	if len(got) != 2 {
+		t.Fatalf("walk returned %v, want both .jsonl.zstd and .jsonl matches", got)
+	}
+	for _, want := range []string{filepath.Join(dir, "session.jsonl"), filepath.Join(dir, "session.jsonl.zstd")} {
+		if !slices.Contains(got, want) {
+			t.Errorf("walk returned %v, missing %s", got, want)
+		}
+	}
+	rootListMu.Lock()
+	entries := 0
+	for k := range rootLists {
+		if strings.HasPrefix(k, dir+"\x00") {
+			entries++
+		}
+	}
+	rootListMu.Unlock()
+	if entries != 1 {
+		t.Fatalf("one walk left %d listings for the root, want 1", entries)
 	}
 }

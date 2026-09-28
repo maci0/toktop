@@ -35,6 +35,24 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   screen. The rows it could not show were the flags at the bottom, and no key
   reached them.
 
+### Performance
+
+- The generic transcript reader (copilot, cursor-agent, clanker) no longer
+  decodes a record that carries no key it can use. The decode builds a map and
+  a boxed value per key for the whole record, tool results and user text
+  included, and the walk then dropped all of it: over a mixed six-record poll,
+  178 allocations and 7,764 bytes became 104 and 4,527, with the decode skipped
+  on the four records of that poll that carry nothing it can use. The keys that
+  can match are a fixed set, so a scan of the raw bytes rules a record out
+  before it is decoded, and a test fails the build if a key added to those
+  tables holds none of the scanned spellings.
+
+- A transcript store holding two extensions is walked once for both. The
+  shared listing was keyed per suffix, so a dsh watcher (zstd and plain
+  session logs in the same tree) traversed the store and stat'd every file in
+  it twice per rescan for a list that is the union either way. The key is the
+  whole suffix set now, and one walk fills it.
+
 ### Fixed
 
 - The web site no longer removes the focus outline from the skip link's

@@ -108,7 +108,13 @@ func SetLogger(l *slog.Logger) {
 	audit = func() *slog.Logger { return l }
 }
 
-func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
+// rootListKey names a listing by the root and the whole suffix set it was
+// walked for, not by one suffix: an adapter with two suffixes (dsh's zstd and
+// plain session logs) reads both out of the same tree, and a key per suffix
+// would walk it twice per rescan, one lstat per file each time.
+func rootListKey(root string, suffixes []string) string {
+	return root + "\x00" + strings.Join(suffixes, "\x00")
+}
 
 // auditWalkFailure writes the one line a transcript walk that could not
 // finish produces. Both values on it are folded to "~": the root is the
@@ -150,8 +156,19 @@ func (a adapter) fileSuffixes() []string {
 	return []string{a.suffix}
 }
 
-// listTranscripts returns recent files under root matching suffix. force
-// bypasses the shared cache so a final Poll cannot miss a file created
+// hasAnySuffix reports whether name carries one of suffixes, so a walk can
+// serve a whole suffix set without a walk per suffix.
+func hasAnySuffix(name string, suffixes []string) bool {
+	for _, s := range suffixes {
+		if strings.HasSuffix(name, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// listTranscripts returns recent files under root matching any of suffixes.
+// force bypasses the shared cache so a final Poll cannot miss a file created
 // inside the last rescan window.
 //
 // now is the calling watcher's clock, and the cache is stamped with it rather
@@ -161,11 +178,11 @@ func (a adapter) fileSuffixes() []string {
 // clocks shares freshness with the others; mixing is a configuration error,
 // not a supported mode.
 //
-// Concurrent watchers of the same root share one walk, and only that walk
-// blocks: a store with thousands of files takes long enough that holding
-// rootListMu across it stalled every watcher reading an unrelated root, and
-// with one goroutine per agent process one slow store paused all of them. The
-// walk therefore runs outside the map lock, with an in-flight channel as the
+// Concurrent watchers of the same root and suffix set share one walk, and only
+// that walk blocks: a store with thousands of files takes long enough that
+// holding rootListMu across it stalled every watcher reading an unrelated root,
+// and with one goroutine per agent process one slow store paused all of them.
+// The walk therefore runs outside the map lock, with an in-flight channel as the
 // per-root claim on it. A slower empty result still cannot overwrite a newer
 // listing: only the goroutine holding the claim writes one.
 //
@@ -177,8 +194,8 @@ func (a adapter) fileSuffixes() []string {
 // goes unread, and ageing bookkeeping against it releases the read positions of
 // transcripts that are still on disk, which is what re-reads them from byte
 // zero and bills a session twice.
-func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) ([]string, bool) {
-	key := rootListKey(root, suffix)
+func listTranscripts(root string, suffixes []string, cutoff, now time.Time, force bool) ([]string, bool) {
+	key := rootListKey(root, suffixes)
 	for {
 		rootListMu.Lock()
 		pruneRootListsLocked(now, rescanEvery)
@@ -240,7 +257,7 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) ([]
 			rootListMu.Unlock()
 		}()
 
-		files, err := walkTranscripts(root, suffix, cutoff)
+		files, err := walkTranscripts(root, suffixes, cutoff)
 		complete := err == nil
 		if err != nil {
 			// A walk that could not finish is not an empty store, and caching
@@ -258,17 +275,23 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) ([]
 	}
 }
 
-// walkTranscripts lists the transcripts under one root, reporting a failure to
-// finish. A walk that stops partway (an unreadable subtree, a filesystem error)
-// has seen some of the store and not the rest, which is a different answer from
-// an empty one: the caller must not cache the partial list as a fresh listing.
+// walkTranscripts lists the transcripts under one root that match any of
+// suffixes, reporting a failure to finish. A walk that stops partway (an
+// unreadable subtree, a filesystem error) has seen some of the store and not the
+// rest, which is a different answer from an empty one: the caller must not cache
+// the partial list as a fresh listing.
+//
+// One walk serves the whole suffix set: dsh's store holds both compressed and
+// plain session logs, and walking it once per suffix paid the tree traversal
+// and the stat of every file in it twice per rescan for a list that is the
+// union either way.
 //
 // A root that is not there is an empty store. Clanker keeps its log in
 // <project>/state, which does not exist until the agent writes it, and a
 // process whose working directory was a deleted build temp is the same
 // answer. Warning on every rescan logged one line per vanished directory.
 // A root that exists but cannot be opened is still a failure.
-func walkTranscripts(root, suffix string, cutoff time.Time) ([]string, error) {
+func walkTranscripts(root string, suffixes []string, cutoff time.Time) ([]string, error) {
 	r, err := os.OpenRoot(root)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -290,7 +313,7 @@ func walkTranscripts(root, suffix string, cutoff time.Time) ([]string, error) {
 		if rel == "." {
 			return nil
 		}
-		if d.IsDir() || !strings.HasSuffix(rel, suffix) {
+		if d.IsDir() || !hasAnySuffix(rel, suffixes) {
 			return nil
 		}
 		info, err := d.Info()
@@ -358,31 +381,34 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 		out      []string
 		complete = true
 	)
+	// One walk per root for the whole suffix set, the way listTranscripts keys
+	// its shared listing: the files are the union either way, and a store with
+	// two extensions in it (dsh) was paying the traversal and the per-file stat
+	// twice per rescan to reach the same answer.
+	suffixes := w.ad.fileSuffixes()
 	for _, root := range w.rootsLocked(now) {
 		if root == "" {
 			continue
 		}
-		for _, suffix := range w.ad.fileSuffixes() {
-			if cache {
-				files, ok := listTranscripts(root, suffix, cutoff, now, force)
-				if !ok {
-					complete = false
-				}
-				out = append(out, files...)
-				continue
-			}
-			files, err := walkTranscripts(root, suffix, cutoff)
-			if err != nil {
-				// The attach walk has no listing cache to leave unstamped, so it
-				// is audited here and the read is abandoned: seeding offsets from
-				// a store that could not be walked would record "read to the
-				// end" for files the walk never reached, and the next append to
-				// one of them would be skipped.
-				auditWalkFailure(root, err)
-				return nil
+		if cache {
+			files, ok := listTranscripts(root, suffixes, cutoff, now, force)
+			if !ok {
+				complete = false
 			}
 			out = append(out, files...)
+			continue
 		}
+		files, err := walkTranscripts(root, suffixes, cutoff)
+		if err != nil {
+			// The attach walk has no listing cache to leave unstamped, so it
+			// is audited here and the read is abandoned: seeding offsets from
+			// a store that could not be walked would record "read to the
+			// end" for files the walk never reached, and the next append to
+			// one of them would be skipped.
+			auditWalkFailure(root, err)
+			return nil
+		}
+		out = append(out, files...)
 	}
 	if !cache {
 		return out

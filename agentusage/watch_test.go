@@ -1584,8 +1584,8 @@ func TestStaleRootListingIsForgotten(t *testing.T) {
 	stale := t.TempDir()
 	now := time.Now()
 	cutoff := now.Add(-time.Hour)
-	_, _ = listTranscripts(stale, ".jsonl", cutoff, now, true)
-	key := rootListKey(stale, ".jsonl")
+	_, _ = listTranscripts(stale, []string{".jsonl"}, cutoff, now, true)
+	key := rootListKey(stale, []string{".jsonl"})
 	rootListMu.Lock()
 	c, ok := rootLists[key]
 	if !ok {
@@ -1596,7 +1596,7 @@ func TestStaleRootListingIsForgotten(t *testing.T) {
 	rootLists[key] = c
 	rootListMu.Unlock()
 
-	_, _ = listTranscripts(t.TempDir(), ".jsonl", cutoff, now, true)
+	_, _ = listTranscripts(t.TempDir(), []string{".jsonl"}, cutoff, now, true)
 	rootListMu.Lock()
 	_, still := rootLists[key]
 	rootListMu.Unlock()
@@ -1620,7 +1620,7 @@ func TestRootListPruneKeepsInflightClaim(t *testing.T) {
 		rootListMu.Unlock()
 	})
 
-	key := rootListKey(t.TempDir(), ".jsonl")
+	key := rootListKey(t.TempDir(), []string{".jsonl"})
 	walk := make(chan struct{})
 	rootListMu.Lock()
 	rootLists[key] = rootListing{at: time.Now().Add(-2 * rescanEvery), walk: walk}

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // The envelopes below follow the dialects the supported agents emit:
@@ -654,5 +656,49 @@ func TestMixedCaseKeysReachTheCounters(t *testing.T) {
 	}
 	if ev.Usage.Output != 7 {
 		t.Fatalf("Output_Tokens read as %d, want 7", ev.Usage.Output)
+	}
+}
+
+func TestUsageMarkersCoverEveryKey(t *testing.T) {
+	// mayCarryUsage rules a record out before it is decoded, so a key missing
+	// from the marker list is a record whose counters are never read again. The
+	// tables are the whole list of keys walk can use; each has to hold at least
+	// one marker, spelled the way the scan sees it, which is case-insensitive
+	// because core.FoldASCII only lowers A-Z.
+	for name, keys := range map[string]map[string]bool{
+		"output": outputKeys, "thinking": thinkingKeys, "total": totalKeys,
+		"input": inputKeys, "cache": cacheKeys, "cwd": cwdKeys,
+	} {
+		for k := range keys {
+			lower := []byte(core.FoldASCII(k))
+			if !mayCarryUsage(lower) {
+				t.Errorf("%s key %q holds no usage marker", name, k)
+			}
+		}
+	}
+}
+
+func TestMayCarryUsageFoldsCase(t *testing.T) {
+	// The scan has to see a key spelled in any case, since FoldASCII matches
+	// one, and must not fire on a record that carries nothing it recognizes.
+	if !mayCarryUsage([]byte(`{"USAGE":{"OUTPUT_TOKENS":7}}`)) {
+		t.Error("an upper-case usage key was ruled out")
+	}
+	if mayCarryUsage([]byte(`{"type":"user","content":"read the file"}`)) {
+		t.Error("a record with no recognized key was let through")
+	}
+}
+
+func TestGenericSkipsRecordsWithNoCounters(t *testing.T) {
+	// The prefilter's whole claim: a record the walk finds nothing in parses
+	// to nothing, whether or not the decode was skipped.
+	for _, line := range []string{
+		`{"type":"user","content":[{"type":"text","text":"fix the bench"}]}`,
+		`{"type":"tool.result","result":"total tokens are not in this string"}`,
+		`{"kind":"progress","phase":"indexing","files":420}`,
+	} {
+		if v, cwd, ok := parseGeneric([]byte(line)); ok {
+			t.Errorf("%s reported %+v cwd %q, want no record", line, v, cwd)
+		}
 	}
 }
