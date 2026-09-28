@@ -416,7 +416,7 @@ func writeKnownHosts(path string, store map[string]string) error {
 	for _, host := range slices.Sorted(maps.Keys(store)) {
 		b.WriteString(store[host] + "\n")
 	}
-	sweepStaleTempFiles(dir)
+	core.SweepStaleTemps(dir, knownHostsTempPrefix)
 	if err := atomicWriteFile(path, b.String()); err != nil {
 		return err
 	}
@@ -491,34 +491,6 @@ func writeBackup(path string, b string) error {
 // knownHostsTempPrefix names the staging file the store is written to before
 // it is renamed into place.
 const knownHostsTempPrefix = ".known_hosts-"
-
-// staleTempAge is how old a leftover staging file has to be before the next
-// write removes it. A kill between CreateTemp and the rename leaves one in
-// the config directory forever, since nothing else ever looks for it. The age
-// gate keeps the sweep from deleting a store another toktop is writing.
-const staleTempAge = 24 * time.Hour
-
-// sweepStaleTempFiles removes staging files an earlier write did not get to
-// rename away. Callers hold the store's mutex, so within one process only the
-// crashed runs of earlier sessions are ever this old. Anything it cannot
-// remove is left alone.
-func sweepStaleTempFiles(dir string) {
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		return
-	}
-	cutoff := time.Now().Add(-staleTempAge)
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), knownHostsTempPrefix) {
-			continue
-		}
-		info, err := e.Info()
-		if err != nil || info.ModTime().After(cutoff) {
-			continue
-		}
-		_ = os.Remove(filepath.Join(dir, e.Name()))
-	}
-}
 
 // displacedSuffix names the copy replaceFile moves the old store to before
 // renaming the new one in. readKnownHosts reads it back when the store itself

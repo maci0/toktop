@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // ExpandHome expands a leading tilde in a path the way a shell would: "~" to
@@ -51,4 +52,33 @@ func SyncDir(dir string) {
 	}
 	defer d.Close()
 	_ = d.Sync()
+}
+
+// StaleTempAge is how old a leftover staging file has to be before the next
+// write removes it. A kill between CreateTemp and the rename leaves one in
+// the directory forever, since nothing else ever looks for it. The age gate
+// is what keeps the sweep from deleting a staging file another process is
+// still writing.
+const StaleTempAge = 24 * time.Hour
+
+// SweepStaleTemps removes staging files an earlier write did not get to rename
+// away, where prefix names the staging files of the caller. Anything it cannot
+// remove is left alone. Callers serialize their writers, so within one process
+// only the crashed runs of earlier sessions are ever this old.
+func SweepStaleTemps(dir, prefix string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-StaleTempAge)
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil || info.ModTime().After(cutoff) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
 }

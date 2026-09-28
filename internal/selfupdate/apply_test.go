@@ -20,6 +20,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // checksumsArchive packs a listing the way the release workflow does.
@@ -289,7 +291,7 @@ func TestApplySweepsTempFilesLeftByAKilledRun(t *testing.T) {
 	if err := os.WriteFile(crashed, []byte("half a download"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-2 * staleTempAge)
+	old := time.Now().Add(-2 * core.StaleTempAge)
 	if err := os.Chtimes(crashed, old, old); err != nil {
 		t.Fatal(err)
 	}

@@ -306,8 +306,7 @@ const versionCap = 128
 // engine answering "\n" would otherwise buy itself a second row in the
 // version readout.
 func capVersion(s string) string {
-	oneLine := strings.Join(strings.Fields(core.SanitizeText(s)), " ")
-	return core.ClampField(oneLine, versionCap)
+	return core.ClampField(core.SingleLine(s), versionCap)
 }
 
 // extractVersionField pulls a "version" member out of JSON-ish bodies.

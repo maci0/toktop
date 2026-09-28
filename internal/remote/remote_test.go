@@ -937,7 +937,7 @@ func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
 	if err := os.WriteFile(crashed, []byte("half a store"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	old := time.Now().Add(-2 * staleTempAge)
+	old := time.Now().Add(-2 * core.StaleTempAge)
 	if err := os.Chtimes(crashed, old, old); err != nil {
 		t.Fatal(err)
 	}
