@@ -1234,6 +1234,12 @@ func TestInformationalCommandsRejectExtraArguments(t *testing.T) {
 		{"update version", func(w io.Writer, args []string) int {
 			return runUpdate(context.Background(), w, args)
 		}, []string{"--version", "extra"}},
+		{"update short version", func(w io.Writer, args []string) int {
+			return runUpdate(context.Background(), w, args)
+		}, []string{"-v", "extra"}},
+		{"help version", runHelp, []string{"--version", "extra"}},
+		{"help short version", runHelp, []string{"-v", "extra"}},
+		{"version short version", runVersion, []string{"-v", "extra"}},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			var out bytes.Buffer
@@ -1303,6 +1309,35 @@ func TestRunHelp(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "Usage:") || !strings.Contains(out.String(), "-demo") {
 			t.Fatalf("runHelp(version) stdout missing top-level usage: %q", out.String())
+		}
+	})
+	t.Run("version flag prints the version on every command", func(t *testing.T) {
+		for _, tt := range []struct {
+			name string
+			run  func(io.Writer, []string) int
+			args []string
+		}{
+			{"help", runHelp, []string{"--version"}},
+			{"help short", runHelp, []string{"-v"}},
+			{"version", runVersion, []string{"-v"}},
+			{"update", func(w io.Writer, args []string) int {
+				return runUpdate(context.Background(), w, args)
+			}, []string{"-v"}},
+		} {
+			t.Run(tt.name, func(t *testing.T) {
+				var out bytes.Buffer
+				var code int
+				got := captureStderr(t, func() { code = tt.run(&out, tt.args) })
+				if code != 0 {
+					t.Fatalf("= %d, want 0", code)
+				}
+				if got != "" {
+					t.Fatalf("leaked %q to stderr", got)
+				}
+				if out.String() != "toktop "+version+"\n" {
+					t.Fatalf("stdout = %q, want the version line", out.String())
+				}
+			})
 		}
 	})
 	t.Run("dashed leftover is an unknown option", func(t *testing.T) {

@@ -542,8 +542,9 @@ toktop update     subcommand: install the latest release (--check to only
                   stdout is the release URL and nothing else, or nothing at
                   all when the release names no GitHub release page, which
                   stderr then says
-toktop help       same as --help; `toktop help update` / `toktop help version`
-toktop version    same as --version
+toktop help       same as --help (-h); `toktop help update` / `toktop help version`
+toktop version    same as --version (-v), which `toktop help`, `toktop version`
+                  and `toktop update` all accept
 --demo            simulated fleet, zero setup
 --add URL         attach an openai-compatible http(s) endpoint (repeatable,
                   once per endpoint; host required; no userinfo, query or
@@ -648,7 +649,7 @@ follow the run rather than how long the process took.
 | `TOKTOP_BEARER` | bearer token fallback for `--bearer` (checked after `OMNIROUTE_API_KEY`). Same trimming and skip-a-blank-value rule |
 | `TOKTOP_SSH_PASSWORD` | ssh password for headless runs; otherwise an interactive prompt. A trailing newline (from `$(cat file)`) is stripped, everything else is sent as typed. Set but empty is named rather than passed over: a headless run fails saying so, and a terminal run says it is prompting instead |
 | `TOKTOP_COLUMNS` / `TOKTOP_LINES` | fixed frame size for `--once` output (screenshots, capture); must be 41-1024 / 21-512, and a set-but-invalid value aborts with exit code 2. `--once --plain` renders no sized frame, so both are named as unused and never validated |
-| `TOKTOP_LOG_LEVEL` | audit log floor for every subsystem that writes one (ingest endpoint, engine collector, host-vitals sampler, ssh client, `--add` attach, agent watch): `debug`, `info` (default), `warn`, or `error`; a set-but-invalid value aborts with exit code 2 |
+| `TOKTOP_LOG_LEVEL` | audit log floor for every subsystem that writes one (ingest endpoint, engine collector, host-vitals sampler, ssh client, `--add` attach, agent watch): `debug`, `info` (default), `warn` (or `warning`), or `error`, case-insensitive; a set-but-invalid value aborts with exit code 2 |
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it |
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header, and a set-but-blank value is named before the request, since the rate-limit error it produces otherwise advises setting a variable that is already set |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows, and so is an absolute one with no `agents.json` under it |

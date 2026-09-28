@@ -72,6 +72,7 @@ func registerFlags() *cliFlags {
 		topFS.StringVar(&cli.sshKey, "ssh-key", "", "private key for ssh:// targets (overrides ~/.ssh/config)")
 		topFS.StringVar(&cli.bearer, "bearer", "", "bearer token sent to --add endpoints only (OmniRoute etc.)")
 		topFS.BoolVar(&cli.showVer, "version", false, "print version and exit")
+		topFS.BoolVar(&cli.showVer, "v", false, "print version and exit")
 		topFS.BoolVar(&cli.showHelp, "help", false, "show help and exit")
 		topFS.BoolVar(&cli.showHelp, "h", false, "show help and exit")
 		topFS.Func("add", "attach an openai-compatible backend http(s) URL (repeatable, once per endpoint)", func(v string) error {

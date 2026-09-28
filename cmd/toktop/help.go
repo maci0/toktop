@@ -17,7 +17,8 @@ import (
 // package records no alias relationship, so the pairing is declared here;
 // without it PrintDefaults would list -h and --help as two unrelated flags.
 var flagAliases = map[string]string{
-	"help": "h",
+	"help":    "h",
+	"version": "v",
 }
 
 // flagPlaceholders overrides the argument word the flag package would print.
@@ -169,7 +170,8 @@ Environment (a flag always wins over the variable it mirrors):
   TOKTOP_LINES            --once frame height, 21-512 (default: the terminal,
                           else 38 when stdout is not one)
   TOKTOP_LOG_LEVEL        audit log floor for every subsystem that writes one
-                          (engine, ssh, ingest): debug, info, warn, error
+                          (engine, ssh, ingest): debug, info, warn (or
+                          warning), error; the name is case-insensitive
   GAUNTLET_HOME           directory holding agents.json (--agents), default
                           ~/.gauntlet; a relative value is ignored
   XDG_DATA_HOME           where opencode's session database is read
@@ -259,6 +261,14 @@ func isHelpArg(arg string) bool {
 	return arg == "-h" || arg == "--h" || arg == "-help" || arg == "--help"
 }
 
+// versionFlags are the spellings of --version that every command carrying it
+// accepts: the long form, the single-dash spelling the flag package also
+// parses, and the -v short form declared in flagAliases.
+var versionFlags = []string{"--version", "-version", "-v"}
+
+// isVersionArg reports whether arg is one of the spellings of --version.
+func isVersionArg(arg string) bool { return slices.Contains(versionFlags, arg) }
+
 // runHelp implements `toktop help [topic]`. Unknown topics are a usage error
 // so a typo does not dump the top-level screen and look like success. A topic
 // names the command whose help applies, so the extra-argument message points
@@ -269,6 +279,15 @@ func runHelp(out io.Writer, args []string) int {
 			return rejectExtra("toktop help", args[1])
 		}
 		return outputStatus(usage(out))
+	}
+	// --version under help prints the version, as it does under `version` and
+	// under `update`: a flag that means the same thing in all three commands
+	// must not be a usage error in one of them.
+	if isVersionArg(args[0]) {
+		if len(args) > 1 {
+			return rejectExtra("toktop help", args[1])
+		}
+		return runVersion(out, nil)
 	}
 	switch args[0] {
 	case "update":
@@ -300,7 +319,7 @@ func rejectExtra(cmd, arg string) int {
 // other extra argument is a usage error.
 func runVersion(out io.Writer, args []string) int {
 	if len(args) > 0 {
-		if args[0] == "--version" {
+		if isVersionArg(args[0]) {
 			if len(args) > 1 {
 				return rejectExtra("toktop version", args[1])
 			}

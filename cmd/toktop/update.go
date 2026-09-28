@@ -66,6 +66,7 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	fs.BoolVar(&showHelp, "help", false, "show help and exit")
 	fs.BoolVar(&showHelp, "h", false, "show help and exit")
 	fs.BoolVar(&showVer, "version", false, "print version and exit")
+	fs.BoolVar(&showVer, "v", false, "print version and exit")
 	// Defining -h/--help as real flags keeps the flag package from treating
 	// them as a parse error, so they can land on stdout with exit 0 the way
 	// the top-level command's --help does. --version matches the parent.
