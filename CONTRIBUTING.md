@@ -86,6 +86,13 @@ fails on an empty list, naming any near miss and the command to list the
 real names. A `RUN` containing a `/` selects subtests, which that check
 cannot see, so it is passed through unchecked.
 
+`RACE=0` drops `-race` and nothing else: the zone tag and `-shuffle=on` stay
+on, so the fast loop tests the same binary, in the same shuffled order, as
+the default one. `make check-test-flags` fails if a `go test` line in the
+Makefile drops the zone tag or `-shuffle=on`, or glues one flag onto the
+other, which is a different argument rather than a missing one and so
+stays invisible to a `go test` that exits 0.
+
 To see the dashboard render without an interactive terminal:
 
 ```
@@ -197,6 +204,7 @@ in day-to-day work:
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
+| `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, and keeps `-shuffle=on` (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
 | `make check-yaml` | fail unless every workflow in `.github/workflows/` is valid YAML and passes the `.yamllint` rule set, at the Makefile's `YAMLLINT_VERSION` pin (`make check` runs it) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
@@ -231,7 +239,8 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
 the Linux leg of the test job runs every `make check` guard
-(`check-ci-tags`, `check-ci-platforms`, `check-yaml`, `check-help-docs`).
+(`check-ci-tags`, `check-test-flags`, `check-ci-platforms`, `check-yaml`,
+`check-help-docs`).
 Vulnerability analysis follows the host platform's build constraints.
 `staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
 Linux, macOS and Windows, plus cross-compiles of linux/amd64, linux/arm64,

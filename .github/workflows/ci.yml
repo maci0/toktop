@@ -66,6 +66,15 @@ jobs:
       - name: the go lines in this job carry the Makefile's tags
         if: runner.os == 'Linux'
         run: make check-ci-tags
+      # The same guards for the Makefile's own `go test` lines. A tag value
+      # glued to the next flag is not a missing flag but a different
+      # argument, so a RACE=0 run can silently test a binary without the
+      # embedded zone database and without a shuffled order, and only the
+      # RACE=1 path stays right. Linux only: it reads the Makefile, which is
+      # one file for all three runners.
+      - name: the Makefile's go test lines carry the zone tag and -shuffle=on
+        if: runner.os == 'Linux'
+        run: make check-test-flags
       # The build matrix below is a copy of the Makefile's PLATFORMS, so the
       # two can drift: the release job builds and publishes PLATFORMS while
       # this workflow vets and compiles whatever the matrix lists.

@@ -371,7 +371,7 @@ test-pkg: ## one package/test: PKG=./internal/ui [RUN=TestName] [TESTTAGS=sqlite
 	fi
 	@if [ "$(RACE)" != "0" ]; then $(NEED_CC); fi
 	@if [ -n "$(RUN_TO_CHECK)" ]; then $(CHECK_RUN_MATCHES); fi
-	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags "$(strip $(TESTTAGS) $(ZONE_TAG))"$(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)"
+	CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly -tags "$(strip $(TESTTAGS) $(ZONE_TAG))" $(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)"
 	@if [ -n "$(BOTH_HALVES)" ]; then \
 		echo "make test-pkg: also running the tagged half (set TESTTAGS to run one half)"; \
 		CGO_ENABLED=$(if $(filter 0,$(RACE)),0,1) $(GO) test -mod=readonly $(GOTAGS) $(race_flag)-shuffle=on $(if $(RUN_PATTERN),-run "$(RUN_PATTERN)" )"$(PKG)" || exit 1; \
@@ -648,6 +648,52 @@ endef
 # toolchain command must carry the tag, and every go vet line must carry
 # VET_TESTS as well, for the reason given at the `vet` target.
 WORKFLOWS := $(wildcard .github/workflows/*.yml)
+
+# The same drift, inside this file. `test-pkg` builds its own `-tags` value
+# rather than reusing GOTAGS, so a line here can lose the tag or the shuffle
+# without any workflow changing, and nothing else in the tree notices: the
+# go command is handed a *different* argument, not a missing one. With the
+# tag value quoted against `$(race_flag)` with no space between them, the
+# shell joins them, so RACE=0 (where race_flag expands to nothing) hands go
+# a single build tag named "timetzdata-shuffle=on": the zone database drops
+# out of the test binary and the shuffle flag is never seen at all, and go
+# accepts the unknown tag without complaint. RACE=1 leaves race_flag as
+# " -race ", so the space is there and that run stays correct. The divergence
+# is therefore invisible on the default loop and lands on the RACE=0 loop,
+# the one contributors are told to use for a faster cycle.
+#
+# Three rules, all read off the recipe source with index() rather than a
+# regexp: the pattern text here is `$(race_flag)`, whose parentheses and
+# dollar sign are regexp metacharacters, and a mangled pattern is a check
+# that fires on every line or none. Every `$(GO) test` line must name the
+# zone tag (directly or through GOTAGS); none may put `$(race_flag)`
+# against a preceding non-space character; and every one that runs tests
+# rather than listing them must carry -shuffle=on.
+#
+# The guard skips any line containing awk, because its own recipe lines
+# quote the very text being searched for and a check that matches itself
+# reports every line it was meant to skip.
+.PHONY: check-test-flags
+check-test-flags: ## fail if a Makefile go test line lost the zone tag, glued a flag onto it, or dropped -shuffle=on
+	@untagged=$$(awk '/^[[:space:]]*#/ || /awk/ { next } index($$0, "$$(GO) test") && !index($$0, "$$(ZONE_TAG)") && !index($$0, "$$(GOTAGS") { print "  Makefile:" FNR ": " $$0 }' $(MAKEFILE_LIST)); \
+	if [ -n "$$untagged" ]; then \
+		echo "make check-test-flags: these lines run go test without -tags $(ZONE_TAG), so they test a binary without the embedded zone database, which is the fallback the released binaries no longer have:" >&2; \
+		echo "$$untagged" >&2; \
+		exit 1; \
+	fi
+	@glued=$$(awk '/^[[:space:]]*#/ || /awk/ { next } index($$0, "$$(GO) test") { p = index($$0, "$$(race_flag)"); if (p > 1 && substr($$0, p - 1, 1) != " ") print "  Makefile:" FNR ": " $$0 }' $(MAKEFILE_LIST)); \
+	if [ -n "$$glued" ]; then \
+		echo "make check-test-flags: these lines put \$$(race_flag) directly against the tag value, so RACE=0 joins them into one argument: the zone tag stops applying and -shuffle=on is dropped. Put a space between them:" >&2; \
+		echo "$$glued" >&2; \
+		exit 1; \
+	fi
+	@unshuffled=$$(awk '/^[[:space:]]*#/ || /awk/ { next } index($$0, "$$(GO) test") && !index($$0, "-list") && !index($$0, "-shuffle=on") { print "  Makefile:" FNR ": " $$0 }' $(MAKEFILE_LIST)); \
+	if [ -n "$$unshuffled" ]; then \
+		echo "make check-test-flags: these lines run tests without -shuffle=on, so an order-dependent test passes locally and fails under the shuffled order CI uses:" >&2; \
+		echo "$$unshuffled" >&2; \
+		exit 1; \
+	fi
+
 .PHONY: check-ci-tags
 check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not carry the zone tag, or a go vet line lost -tests=true
 	@missing=$$(awk '/^[[:space:]]*#/ || /^[[:space:]]*-?[[:space:]]*name:/ { next } /(^|[[:space:]])(go (test|vet|tool staticcheck)|staticcheck)[[:space:]]/ && $$0 !~ /$(ZONE_TAG)/ { print "  " FILENAME ":" FNR ": " $$0 }' $(WORKFLOWS)); \
@@ -825,6 +871,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 
 .PHONY: check
 check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the workflow YAML and the doc guards (CI parity)
+	@$(MAKE) --no-print-directory check-test-flags
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-platforms
 	@$(MAKE) --no-print-directory check-yaml
