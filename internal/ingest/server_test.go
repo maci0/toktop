@@ -674,6 +674,83 @@ func TestIngestDropsAbsurdTokenCounts(t *testing.T) {
 	}
 }
 
+// A sender that knows how long the model spent reports it as span_ms, and
+// that duration is the rate denominator the dashboard prefers. A pushed
+// agent's rate used to be the gap between its events whatever it knew.
+func TestIngestRecordsReportedSpan(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	resp := post(t, "http://"+s.Addr()+"/v1/events",
+		`{"agent":"grok","output_tokens":400,"span_ms":2000}`)
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 1)
+	if got := rec.evs[0].Span; got != 2*time.Second {
+		t.Errorf("span = %s, want 2s", got)
+	}
+}
+
+// An absent span keeps its documented meaning: the rate is the gap between
+// events. A whole JSON float is an integer like the token counts.
+func TestIngestSpanDefaultsToZero(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want time.Duration
+	}{
+		{"absent", `{"agent":"grok","output_tokens":400}`, 0},
+		{"null", `{"agent":"grok","output_tokens":400,"span_ms":null}`, 0},
+		{"whole-float", `{"agent":"grok","output_tokens":400,"span_ms":2000.0}`, 2 * time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &memRecorder{}
+			s := startIngest(t, rec)
+			if resp := post(t, "http://"+s.Addr()+"/v1/events", tc.body); resp != http.StatusAccepted {
+				t.Fatalf("status = %d", resp)
+			}
+			awaitEvents(t, rec, 1)
+			if got := rec.evs[0].Span; got != tc.want {
+				t.Errorf("span = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+// A span is a rate denominator, so a negative or absurd one is junk from a
+// misbehaving sender and drops to zero rather than scaling a real rate to
+// nothing. A non-number is a malformed body, which is a 400.
+func TestIngestClampsOutOfRangeSpan(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		span   string
+		status int
+	}{
+		{"negative", `-1`, http.StatusAccepted},
+		{"absurd", `99999999999999`, http.StatusAccepted},
+		{"fractional", `1.5`, http.StatusBadRequest},
+		{"string", `"2s"`, http.StatusBadRequest},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := &memRecorder{}
+			s := startIngest(t, rec)
+			resp := post(t, "http://"+s.Addr()+"/v1/events",
+				`{"agent":"grok","output_tokens":400,"span_ms":`+tc.span+`}`)
+			if resp != tc.status {
+				t.Fatalf("status = %d, want %d", resp, tc.status)
+			}
+			if tc.status != http.StatusAccepted {
+				return
+			}
+			awaitEvents(t, rec, 1)
+			if got := rec.evs[0].Span; got != 0 {
+				t.Errorf("span = %s, want 0", got)
+			}
+		})
+	}
+}
+
 // A claimed event timestamp far ahead of arrival is a wrong clock or a
 // forgery; it must not enter the retained feed as a future instant, where
 // it would pin the UI's "live" marker and render a future wall-clock time.

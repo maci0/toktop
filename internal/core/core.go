@@ -111,6 +111,24 @@ type ProviderSnapshot struct {
 // the other would have refused.
 const MaxEventTokens = 1 << 40
 
+// MaxEventSpan bounds the model-reported duration on one AgentEvent. Span is
+// the denominator of the rate core.SummarizeAgents prefers over the gap
+// between events, so an unclamped value from a sender does not add tokens
+// twice: it divides them by a duration that never happened and reports a rate
+// orders of magnitude too low. A turn is bounded by a day; anything past that
+// is a sender reporting its own uptime, not one turn.
+const MaxEventSpan = 24 * time.Hour
+
+// ClampEventSpan bounds one event's reported duration to [0, MaxEventSpan].
+// The ingest endpoint is the only producer of a Span from the wire, and it
+// routes through here so the bound has one definition.
+func ClampEventSpan(d time.Duration) time.Duration {
+	if d < 0 || d > MaxEventSpan {
+		return 0
+	}
+	return d
+}
+
 // ClampEventTokens bounds one event's token count to MaxEventTokens, dropping
 // anything outside [0, MaxEventTokens] to zero. Both producers of an agent
 // event (the ingest endpoint, the local process watcher) route through it, so

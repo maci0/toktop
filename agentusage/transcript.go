@@ -48,6 +48,13 @@ func (w *Watcher) readNew(path string) {
 		// it would be prepended to that version's first line, which then fails
 		// to parse and is dropped with the offset already past it.
 		delete(w.zstdCarry, path)
+		// The bytes behind the pre-existing flag are the ones being abandoned:
+		// it said "this file was on disk at attach, so its cumulative counters
+		// began before this watch". The version now being read from byte zero is
+		// a session that appeared after attach, so it counts in full. Left in
+		// place, a rotated-in cumulative session takes its first reading as a
+		// baseline and that reading is never reported.
+		delete(w.preexisting, path)
 	}
 	mine, decided := w.owns(path)
 	if !decided {

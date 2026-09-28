@@ -1145,6 +1145,30 @@ func TestRewrittenTranscriptIsNotCountedTwice(t *testing.T) {
 	}
 }
 
+// A cumulative transcript that existed at attach and is then rotated to a
+// shorter file is a different session, one that began after this watch. Its
+// first reading is real output, not a baseline, so it must be reported.
+func TestRotatedCumulativeSessionIsNotBaselinedAway(t *testing.T) {
+	store := withStore(t, "codex")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl")
+
+	// On disk at attach, so its first reading would be a baseline.
+	append_(t, path, codexMeta(work), codexTokens(1000, 5000))
+	w := Watch("codex", work, time.Now())
+	w.poll(nil)
+
+	// Rotated: shorter than what was there at attach, and a new session that
+	// began after this watch.
+	if err := os.WriteFile(path, []byte(codexMeta(work)+"\n"+codexTokens(40, 400)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	w.poll(nil)
+	if got := w.Sample().Output; got != 40 {
+		t.Fatalf("output tokens %d, want 40: a session created after attach was baselined away", got)
+	}
+}
+
 // A record flushed in two chunks must be counted exactly once: the torn
 // prefix waits for its remainder instead of being consumed and lost.
 func TestTornRecordIsCountedOnceComplete(t *testing.T) {

@@ -72,7 +72,8 @@ verified out of band, as any first contact is.
 - **The ingest endpoint** accepts events pushed to it. It binds
   `127.0.0.1:8420` by default, authenticates nobody, and prints a warning
   when bound anywhere else. The `/v1/events` body is `id`, `agent`, `model`,
-  `kind`, token counts, a timestamp, `via_engine` and a free-form note, all
+  `kind`, token counts, a timestamp, a `span_ms` duration, `via_engine` and
+  a free-form note, all
   of which are stored in memory and rendered on your terminal. A note that
   is nothing but a directory gets the same two components a locally
   watched working directory does, with the home folded to `~`; a note

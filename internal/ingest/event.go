@@ -30,6 +30,10 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	if err != nil {
 		return core.AgentEvent{}, err
 	}
+	span, err := parseSpanFields(wire)
+	if err != nil {
+		return core.AgentEvent{}, err
+	}
 	ev := core.AgentEvent{
 		At:             at,
 		ID:             id,
@@ -41,6 +45,7 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 		ThinkingTokens: thinking,
 		ViaEngine:      wire.ViaEngine,
 		Note:           wire.Note,
+		Span:           span,
 	}
 	// Event fields are attacker-shaped text (any local process or peer
 	// able to reach this endpoint): strip terminal escape sequences and
@@ -159,6 +164,15 @@ type agentEventWire struct {
 	ThinkingTokens json.RawMessage `json:"thinking_tokens"`
 	ViaEngine      string          `json:"via_engine"`
 	Note           string          `json:"note"`
+	// SpanMs is how long the model spent on this event's tokens, in
+	// milliseconds, carried raw for the same reason as the token counts: a
+	// sender that dumps a float should not abort the stream. core.AgentEvent
+	// has held Span since the local watcher began setting it, and a sender
+	// arriving over HTTP could not report one, so a pushed agent's rate was
+	// always the gap between events while a locally watched one was the
+	// model's own time. Zero, or absent, keeps the documented meaning: the
+	// gap between events.
+	SpanMs json.RawMessage `json:"span_ms"`
 }
 
 // parseEventTime decodes an event's ts field as RFC 3339 (offset required).
@@ -196,6 +210,21 @@ func parseTokenFields(w agentEventWire) (prompt, output, thinking int64, err err
 	}
 	thinking, err = parseTokenJSON(w.ThinkingTokens, "thinking_tokens")
 	return
+}
+
+// parseSpanFields reads the model-reported duration in milliseconds and
+// returns it clamped to core.MaxEventSpan. Absent, null or whitespace-only is
+// zero, which keeps the documented meaning: the rate is the gap between
+// events. A non-number is the same 400 the token counts use, but a number
+// outside the bound is dropped to zero rather than refused, because a span
+// only ever scales a rate down and the three token fields set the precedent
+// of clamping rather than rejecting.
+func parseSpanFields(w agentEventWire) (time.Duration, error) {
+	ms, err := parseTokenJSON(w.SpanMs, "span_ms")
+	if err != nil {
+		return 0, err
+	}
+	return core.ClampEventSpan(time.Duration(ms) * time.Millisecond), nil
 }
 
 func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {

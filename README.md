@@ -337,6 +337,7 @@ Event fields are all optional; anything omitted gets the default:
 | `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`; custom kinds pass through lowercased, capped at 24 characters |
 | `prompt_tokens` / `output_tokens` / `thinking_tokens` | integer | `0` | negative values and values above 2^40 clamp to `0`; a whole JSON number such as `100.0` counts; a count outside the 64-bit integer range is a `400` naming the field instead of a clamp; thinking is the reasoning share of output when the agent says so |
 | `via_engine` | string | - | monitored engine already counting this output; aggregates skip the event; capped at 128 characters |
+| `span_ms` | integer | `0` | how long the model spent on this event's tokens, in milliseconds. It is the rate denominator, so it beats the gap between events. Negative values and values above 86400000 clamp to `0`, which leaves the gap between events in charge; a whole JSON number such as `2000.0` counts, and a value that is not a number is a `400` naming the field |
 | `note` | string | - | free-form, capped at 512 characters; a note that is nothing but a directory is reduced to its last two components, with a path under `$HOME` folded to `~`, so client and project names above the checkout never reach the feed |
 
 One POST answers `202` with `{"accepted":N,"stored":M}` once every event in
