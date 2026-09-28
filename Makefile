@@ -255,6 +255,11 @@ help: ## show available targets
 # before the first failure rather than one missing tool per round trip. The
 # per-target checks below still fire where the tool is actually used: this
 # reports, it does not replace them. Every gap is listed, then one verdict.
+#
+# The C compiler check mirrors NEED_CC rather than re-deriving it: a set CC is
+# the compiler and the only one the race tests will use, with no fallback to
+# gcc or clang. Testing the fallback as well reported ok for a CC that does not
+# exist, so prereqs cleared a machine that make test then refused to build.
 .PHONY: prereqs
 prereqs: ## check every tool the merge gates need, naming all gaps at once
 	@fail=0; \
@@ -268,10 +273,14 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	fi; \
 	if [ "$(RACE)" = "0" ]; then \
 		ok "C compiler not needed (RACE=0 skips the race detector)"; \
-	elif [ -n "$${CC:-}" ] && command -v "$${CC}" >/dev/null 2>&1 \
-		|| command -v gcc >/dev/null 2>&1 \
-		|| command -v clang >/dev/null 2>&1; then \
-		ok "C compiler for 'go test -race' ($${CC:-gcc or clang})"; \
+	elif [ -n "$${CC:-}" ]; then \
+		if command -v "$${CC}" >/dev/null 2>&1; then \
+			ok "C compiler for 'go test -race' ($$CC)"; \
+		else \
+			gap "CC is set to '$$CC', which is not on PATH; unset it to use gcc or clang"; \
+		fi; \
+	elif command -v gcc >/dev/null 2>&1 || command -v clang >/dev/null 2>&1; then \
+		ok "C compiler for 'go test -race' (gcc or clang)"; \
 	else \
 		gap "no C compiler (gcc or clang) for the race tests in 'make test'; pass RACE=0 to skip them"; \
 	fi; \
@@ -812,24 +821,34 @@ check-release-source: ## fail unless a non-dev VERSION builds from a clean, git-
 		exit 1; \
 	fi
 
-# sbom first: checksums.txt has to cover the SBOM, or a downloaded SBOM is the
-# one release asset with nothing to verify it against.
+# The guards run before anything writes a byte: a version whose changelog or
+# source tree fails must not spend a full cross-build first. sbom before
+# checksums, because checksums.txt has to cover the SBOM or a downloaded SBOM
+# is the one release asset with nothing to verify it against. Under -j none of
+# that order is guaranteed by listing prerequisites, so .NOTPARALLEL below
+# inserts a .WAIT between them.
 .PHONY: release
 release: check-changelog check-release-source sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
+
+# Without this, `make -j release` runs the three prerequisites above at once:
+# dist-clean would delete the binaries test-dist is writing, and the checksums
+# glob would miss an SBOM that has not been written yet.
+.NOTPARALLEL: release
 
 # dist/ is shared: cover writes coverage.out, vet-cross and repro-check write
 # subdirectories, and the release build writes binaries. release.yml publishes
 # every top-level file it finds there, so a coverage profile or an old note left
 # by an earlier local target would ride along as a release asset. test-dist
-# already drops this version's binaries; this drops the rest. The keep patterns
-# name $(VERSION) rather than the bare prefix, so a `make release` of one version
-# cannot checksum and publish another version's leftover, and both separators are
-# kept so the SBOM (toktop-sbom-*) survives whichever order a `make -j release`
-# runs the prerequisites in. The tarball is a packaging output, not a release
-# input: keeping it would fold yesterday's archive into today's checksums.txt,
-# which the tar step is about to overwrite. Only regular files at depth 1 are
-# touched, so the site deploy lock (a directory) and any nested build output are
-# left alone.
+# already drops this version's binaries; this drops the rest. It is a
+# prerequisite of buildinfo rather than a sibling of it, so the sweep cannot
+# run beside the build that fills dist/ again. The keep patterns name
+# $(VERSION) rather than the bare prefix, so a `make release` of one version
+# cannot checksum and publish another version's leftover, and both separators
+# are kept so the SBOM (toktop-sbom-*) survives the sweep that runs after it.
+# The tarball is a packaging output, not a release input: keeping it would fold
+# yesterday's archive into today's checksums.txt, which the tar step is about to
+# overwrite. Only regular files at depth 1 are touched, so the site deploy lock
+# (a directory) and any nested build output are left alone.
 .PHONY: dist-clean
 dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 	@mkdir -p $(DIST)
@@ -841,7 +860,7 @@ dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 # runs `sbom` first; run on its own, the glob matches nothing and the list is
 # the binaries alone.
 .PHONY: checksums
-checksums: dist-clean buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
+checksums: sbom buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
 	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
 		{ echo "$(TAR) rejects --sort: deterministic packaging needs GNU tar (install it as gtar)" >&2; exit 1; }
 	@cd $(DIST) && \
@@ -877,8 +896,11 @@ test-dist: ## build every release platform without packaging
 # download arrived intact, not which toolchain made it; without the commit,
 # the toolchain, and the flags there is nothing faithful to rebuild against.
 # Named to match the toktop_* glob, so it lands in checksums.txt too.
+# dist-clean is a prerequisite, not a sibling: as a sibling it raced
+# test-dist under `make -j release`, deleting binaries while they were being
+# written and leaving checksums.txt covering fewer files than PLATFORMS.
 .PHONY: buildinfo
-buildinfo: test-dist ## record the toolchain, commit, and flags behind dist/ into a manifest
+buildinfo: dist-clean test-dist ## record the toolchain, commit, and flags behind dist/ into a manifest
 	@mkdir -p $(DIST)
 	@{ \
 		echo "name: $(BINARY)"; \
