@@ -44,6 +44,12 @@ func TestSameSpellingAcrossNormalizationForms(t *testing.T) {
 	}
 }
 
+func TestDirKeyFoldsCaseAndNormalization(t *testing.T) {
+	if got, want := dirKey("/Users/Foo/café"), "/users/foo/café"; got != want {
+		t.Errorf("dirKey = %q, want %q", got, want)
+	}
+}
+
 // The full spelling list for a non-ASCII directory must reach every
 // normalization form an agent could have recorded.
 func TestDirSpellingsIncludeNormalizationVariants(t *testing.T) {

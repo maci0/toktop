@@ -5,6 +5,7 @@ package procs
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"strings"
 	"sync"

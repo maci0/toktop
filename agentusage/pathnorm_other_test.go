@@ -31,4 +31,10 @@ func TestDirSpellingsHaveNoSynthesizedVariants(t *testing.T) {
 	if v := dirVariants(dir); !slices.Equal(v, []string{dir}) {
 		t.Errorf("dirVariants = %q, want the input unchanged", v)
 	}
+	if got := dirKey(dir); got != dir {
+		t.Errorf("dirKey(%q) = %q, want the path unchanged here", dir, got)
+	}
+	if got := dirKey("/Users/Dev/proj"); got != "/Users/Dev/proj" {
+		t.Errorf("dirKey folded case = %q; two differently cased names are two directories here", got)
+	}
 }

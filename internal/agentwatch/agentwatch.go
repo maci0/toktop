@@ -221,7 +221,10 @@ func (w *Watcher) runningAgents() []agentusage.Process {
 // sameProcess reports whether found is the OS process already being followed
 // at that PID. Linux supplies a start time, which changes when the kernel
 // reuses the PID; when the platform does not (Darwin), tool and working
-// directory stand in.
+// directory stand in. The directory is compared the way the file system
+// compares it: on macOS and Windows two spellings of one checkout differ byte
+// for byte, and treating them as two processes restarts the session's counters
+// on every poll.
 func sameProcess(was, found agentusage.Process) bool {
 	if was.PID != found.PID {
 		return false
@@ -229,14 +232,16 @@ func sameProcess(was, found agentusage.Process) bool {
 	if !was.Started.IsZero() && !found.Started.IsZero() {
 		return was.Started.Equal(found.Started)
 	}
-	return was.Tool == found.Tool && was.Dir == found.Dir
+	return was.Tool == found.Tool && agentusage.SameDir(was.Dir, found.Dir)
 }
 
 // storeKey names the transcript store a process writes to. A store is
 // identified by the tool and the working directory, never by the PID:
 // agentusage.Watch resolves its source from that pair, so two processes in one
-// repo enumerate the same sessions.
-func storeKey(p agentusage.Process) string { return p.Tool + "\x00" + p.Dir }
+// repo enumerate the same sessions. The directory is folded the way DirKey
+// folds it, or two spellings of one checkout would claim the same store twice
+// and two watchers would tail it.
+func storeKey(p agentusage.Process) string { return p.Tool + "\x00" + agentusage.DirKey(p.Dir) }
 
 // closedDone is the done channel of a tracker with no watcher of its own. It
 // is already closed, so stopOne's wait returns at once instead of blocking on

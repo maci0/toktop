@@ -38,3 +38,9 @@ func TestDirVariantsCoverSlashAndCase(t *testing.T) {
 		}
 	}
 }
+
+func TestDirKeyCleansSlashesAndCase(t *testing.T) {
+	if got, want := dirKey(`C:\Users\Dev\project\`), "c:/users/dev/project"; got != want {
+		t.Errorf("dirKey = %q, want %q", got, want)
+	}
+}

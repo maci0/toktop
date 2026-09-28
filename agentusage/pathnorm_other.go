@@ -23,3 +23,8 @@ func dirVariants(p string) []string { return []string{p} }
 func foldSpelling(p string) string { return p }
 
 func spellingEqual(a, b string) bool { return a == b }
+
+// dirKey is the map key form of a recorded path. Nothing folds outside macOS
+// and Windows, so the key is the path itself and two spellings that name
+// different directories stay different keys.
+func dirKey(p string) string { return p }

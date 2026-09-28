@@ -305,6 +305,39 @@ func TestSameProcess(t *testing.T) {
 	}
 }
 
+// The directory a process is attributed to is compared the way the file
+// system compares it, so two spellings of one checkout are one session on the
+// platforms whose volumes fold and two on the platforms whose do not.
+func TestSameProcessFoldsDirectorySpelling(t *testing.T) {
+	a := agentusage.Process{PID: 1, Tool: "claude", Dir: filepath.Join("a", "b", "café")}
+	for _, other := range []string{a.Dir + string(filepath.Separator), filepath.Join("a", "b", "café"), "a/b/other"} {
+		b := a
+		b.Dir = other
+		if sameProcess(a, b) != agentusage.SameDir(a.Dir, other) {
+			t.Errorf("sameProcess(%q, %q) disagrees with the platform's directory identity", a.Dir, other)
+		}
+	}
+}
+
+// A store is keyed by tool and working directory, and the key has to fold the
+// directory the way the platform does: two spellings of one checkout that key
+// apart let two watchers tail the same transcripts and count every event
+// twice.
+func TestStoreKeyFoldsDirectorySpelling(t *testing.T) {
+	a := agentusage.Process{Tool: "claude", Dir: filepath.Join(t.TempDir(), "proj")}
+	for _, other := range []string{a.Dir + string(filepath.Separator), filepath.ToSlash(a.Dir), a.Dir + "-other"} {
+		b := a
+		b.Dir = other
+		if got, want := storeKey(a) == storeKey(b), agentusage.SameDir(a.Dir, other); got != want {
+			t.Errorf("storeKey(%q) == storeKey(%q) is %v, want %v: the platform calls those one directory or two",
+				a.Dir, other, got, want)
+		}
+	}
+	if storeKey(a) == storeKey(agentusage.Process{Tool: "codex", Dir: a.Dir}) {
+		t.Error("two tools writing to one directory are two stores")
+	}
+}
+
 // A kernel-reused PID must not keep the previous process's tracker: events
 // would carry the old tool/dir, and two watchers would double-count.
 func TestPIDReuseRetargetsWatcher(t *testing.T) {

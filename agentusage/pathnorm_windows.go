@@ -39,3 +39,8 @@ func dirVariants(p string) []string {
 func foldSpelling(p string) string { return filepath.ToSlash(filepath.Clean(p)) }
 
 func spellingEqual(a, b string) bool { return strings.EqualFold(a, b) }
+
+// dirKey is the map key form of a recorded path: cleaned, slash-normalized
+// and lowercased, which is how NTFS and the Windows APIs look the name up, so
+// one checkout spelled two ways is one key.
+func dirKey(p string) string { return strings.ToLower(foldSpelling(p)) }

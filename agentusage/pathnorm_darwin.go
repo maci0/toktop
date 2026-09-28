@@ -41,3 +41,8 @@ func dirVariants(p string) []string {
 func foldSpelling(p string) string { return norm.NFC.String(p) }
 
 func spellingEqual(a, b string) bool { return strings.EqualFold(a, b) }
+
+// dirKey is the map key form of a recorded path: normalized and case-folded,
+// which is how an APFS or HFS+ volume looks the name up, so one checkout
+// spelled two ways is one key.
+func dirKey(p string) string { return strings.ToLower(norm.NFC.String(p)) }
