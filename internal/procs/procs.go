@@ -297,7 +297,7 @@ func (i Info) ListenPort() int {
 type engineMatcher struct {
 	engine  string
 	defPort int
-	match   func(name string, lowerCmd string, args []string) bool
+	match   func(*cmdline) bool
 }
 
 // baseName is a process name reduced to the form the engine matchers below
@@ -438,56 +438,78 @@ func lowerJoinedArgs(args []string) string {
 	return b.String()
 }
 
+// cmdline is what an engine matcher reads: the process name, its argv, and
+// the argv folded into one lowercased line.
+//
+// The fold is built on first use. Most matchers decide on the name alone, and
+// folding the line for every process on every /proc poll was a per-process
+// allocation paid for a match that never reads it.
+type cmdline struct {
+	name   string
+	args   []string
+	once   sync.Once
+	folded string
+}
+
+// joined is the lowercased command line, folded once per cmdline.
+func (c *cmdline) joined() string {
+	c.once.Do(func() { c.folded = lowerJoinedArgs(c.args) })
+	return c.folded
+}
+
+// has reports whether the folded command line contains s.
+func (c *cmdline) has(s string) bool { return strings.Contains(c.joined(), s) }
+
 var engineMatchers = []engineMatcher{
-	{"ollama", 11434, func(n, c string, _ []string) bool {
-		return n == "ollama" || strings.Contains(c, "ollama serve")
+	{"ollama", 11434, func(c *cmdline) bool {
+		return c.name == "ollama" || c.has("ollama serve")
 	}},
-	{"llama.cpp", 8080, func(n, c string, _ []string) bool {
-		return strings.Contains(n, "llama-server") || strings.Contains(c, "llama-server") ||
-			strings.Contains(n, "llamafile")
+	{"llama.cpp", 8080, func(c *cmdline) bool {
+		return strings.Contains(c.name, "llama-server") || c.has("llama-server") ||
+			strings.Contains(c.name, "llamafile")
 	}},
-	{"koboldcpp", 5001, func(_, c string, _ []string) bool {
-		return strings.Contains(c, "koboldcpp")
+	{"koboldcpp", 5001, func(c *cmdline) bool {
+		return c.has("koboldcpp")
 	}},
-	{"vllm", 8000, func(_, _ string, args []string) bool {
-		return anyArgContains(args, "vllm.entrypoints", "/vllm") ||
-			baseNameEq(args, "vllm")
+	{"vllm", 8000, func(c *cmdline) bool {
+		return anyArgContains(c.args, "vllm.entrypoints", "/vllm") ||
+			baseNameEq(c.args, "vllm")
 	}},
-	{"sglang", 30000, func(_, _ string, args []string) bool {
+	{"sglang", 30000, func(c *cmdline) bool {
 		// python -m sglang.launch_server / sglang.srt.*, and the
 		// `sglang serve` CLI (same shape as `vllm serve`).
-		return anyArgContains(args, "sglang.launch_server", "sglang.srt") ||
-			baseNameEq(args, "sglang")
+		return anyArgContains(c.args, "sglang.launch_server", "sglang.srt") ||
+			baseNameEq(c.args, "sglang")
 	}},
-	{"triton", 8000, func(n, _ string, _ []string) bool { return n == "tritonserver" }},
-	{"tgi", 8080, func(_, c string, _ []string) bool {
-		return strings.Contains(c, "text-generation-launcher")
+	{"triton", 8000, func(c *cmdline) bool { return c.name == "tritonserver" }},
+	{"tgi", 8080, func(c *cmdline) bool {
+		return c.has("text-generation-launcher")
 	}},
-	{"tabbyapi", 5000, func(n, _ string, _ []string) bool { return n == "tabbyapi" }},
-	{"oobabooga", 7860, func(_, c string, _ []string) bool {
-		return strings.Contains(c, "text-generation-webui") || strings.Contains(c, "oobabooga")
+	{"tabbyapi", 5000, func(c *cmdline) bool { return c.name == "tabbyapi" }},
+	{"oobabooga", 7860, func(c *cmdline) bool {
+		return c.has("text-generation-webui") || c.has("oobabooga")
 	}},
-	{"localai", 8080, func(n, _ string, _ []string) bool {
-		return n == "localai" || n == "local-ai"
+	{"localai", 8080, func(c *cmdline) bool {
+		return c.name == "localai" || c.name == "local-ai"
 	}},
-	{"litellm", 4000, func(_, _ string, args []string) bool {
-		return baseNameEq(args, "litellm") || anyArgContains(args, "litellm.proxy")
+	{"litellm", 4000, func(c *cmdline) bool {
+		return baseNameEq(c.args, "litellm") || anyArgContains(c.args, "litellm.proxy")
 	}},
-	{"mlx", 8080, func(_, c string, _ []string) bool {
-		return strings.Contains(c, "mlx_lm.server") || strings.Contains(c, "mlx-lm")
+	{"mlx", 8080, func(c *cmdline) bool {
+		return c.has("mlx_lm.server") || c.has("mlx-lm")
 	}},
-	{"lmstudio", 1234, func(n, _ string, _ []string) bool {
-		return strings.Contains(n, "lm-studio") || strings.Contains(n, "lmstudio") ||
-			strings.Contains(n, "lm studio")
+	{"lmstudio", 1234, func(c *cmdline) bool {
+		return strings.Contains(c.name, "lm-studio") || strings.Contains(c.name, "lmstudio") ||
+			strings.Contains(c.name, "lm studio")
 	}},
-	{"gpustack", 80, func(_, _ string, args []string) bool {
-		return anyArgContains(args, "gpustack.start")
+	{"gpustack", 80, func(c *cmdline) bool {
+		return anyArgContains(c.args, "gpustack.start")
 	}},
-	{"lemonade", 8000, func(n, _ string, _ []string) bool { return n == "lemonade-server" || n == "lemond" }},
-	{"gpt4all", 4891, func(n, _ string, _ []string) bool { return n == "gpt4all" }},
-	{"jan", 1337, func(n, _ string, _ []string) bool { return n == "jan" }},
-	{"ramalama", 8080, func(_, c string, _ []string) bool {
-		return strings.Contains(c, "ramalama")
+	{"lemonade", 8000, func(c *cmdline) bool { return c.name == "lemonade-server" || c.name == "lemond" }},
+	{"gpt4all", 4891, func(c *cmdline) bool { return c.name == "gpt4all" }},
+	{"jan", 1337, func(c *cmdline) bool { return c.name == "jan" }},
+	{"ramalama", 8080, func(c *cmdline) bool {
+		return c.has("ramalama")
 	}},
 }
 
@@ -499,10 +521,9 @@ func baseNameEq(args []string, want string) bool {
 // name is basename'd internally, so raw argv[0] works. Exported for the
 // remote ssh path, which matches command lines gathered from another host.
 func MatchEngine(i Info) (engine string, defPort int, ok bool) {
-	name := baseName(i.Name)
-	lowerCmd := lowerJoinedArgs(i.Args)
+	c := cmdline{name: baseName(i.Name), args: i.Args}
 	for _, m := range engineMatchers {
-		if m.match(name, lowerCmd, i.Args) {
+		if m.match(&c) {
 			return m.engine, m.defPort, true
 		}
 	}

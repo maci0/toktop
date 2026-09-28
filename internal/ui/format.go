@@ -370,8 +370,9 @@ func dim(s string) string { return styleDim.Render(s) }
 // with widthOf: that call was a fifth of a frame's CPU, spent splitting each
 // block and re-measuring rows this package had already cut to a known width.
 //
-// The widest row is found in the same pass that copies, so a block list is
-// walked once rather than once per block plus once to concatenate.
+// Each row is measured once, in the pass that splits the blocks, and the
+// widths are kept for the copy. Measuring again while padding walked the
+// frame's whole byte volume a second time per frame.
 func joinBlocks(blocks ...string) string {
 	if len(blocks) == 0 {
 		return ""
@@ -380,23 +381,28 @@ func joinBlocks(blocks ...string) string {
 		return blocks[0] // a lone block is already the join, trailing rows and all
 	}
 	rows := make([][]string, len(blocks))
+	widths := make([][]int, len(blocks))
 	widest := 0
 	total := 0
 	for i, b := range blocks {
 		rows[i] = strings.Split(b, "\n")
 		total += len(rows[i])
-		for _, ln := range rows[i] {
-			if w := widthOf(ln); w > widest {
+		ws := make([]int, len(rows[i]))
+		for j, ln := range rows[i] {
+			w := widthOf(ln)
+			ws[j] = w
+			if w > widest {
 				widest = w
 			}
 		}
+		widths[i] = ws
 	}
 	var out strings.Builder
 	out.Grow(total * (widest + 1))
-	for _, lines := range rows {
-		for _, ln := range lines {
+	for i, lines := range rows {
+		for j, ln := range lines {
 			out.WriteString(ln)
-			if gap := widest - widthOf(ln); gap > 0 {
+			if gap := widest - widths[i][j]; gap > 0 {
 				out.WriteString(strings.Repeat(" ", gap))
 			}
 			out.WriteByte('\n')

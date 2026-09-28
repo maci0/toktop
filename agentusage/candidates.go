@@ -172,10 +172,15 @@ func listTranscripts(root, suffix string, cutoff, now time.Time, force bool) []s
 			// the next one re-claims the walk once it lands.
 			walk := c.walk
 			rootListMu.Unlock()
+			// A stopped timer, not time.After: taking the <-walk branch leaves a
+			// two-second timer behind in the runtime heap for a wait that is
+			// already over, and contended walks park many callers per tick.
+			timer := time.NewTimer(walkWait)
 			select {
 			case <-walk:
+				timer.Stop()
 				continue
-			case <-time.After(walkWait):
+			case <-timer.C:
 				return nil
 			}
 		}

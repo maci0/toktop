@@ -446,18 +446,13 @@ func classify(fam map[string]float64, m *Metrics) {
 	// cache or throughput. Filtering first (case-insensitively, so the common
 	// path allocates nothing) keeps the lowercasing and the sort proportional
 	// to the matches rather than to the exposition.
-	matched := make([]string, 0, 16)
-	values := make([]float64, 0, 16)
+	lower := make(map[string]float64, 16)
 	for k, v := range fam {
-		if !classifiable(k) {
+		n := core.FoldASCII(k)
+		if !classifiable(n) {
 			continue
 		}
-		matched = append(matched, core.FoldASCII(k))
-		values = append(values, v)
-	}
-	lower := make(map[string]float64, len(matched))
-	for i, n := range matched {
-		lower[n] = values[i]
+		lower[n] = v
 	}
 	// Iterate in sorted order: several names can contest one scalar field,
 	// and random map order would flip the winner (and the rendered queue
@@ -519,12 +514,12 @@ func classify(fam map[string]float64, m *Metrics) {
 // classifiable reports whether a family name can reach any branch of classify.
 // The four substrings are exactly what those branches test for, and
 // "time_to_first_token" is covered by "token".
-// This is the pre-filter that decides whether to make the lowercased copy
-// classify's own tests run against. core.FoldASCII leaves an all-lowercase
-// Prometheus name as it found it, so the filter allocates nothing in the
-// common case.
-func classifiable(name string) bool {
-	n := core.FoldASCII(name)
-	return strings.Contains(n, "token") || strings.Contains(n, "req") ||
-		strings.Contains(n, "cache") || strings.Contains(n, "throughput")
+// This is the pre-filter that decides whether a family reaches classify's own
+// tests. It takes the name already folded by the caller, so the fold of a
+// family name happens once per poll rather than once here and once there.
+// core.FoldASCII leaves an all-lowercase Prometheus name as it found it, so
+// the filter allocates nothing in the common case.
+func classifiable(folded string) bool {
+	return strings.Contains(folded, "token") || strings.Contains(folded, "req") ||
+		strings.Contains(folded, "cache") || strings.Contains(folded, "throughput")
 }
