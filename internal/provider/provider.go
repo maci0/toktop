@@ -110,9 +110,15 @@ func getJSON(ctx context.Context, url string, out any) error {
 		return err
 	}
 	defer resp.Body.Close()
-	if err := json.NewDecoder(io.LimitReader(resp.Body, jsonBodyMax)).Decode(out); err != nil {
+	dec := json.NewDecoder(io.LimitReader(resp.Body, jsonBodyMax))
+	if err := dec.Decode(out); err != nil {
 		return fmt.Errorf("%s: %w", url, err)
 	}
+	// Decode stops at the end of the JSON value, not at EOF, and net/http
+	// only returns a connection to the idle pool when the body is closed at
+	// EOF. Without the drain every poll pays a fresh dial and leaves a
+	// socket in TIME_WAIT.
+	_, _ = io.Copy(io.Discard, io.MultiReader(dec.Buffered(), resp.Body))
 	return nil
 }
 

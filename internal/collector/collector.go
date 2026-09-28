@@ -8,6 +8,7 @@ import (
 	"maps"
 	"net"
 	"net/url"
+	"os"
 	"slices"
 	"strconv"
 	"strings"
@@ -104,6 +105,11 @@ type Collector struct {
 	// down exists: a poll interval of a second would otherwise write a line
 	// per engine per second while an engine is merely struggling.
 	slow map[string]time.Time
+	// errFold memoizes the folded text of a poll error per key. A downed
+	// engine answers the same failed poll every interval, and folding is a
+	// pure function of that error string, so the fold is done once per
+	// distinct error rather than once per poll per engine.
+	errFold map[string]foldedErr
 
 	probeMu       sync.Mutex // guards the probe fan-out state below
 	lastProbeWave time.Time  // wave gate: see probeWaveGap
@@ -394,6 +400,36 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 // going away is the dependency failure an operator needs named, and a slow
 // stderr must not stall the poll loop the snapshot depends on. The list is
 // empty when this engine crossed neither boundary.
+// foldedErr is one poll error's text after the home fold and the length
+// bound, kept alongside the exact error and the home it was folded against so
+// a repeat of that error can be answered from memory.
+type foldedErr struct {
+	raw  string
+	home string
+	text string
+}
+
+// foldErr is the folded text of err, memoized per key. The fold is a pure
+// function of the error string and the home directory, and a downed engine
+// repeats its failed poll's error verbatim every interval, so folding once
+// per distinct error replaces a multi-megabyte re-fold per second per downed
+// engine. The home is re-read each time and part of the memo key, so a
+// process whose $HOME changes does not keep serving a fold made against the
+// old one.
+func (c *Collector) foldErr(key string, err error) string {
+	raw := err.Error()
+	home, _ := os.UserHomeDir()
+	if f, ok := c.errFold[key]; ok && f.raw == raw && f.home == home {
+		return f.text
+	}
+	text := core.Snippet([]byte(core.RedactHome(raw)))
+	if c.errFold == nil {
+		c.errFold = make(map[string]foldedErr)
+	}
+	c.errFold[key] = foldedErr{raw: raw, home: home, text: text}
+	return text
+}
+
 func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, changes []healthChange) {
 	ps = core.ProviderSnapshot{
 		Label: p.Label,
@@ -422,7 +458,7 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		// line rides the same string, so this is where both are made safe,
 		// once, at the boundary every other engine-supplied string already
 		// uses.
-		ps.Err = core.Snippet([]byte(core.RedactHome(r.err.Error())))
+		ps.Err = c.foldErr(key, r.err)
 	case r.m == nil:
 		ps.Err = "empty poll result"
 	default:

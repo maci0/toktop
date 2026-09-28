@@ -194,20 +194,33 @@ func clientEventKey(r *http.Request) string {
 	return r.Header.Get("Idempotency-Key")
 }
 
-// derivedEventID maps one line of a POST onto a stable event id so a replay
-// of the same stream (lost 202, retry after a mid-stream 400) lands on the
-// same keys the collector already ignores. seq is 1-based within the POST.
-// The key is NFC-normalized and hashed rather than truncated, so a collision
-// needs only a match on the 8-byte sha256 prefix however long the keys are.
-// A derived id is 16 hex chars plus the ":seq" suffix, well inside the
-// 128-character id cap applied when the event is stored.
-func derivedEventID(key string, seq int) string {
-	if key == "" || seq < 1 {
+// derivedKeyPrefix normalizes a replay key and hashes it into the 16 hex
+// chars every derived id starts with. The key is NFC-normalized and hashed
+// rather than truncated, so a collision needs only a match on the 8-byte
+// sha256 prefix however long the keys are.
+//
+// The prefix is a property of the POST, not of the line, so a caller
+// decoding a whole body computes it once and hands it to derivedEventID per
+// line rather than re-normalizing and re-hashing the same key per line.
+func derivedKeyPrefix(key string) string {
+	if key == "" {
 		return ""
 	}
-	suffix := ":" + strconv.Itoa(seq)
 	sum := sha256.Sum256([]byte(norm.NFC.String(key)))
-	return hex.EncodeToString(sum[:8]) + suffix
+	return hex.EncodeToString(sum[:8])
+}
+
+// derivedEventID maps one line of a POST onto a stable event id so a replay
+// of the same stream (lost 202, retry after a mid-stream 400) lands on the
+// same keys the collector already ignores. prefix comes from derivedKeyPrefix
+// for this POST's replay key; seq is 1-based within the POST. A derived id is
+// 16 hex chars plus the ":seq" suffix, well inside the 128-character id cap
+// applied when the event is stored.
+func derivedEventID(prefix string, seq int) string {
+	if prefix == "" || seq < 1 {
+		return ""
+	}
+	return prefix + ":" + strconv.Itoa(seq)
 }
 
 func requestID(r *http.Request) string {
@@ -680,6 +693,9 @@ type streamResult struct {
 // before the failing line in the feed; the returned counts say so.
 func (s *Server) decodeStream(dec *json.Decoder, progress *progressBody, replayKey string, state *requestState) streamResult {
 	var r streamResult
+	// The replay key is fixed for the whole body, so its hash prefix is
+	// computed once here rather than per id-less line.
+	keyPrefix := derivedKeyPrefix(replayKey)
 	// keyed tracks whether the last id-less line had an identity derived from
 	// the POST key and its position in the body. Such a line can only be
 	// recovered by replaying the whole request.
@@ -729,7 +745,7 @@ func (s *Server) decodeStream(dec *json.Decoder, progress *progressBody, replayK
 		// so retrying the whole request does not double-count.
 		if ev.ID == "" {
 			keyed = replayKey != ""
-			ev.ID = derivedEventID(replayKey, r.decoded+1)
+			ev.ID = derivedEventID(keyPrefix, r.decoded+1)
 		}
 		if s.rec.RecordAgent(ev) {
 			r.stored++

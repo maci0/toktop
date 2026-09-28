@@ -267,20 +267,20 @@ func TestIngestDistinctIdempotencyKeys(t *testing.T) {
 
 func TestDerivedEventIDFitsCap(t *testing.T) {
 	key := strings.Repeat("k", 200)
-	id := derivedEventID(key, 1)
+	id := derivedEventID(derivedKeyPrefix(key), 1)
 	if n := uniseg.GraphemeClusterCount(id); n > 128 {
 		t.Fatalf("id = %d characters, cap 128", n)
 	}
 	if !strings.HasSuffix(id, ":1") {
 		t.Fatalf("id %q lost its sequence suffix", id)
 	}
-	if derivedEventID("", 1) != "" || derivedEventID("k", 0) != "" {
+	if derivedEventID("", 1) != "" || derivedEventID(derivedKeyPrefix("k"), 0) != "" {
 		t.Fatal("empty key or non-positive seq must not mint an id")
 	}
 	// A flag is two runes, one character. Counting runes would reject a
 	// legal id that clampField kept as 126 flags plus ":1".
 	flags := strings.Repeat("\U0001F1E9\U0001F1EA", 80)
-	id = derivedEventID(flags, 1)
+	id = derivedEventID(derivedKeyPrefix(flags), 1)
 	if n := uniseg.GraphemeClusterCount(id); n > 128 {
 		t.Fatalf("flag id = %d characters, cap 128", n)
 	}
@@ -292,7 +292,7 @@ func TestDerivedEventIDFitsCap(t *testing.T) {
 func TestDerivedEventIDNormalizesNFC(t *testing.T) {
 	nfcKey := "retry-caf\u00e9"
 	nfdKey := "retry-cafe\u0301"
-	if derivedEventID(nfcKey, 1) != derivedEventID(nfdKey, 1) {
+	if derivedEventID(derivedKeyPrefix(nfcKey), 1) != derivedEventID(derivedKeyPrefix(nfdKey), 1) {
 		t.Fatalf("derivedEventID for NFC %q and NFD %q must match", nfcKey, nfdKey)
 	}
 }
