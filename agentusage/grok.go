@@ -33,7 +33,7 @@ func grokRoots(dir string) []string {
 		}
 		out = append(out, filepath.Join(store, name))
 	}
-	return out
+	return uniqueRoots(out)
 }
 
 // grokDirName is the directory name the CLI uses for one working directory.

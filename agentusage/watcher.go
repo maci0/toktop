@@ -302,6 +302,30 @@ func dirSpellings(dir string) []string {
 	return out
 }
 
+// uniqueRoots drops a root that names a directory already in the list.
+// dirSpellings yields several spellings of one path, and on Windows those
+// spellings are the same directory. Walking each one counts its transcripts
+// again.
+func uniqueRoots(roots []string) []string {
+	var out []string
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		dup := false
+		for _, have := range out {
+			if spellingEqual(have, root) {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
 // openTranscript opens path only if it still lives under one of this
 // watcher's roots. A symlink swapped to point outside is refused, so a
 // writable store cannot pull in a file from elsewhere.

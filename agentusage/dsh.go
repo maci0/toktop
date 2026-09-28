@@ -350,7 +350,7 @@ func dshRoots(dir string) []string {
 			out = append(out, filepath.Join(root, name))
 		}
 	}
-	return out
+	return uniqueRoots(out)
 }
 
 // decodeZstdPrefix decompresses every complete frame at the front of src

@@ -22,5 +22,5 @@ func cursorRoots(dir string) []string {
 		}
 		out = append(out, filepath.Join(base, slug, "agent-transcripts"))
 	}
-	return out
+	return uniqueRoots(out)
 }
