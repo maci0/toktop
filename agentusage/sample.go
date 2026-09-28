@@ -246,8 +246,8 @@ func satSub(a, b int) int {
 }
 
 // satAddSpan sums two model-time spans the way satAdd sums counters: by
-// saturating at maxSaneSpan rather than wrapping. One grok record may carry a
-// span of up to grokMaxTurnMS, which is close to the whole int64 nanosecond
+// saturating at maxSaneSpan rather than wrapping. One record may carry a
+// span of up to maxTurnMS, which is close to the whole int64 nanosecond
 // range, so two records on one transcript summed with a plain + wrapped the
 // accumulator negative and the sample reported a negative span for work that
 // was counted.

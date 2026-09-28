@@ -30,8 +30,8 @@ import (
 // and the definitions below.
 var knownAgents = []string{
 	"agy", "claude", "clanker", "codex", "copilot", "crush", "cursor-agent",
-	"dsh", "feynman", "gemini", "grok", "kimi", "omp", "opencode", "pi",
-	"prime-agent", "qwen",
+	"dsh", "feynman", "gemini", "grok", "kimi", "microagent", "omp",
+	"opencode", "pi", "prime-agent", "qwen",
 }
 
 // Agents lists every agent name this package knows: the recognized CLIs it was

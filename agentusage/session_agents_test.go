@@ -24,7 +24,7 @@ func TestNamedFileAgentsAreReadable(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	for _, tool := range []string{"dsh", "kimi", "agy", "claude", "grok", "codex", "gemini", "qwen", "cursor-agent", "omp", "pi", "prime-agent", "feynman"} {
+	for _, tool := range []string{"dsh", "kimi", "agy", "claude", "grok", "codex", "gemini", "qwen", "cursor-agent", "microagent", "omp", "pi", "prime-agent", "feynman"} {
 		if !Supported(tool) {
 			t.Errorf("Supported(%s) = false", tool)
 		}

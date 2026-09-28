@@ -73,11 +73,11 @@ func grokSessionCwd(path string) (string, bool) {
 	return decoded, true
 }
 
-// grokMaxTurnMS is the largest turn length that converts to a duration. The
+// maxTurnMS is the largest turn length that converts to a duration. The
 // counters arrive as milliseconds and the span is nanoseconds, so a value past
 // this wraps the product negative and a rate taken over it reports tokens per
 // second with the wrong sign.
-const grokMaxTurnMS = math.MaxInt64 / int64(time.Millisecond)
+const maxTurnMS = math.MaxInt64 / int64(time.Millisecond)
 
 // parseGrokUpdate reads one updates.jsonl line. Only a completed turn
 // carries counts. Anything else in the log, including the same word inside
@@ -131,8 +131,8 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 	}
 	if ms > 0 {
 		n := int64(ms)
-		if n > grokMaxTurnMS {
-			n = grokMaxTurnMS
+		if n > maxTurnMS {
+			n = maxTurnMS
 		}
 		v.span = time.Duration(n) * time.Millisecond
 	}

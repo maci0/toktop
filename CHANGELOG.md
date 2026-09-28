@@ -13,6 +13,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- `microagent` is read. It writes one session log per run under
+  `~/.microagent/sessions`, one JSON object per model response carrying that
+  response's counters, the directory the run works in, and `elapsed_ms`, and
+  `--agents` now finds the process and tails that store. Counters are per
+  response and add up; the rate is output tokens over the model's own
+  `elapsed_ms` rather than over the gap to the previous response, which covers
+  the tool calls in between. The store is machine-wide, so a file's first
+  recorded directory decides which watcher reads it, and a file whose records
+  name none is attributed to nobody rather than to every watcher.
+
 ## [0.20.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

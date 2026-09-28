@@ -12,8 +12,8 @@ import (
 
 // FuzzParseAgentLines drives every per-agent transcript line parser
 // (parseClaude, parseQwen, parseCodex, parseDsh, parseKimi,
-// parseGeminiRecord, parseGrokUpdate and the session-cwd readers) with
-// arbitrary bytes.
+// parseGeminiRecord, parseGrokUpdate, parseMicroagent and the session-cwd
+// readers) with arbitrary bytes.
 // Transcripts are files on disk whose records embed whatever
 // the model and its tools ingested, so a corrupted or hostile line must not be
 // able to poison a reading: no counter is ever negative (they are summed)
@@ -62,6 +62,13 @@ func FuzzParseAgentLines(f *testing.F) {
 		`{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","elapsed_ms":5000,"usage":{"inputTokens":-9,"outputTokens":-9,"totalTokens":-9,"apiDurationMs":-9}}}}`,
 		`{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","elapsed_ms":9223372036854775807,"usage":{"inputTokens":1,"outputTokens":1,"apiDurationMs":9223372036854775807}}}}`,
 		`{"method":"_x.ai/session/update","params":{"update":"x","usage":1}}`,
+
+		// microagent's per-response session record.
+		`{"ts":1790608347342,"cwd":"/home/dev/proj","model":"deepseek/deepseek-v4-flash","elapsed_ms":1448,"usage":{"prompt_tokens":998,"completion_tokens":19,"reasoning_tokens":16,"total_tokens":1017}}`,
+		`{"ts":1,"cwd":"/w","elapsed_ms":0,"usage":{"prompt_tokens":1,"completion_tokens":2,"reasoning_tokens":0,"total_tokens":3}}`,
+		`{"ts":1,"cwd":"/w","elapsed_ms":-5,"usage":{"completion_tokens":-2,"total_tokens":-3}}`,
+		`{"ts":1,"cwd":"/w","elapsed_ms":9223372036854775807,"usage":{"completion_tokens":1,"total_tokens":2}}`,
+		`{"ts":1,"cwd":"/w","elapsed_ms":"soon","usage":"many"}`,
 	}
 	for _, s := range seeds {
 		f.Add([]byte(s))
@@ -130,6 +137,15 @@ func FuzzParseAgentLines(f *testing.F) {
 		}
 		if gr.span < 0 {
 			t.Fatalf("grok: negative turn span for %q: %+v", line, gr)
+		}
+
+		m, _, mok := parseMicroagent(line)
+		assertUsage("microagent", m, mok)
+		if m2, _, mok2 := parseMicroagent(line); mok2 != mok || m2 != m {
+			t.Fatalf("parseMicroagent not deterministic for %q", line)
+		}
+		if m.span < 0 {
+			t.Fatalf("microagent: negative response span for %q: %+v", line, m)
 		}
 
 		assertToolCallsRepeat(t, line)

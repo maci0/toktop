@@ -77,7 +77,8 @@ added on top of the engine's own numbers.
 
 Once asked for, nothing else has to be configured and the agent does not have
 to cooperate: claude, codex, qwen, copilot, kimi, gemini, grok, agy, pi,
-prime-agent, feynman, omp, cursor-agent, clanker, crush, opencode, and dsh all keep records
+prime-agent, feynman, omp, cursor-agent, clanker, crush, opencode, dsh, and
+microagent all keep records
 carrying the provider's own counts (JSONL transcripts, except opencode and
 crush which keep SQLite stores, and grok which records each turn in
 `updates.jsonl`). Gemini CLI chats live under `~/.gemini/tmp`, Grok under
@@ -94,7 +95,10 @@ dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `dsh web` writes every project's sessions from the harness directory, so
 that process is read from both session stores rather than from the harness
 directory alone. Grok records a turn's tokens when the turn ends, and the tok/s is that
-turn's tokens over the time the model spent.
+turn's tokens over the time the model spent. microagent writes one session
+log per run under `~/.microagent/sessions`, one record per response with that
+response's counters, the directory it ran in, and how long the model spent on
+it, which is the span its rate is taken over.
 Agents that report nothing show no rate rather than a zero.
 
 Two agents keep databases instead of transcripts, and both need the `sqlite`

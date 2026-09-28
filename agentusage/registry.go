@@ -78,6 +78,21 @@ var adapters = map[string]adapter{
 		kind:   perMessage,
 		parse:  parseQwen,
 	},
+	// microagent (the Zig coding agent) writes one session log per run under
+	// ~/.microagent/sessions, one JSON object per model response carrying that
+	// response's own counters, the working directory it ran in, and how long
+	// the model spent on it. The store is machine-wide, and every record names
+	// the directory it belongs to, so the file's first record decides which
+	// watcher reads it and each later record is checked again. A store file
+	// whose records name no directory is attributed to nobody rather than to
+	// every watcher on the machine.
+	"microagent": {
+		roots:      func(string, time.Time) []string { return []string{home(".microagent", "sessions")} },
+		suffix:     ".jsonl",
+		kind:       perMessage,
+		parse:      parseMicroagent,
+		sessionCwd: genericSessionCwd,
+	},
 	// dsh (DeepSeek Harness) writes one session log per run under
 	// ~/.dsh/sessions/--<normalized-cwd>--/<id>/, named session.v<N>.jsonl.zstd
 	// (session.jsonl.zstd for generation zero, and .jsonl when compression is
