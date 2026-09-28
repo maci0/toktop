@@ -1175,6 +1175,31 @@ func TestRunFoldsThePeersHomeFromItsStderr(t *testing.T) {
 	}
 }
 
+// A target written without a login ("ssh://box", the spelling in the README)
+// is opened as the operator's own account, so the peer's errors name that
+// account and not Target.User, which is empty. The fold has to follow the
+// login the session actually resolved.
+func TestRunFoldsThePeersHomeForATargetWithoutAUser(t *testing.T) {
+	withKnownHosts(t)
+	srv := newTestSSHServer(t, "", 0)
+	defer srv.Close()
+	t.Setenv("USER", "tester")
+	tgt := testTarget(t, srv.Port())
+	tgt.User = ""
+	cli, err := Connect(t.Context(), tgt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	_, err = cli.Run(t.Context(), `printf '%s\n' '/home/tester/.bashrc: no such file' >&2; exit 1`)
+	if err == nil {
+		t.Fatal("a failing script must fail Run")
+	}
+	if msg := err.Error(); strings.Contains(msg, "/home/tester") {
+		t.Errorf("Run error = %q, want the peer's home directory folded", msg)
+	}
+}
+
 func TestStderrTailTruncatesToTail(t *testing.T) {
 	if got := stderrTail("   \n "); got != "" {
 		t.Errorf("blank stderr = %q, want empty", got)

@@ -46,6 +46,13 @@ var sessionOpenTimeout = 3 * time.Second
 type Client struct {
 	Target Target
 
+	// user is the login the session was opened with, which is not always
+	// Target.User: a target written without one (ssh://box) is opened as the
+	// operator's own account. Kept because the peer's own words about its home
+	// have to be folded by the account they name, and the account is only
+	// known here, once the transport has resolved it.
+	user string
+
 	conn    *ssh.Client
 	closed  chan struct{}
 	closeMu sync.Mutex // guards the close-once below
@@ -249,8 +256,9 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	user := t.userOr(currentUser())
 	cfg := &ssh.ClientConfig{
-		User:            t.userOr(currentUser()),
+		User:            user,
 		Auth:            methods,
 		HostKeyCallback: hk,
 	}
@@ -288,7 +296,7 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		cc.Close()
 		return nil, fmt.Errorf("ssh %s: %w", t.UserHost(), err)
 	}
-	c := &Client{Target: t, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
+	c := &Client{Target: t, user: user, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
 		keepaliveDone: make(chan struct{}), connectedAt: time.Now(),
 		relays: map[net.Conn]struct{}{}, relayActive: make(chan struct{}, maxConcurrentRelays)}
 	go c.watchClose()
@@ -579,7 +587,18 @@ func (c *Client) redactPeerHome(err error) error {
 	if err == nil {
 		return nil
 	}
-	return errors.New(core.RedactUserHome(c.Target.User, err.Error()))
+	return errors.New(core.RedactUserHome(c.account(), err.Error()))
+}
+
+// account is the login the peer's shell runs as, for the fold in
+// redactPeerHome. The resolved login is the account whose home the peer's own
+// errors name; Target.User alone would name none of them for a target written
+// as a bare host, which is the spelling in the README.
+func (c *Client) account() string {
+	if c.user != "" {
+		return c.user
+	}
+	return c.Target.User
 }
 
 // stderrTailClusters bounds how much of a peer's stderr is quoted into a

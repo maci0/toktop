@@ -169,12 +169,14 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 	done := make(chan []string, 1)
 	entered := make(chan struct{})
 	go func() {
+		// Closed before the call, not after: a waiter that reaches the wait
+		// branch parks on the claim, and the signal has to say the goroutine
+		// is running rather than that it is parked. How long it parks is
+		// bounded (walkWait), so a signal from inside the branch would race
+		// that bound instead of reporting the wait.
+		close(entered)
 		now := time.Now()
 		files, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
-		// Without this the caller below could win the 50ms race against a
-		// goroutine the scheduler never ran, and the no-return window would
-		// prove nothing at all.
-		close(entered)
 		done <- files
 	}()
 	select {
@@ -183,11 +185,19 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 		t.Fatal("the waiter never started")
 	}
 
-	// The claim is the wait branch: a second walk would answer at once.
-	select {
-	case got := <-done:
-		t.Fatalf("walked the same tree a second time while one was in flight, returned %+v", got)
-	case <-time.After(50 * time.Millisecond):
+	// The claim is the wait branch: a caller that walks the tree a second
+	// time takes ownership of the entry, replacing the claim this test
+	// installed with one of its own. Ownership is therefore what says the
+	// waiter parked, and it is visible in the map however long the wait
+	// branch goes on holding.
+	for deadline := time.Now().Add(50 * time.Millisecond); time.Now().Before(deadline); {
+		rootListMu.Lock()
+		held := rootLists[rootListKey(dir, ".jsonl")].walk
+		rootListMu.Unlock()
+		if held != walk {
+			t.Fatalf("walked the same tree a second time while one was in flight, returned %+v", <-done)
+		}
+		time.Sleep(time.Millisecond)
 	}
 
 	// Publish the way the walker holding the claim does, then release it, so
