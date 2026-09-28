@@ -253,9 +253,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 	wg.Go(func() {
 		if p, ok := lookup("nvidia-smi"); ok {
-			if out, ok2 := run(ctx, p,
-				"--query-gpu=index,name,temperature.gpu,memory.used,memory.total,utilization.gpu,power.draw,driver_version",
-				"--format=csv,noheader,nounits"); ok2 {
+			if out, ok2 := run(ctx, p, NvidiaQuery, NvidiaFormat); ok2 {
 				add(ParseNvidiaSMI(out))
 			}
 		}
@@ -281,8 +279,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 func sampleAMD(ctx context.Context) []core.GPUDevice {
 	if p, ok := lookup("rocm-smi"); ok {
-		if out, ok2 := run(ctx, p,
-			"--showtemp", "--showusemem", "--showmeminfo", "vram", "--showuse", "--json"); ok2 {
+		if out, ok2 := run(ctx, p, RocmArgs()...); ok2 {
 			if devs := ParseRocmSMI(out); len(devs) > 0 {
 				return devs
 			}
@@ -330,6 +327,25 @@ func sampleXPU(ctx context.Context, xpu string) []core.GPUDevice {
 		}
 	}
 	return out2
+}
+
+// The vendor CLI argument lists, named because the parsers below read their
+// output positionally. A query edited on one side and not the other yields
+// zeros on every device with no error, so the two live here: the local
+// sampler passes them to the resolved path, and the ssh path splices the same
+// strings into its remote shell.
+const (
+	// NvidiaQuery is the column list ParseNvidiaSMI reads, in order.
+	NvidiaQuery = "--query-gpu=index,name,temperature.gpu,memory.used,memory.total,utilization.gpu,power.draw,driver_version"
+	// NvidiaFormat is the CSV headerless, unitless form that query is parsed from.
+	NvidiaFormat = "--format=csv,noheader,nounits"
+)
+
+// RocmArgs is rocm-smi's argument list, in the order ParseRocmSMI expects. A
+// function rather than a var so no caller can reorder the slice it is
+// matched against.
+func RocmArgs() []string {
+	return []string{"--showtemp", "--showusemem", "--showmeminfo", "vram", "--showuse", "--json"}
 }
 
 // ParseNvidiaSMI reads CSV rows of

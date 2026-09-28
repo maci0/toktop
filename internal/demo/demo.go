@@ -69,49 +69,14 @@ type Source struct {
 	swapPct float64
 	agents  []core.AgentEvent
 	probes  []core.ProbeSample
-	// agentIDs is the id ledger a replayed POST is answered from, and
-	// agentIDOrder the same ids in insertion order. The retained feed is a
-	// poor stand-in for it: it holds a couple of minutes of generated events,
-	// so a sender retrying an Idempotency-Key after its first copy has rolled
-	// out of the ring finds nothing to match and counts its stream twice. The
-	// live collector keeps the same ledger for the same reason.
-	agentIDs     map[string]time.Time
-	agentIDOrder []agentIDEntry
-}
-
-// agentIDEntry is one ledger id and the instant it was recorded at, held in
-// insertion order so the oldest is the one that falls out of the window.
-type agentIDEntry struct {
-	id string
-	at time.Time
-}
-
-// The ledger's bounds, on the collector's reasoning (collector/agents.go): the
-// horizon is the retry window a sender may reasonably hold to, and the count
-// cap bounds the ledger for a fleet that posts faster than that, so neither
-// bound can be reached without the other holding. Simulated time, like every
-// other instant this source hands out.
-const (
-	agentIDHorizon = 15 * time.Minute
-	agentIDMax     = 8 * core.AgentHistoryLen
-)
-
-// forgetAgedAgentIDs drops the entries the window has moved past, then, if the
-// count cap is still exceeded, the oldest ones. An id can appear twice in the
-// order (recorded, evicted, reused), so an entry is only removed from the index
-// when it is still the occurrence that reached the front: the newer record of
-// the same id must survive its own older twin.
-func (s *Source) forgetAgedAgentIDs(cutoff time.Time) {
-	for len(s.agentIDOrder) > 0 {
-		front := s.agentIDOrder[0]
-		if len(s.agentIDOrder) <= agentIDMax && s.agentIDs[front.id].Equal(front.at) && front.at.After(cutoff) {
-			return
-		}
-		s.agentIDOrder = s.agentIDOrder[1:]
-		if at, ok := s.agentIDs[front.id]; ok && at.Equal(front.at) {
-			delete(s.agentIDs, front.id)
-		}
-	}
+	// agentIDs is the id ledger a replayed POST is answered from. The
+	// retained feed is a poor stand-in for it: it holds a couple of minutes
+	// of generated events, so a sender retrying an Idempotency-Key after its
+	// first copy has rolled out of the ring finds nothing to match and counts
+	// its stream twice. The live collector keeps the same ledger for the same
+	// reason, so both are one core.AgentIDLedger and a change to the dedup
+	// window reaches a replay answered here and there alike.
+	agentIDs core.AgentIDLedger
 }
 
 // NewSource builds the simulated fleet: interval is the simulated tick (a
@@ -362,9 +327,9 @@ func (s *Source) addAgent(ev core.AgentEvent) {
 
 // RecordAgent lets external scripts push events into the demo feed too. It
 // reports whether the event was retained, like a live collector: false for an
-// id the ledger still holds from the last agentIDHorizon, and for an event that
-// sorts behind the retained window, which the feed would trim on arrival. The
-// check is the ledger's rather than a scan of the feed, so a POST replayed
+// id the ledger still holds from the last core.AgentIDHorizon, and for an event
+// that sorts behind the retained window, which the feed would trim on arrival.
+// The check is the ledger's rather than a scan of the feed, so a POST replayed
 // after its first copy has rolled out of the ring is still answered as the
 // duplicate it is.
 func (s *Source) RecordAgent(ev core.AgentEvent) bool {
@@ -374,8 +339,7 @@ func (s *Source) RecordAgent(ev core.AgentEvent) bool {
 	id := ""
 	if ev.ID != "" {
 		id = norm.NFC.String(ev.ID)
-		s.forgetAgedAgentIDs(now.Add(-agentIDHorizon))
-		if _, dup := s.agentIDs[id]; dup {
+		if s.agentIDs.Seen(id, now) {
 			return false
 		}
 	}
@@ -388,15 +352,7 @@ func (s *Source) RecordAgent(ev core.AgentEvent) bool {
 	}
 	s.agents = agents
 	if id != "" {
-		// Keyed on the recording instant, not the event's own stamp: a replay
-		// carries the sender's clock, and a stale stamp must not decide how
-		// long its own duplicate is ignored.
-		if s.agentIDs == nil {
-			s.agentIDs = make(map[string]time.Time)
-		}
-		s.agentIDs[id] = now
-		s.agentIDOrder = append(s.agentIDOrder, agentIDEntry{id: id, at: now})
-		s.forgetAgedAgentIDs(now.Add(-agentIDHorizon))
+		s.agentIDs.Add(id, now)
 	}
 	return true
 }

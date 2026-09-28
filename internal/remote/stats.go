@@ -121,9 +121,9 @@ echo ` + sectionMark + `
 uname -r 2>/dev/null
 echo ` + sectionMark + `
 if command -v nvidia-smi >/dev/null 2>&1; then
-  nvidia-smi --query-gpu=index,name,temperature.gpu,memory.used,memory.total,utilization.gpu,power.draw,driver_version --format=csv,noheader,nounits 2>/dev/null
+  nvidia-smi ` + gpu.NvidiaQuery + ` ` + gpu.NvidiaFormat + ` 2>/dev/null
 elif command -v rocm-smi >/dev/null 2>&1; then
-  rocm-smi --showtemp --showusemem --showmeminfo vram --showuse --json 2>/dev/null
+  rocm-smi ` + strings.Join(gpu.RocmArgs(), " ") + ` 2>/dev/null
 fi
 true`
 }
@@ -386,13 +386,13 @@ func splitSections(out string) []string {
 	return append(secs, cur.String())
 }
 
-// trimQuotes strips one layer of matching quotes (PRETTY_NAME style). The
-// local producer of the same field, /etc/os-release's PRETTY_NAME, uses
-// strings.Trim(v, `"`) at internal/sysmon/sysmon_linux.go, which is a cutset
-// trim: PRETTY_NAME=""" reads locally as no OS name at all and over ssh as a
-// one-character name. strconv.Unquote is the library call for this job and
-// makes both paths agree, including on a value that carries the escapes a
-// real os-release does.
+// trimQuotes strips one layer of matching quotes (PRETTY_NAME style) with
+// strconv.Unquote, and falls back to one quote off each end when the value is
+// not a Go string literal. The local producer of the same field,
+// /etc/os-release's PRETTY_NAME, makes the same call
+// (internal/sysmon/sysmon_linux.go prettyOSName); the two readers are separate
+// because the remote one runs on a value a shell sent and the local one reads
+// the file itself, and neither package may import the other.
 func trimQuotes(s string) string {
 	if u, err := strconv.Unquote(s); err == nil {
 		return u

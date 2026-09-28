@@ -1034,7 +1034,7 @@ func TestRecordAgentOffsetFollowsASmallerLead(t *testing.T) {
 	// out: the ledger holds one entry per (agent, skew), and the count cap
 	// walks past the older twin first.
 	now = base.Add(core.AgentRateWindow + 2*time.Second)
-	c.forgetAgedAgentSkews(now.Add(-agentIDHorizon))
+	c.forgetAgedAgentSkews(now.Add(-core.AgentIDHorizon))
 	if got, ok := c.agentSkews["remote"]; !ok {
 		t.Fatal("the offset in force was dropped with its superseded row")
 	} else if got != time.Second {
@@ -1144,7 +1144,7 @@ func TestRecordAgentRefusesEventBehindRetainedWindow(t *testing.T) {
 	if core.HasAgentID(c.agents, "stale") {
 		t.Fatal("the refused event is in the feed")
 	}
-	if _, ok := c.agentIDs["stale"]; ok {
+	if c.agentIDs.Held("stale") {
 		t.Fatal("the refused event's id is ledgered")
 	}
 	// The newest event still lands: only what cannot be retained is refused.
@@ -1250,7 +1250,7 @@ func TestRecordAgentReusesIDPastHorizon(t *testing.T) {
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
 	c.RecordAgent(core.AgentEvent{At: base, ID: "old", Agent: "a"})
-	now = base.Add(agentIDHorizon + time.Second)
+	now = base.Add(core.AgentIDHorizon + time.Second)
 	if !c.RecordAgent(core.AgentEvent{At: now, ID: "old", Agent: "a", OutputTokens: 7}) {
 		t.Fatal("id older than the dedup horizon must be reusable")
 	}
@@ -1270,19 +1270,19 @@ func TestRecordAgentIDLedgerStaysBounded(t *testing.T) {
 	now := base
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
-	const flood = 4 * agentIDMax
+	const flood = 4 * core.AgentIDLedgerMax
 	for i := range flood {
 		now = base.Add(time.Duration(i) * time.Millisecond)
 		c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("e%d", i), Agent: "a"})
 	}
-	if len(c.agentIDs) > agentIDMax || len(c.agentIDOrder) > agentIDMax {
+	if c.agentIDs.Len() > core.AgentIDLedgerMax || c.agentIDs.Tracked() > core.AgentIDLedgerMax {
 		t.Fatalf("ledger holds %d ids in %d slots, want at most %d",
-			len(c.agentIDs), len(c.agentIDOrder), agentIDMax)
+			c.agentIDs.Len(), c.agentIDs.Tracked(), core.AgentIDLedgerMax)
 	}
-	if _, ok := c.agentIDs["e0"]; ok {
+	if c.agentIDs.Held("e0") {
 		t.Fatal("oldest id outlived the count cap")
 	}
-	if _, ok := c.agentIDs[fmt.Sprintf("e%d", flood-1)]; !ok {
+	if !c.agentIDs.Held(fmt.Sprintf("e%d", flood-1)) {
 		t.Fatal("newest id evicted")
 	}
 	// A replay of the newest id is still refused, whichever bound applied.
@@ -1298,9 +1298,9 @@ func TestREADMEDocumentsAgentIDHorizon(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := fmt.Sprintf("last %d minutes", int(agentIDHorizon/time.Minute))
+	want := fmt.Sprintf("last %d minutes", int(core.AgentIDHorizon/time.Minute))
 	if !strings.Contains(string(b), want) {
-		t.Fatalf("README.md ingest section must say %q (matches agentIDHorizon)", want)
+		t.Fatalf("README.md ingest section must say %q (matches core.AgentIDHorizon)", want)
 	}
 }
 
@@ -2325,7 +2325,7 @@ func TestRecordAgentOffsetAgesOutWithTheHorizon(t *testing.T) {
 	// The host is quiet past the horizon, then returns with its clock error
 	// grown to 3 minutes, as a host that lost NTP for a while does. The
 	// aged-out offset must not cap the new reading at the old one.
-	now = base.Add(agentIDHorizon + time.Minute)
+	now = base.Add(core.AgentIDHorizon + time.Minute)
 	const worse = 3 * time.Minute
 	if !c.RecordAgent(core.AgentEvent{At: now.Add(worse), Agent: "remote", OutputTokens: 40}) {
 		t.Fatal("the event after the quiet spell was not retained")

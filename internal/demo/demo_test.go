@@ -616,7 +616,7 @@ func TestRecordAgentLedgerAgesOutWithTheHorizon(t *testing.T) {
 	if !s.RecordAgent(ev) {
 		t.Fatal("first send was refused")
 	}
-	s.stepAt(s.Now().Add(agentIDHorizon + time.Second))
+	s.stepAt(s.Now().Add(core.AgentIDHorizon + time.Second))
 	if !s.RecordAgent(ev) {
 		t.Fatal("an id past the horizon is still suppressed, so the ledger never ages out")
 	}

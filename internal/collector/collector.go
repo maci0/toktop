@@ -79,15 +79,14 @@ type Collector struct {
 	sysCache    *core.SysSample // last good sample from the background poller
 	sysSampling sync.Mutex      // serializes sampling; vendor CLIs take seconds
 
-	mu           sync.Mutex
-	histOut      map[string]*timedRing
-	histIn       map[string]*timedRing
-	prev         map[string]prevSample
-	lastModel    map[string]string // endpoint -> model to probe
-	kvPct        map[string]float64
-	agents       []core.AgentEvent
-	agentIDs     map[string]time.Time // NFC event id -> instant it was recorded
-	agentIDOrder []agentIDEntry       // the same ids in insertion order, oldest first
+	mu        sync.Mutex
+	histOut   map[string]*timedRing
+	histIn    map[string]*timedRing
+	prev      map[string]prevSample
+	lastModel map[string]string // endpoint -> model to probe
+	kvPct     map[string]float64
+	agents    []core.AgentEvent
+	agentIDs  core.AgentIDLedger // the NFC event ids already stored
 	// agentSkews maps a canonical agent name to that sender's clock offset, so
 	// its events are stored on this machine's timeline; agentSkewOrder holds
 	// the same offsets in insertion order, oldest first. agentSkewLive names
@@ -178,7 +177,6 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		prev:          map[string]prevSample{},
 		lastModel:     map[string]string{},
 		kvPct:         map[string]float64{},
-		agentIDs:      map[string]time.Time{},
 		agentSkews:    map[string]time.Duration{},
 		agentSkewLive: map[string]agentSkewEntry{},
 		down:          map[string]downState{},
