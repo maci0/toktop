@@ -82,8 +82,8 @@ func TestGitHubAssetURL(t *testing.T) {
 		"https://api.github.com/repos/maci0/toktop/releases/assets/1",
 	}
 	for _, u := range ok {
-		if !githubAssetURL(u) {
-			t.Errorf("githubAssetURL(%q) = false, want true", u)
+		if !TrustedReleaseURL(u) {
+			t.Errorf("TrustedReleaseURL(%q) = false, want true", u)
 		}
 	}
 	bad := []string{
@@ -97,8 +97,8 @@ func TestGitHubAssetURL(t *testing.T) {
 		"",
 	}
 	for _, u := range bad {
-		if githubAssetURL(u) {
-			t.Errorf("githubAssetURL(%q) = true, want false", u)
+		if TrustedReleaseURL(u) {
+			t.Errorf("TrustedReleaseURL(%q) = true, want false", u)
 		}
 	}
 }

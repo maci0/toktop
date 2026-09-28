@@ -97,7 +97,7 @@ func FuzzValidateRepo(f *testing.F) {
 		}
 		// The request target is fetched with the Authorization header set, so
 		// it is held to the same host rule every download hop is.
-		if !githubAssetURL(latest) {
+		if !TrustedReleaseURL(latest) {
 			t.Fatalf("admitted repo %q built a URL the download allowlist refuses: %q", repo, latest)
 		}
 		// No segment the operator did not write. The check is per segment,

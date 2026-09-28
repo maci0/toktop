@@ -407,25 +407,25 @@ var bearerEnvVars = [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"}
 // resolveBearer returns the token sent to --add endpoints, empty when none is
 // set. An explicit --bearer (including empty) wins so clearing the token does
 // not fall through to the environment; otherwise bearerEnvVars in order.
+//
+// Every source is trimmed of surrounding whitespace, which bearer.Set trims
+// anyway, so the token is not left with the line ending
+// `export TOKTOP_BEARER=$(cat key)` leaves behind. Untrimmed, a variable
+// holding only that newline is a non-empty string that wins the precedence
+// chain and then authenticates nothing: every --add endpoint answers 401 while
+// the startup line reads bearer=set. A value that is whitespace is a wrapper
+// that failed to read the file, not a token.
 func resolveBearer(flagVal string, flagSet bool) string {
 	if flagSet {
-		return trimBearer(flagVal)
+		return strings.TrimSpace(flagVal)
 	}
 	for _, name := range bearerEnvVars {
-		if v := trimBearer(os.Getenv(name)); v != "" {
+		if v := strings.TrimSpace(os.Getenv(name)); v != "" {
 			return v
 		}
 	}
 	return ""
 }
-
-// trimBearer drops the surrounding whitespace bearer.Set trims anyway, plus
-// the line ending `export TOKTOP_BEARER=$(cat key)` leaves behind. Without it
-// a variable holding only that newline is a non-empty string that wins the
-// precedence chain and then authenticates nothing: every --add endpoint
-// answers 401 while the startup line reads bearer=set. A value that is
-// whitespace is a wrapper that failed to read the file, not a token.
-func trimBearer(s string) string { return strings.TrimSpace(s) }
 
 // warnBlankBearer names a bearer variable that is set but carries no token,
 // where a --add endpoint is attached. The generic message is a 401 per poll
@@ -440,7 +440,7 @@ func warnBlankBearer(nAdd int, demo bool) {
 	}
 	for _, name := range bearerEnvVars {
 		v, set := os.LookupEnv(name)
-		if !set || trimBearer(v) != "" {
+		if !set || strings.TrimSpace(v) != "" {
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "toktop: $%s is set but blank; the --add endpoints are queried without a token\n", name)

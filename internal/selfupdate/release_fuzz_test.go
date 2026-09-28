@@ -42,7 +42,7 @@ func releaseAssetsJSON(pairs ...string) string {
 // the network into Release, and applyTo then picks the two assets to fetch out
 // of it. A hostile or proxy-mangled body must not panic, and the two URLs the
 // picker returns are the only strings that reach the network, so each one that
-// survives the trusted-asset check must parse as exactly what githubAssetURL
+// survives the trusted-asset check must parse as exactly what TrustedReleaseURL
 // admitted: https, no userinfo, a GitHub download host. Without that a
 // release naming browser_download_url "https://user:pass@evil.example/..."
 // would move the fetch, and the GITHUB_TOKEN header with it, off GitHub.
@@ -94,19 +94,19 @@ func FuzzReleaseJSON(f *testing.F) {
 			if raw == "" {
 				continue
 			}
-			if !githubAssetURL(raw) {
+			if !TrustedReleaseURL(raw) {
 				continue // applyTo refuses this before any request is made
 			}
 			u, err := url.Parse(raw)
 			if err != nil {
-				t.Fatalf("githubAssetURL admitted %q, which url.Parse rejects: %v", raw, err)
+				t.Fatalf("TrustedReleaseURL admitted %q, which url.Parse rejects: %v", raw, err)
 			}
 			if u.Scheme != "https" || u.User != nil || u.Host == "" {
-				t.Fatalf("githubAssetURL admitted %q: scheme=%q user=%v host=%q", raw, u.Scheme, u.User, u.Host)
+				t.Fatalf("TrustedReleaseURL admitted %q: scheme=%q user=%v host=%q", raw, u.Scheme, u.User, u.Host)
 			}
 			host := strings.ToLower(u.Hostname())
 			if host != "github.com" && host != "api.github.com" && !strings.HasSuffix(host, ".githubusercontent.com") {
-				t.Fatalf("githubAssetURL admitted off-GitHub host %q in %q", host, raw)
+				t.Fatalf("TrustedReleaseURL admitted off-GitHub host %q in %q", host, raw)
 			}
 		}
 	})
