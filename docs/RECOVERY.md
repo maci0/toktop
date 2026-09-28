@@ -40,7 +40,7 @@ Nothing to back up beyond the pin store, which is why this file is short.
 | RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
-| What a lost pin store actually costs | a forced re-trust, not a dashboard outage. The next connect accepts whatever key that host presents, so a store lost to a machine image, a wiped home directory, or a rogue `rm` also removes the protection against a first-contact interception. That is the reason the copy below exists, and the reason the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
+| What a lost pin store actually costs | a forced re-trust, not a dashboard outage, but only once the copies are gone too. A store that is missing, emptied or overwritten is read back from `known_hosts.bak` (or the `.displaced` copy) and rewritten on the next connect, so a rogue `rm` of the store alone still refuses a changed key. Losing the store *and* the directory it sits in leaves the next connect accepting whatever key that host presents, which removes the protection against a first-contact interception. That is the reason the copy below exists, and the reason the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
 
 ## Restoring the pin store
 

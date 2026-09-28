@@ -484,14 +484,15 @@ func (w *Watcher) seedBaseline(path string) {
 // observed usage changes, growth or the drop a rewritten transcript causes.
 // It is meant to run in its own goroutine.
 //
-// onChange receives a [Sample], which is a running total since the watcher
-// attached, not the usage of the interval since the previous call. A caller
-// that emits usage events therefore reports cur.Delta(prev) and keeps cur as
-// the next baseline; printing the totals themselves bills the same tokens
-// once per poll. [Sample.Delta] is that rule in one call, and the no-growth
-// case is the re-baselining half: a sample that reports no growth is the one
-// to measure from next time, whether the agent was quiet or a rewritten
-// transcript replaced the figures.
+// onChange receives a [Sample], which holds the totals observed since the
+// watcher attached as the transcripts stand right now (a rewritten transcript
+// republishes lower figures), not the usage of the interval since the
+// previous call. A caller that emits usage events therefore reports
+// cur.Delta(prev) and keeps cur as the next baseline; printing the totals
+// themselves bills the same tokens once per poll. [Sample.Delta] is that rule
+// in one call, and the no-growth case is the re-baselining half: a sample
+// that reports no growth is the one to measure from next time, whether the
+// agent was quiet or a rewritten transcript replaced the figures.
 //
 // every is how often the transcripts are re-read; a non-positive value uses
 // [DefaultPollInterval], which is also the value to pass for that default.

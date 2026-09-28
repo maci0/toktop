@@ -142,7 +142,8 @@ widths match the `srcset` in `site/worker.js`: 768w is the ~720px slot,
 `-q 32` rather than 40 or 50: the capture is flat color and hard edges, and
 the page downscales each candidate, so 32 is where the bytes stop paying:
 10,577 bytes at 768w against 13,563 at `-q 40`, a 22% cut of the image that is
-79% of a phone's visit, at 30.0 dB PSNR against the resized source. The gain
+74% of a phone's 14,220-byte visit, at 30.0 dB PSNR against the resized
+source. The gain
 below 32 is not on screen at the size anyone reads it, so compare a crop
 before moving it.
 `dashboard-card.png` is the share card, not a fifth hero candidate: the
@@ -168,7 +169,8 @@ the file is the capture `site/public/dashboard.avif` already ships.
 
 ## Make targets
 
-`make help` lists everything. The ones expected in day-to-day work:
+`make help` lists every target that carries a `##` summary. The ones expected
+in day-to-day work:
 
 | target | what it does |
 |---|---|
@@ -195,6 +197,7 @@ the file is the capture `site/public/dashboard.avif` already ships.
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag (`make check` runs it) |
+| `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |

@@ -119,9 +119,11 @@ const MaxEventTokens = 1 << 40
 // is a sender reporting its own uptime, not one turn.
 const MaxEventSpan = 24 * time.Hour
 
-// ClampEventSpan bounds one event's reported duration to [0, MaxEventSpan].
-// The ingest endpoint is the only producer of a Span from the wire, and it
-// routes through here so the bound has one definition.
+// ClampEventSpan drops one event's reported duration to zero unless it lies
+// in [0, MaxEventSpan], rather than pulling it back to the nearest bound. Both
+// producers of an agent event (the ingest endpoint, the local process
+// watcher) route through it, so neither can drift into accepting a duration
+// the other would refuse.
 func ClampEventSpan(d time.Duration) time.Duration {
 	if d < 0 || d > MaxEventSpan {
 		return 0

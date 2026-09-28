@@ -8,7 +8,11 @@ import (
 	"time"
 )
 
-// Sample is cumulative usage observed since the watcher attached.
+// Sample is the usage observed since the watcher attached, as the transcripts
+// stand at the last read. The counters are a level rather than a running total
+// that only rises: a rewritten transcript is re-read whole and republishes
+// lower figures, so a caller reporting events must take growth with
+// [Sample.Delta].
 type Sample struct {
 	// Output is generated tokens observed since attach.
 	Output int

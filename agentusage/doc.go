@@ -77,7 +77,8 @@
 //     transcripts are always tailed from their attach-time end.
 //   - Attribute the transcript to the right process. Each adapter ties its
 //     files to a working directory: recorded per record, read from the
-//     session header, or implicit because the log lives inside the project
+//     session header, read from a file beside the transcript (kimi, gemini,
+//     agy, grok), or implicit because the log lives inside the project
 //     directory itself (clanker), so the cwd is the key.
 //   - Never invent a number. An agent whose transcript cannot be found, parsed,
 //     or attributed simply reports nothing, and the dashboard shows no rate.

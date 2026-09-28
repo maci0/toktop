@@ -243,7 +243,7 @@ finds out which entries a definitions file registered and which it skipped
 (the agents read by a compiled-in adapter are not reported, so a `usage` entry
 naming one is skipped on load rather than registered). Use `RegisterSpec` to
 read such an agent elsewhere. A definition does replace a compiled-in
-*definition*, pi, prime-agent and feynman. `Supported` covers every agent.
+*definition*, pi, prime-agent, feynman and omp. `Supported` covers every agent.
 `Watch` returns
 a nil `*Watcher` when an agent keeps nothing readable; `Watcher.Err` says so,
 and matches `ErrUnsupportedTool`. Every method on it is safe to call, so a
@@ -466,8 +466,9 @@ configured. A path, query, or fragment on the URL is rejected rather than
 ignored. Host keys use trust-on-first-use, stored at
 `$XDG_CONFIG_HOME/toktop/known_hosts` (default `~/.config/toktop/known_hosts`);
 a changed key is refused loudly. Every write keeps a copy of the store at
-`known_hosts.bak` beside it, and a store that goes missing is read back from
-that copy rather than re-pinned from scratch. `SSH_AUTH_SOCK` selects the
+`known_hosts.bak` beside it, and a store that goes missing, is emptied, or is
+overwritten by something else is read back from that copy rather than re-pinned
+from scratch. `SSH_AUTH_SOCK` selects the
 agent; on Windows the OpenSSH named pipe is used when that variable is unset.
 
 ## Keys
@@ -506,7 +507,7 @@ technology:
 
   ```
   $ toktop --once --plain
-  toktop v0.15.0
+  toktop v0.18.2
 
   5/5 engines up · out 1.5k tok/s · in 10k tok/s · 2 agents · session 24s
 
@@ -741,5 +742,6 @@ bytes.
 Versions are 0.x: the CLI, the ingest `/v1/events` body, and the
 `agentusage` Go API may change without a major bump. Consumer-facing notes
 live in [CHANGELOG.md](CHANGELOG.md). CI
-runs `govulncheck` on every push; Dependabot keeps go modules, workflow
+runs `govulncheck` on every push to `main` and on every pull request;
+Dependabot keeps go modules, workflow
 actions, and `scripts/` pip pins current.

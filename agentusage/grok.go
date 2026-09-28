@@ -14,10 +14,11 @@ import (
 )
 
 // Grok writes one updates.jsonl per session. A turn's token counts arrive
-// once, on the turn_completed record, with elapsed_ms for how long that
-// turn ran. Turns are minutes apart, so a rate taken from the gap between
-// two of them is not the model's speed. The rate is that turn's tokens
-// over its own elapsed time.
+// once, on the turn_completed record, with apiDurationMs for how long the
+// model spent on it. Turns are minutes apart, so a rate taken from the gap
+// between two of them is not the model's speed. The rate is that turn's
+// tokens over the model's own time; elapsed_ms, the whole turn with its
+// tools, is the fallback for a record that carries no API duration.
 //
 // The sessions for one working directory live in the directory named for
 // that path, percent-encoded with the slashes encoded too:

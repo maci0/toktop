@@ -9,12 +9,15 @@ Usage: screenshot.py <capture.txt> <out.png> [scale] [cols] [rows]
 scale defaults to 2; cols and rows default to 0, which measures the capture
 instead of taking the pane geometry from the caller.
 
-Dependencies are declared in scripts/requirements.txt (pyte, pillow).
+Dependencies are declared in scripts/requirements.txt (pyte, wcwidth,
+pillow) and installed --no-deps, so all three are required, not just the two
+this file imports directly.
 
 The capture must come from `tmux capture-pane -e -p` (one line per row,
-escape sequences preserved). Rendering uses the same monospace family the
-dashboard targets (Meslo LG), on the toktop.ai dark base the TUI paints.
-Set TOKTOP_SCREENSHOT_FONT to a regular-weight .ttf when no Meslo build
+escape sequences preserved). Rendering uses Meslo (LG Nerd Font where it is
+installed), the family the shipped capture was made with, on the toktop.ai
+dark base the TUI paints. Set TOKTOP_SCREENSHOT_FONT to a regular-weight
+.ttf when no Meslo build
 is installed where the script looks.
 
 Exit codes: 0 the image was written, 1 a runtime failure (unreadable

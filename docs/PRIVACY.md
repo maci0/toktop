@@ -16,8 +16,9 @@ data flows, so the claim is checkable rather than a slogan.
 
 A local process listing keeps the leading 4096 bytes of a command line and
 drops the rest, rather than holding the whole line for as long as the
-dashboard runs. Engine matching and the `--port` hint read no further in, so
-nothing past the cut changes what is reported, and a browser, an Electron app
+dashboard runs. Engine matching and the engine process's own `--port` flag
+read no further in, so nothing past the cut changes what is reported, and a
+browser, an Electron app
 or an agent started with a long inline script leaves its flags, prompts and
 paths on the other side of the cut rather than in a toktop structure.
 
