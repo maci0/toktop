@@ -75,17 +75,25 @@ What is worth stealing, corrupting, or denying:
   (internal/remote/knownhosts.go, 31-34). The env var is read first on every
   platform, so on macOS and Windows it widens the store's location past what
   `UserConfigDir` would pick. This is the only state toktop keeps across runs
-  and nothing in this repository backs it up: a lost, truncated or emptied
-  store is a total loss of pins, and a read that cannot be trusted now fails
-  loudly instead of re-trusting every host. The two writes that can end a
+  and every write to it now leaves a copy of the store at `known_hosts.bak`
+  beside it (`writeBackup`, internal/remote/knownhosts.go): a lost, truncated
+  or emptied store is read back from that copy instead of being read as no
+  pins at all, and a store found only under a copy is written back to its own
+  path on the next connect (`restoreStore`). The copy shares the store's
+  directory, so it recovers a damaged, emptied or overwritten store, not a
+  config directory that is gone: backing the directory up is the operator's
+  half. A read that cannot be trusted still fails loudly rather than
+  re-trusting every host. The two writes that can end a
   store half-finished (a kill between the two renames `replaceFile` makes on
-  Windows) leave the previous pins beside the store under `.displaced`, and
-  `readKnownHosts` reads that copy back rather than reading a missing store as
-  no pins at all; the same window in the self-update leaves the installed
+  Windows) leave the previous pins beside the store under `.displaced`, which
+  `readKnownHosts` reads back for the same reason; the same window in the
+  self-update leaves the installed
   binary under `.old`, which the next install restores before replacing it
-  (internal/selfupdate/selfupdate.go, restoreDisplaced). A store lost with no
-  `.displaced` beside it is a manual repair: restore the file, or delete it to
-  pin the hosts again on purpose.
+  (internal/selfupdate/selfupdate.go, restoreDisplaced). A store lost with
+  neither copy beside it is a manual repair: restore the file, or delete it to
+  pin the hosts again on purpose. [RECOVERY.md](RECOVERY.md) is the
+  operational half: the state inventory, the RPO and RTO, and the restore
+  and its verification.
 - **Binary integrity**: the running executable is replaceable by design twice
   over: hot-reload on Unix (internal/selfreload/exec_unix.go) and
   `toktop update` (cmd/toktop/update.go). Whoever controls either channel

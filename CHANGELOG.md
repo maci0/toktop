@@ -15,6 +15,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The ssh host-key store keeps a copy of itself. Every write leaves one at
+  `known_hosts.bak` beside the store, and a store that goes missing, is
+  emptied, or is overwritten by something else is read back from that copy
+  and written to its own path again. Losing the file used to re-pin every
+  host on the next connect, which accepts whatever key is presented once
+  the pins are gone. The copy lives in the store's own directory: back up
+  that directory to cover losing it.
+
 - Grok's tok/s is the turn's own tokens over the time the model spent.
   The counts arrive once, when the turn ends. A rate taken from the gap
   since the previous turn never formed, and dividing by the whole turn

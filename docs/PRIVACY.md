@@ -38,20 +38,24 @@ Nothing about usage, agents or engines. The only files toktop writes are:
   while a host key is being added and is removed when the write finishes.
   Each write goes to a short-lived `.known_hosts-*` staging file that is
   renamed into place, and a Windows replacement that had to move the old store
-  aside leaves a `known_hosts.displaced` copy behind.
+  aside leaves a `known_hosts.displaced` copy behind. Every write also leaves
+  a `known_hosts.bak` copy of the store, holding the same host keys.
 - A `.toktop-update-*` download next to the binary, and the previous binary as
   `<binary>.old`, when `toktop update` replaces it in place.
 
 Agent events live in memory for the life of the process. There is no history
 file, no cache and no database. If you want the feed to disappear, quit.
 
-`known_hosts` is the only thing here that outlives a run, and toktop backs it
-up nowhere: it is one small file, worth copying into whatever you already back
-up. If it is lost, every host you have connected to with `ssh://` is trusted
-again on its next connection, so a store that reads as damaged, truncated or
-emptied refuses the connection with an error instead of doing that silently.
-Deleting the file is how you ask for that on purpose, and it must then be
-verified out of band, as any first contact is.
+`known_hosts` is the only thing here that outlives a run, and the `.bak` copy
+beside it is the only backup toktop keeps: same directory, same credential, so
+it covers a store that is damaged, emptied or overwritten, not a config
+directory that is lost. The directory is one small file, worth copying into
+whatever you already back up. If the store and its copy are both lost, every
+host you have connected to with `ssh://` is trusted again on its next
+connection, so a store that reads as damaged, truncated or emptied refuses the
+connection with an error instead of doing that silently. Deleting the file is
+how you ask for that on purpose, and it must then be verified out of band, as
+any first contact is.
 
 ## What is sent, and to whom
 

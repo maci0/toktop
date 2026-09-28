@@ -458,8 +458,10 @@ is rejected: the password would sit in argv, and is not how auth is
 configured. A path, query, or fragment on the URL is rejected rather than
 ignored. Host keys use trust-on-first-use, stored at
 `$XDG_CONFIG_HOME/toktop/known_hosts` (default `~/.config/toktop/known_hosts`);
-a changed key is refused loudly. `SSH_AUTH_SOCK` selects the agent; on Windows
-the OpenSSH named pipe is used when that variable is unset.
+a changed key is refused loudly. Every write keeps a copy of the store at
+`known_hosts.bak` beside it, and a store that goes missing is read back from
+that copy rather than re-pinned from scratch. `SSH_AUTH_SOCK` selects the
+agent; on Windows the OpenSSH named pipe is used when that variable is unset.
 
 ## Keys
 
@@ -718,6 +720,8 @@ and what CI runs, [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the
 package map, the tier rule every import follows, and where new code goes,
 [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md) for the
 attack surface, what toktop trusts, and the mitigations already in place,
+[docs/RECOVERY.md](docs/RECOVERY.md) for the state toktop keeps on disk and
+how to get it back,
 [docs/DEPENDENCIES.md](docs/DEPENDENCIES.md) for every external package and
 the reason it is here, and [docs/PRIVACY.md](docs/PRIVACY.md) for what it
 reads, sends and stores.

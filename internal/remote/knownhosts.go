@@ -166,6 +166,13 @@ func tofu() (ssh.HostKeyCallback, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A store that survived only under one of the copies beside it is put
+	// back on the next connect, so the copies are backups again rather than
+	// where the store has permanently moved to. Best effort: readKnownHosts
+	// reads them on every run either way, so a restore that cannot land costs
+	// nothing but the tidiness, and a store that cannot be parsed at all is
+	// the probe's error to report, not this one's to swallow.
+	restoreStore(path)
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		if strings.ContainsAny(hostname, " \t\r\n\x00") {
 			return fmt.Errorf("invalid hostname %q: contains whitespace or newline", hostname)
@@ -222,6 +229,20 @@ func tofu() (ssh.HostKeyCallback, error) {
 	}, nil
 }
 
+// readKnownHosts returns the pins the store holds, reading the store itself
+// and, when it is not there, the two copies written beside it in turn:
+//
+//   - the displaced copy, which replaceFile leaves when a kill lands between
+//     the two renames it makes on Windows;
+//   - the backup copy, which every write refreshes, so a store lost, emptied
+//     or overwritten by something else is read back rather than read as
+//     "nothing pinned".
+//
+// Either way the pins are enforced, not merely returned: the caller compares
+// them against the presented key. A store that is gone with neither copy
+// beside it has nothing to recover, and the empty map it returns is the one
+// honest reading left.
+//
 // A record is only a pin if its key parses. Lines that are blank or comments
 // are skipped; anything else must be `host key-type base64`, optionally with a
 // trailing comment, and must parse as an authorized key.
@@ -246,28 +267,17 @@ func tofu() (ssh.HostKeyCallback, error) {
 // The same host repeated verbatim is a no-op, not an error: re-running a
 // migration that concatenated the file must not brick the store.
 func readKnownHosts(path string) (map[string]string, error) {
-	b, err := os.ReadFile(path)
-	if os.IsNotExist(err) {
-		// A store that is gone but has a displaced copy beside it was not
-		// deleted: replaceFile renames the old store aside on Windows and
-		// renames the new one in, and a kill between the two leaves the pins
-		// under the displaced name. Reading the missing path as "nothing
-		// pinned" would re-trust every host the operator had connected to.
-		//
-		// One level, not a recursive call: a store that was never written has
-		// neither file, and asking for its displaced copy in turn would build
-		// an unbounded ".displaced.displaced..." name looking for pins that
-		// were never there.
-		b, err = os.ReadFile(displacedPath(path))
+	for _, candidate := range []string{path, displacedPath(path), backupPath(path)} {
+		b, err := os.ReadFile(candidate)
 		if os.IsNotExist(err) {
-			return map[string]string{}, nil
+			continue
 		}
-		path = displacedPath(path)
+		if err != nil {
+			return nil, err
+		}
+		return parseKnownHosts(candidate, b)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return parseKnownHosts(path, b)
+	return map[string]string{}, nil
 }
 
 // parseKnownHosts turns store bytes into pins, naming path in every error so
@@ -363,7 +373,101 @@ func writeKnownHosts(path string, store map[string]string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return replaceFile(tmpName, path)
+	if err := replaceFile(tmpName, path); err != nil {
+		return err
+	}
+	// The store is durable at this point, so a copy that does not land is a
+	// warning rather than a failed write: the pin is pinned either way, and
+	// reporting an error here would leave the operator with a pin to distrust.
+	if err := writeBackup(path, b.String()); err != nil {
+		audit().Warn("toktop: host key store backup not written",
+			"path", logcfg.RedactedField(core.RedactHome(path), 256),
+			"error", logcfg.RedactedField(err.Error(), 256))
+	}
+	return nil
+}
+
+// restoreStore rewrites a store that is only present under one of the copies
+// beside it. It does nothing when the store is where it belongs, and it takes
+// the cross-process lock rather than the bare in-process mutex, because a peer
+// toktop may be mid-write: a restore that raced one would undo the pin that
+// write had just recorded.
+func restoreStore(path string) {
+	// Only a store that is actually gone is worth a lock. Taking one on every
+	// connect would make a dashboard pay a peer's full storeLockWait to learn
+	// there is nothing to restore, which is a cost the connect cannot justify
+	// for a state that is already correct.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		return
+	}
+	err := lockStore(path, func() error {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			return nil
+		}
+		mu := storeMutex(path)
+		mu.Lock()
+		defer mu.Unlock()
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			return nil
+		}
+		store, err := readKnownHosts(path)
+		if err != nil || len(store) == 0 {
+			return nil
+		}
+		audit().Warn("toktop: host key store was missing, pins recovered from its backup",
+			"path", logcfg.RedactedField(core.RedactHome(path), 256))
+		return writeKnownHosts(path, store)
+	})
+	if err != nil {
+		audit().Warn("toktop: host key store not restored from its backup",
+			"path", logcfg.RedactedField(core.RedactHome(path), 256),
+			"error", logcfg.RedactedField(err.Error(), 256))
+	}
+}
+
+// backupSuffix names the copy of the store kept beside it.
+const backupSuffix = ".bak"
+
+func backupPath(path string) string { return path + backupSuffix }
+
+// writeBackup saves a copy of the store next to it, in the same atomic shape
+// the store itself is written in, so the copy is never a half-written file
+// either.
+//
+// It lands after the store, not before: a crash between the two leaves a
+// store that is complete with a stale or absent copy, and readKnownHosts
+// prefers the store, so nothing is lost. The other order would leave a copy
+// newer than the store, and a later deletion of the store would hand back
+// pins that were never actually enforced.
+func writeBackup(path string, b string) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, knownHostsTempPrefix+"*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() {
+		tmp.Close()
+		os.Remove(tmpName) // no-op once the rename succeeded
+	}()
+	if _, err := tmp.WriteString(b); err != nil {
+		return err
+	}
+	// The copy names the same host keys, so it is as private as the store.
+	if err := tmp.Chmod(0o600); err != nil {
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmpName, backupPath(path)); err != nil {
+		return err
+	}
+	core.SyncDir(dir)
+	return nil
 }
 
 // knownHostsTempPrefix names the staging file the store is written to before

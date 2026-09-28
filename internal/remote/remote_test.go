@@ -964,8 +964,8 @@ func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("the store itself must be written: %v", err)
 	}
-	// A second write converges: the directory holds the store, the in-flight
-	// file, and nothing the sweep added.
+	// A second write converges: the directory holds the store, its backup
+	// copy, the in-flight file, and nothing the sweep added.
 	if err := writeKnownHosts(path, map[string]string{"a.example:22": "a.example:22 ssh-ed25519 AAAA"}); err != nil {
 		t.Fatal(err)
 	}
@@ -977,7 +977,7 @@ func TestWriteKnownHostsSweepsTempFilesLeftByAKilledRun(t *testing.T) {
 	for _, e := range entries {
 		names = append(names, e.Name())
 	}
-	want := []string{knownHostsTempPrefix + "in-flight", "config.toml", "known_hosts"}
+	want := []string{knownHostsTempPrefix + "in-flight", "config.toml", "known_hosts", "known_hosts" + backupSuffix}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Fatalf("directory = %v, want %v", names, want)
@@ -1138,6 +1138,106 @@ func TestReadKnownHostsRejectsDisplacedStoreWithNoRecords(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), displacedPath(path)) {
 		t.Errorf("error should name the displaced file, got: %v", err)
+	}
+}
+
+// Every write leaves a copy of the store beside it, so a store that is then
+// lost, emptied or overwritten by something else is read back from the copy
+// rather than read as "nothing pinned". Without it, one deleted file silently
+// re-trusts every host the operator had ever connected to, which is the one
+// outcome the store exists to prevent.
+func TestReadKnownHostsRecoversBackupStore(t *testing.T) {
+	withKnownHosts(t)
+	path := knownHostsPath()
+	key := fakePublicKey("remembered")
+	line := "h:22 " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	if err := writeKnownHosts(path, map[string]string{"h:22": line}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(backupPath(path)); err != nil {
+		t.Fatalf("a write must leave a copy of the store beside it: %v", err)
+	}
+	// The copy is the store as of the last write, not the one before it, so a
+	// host pinned most recently is in it too.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatalf("a lost store must be read back from its copy: %v", err)
+	}
+	if store["h:22"] == "" {
+		t.Fatalf("the copied pin was lost: %v", store)
+	}
+
+	// The recovered pins are enforced, not merely returned: a changed key is
+	// still refused, and the pinned key is not re-pinned as a first contact.
+	cb, err := tofu()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cb("h:22", nil, fakePublicKey("changed")); err == nil {
+		t.Fatal("a store recovered from its copy accepted a changed host key")
+	}
+	if err := cb("h:22", nil, key); err != nil {
+		t.Fatalf("the recovered pin was not honored: %v", err)
+	}
+
+	// Connecting again puts the store back where it belongs, so the copy is a
+	// backup once more rather than where the store now lives. The connect
+	// above rewrites it; this is the path a second run takes.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tofu(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("a recovered store was not written back to its own path: %v", err)
+	}
+	again, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again["h:22"] == "" {
+		t.Fatalf("the recovered pin did not survive the rewrite: %v", again)
+	}
+}
+
+// A copy that does not parse is a copy that lost its records. Falling back to
+// it and finding nothing there would re-trust every host, so the read fails
+// and names the file an operator has to look at.
+func TestReadKnownHostsRejectsBackupWithNoRecords(t *testing.T) {
+	withKnownHosts(t)
+	path := knownHostsPath()
+	if err := os.WriteFile(backupPath(path), []byte("\n \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readKnownHosts(path)
+	if err == nil {
+		t.Fatal("readKnownHosts accepted a store copy holding no host records")
+	}
+	if !strings.Contains(err.Error(), backupPath(path)) {
+		t.Errorf("error should name the copy, got: %v", err)
+	}
+}
+
+// A store that never existed has no copy either, and must keep reading as
+// empty: that is the one absence that means "no pins yet".
+func TestReadKnownHostsWithNoStoreOrCopy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "never-written")
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatalf("a store that was never written must read as empty: %v", err)
+	}
+	if len(store) != 0 {
+		t.Fatalf("store = %v, want empty", store)
+	}
+	restoreStore(path)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("nothing to restore must not leave a store behind: %v", err)
 	}
 }
 
