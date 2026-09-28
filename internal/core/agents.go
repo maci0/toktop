@@ -100,6 +100,14 @@ type agentAcc struct {
 	ownFirst  time.Time
 	ownLast   time.Time
 	ownN      int
+	// span is the sum of event durations the sender reported. spanned counts
+	// those events. A rate uses the durations only when every event in the
+	// window brought one: a grok turn is a single event minutes after the
+	// last, and the gap between them is not how long the model ran.
+	span       time.Duration
+	spanned    int
+	ownSpan    time.Duration
+	ownSpanned int
 }
 
 // viaEngine is the engine a rate row may name: one every in-window event of
@@ -158,6 +166,10 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			}
 		}
 		a.n++
+		if ev.Span > 0 {
+			a.span += ev.Span
+			a.spanned++
+		}
 		if ev.ViaEngine == "" {
 			if a.ownN == 0 {
 				a.ownFirst = ev.At
@@ -166,6 +178,10 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			}
 			a.ownTokens = satAddPos(a.ownTokens, ev.OutputTokens)
 			a.ownPrompt = satAddPos(a.ownPrompt, ev.PromptTokens)
+			if ev.Span > 0 {
+				a.ownSpan += ev.Span
+				a.ownSpanned++
+			}
 			if ev.At.After(a.ownLast) {
 				a.ownLast = ev.At
 			}
@@ -190,8 +206,14 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			ViaEngine: a.viaEngine(),
 		}
 		// A rate needs a span. One event says how much, not how fast, so it
-		// reports tokens without a rate.
-		if span := a.last.Sub(a.first).Seconds(); a.n > 1 && span > 0 {
+		// reports tokens without a rate, unless the event itself says how
+		// long the model spent. That duration is the span, not the time
+		// since the previous event.
+		if a.n > 0 && a.spanned == a.n && a.span > 0 {
+			secs := a.span.Seconds()
+			r.TokPS = float64(a.tokens) / secs
+			r.PromptPS = float64(a.prompt) / secs
+		} else if span := a.last.Sub(a.first).Seconds(); a.n > 1 && span > 0 {
 			r.TokPS = float64(a.tokens) / span
 			r.PromptPS = float64(a.prompt) / span
 		}
@@ -205,7 +227,11 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			Prompt: a.ownPrompt,
 			Last:   a.ownLast,
 		}
-		if span := a.ownLast.Sub(a.ownFirst).Seconds(); a.ownN > 1 && span > 0 {
+		if a.ownN > 0 && a.ownSpanned == a.ownN && a.ownSpan > 0 {
+			secs := a.ownSpan.Seconds()
+			o.TokPS = float64(a.ownTokens) / secs
+			o.PromptPS = float64(a.ownPrompt) / secs
+		} else if span := a.ownLast.Sub(a.ownFirst).Seconds(); a.ownN > 1 && span > 0 {
 			o.TokPS = float64(a.ownTokens) / span
 			o.PromptPS = float64(a.ownPrompt) / span
 		}

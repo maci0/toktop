@@ -198,18 +198,19 @@ func TestGrokUsageIsThisProject(t *testing.T) {
 	if w == nil {
 		t.Fatal("grok watcher")
 	}
-	writeGrokUsage(t, store, work, 80, 9, 30, 4)
-	writeGrokUsage(t, store, other, 5000, 400, 0, 0)
+	writeGrokTurn(t, store, work, 80, 9, 30, 4, 2000)
+	writeGrokTurn(t, store, other, 5000, 400, 0, 0, 1000)
 	s := w.Poll()
-	if s.Input != 80 || s.Output != 9 || s.Thinking != 4 {
-		t.Fatalf("sample = %+v, want input 80 output 9 thinking 4", s)
+	if s.Input != 80 || s.Output != 9 || s.Thinking != 4 || s.Span != 2*time.Second {
+		t.Fatalf("sample = %+v, want input 80 output 9 thinking 4 span 2s", s)
 	}
 
-	// A rewrite of the same file is the new total, not a second copy of it.
-	writeGrokUsage(t, store, work, 100, 14, 40, 6)
+	// The next completed turn adds its own counts. It does not replace the
+	// previous turn, and it does not bill the other project.
+	writeGrokTurn(t, store, work, 20, 5, 10, 2, 1000)
 	s = w.Poll()
-	if s.Input != 100 || s.Output != 14 || s.Thinking != 6 {
-		t.Fatalf("after rewrite sample = %+v, want input 100 output 14 thinking 6", s)
+	if s.Input != 100 || s.Output != 14 || s.Thinking != 6 || s.Span != 3*time.Second {
+		t.Fatalf("after second turn sample = %+v, want input 100 output 14 thinking 6 span 3s", s)
 	}
 }
 
@@ -221,28 +222,35 @@ func TestGrokUsageWithoutCountersContributesNothing(t *testing.T) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "usage.json"), []byte("{}\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "updates.jsonl"), []byte("{}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if s := w.Poll(); !s.Empty() {
-		t.Fatalf("empty usage.json counted %+v", s)
+		t.Fatalf("a line with no turn usage counted %+v", s)
 	}
 }
 
-func writeGrokUsage(t *testing.T, store, dir string, in, out, cached, think int) {
+func TestGrokTurnRateUsesModelTime(t *testing.T) {
+	line := `{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","elapsed_ms":5000,"usage":{"inputTokens":10,"outputTokens":50,"totalTokens":60,"apiDurationMs":1000}}}}`
+	v, _, ok := parseGrokUpdate([]byte(line))
+	if !ok || v.output != 50 || v.span != time.Second {
+		t.Fatalf("parse = %+v ok=%v, want output 50 span 1s", v, ok)
+	}
+}
+
+func writeGrokTurn(t *testing.T, store, dir string, in, out, cached, think, elapsedMS int) {
 	t.Helper()
 	sess := filepath.Join(store, grokDirName(dir), "sess")
 	if err := os.MkdirAll(sess, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	body := "{\n  \"session\": {\n    \"inputTokens\": " + itoa(in) +
-		",\n    \"outputTokens\": " + itoa(out) +
-		",\n    \"cachedReadTokens\": " + itoa(cached) +
-		",\n    \"cacheCreationTokens\": 0,\n    \"reasoningTokens\": " + itoa(think) +
-		",\n    \"totalTokens\": " + itoa(in+out) + "\n  }\n}\n"
-	if err := os.WriteFile(filepath.Join(sess, "usage.json"), []byte(body), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	line := `{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","elapsed_ms":` +
+		itoa(elapsedMS) + `,"usage":{"inputTokens":` + itoa(in) +
+		`,"outputTokens":` + itoa(out) +
+		`,"cachedReadTokens":` + itoa(cached) +
+		`,"cacheCreationTokens":0,"reasoningTokens":` + itoa(think) +
+		`,"totalTokens":` + itoa(in+out) + `}}}}`
+	append_(t, filepath.Join(sess, "updates.jsonl"), line)
 }
 
 func itoa(n int) string {

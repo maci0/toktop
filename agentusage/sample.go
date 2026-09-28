@@ -25,6 +25,10 @@ type Sample struct {
 	Total int
 	// Input is billed prompt tokens, accrued per request the same way Output is.
 	Input int
+	// Span is how long the model spent producing the tokens in this sample,
+	// when the transcript records it. Zero means the caller derives a rate
+	// from the time between samples instead.
+	Span time.Duration
 	// At is when the counters last changed, which is when the reading was
 	// taken. A poll that observed nothing does not move it, so a stalled
 	// agent's rate is averaged over the whole pause rather than over the
@@ -50,6 +54,9 @@ type Delta struct {
 	Thinking int
 	// Input is billed prompt tokens since the previous sample.
 	Input int
+	// Span is how long the model spent producing this interval's tokens,
+	// when the transcript recorded it. Zero means it did not.
+	Span time.Duration
 	// At is when the current sample was read, whether or not anything grew, so
 	// a caller can stamp the interval the samples span.
 	At time.Time
@@ -75,7 +82,11 @@ func (s Sample) Delta(prev Sample) (Delta, bool) {
 		Output:   satSub(s.Output, prev.Output),
 		Thinking: satSub(s.Thinking, prev.Thinking),
 		Input:    satSub(s.Input, prev.Input),
+		Span:     s.Span - prev.Span,
 		At:       s.At,
+	}
+	if d.Span < 0 {
+		d.Span = 0
 	}
 	return d, d.Output > 0 || d.Thinking > 0 || d.Input > 0
 }
@@ -122,6 +133,11 @@ type values struct {
 	thinking int
 	total    int
 	input    int
+	// span is how long the model spent producing this record, when the
+	// transcript says so. A grok turn is one record at the end, minutes
+	// after the previous one, and the rate is this record's tokens over
+	// this duration rather than the gap between two turns.
+	span time.Duration
 }
 
 // present is the same rule as Sample.Empty inverted: any counter is a

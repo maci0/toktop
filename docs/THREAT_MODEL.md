@@ -103,7 +103,8 @@ What is worth stealing, corrupting, or denying:
   (`~/.kimi-code/sessions`, one directory per working directory, derived from
   the SHA-256 of its path rather than walked, agentusage/kimi.go), gemini
   (`~/.gemini/tmp`, the project named by `.project_root`), grok
-  (`~/.grok/sessions/<encoded cwd>/<id>/usage.json`), agy
+  (`~/.grok/sessions/<encoded cwd>/<id>/updates.jsonl`, the turn_completed
+  record), agy
   (`~/.gemini/antigravity-cli/brain/<id>/.../transcript.jsonl`, workspace
   from `history.jsonl` or `cache/last_conversations.json`, only steps that
   carry token counts), clanker

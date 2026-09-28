@@ -97,6 +97,9 @@ func TestSummarizeRates(t *testing.T) {
 		{At: now.Add(-1 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 15},
 		// Single event: tokens but no rate (no span to measure).
 		{At: now.Add(-1 * time.Second), Agent: "codex", OutputTokens: 30},
+		// One grok turn names its own duration, so the rate does not wait
+		// for a second event. 2460 tokens in 90s is 27.333 tok/s.
+		{At: now.Add(-1 * time.Second), Agent: "grok", OutputTokens: 2460, PromptTokens: 9000, Span: 90 * time.Second},
 		// Outside the window: excluded entirely.
 		{At: now.Add(-2 * AgentRateWindow), Agent: "stale", OutputTokens: 9999},
 		// Two events sharing one instant: a zero-length span, so there is
@@ -110,8 +113,8 @@ func TestSummarizeRates(t *testing.T) {
 		{At: now.Add(-1 * time.Second), Agent: "idle"},
 	}
 	rates := Summarize(events, now).Rates
-	if len(rates) != 4 {
-		t.Fatalf("rates = %d entries, want 4 (claude, codex, coincident, opencode)", len(rates))
+	if len(rates) != 5 {
+		t.Fatalf("rates = %d entries, want 5 (claude, grok, codex, coincident, opencode)", len(rates))
 	}
 	// Busiest first: claude (80 tok/s) before the three rows with no rate.
 	if rates[0].Agent != "claude" {
@@ -120,6 +123,15 @@ func TestSummarizeRates(t *testing.T) {
 	if rates[0].TokPS != 80 || rates[0].PromptPS != 200 {
 		t.Errorf("claude = %v/%v tok/s, want 80/200", rates[0].TokPS, rates[0].PromptPS)
 	}
+	var grok AgentRate
+	for _, r := range rates {
+		if r.Agent == "grok" {
+			grok = r
+		}
+	}
+	if grok.TokPS != 2460.0/90 || grok.PromptPS != 9000.0/90 {
+		t.Errorf("grok = %v/%v tok/s, want %v/%v", grok.TokPS, grok.PromptPS, 2460.0/90, 9000.0/90)
+	}
 	if rates[0].Tokens != 80 || rates[0].Prompt != 200 {
 		t.Errorf("claude totals = %v/%v, want 80/200", rates[0].Tokens, rates[0].Prompt)
 	}
@@ -127,23 +139,28 @@ func TestSummarizeRates(t *testing.T) {
 		t.Errorf("claude thinking = %v, want 25", rates[0].Thinking)
 	}
 	for _, r := range rates[1:] {
+		if r.Agent == "grok" {
+			continue
+		}
 		if r.TokPS != 0 || r.PromptPS != 0 {
 			t.Errorf("%s got a rate with no measurable span: %v", r.Agent, r.TokPS)
 		}
 	}
-	codex := rates[1]
-	if codex.Agent != "codex" || codex.Tokens != 30 {
-		t.Errorf("codex row = %+v, want 30 output tokens", codex)
+	byName := map[string]AgentRate{}
+	for _, r := range rates {
+		byName[r.Agent] = r
+	}
+	if codex := byName["codex"]; codex.Tokens != 30 || codex.TokPS != 0 {
+		t.Errorf("codex row = %+v, want 30 output tokens and no rate", codex)
 	}
 	// A zero-length span leaves the rate at zero, so the row sorts with the
 	// other unrated agents (by name) rather than jumping the queue on the
 	// strength of its token total.
-	coincident := rates[2]
-	if coincident.Agent != "coincident" || coincident.TokPS != 0 || coincident.Tokens != 10 {
+	if coincident := byName["coincident"]; coincident.TokPS != 0 || coincident.Tokens != 10 {
 		t.Errorf("coincident row = %+v, want 10 tokens at 0 tok/s", coincident)
 	}
-	if rates[3].Agent != "opencode" || rates[3].ViaEngine != "127.0.0.1:11434" {
-		t.Errorf("via-engine row = %+v, want opencode via 127.0.0.1:11434", rates[3])
+	if opencode := byName["opencode"]; opencode.ViaEngine != "127.0.0.1:11434" {
+		t.Errorf("via-engine row = %+v, want opencode via 127.0.0.1:11434", opencode)
 	}
 }
 

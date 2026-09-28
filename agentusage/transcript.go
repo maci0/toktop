@@ -258,6 +258,7 @@ func (w *Watcher) applyRecord(path string, v values) {
 		cur.output = satAdd(cur.output, v.output)
 		cur.thinking = satAdd(cur.thinking, v.thinking)
 		cur.input = satAdd(cur.input, v.input)
+		cur.span += v.span
 		w.seen[path] = cur
 		// Output and input accrue per message (billed tokens). A "total" on
 		// a per-message record is the context size at that point, so summing

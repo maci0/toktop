@@ -75,8 +75,8 @@ Once asked for, nothing else has to be configured and the agent does not have
 to cooperate: claude, codex, qwen, copilot, kimi, gemini, grok, agy, pi,
 prime-agent, feynman, omp, cursor-agent, clanker, crush, opencode, and dsh all keep records
 carrying the provider's own counts (JSONL transcripts, except opencode and
-crush which keep SQLite stores, and grok which rewrites one usage.json per
-session). Gemini CLI chats live under `~/.gemini/tmp`, Grok under
+crush which keep SQLite stores, and grok which records each turn in
+`updates.jsonl`). Gemini CLI chats live under `~/.gemini/tmp`, Grok under
 `~/.grok/sessions`, and Antigravity (`agy`) under `~/.gemini/antigravity-cli`.
 An agy step that names no tokens contributes nothing. Its workspace comes
 from `history.jsonl`, or from `cache/last_conversations.json` when the
@@ -89,7 +89,8 @@ dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
 `dsh web` writes every project's sessions from the harness directory, so
 that process is read from both session stores rather than from the harness
-directory alone.
+directory alone. Grok records a turn's tokens when the turn ends, and the tok/s is that
+turn's tokens over the time the model spent.
 Agents that report nothing show no rate rather than a zero.
 
 Two agents keep databases instead of transcripts, and both need the `sqlite`

@@ -13,6 +13,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- Grok's tok/s is the turn's own tokens over the time the model spent.
+  The counts arrive once, when the turn ends. A rate taken from the gap
+  since the previous turn never formed, and dividing by the whole turn
+  counted tool time as generation. Cached prompt tokens that are already
+  inside the reported input are not added again.
+
 ## [0.18.2] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

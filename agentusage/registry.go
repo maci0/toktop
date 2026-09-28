@@ -182,14 +182,15 @@ var adapters = map[string]adapter{
 		sessionCwd: genericSessionCwd,
 		rootOwns:   true,
 	},
-	// Grok writes one usage.json per session, rewritten in place with the
-	// session's own totals, under ~/.grok/sessions/<encoded cwd>/<id>/.
+	// Grok appends updates.jsonl for the life of a session. A turn's counts
+	// are the turn_completed record, including how long the turn took.
+	// usage.json is the same totals rewritten in place and is not read:
+	// counting both would bill the turn twice.
 	"grok": {
 		roots:          grokRoots,
-		suffix:         "usage.json",
-		kind:           cumulative,
-		parseFile:      parseGrokUsage,
-		snapshot:       true,
+		suffix:         "updates.jsonl",
+		kind:           perMessage,
+		parse:          parseGrokUpdate,
 		sessionCwdFile: grokSessionCwd,
 	},
 }

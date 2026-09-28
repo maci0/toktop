@@ -155,6 +155,9 @@ type AgentEvent struct {
 	ThinkingTokens int64  // reasoning share of OutputTokens, when the agent says so
 	ViaEngine      string // monitored engine already counting this output; aggregates skip it
 	Note           string
+	// Span is how long the model spent producing this event's tokens, when
+	// the sender knows it. Zero means the rate is the gap between events.
+	Span time.Duration
 }
 
 // HasAgentID reports whether events already contain this id. The empty string

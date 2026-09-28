@@ -9,16 +9,22 @@ import (
 	"net/url"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
-// Grok writes usage.json once per session and rewrites it with that session's
-// totals. The sessions for one working directory live in the directory named
-// for that path, percent-encoded with the slashes encoded too:
-// ~/.grok/sessions/%2Fhome%2Fme%2Fproj/<id>/usage.json.
+// Grok writes one updates.jsonl per session. A turn's token counts arrive
+// once, on the turn_completed record, with elapsed_ms for how long that
+// turn ran. Turns are minutes apart, so a rate taken from the gap between
+// two of them is not the model's speed. The rate is that turn's tokens
+// over its own elapsed time.
 //
-// session.inputTokens already includes the cached share when session.totalTokens
-// equals input plus output. The cached fields are added only when the total is
-// larger than that sum by the cache, which is the uncached-input split.
+// The sessions for one working directory live in the directory named for
+// that path, percent-encoded with the slashes encoded too:
+// ~/.grok/sessions/%2Fhome%2Fme%2Fproj/<id>/updates.jsonl.
+//
+// usage.inputTokens already includes the cached share when usage.totalTokens
+// equals input plus output. The cached fields are added only when the total
+// is larger than that sum by the cache.
 
 func grokRoots(dir string) []string {
 	store := home(".grok", "sessions")
@@ -62,27 +68,41 @@ func grokSessionCwd(path string) (string, bool) {
 	return decoded, true
 }
 
-func parseGrokUsage(data []byte) (values, string, bool) {
-	data = bytes.TrimSpace(bytes.TrimPrefix(data, utf8BOM))
-	var doc struct {
-		Session struct {
-			InputTokens         int `json:"inputTokens"`
-			OutputTokens        int `json:"outputTokens"`
-			CachedReadTokens    int `json:"cachedReadTokens"`
-			CacheCreationTokens int `json:"cacheCreationTokens"`
-			ReasoningTokens     int `json:"reasoningTokens"`
-			TotalTokens         int `json:"totalTokens"`
-		} `json:"session"`
+// parseGrokUpdate reads one updates.jsonl line. Only a completed turn
+// carries counts. Anything else in the log, including the same word inside
+// a tool result, contributes nothing.
+func parseGrokUpdate(line []byte) (values, string, bool) {
+	line = bytes.TrimSpace(bytes.TrimPrefix(line, utf8BOM))
+	var rec struct {
+		Method string `json:"method"`
+		Params struct {
+			Update struct {
+				SessionUpdate string `json:"sessionUpdate"`
+				ElapsedMS     int    `json:"elapsed_ms"`
+				Usage         struct {
+					InputTokens         int `json:"inputTokens"`
+					OutputTokens        int `json:"outputTokens"`
+					CachedReadTokens    int `json:"cachedReadTokens"`
+					CacheCreationTokens int `json:"cacheCreationTokens"`
+					ReasoningTokens     int `json:"reasoningTokens"`
+					TotalTokens         int `json:"totalTokens"`
+					APIDurationMS       int `json:"apiDurationMs"`
+				} `json:"usage"`
+			} `json:"update"`
+		} `json:"params"`
 	}
-	if err := json.Unmarshal(data, &doc); err != nil {
+	if err := json.Unmarshal(line, &rec); err != nil {
 		return values{}, "", false
 	}
-	s := doc.Session
-	in := counter(s.InputTokens)
-	out := counter(s.OutputTokens)
-	think := counter(s.ReasoningTokens)
-	cache := satAdd(counter(s.CachedReadTokens), counter(s.CacheCreationTokens))
-	tot := counter(s.TotalTokens)
+	if rec.Method != "_x.ai/session/update" || rec.Params.Update.SessionUpdate != "turn_completed" {
+		return values{}, "", false
+	}
+	u := rec.Params.Update.Usage
+	in := counter(u.InputTokens)
+	out := counter(u.OutputTokens)
+	think := counter(u.ReasoningTokens)
+	cache := satAdd(counter(u.CachedReadTokens), counter(u.CacheCreationTokens))
+	tot := counter(u.TotalTokens)
 	parts := satAdd(in, out)
 	if cache > 0 && tot >= satAdd(parts, cache) && tot != parts {
 		in = satAdd(in, cache)
@@ -90,6 +110,16 @@ func parseGrokUsage(data []byte) (values, string, bool) {
 	v := values{output: out, thinking: think, input: in, total: tot}
 	if v.total == 0 {
 		v.total = satAdd(in, out)
+	}
+	// apiDurationMs is time spent in the model. elapsed_ms is the whole
+	// turn, tools included, and a turn that mostly ran tools would otherwise
+	// report a few tokens per second for a model that was much faster.
+	ms := u.APIDurationMS
+	if ms <= 0 {
+		ms = rec.Params.Update.ElapsedMS
+	}
+	if ms > 0 {
+		v.span = time.Duration(ms) * time.Millisecond
 	}
 	if !v.present() {
 		return values{}, "", false

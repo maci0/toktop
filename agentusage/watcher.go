@@ -635,6 +635,7 @@ func (w *Watcher) read(force bool) (Sample, bool) {
 		w.scanned = time.Time{}
 	}
 	var out, thinking, total, input int
+	var span time.Duration
 	if w.source.present() {
 		// The provider is resolved per poll rather than trusted from attach:
 		// EnableOpenCodeDB(false) withdraws it, and a watcher that kept the
@@ -661,6 +662,7 @@ func (w *Watcher) read(force bool) (Sample, bool) {
 			out = satAdd(out, v.output)
 			thinking = satAdd(thinking, v.thinking)
 			input = satAdd(input, v.input)
+			span += v.span
 		}
 		for _, v := range w.total {
 			total = max(total, v)
@@ -677,9 +679,9 @@ func (w *Watcher) read(force bool) (Sample, bool) {
 	// records. Publishing the drop is what keeps a rewrite from being billed
 	// twice; callers that differencing see a smaller sample and re-baseline.
 	changed := out != w.sample.Output || total != w.sample.Total ||
-		thinking != w.sample.Thinking || input != w.sample.Input
+		thinking != w.sample.Thinking || input != w.sample.Input || span != w.sample.Span
 	if changed {
-		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, At: at}
+		w.sample = Sample{Output: out, Thinking: thinking, Total: total, Input: input, Span: span, At: at}
 	}
 	return w.sample, changed
 }
