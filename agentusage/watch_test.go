@@ -788,6 +788,9 @@ func TestWatcherErr(t *testing.T) {
 	if err := Watch("no-such-agent-anywhere", t.TempDir(), time.Now()).Err(); !errors.Is(err, ErrUnsupportedTool) {
 		t.Fatalf("unreadable agent Err = %v, want ErrUnsupportedTool", err)
 	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	w := Watch("claude", t.TempDir(), time.Now())
 	if w == nil {
 		t.Fatal("claude should be watchable")
@@ -836,6 +839,9 @@ func TestSupportedRejectsBlankRootSpecs(t *testing.T) {
 }
 
 func TestProcessWatchMatchesWatch(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	p := Process{Tool: "claude", Dir: t.TempDir()}
 	since := time.Now()
 	w1 := Watch(p.Tool, p.Dir, since)

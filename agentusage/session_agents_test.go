@@ -16,6 +16,14 @@ import (
 // The agents named for this package have to be readable. crush and opencode
 // are covered with the sqlite tag, because that is what links their driver.
 func TestNamedFileAgentsAreReadable(t *testing.T) {
+	// An empty home. Watch walks the roots the agent keeps its sessions in
+	// when it attaches and baselines every recent transcript it finds, so
+	// against a real home this test read every session the machine had and
+	// cost a minute and a half of it, and cost nothing at all on a machine
+	// with no agent stores. Neither is what it is here to check.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	for _, tool := range []string{"dsh", "kimi", "agy", "claude", "grok", "codex", "gemini", "qwen", "cursor-agent", "omp", "pi", "prime-agent", "feynman"} {
 		if !Supported(tool) {
 			t.Errorf("Supported(%s) = false", tool)
