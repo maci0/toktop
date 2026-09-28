@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -232,11 +233,15 @@ func tofu() (ssh.HostKeyCallback, error) {
 // readKnownHosts returns the pins the store holds, reading the store itself
 // and, when it is not there, the two copies written beside it in turn:
 //
-//   - the displaced copy, which replaceFile leaves when a kill lands between
-//     the two renames it makes on Windows;
 //   - the backup copy, which every write refreshes, so a store lost, emptied
 //     or overwritten by something else is read back rather than read as
-//     "nothing pinned".
+//     "nothing pinned";
+//   - the displaced copy, which replaceFile leaves when a kill lands between
+//     the two renames it makes on Windows.
+//
+// The two copies are read freshest first (copiesByRecency), so a store
+// recovered from whichever one was written last does not lose the pins the
+// other had.
 //
 // Either way the pins are enforced, not merely returned: the caller compares
 // them against the presented key. A store that is gone with neither copy
@@ -267,7 +272,7 @@ func tofu() (ssh.HostKeyCallback, error) {
 // The same host repeated verbatim is a no-op, not an error: re-running a
 // migration that concatenated the file must not brick the store.
 func readKnownHosts(path string) (map[string]string, error) {
-	for _, candidate := range []string{path, displacedPath(path), backupPath(path)} {
+	for _, candidate := range append([]string{path}, copiesByRecency(path)...) {
 		b, err := os.ReadFile(candidate)
 		if os.IsNotExist(err) {
 			continue
@@ -314,6 +319,33 @@ func parseKnownHosts(path string, b []byte) (map[string]string, error) {
 		return nil, fmt.Errorf("%s: holds no host records; an emptied or truncated store cannot re-trust these hosts, so restore it from a copy or delete it to pin them again on purpose", path)
 	}
 	return out, nil
+}
+
+// copiesByRecency returns the copies beside the store, freshest first.
+//
+// A store recovered from a copy costs a pin for every host that copy predates,
+// so the copy carrying the most pins is the one to read, and a fixed order gets
+// that wrong. The backup is normally the fresher file, being the content of the
+// last write, while the displaced copy is whatever replaceFile moved aside,
+// which is the content before it. mtime decides rather than that assumption,
+// because the case where the assumption fails is the one that costs pins: a
+// write whose backup could not land leaves a backup older than the displaced
+// copy, and reading the backup hands back the store as it was before the
+// failure. A copy that cannot be dated sorts last, and the backup stays ahead of
+// the displaced copy on a tie, which is the order a store written without a
+// kill prefers.
+func copiesByRecency(path string) []string {
+	copies := []string{backupPath(path), displacedPath(path)}
+	modTime := make(map[string]time.Time, len(copies))
+	for _, copy := range copies {
+		if info, err := os.Stat(copy); err == nil {
+			modTime[copy] = info.ModTime()
+		}
+	}
+	sort.SliceStable(copies, func(i, j int) bool {
+		return modTime[copies[i]].After(modTime[copies[j]])
+	})
+	return copies
 }
 
 // pinKey returns the key material of a stored record, which is everything

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1203,6 +1204,103 @@ func TestReadKnownHostsRecoversBackupStore(t *testing.T) {
 	if again["h:22"] == "" {
 		t.Fatalf("the recovered pin did not survive the rewrite: %v", again)
 	}
+}
+
+// A store recovered from a copy must come back whole. Reading a copy that
+// predates the last write hands back a shorter store than the operator had, and
+// every host it dropped is re-trusted on the next connect, so the copy read is
+// the freshest of the two sitting beside the store. The backup is normally it
+// (every write refreshes it, the displaced copy is the content before that
+// write), and the displaced copy is the fresher one only when the backup of the
+// last write never landed.
+func TestReadKnownHostsRecoversFromTheFresherCopy(t *testing.T) {
+	pin := func(host, label string) string {
+		return host + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey(label))))
+	}
+	// One write with both pins, so the store and the backup hold them, then
+	// the store is lost. What the copies hold afterwards is the case: a kill
+	// between a write's two renames leaves a displaced copy carrying the write
+	// before it, and a write whose backup could not land leaves the backup
+	// carrying that older write instead.
+	stage := func(t *testing.T) string {
+		t.Helper()
+		withKnownHosts(t)
+		path := knownHostsPath()
+		store := map[string]string{
+			"old:22": pin("old:22", "old"),
+			"new:22": pin("new:22", "new"),
+		}
+		if err := writeKnownHosts(path, store); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	age := func(t *testing.T, path string, d time.Duration) {
+		t.Helper()
+		when := time.Now().Add(-d)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+	}
+	displace := func(t *testing.T, path string, records map[string]string) {
+		t.Helper()
+		var b strings.Builder
+		for _, host := range slices.Sorted(maps.Keys(records)) {
+			b.WriteString(records[host] + "\n")
+		}
+		if err := os.WriteFile(displacedPath(path), []byte(b.String()), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("the displaced copy predates the backup", func(t *testing.T) {
+		path := stage(t)
+		displace(t, path, map[string]string{"old:22": pin("old:22", "old")})
+		age(t, displacedPath(path), time.Hour)
+		store, err := readKnownHosts(path)
+		if err != nil {
+			t.Fatalf("a lost store must be read back from a copy: %v", err)
+		}
+		if store["new:22"] == "" {
+			t.Fatalf("the pin the stale copy never held was lost: %v", store)
+		}
+		// The pins are enforced, not merely returned: a host present only in
+		// the fresher copy must not be re-trusted.
+		cb, err := tofu()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := cb("new:22", nil, fakePublicKey("changed")); err == nil {
+			t.Fatal("a host pinned only in the backup was re-trusted after a lost store")
+		}
+	})
+
+	t.Run("the backup predates the displaced copy", func(t *testing.T) {
+		// A write whose backup could not land: the displaced copy is what
+		// replaceFile moved aside, and it is newer than the backup left by the
+		// write before it.
+		path := stage(t)
+		displace(t, path, map[string]string{
+			"old:22": pin("old:22", "old"),
+			"new:22": pin("new:22", "new"),
+		})
+		// The backup left by the write before the last one, so it predates the
+		// displaced copy and holds fewer pins.
+		if err := os.WriteFile(backupPath(path), []byte(pin("old:22", "old")+"\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		age(t, backupPath(path), time.Hour)
+		store, err := readKnownHosts(path)
+		if err != nil {
+			t.Fatalf("a lost store must be read back from a copy: %v", err)
+		}
+		if store["new:22"] == "" {
+			t.Fatalf("the pin the stale copy never held was lost: %v", store)
+		}
+	})
 }
 
 // A copy that does not parse is a copy that lost its records. Falling back to

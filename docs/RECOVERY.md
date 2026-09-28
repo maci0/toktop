@@ -40,15 +40,29 @@ Nothing to back up beyond the pin store, which is why this file is short.
 | RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
-| What a lost pin store actually costs | a forced re-trust, not a dashboard outage, but only once the copies are gone too. A store that is missing, emptied or overwritten is read back from `known_hosts.bak` (or the `.displaced` copy) and rewritten on the next connect, so a rogue `rm` of the store alone still refuses a changed key. Losing the store *and* the directory it sits in leaves the next connect accepting whatever key that host presents, which removes the protection against a first-contact interception. That is the reason the copy below exists, and the reason the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
+| What a lost pin store actually costs | a forced re-trust, not a dashboard outage, but only once the copies are gone too. A store that is missing is read back from whichever copy beside it is the fresher, `known_hosts.bak` or the `.displaced` copy, and rewritten on the next connect, so a rogue `rm` of the store alone still refuses a changed key. Losing the store *and* the directory it sits in leaves the next connect accepting whatever key that host presents, which removes the protection against a first-contact interception. That is the reason the copies exist, and the reason the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
 
 ## Restoring the pin store
 
-The copy beside the store is what a restore reads:
+The copy beside the store is what a restore reads, and the one to read is the
+newer of the two, since a copy that predates the last write is missing the pins
+that write added:
 
 ```sh
+ls -t --time-style=long-iso ~/.config/toktop/known_hosts.bak \
+                     ~/.config/toktop/known_hosts.displaced
 cp ~/.config/toktop/known_hosts.bak ~/.config/toktop/known_hosts
 ```
+
+`known_hosts.bak` is the copy to copy unless the listing says otherwise: every
+write of the store refreshes it, and `known_hosts.displaced` is what a killed
+Windows write moved aside, so it holds the store as it was *before* that write.
+The exception is a write whose backup could not be written, which leaves
+`known_hosts.bak` a whole write behind; the warning toktop prints then, naming
+the path and the error, is the signal to read the `.displaced` copy instead.
+`readKnownHosts` makes the same choice on its own (freshest copy first,
+`internal/remote/knownhosts.go`, `copiesByRecency`), so a run that follows a
+`rm` of the store needs no `cp` at all.
 
 One `cp`, because the store is a text file, one record per line, in the
 `host key-type base64` form OpenSSH uses. `ssh-keygen -l -f` reads it, and
@@ -79,19 +93,27 @@ against the fingerprint the host presents today. If it differs, the host
 was rebuilt or the line is wrong: leave the store alone and work out which,
 rather than replacing the pin to make the connect succeed.
 
-There is no automated restore check to run. Every write to the store is
-atomic (staged, fsynced, renamed, with the directory entry flushed
-afterwards) and cross-process serialized by a lock file beside the store
-(`lockStore`), so a store that exists is a whole one. The reads that can
-find it damaged say so: an unparsable record, a host recorded twice with
-different keys, and a file holding no records at all are each an error
-naming the file, not a shorter store.
+There is no operator-facing restore check to run, but the round trip is
+pinned by tests rather than by inspection, in
+`internal/remote/remote_test.go`: `TestReadKnownHostsRecoversBackupStore`
+and `TestReadKnownHostsRecoversDisplacedStore` write a store, delete it, and
+read it back from each copy, and
+`TestReadKnownHostsRecoversFromTheFresherCopy` pins that the copy read is
+the freshest of the two, so a restore cannot hand back fewer pins than the
+operator had. `go test ./internal/remote/` runs them.
+
+Every write to the store is atomic (staged, fsynced, renamed, with the
+directory entry flushed afterwards) and cross-process serialized by a lock
+file beside the store (`lockStore`), so a store that exists is a whole one.
+The reads that can find it damaged say so: an unparsable record, a host
+recorded twice with different keys, and a file holding no records at all
+are each an error naming the file, not a shorter store.
 
 ## Failure domains
 
-- The store and its copy share a directory, and both are removed by
-  anything that removes the config directory. The copy covers a store that
-  is damaged, emptied, or overwritten by another tool; it does not cover a
+- The store and both copies share a directory, and all three are removed by
+  anything that removes the config directory. The copies cover a store that
+  is damaged, emptied, or overwritten by another tool; they do not cover a
   lost home directory. Backing the directory up is the operator's half, and
   is the only backup step in this project.
 - Both copies are written under the same user credential as the store.
