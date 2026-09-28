@@ -13,15 +13,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
-### Fixed
+## [0.20.0] - 2026-09-28
 
-- The site's `/health` reads the asset store for the share card instead of
-  trusting the binding. A deploy that shipped the Worker and left the capture
-  files behind answered `ok` while every image on the page was a 404 and the
-  og:image was broken, so it passed `make site-deploy` and no probe named it.
-  A store that cannot produce the card is now the same `degraded` the missing
-  binding already was, with the reason in the body and in the
-  `health-degraded` line.
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.20.0).
 
 ### Added
 
@@ -79,6 +74,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   whole suffix set now, and one walk fills it.
 
 ### Fixed
+
+- The site's `/health` reads the asset store for the share card instead of
+  trusting the binding. A deploy that shipped the Worker and left the capture
+  files behind answered `ok` while every image on the page was a 404 and the
+  og:image was broken, so it passed `make site-deploy` and no probe named it.
+  A store that cannot produce the card is now the same `degraded` the missing
+  binding already was, with the reason in the body and in the
+  `health-degraded` line.
 
 - `$SSH_AUTH_SOCK` is stripped of surrounding whitespace and a trailing newline
   before the ssh-agent is dialed, the rule `$TOKTOP_SSH_PASSWORD` and
@@ -2480,7 +2483,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/maci0/toktop/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/maci0/toktop/compare/v0.18.2...v0.19.0
 [0.18.2]: https://github.com/maci0/toktop/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/maci0/toktop/compare/v0.18.0...v0.18.1
