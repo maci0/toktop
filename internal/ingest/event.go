@@ -177,7 +177,9 @@ type agentEventWire struct {
 
 // parseEventTime decodes an event's ts field as RFC 3339 (offset required).
 // Absent, null, or whitespace-only yields the zero Time; the caller stamps
-// arrival. Anything else is errBadTS.
+// arrival. Surrounding whitespace is trimmed before the parse, so a stamp a
+// sender padded is the instant it names rather than a 400 over bytes no RFC
+// 3339 reader counts. Anything else is errBadTS.
 func parseEventTime(raw json.RawMessage) (time.Time, error) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
@@ -187,7 +189,8 @@ func parseEventTime(raw json.RawMessage) (time.Time, error) {
 	if err != nil {
 		return time.Time{}, errBadTS
 	}
-	if strings.TrimSpace(v) == "" {
+	v = strings.TrimSpace(v)
+	if v == "" {
 		return time.Time{}, nil
 	}
 	t, err := time.Parse(time.RFC3339, v)

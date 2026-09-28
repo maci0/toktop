@@ -179,8 +179,15 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 	})
 }
 
+// maxRequestID bounds the request id this endpoint echoes and logs. The
+// sender's value is single-lined and capped here, so a long or control-laden
+// header cannot ride into the audit line or the answer's headers. A sender
+// that sends more than this gets the first maxRequestID characters back
+// rather than its own value, so the cap is stated in the README.
+const maxRequestID = 64
+
 func incomingRequestID(r *http.Request) string {
-	if v := logcfg.Field(r.Header.Get("X-Request-Id"), 64); v != "" {
+	if v := logcfg.Field(r.Header.Get("X-Request-Id"), maxRequestID); v != "" {
 		return v
 	}
 	return rand.Text()
@@ -547,12 +554,14 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 		body = fmt.Sprintf("degraded: %d/%d event streams in flight; events are being refused\n", in, cap(slots))
 	}
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	// Stated here rather than left to the runtime, and for the same reason
-	// errorResponse states it: a HEAD carries the GET's headers and no body
-	// (RFC 9110), and net/http derives the length from the body it withheld,
-	// so a HEAD answered this way carries a header set the GET it stands in
-	// for does not. The endpoint table serves HEAD alongside GET, so a probe
-	// that asks one has to read the same answer either way.
+	// Stated here rather than left to the runtime: a HEAD carries the GET's
+	// headers and no body (RFC 9110), and net/http takes the length from the
+	// body it withheld, so a HEAD answered without this states no length at
+	// all where its GET states the size of the answer. The endpoint table
+	// serves HEAD alongside GET, so a probe that asks one has to read the
+	// same answer either way. The error bodies need no such line: http.Error
+	// writes the body for a HEAD too and net/http counts those bytes, so
+	// those answers state their length either way.
 	w.Header().Set("Content-Length", strconv.Itoa(len(body)))
 	w.WriteHeader(status)
 	if r.Method == http.MethodHead {

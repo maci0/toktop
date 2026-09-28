@@ -348,15 +348,18 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 | `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
 | `GET`, `HEAD` `/healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held. A `HEAD` carries the `GET`'s headers and no body, `Content-Length` included, so a probe reads the same answer either way |
 
+A field sent as `null` is the same as one left out, so a sender assembling a
+payload from optional values can send the key either way.
+
 Event fields are all optional; anything omitted gets the default:
 
 | field | type | default | notes |
 |---|---|---|---|
 | `id` | string | - | caller-chosen key, at most 128 characters; an id past the cap, or one that is nothing but whitespace or control characters, is a `400` naming the field rather than a truncated key, because the id is what the feed deduplicates on and two keys clamped onto one stored id would drop the second event as a duplicate. A repeat of a key recorded within the last 15 minutes is ignored. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
-| `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); stamps more than two minutes from arrival in either direction are clamped to the arrival instant |
+| `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); whitespace around the stamp is ignored, an empty or whitespace-only string takes the arrival instant like an absent one, and anything else unparseable is a `400` naming the field; stamps more than two minutes from arrival in either direction are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
-| `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`; custom kinds pass through lowercased, capped at 24 characters |
+| `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`, matched the same way whatever case they are written in; a custom kind passes through ASCII-lowercased, capped at 24 characters. The fold is ASCII on purpose, so a non-ASCII letter keeps the case the sender wrote (`CAFÉ` is stored as `cafÉ`) and `İ` does not become a kind the sender never wrote |
 | `prompt_tokens` / `output_tokens` / `thinking_tokens` | integer | `0` | negative values and values above 2^40 clamp to `0`; a whole JSON number such as `100.0` counts; a count outside the 64-bit integer range is a `400` naming the field instead of a clamp; thinking is the reasoning share of output when the agent says so |
 | `via_engine` | string | - | monitored engine already counting this output; aggregates skip the event; capped at 128 characters |
 | `span_ms` | integer | `0` | how long the model spent on this event's tokens, in milliseconds. It is the rate denominator, so it beats the gap between events. Negative values and values above 86400000 clamp to `0`, which leaves the gap between events in charge; a whole JSON number such as `2000.0` counts, and a value that is not a number is a `400` naming the field |
@@ -407,7 +410,12 @@ bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. An accept failure that ends the
 endpoint writes one ERROR line naming the bound address and the reason.
 Responses carry `X-Request-Id`, echoed from the request when the sender set
-one.
+one and freshly minted when it did not, so every answer is correlatable to its
+audit line either way. An echoed id is single-lined and cut to 64 characters,
+so an id longer than that comes back truncated rather than as it was sent. The
+id is a correlation id only: the `req` on the log
+line is the same value, and neither it nor the sender's own key is read as an
+event id.
 
 Streams are recorded line by line: if a later line fails, events before it
 stay recorded and the error states how many. Retrying a stream (or a

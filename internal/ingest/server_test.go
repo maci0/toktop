@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
 	"io"
 	"log/slog"
@@ -502,6 +503,148 @@ func TestIngestRejectionsNameTheServedEndpoints(t *testing.T) {
 		if want := e.allow() + " " + e.path; !strings.Contains(string(body), want) {
 			t.Errorf("404 body %q missing %q", body, want)
 		}
+	}
+}
+
+// The README tells a sender that a field sent as null is the same as one left
+// out, so a payload assembled from optional values can carry the key either
+// way. Every field, not just the string ones: a null token count and a null id
+// have to reach the same stored event an absent key does.
+func TestIngestTreatsNullFieldsAsOmitted(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	code, body := postBody(t, "http://"+s.Addr()+"/v1/events",
+		`{"id":null,"ts":null,"agent":null,"model":null,"kind":null,`+
+			`"prompt_tokens":null,"output_tokens":null,"thinking_tokens":null,`+
+			`"via_engine":null,"span_ms":null,"note":null}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("all-null event rejected: %d %q", code, body)
+	}
+	awaitEvents(t, rec, 1)
+	ev := rec.evs[0]
+	if ev.Agent != "anonymous" || ev.Kind != core.AgentKindTurn {
+		t.Errorf("null did not take the defaults: %+v", ev)
+	}
+	if ev.ID != "" || ev.Model != "" || ev.ViaEngine != "" || ev.Note != "" {
+		t.Errorf("null did not leave the optional fields empty: %+v", ev)
+	}
+	if ev.PromptTokens != 0 || ev.OutputTokens != 0 || ev.ThinkingTokens != 0 || ev.Span != 0 {
+		t.Errorf("null did not leave the counts at zero: %+v", ev)
+	}
+	if ev.At.IsZero() {
+		t.Error("a null ts must still be stamped with the arrival instant")
+	}
+}
+
+// A blank ts is the one empty value the endpoint reads as absent rather than
+// as a malformed stamp: a sender that formats a timestamp it could not fill in
+// gets the arrival instant instead of a 400 it cannot act on.
+func TestIngestBlankTimestampTakesArrivalInstant(t *testing.T) {
+	for _, ts := range []string{`""`, `"   "`, `" 2026-01-02T03:04:05Z "`} {
+		t.Run(ts, func(t *testing.T) {
+			rec := &memRecorder{}
+			s := startIngest(t, rec)
+			code, body := postBody(t, "http://"+s.Addr()+"/v1/events", `{"ts":`+ts+`}`)
+			if code != http.StatusAccepted {
+				t.Fatalf("status = %d %q, want 202", code, body)
+			}
+			awaitEvents(t, rec, 1)
+			if time.Since(rec.evs[0].At) > time.Minute {
+				t.Errorf("ts %s stored %s, want the arrival instant", ts, rec.evs[0].At)
+			}
+		})
+	}
+}
+
+// A known kind matches whatever case it is written in, and a custom one is
+// folded over ASCII only. The fold leaves É alone rather than lowercasing it,
+// because a full Unicode fold would also turn İ into a kind the sender never
+// wrote; the README's kind row states that and this pins it.
+func TestIngestFoldsKindOverASCIIOnly(t *testing.T) {
+	cases := map[string]string{
+		"TURN":     core.AgentKindTurn,
+		"Tool":     core.AgentKindTool,
+		"ERROR":    core.AgentKindError,
+		"Note":     core.AgentKindNote,
+		"CAFÉ":     "cafÉ",
+		"İstanbul": "İstanbul",
+		"":         core.AgentKindTurn,
+	}
+	for wire, want := range cases {
+		t.Run(wire, func(t *testing.T) {
+			rec := &memRecorder{}
+			s := startIngest(t, rec)
+			code, body := postBody(t, "http://"+s.Addr()+"/v1/events", `{"kind":"`+wire+`"}`)
+			if code != http.StatusAccepted {
+				t.Fatalf("status = %d %q, want 202", code, body)
+			}
+			awaitEvents(t, rec, 1)
+			if got := rec.evs[0].Kind; got != want {
+				t.Errorf("kind %q stored as %q, want %q", wire, got, want)
+			}
+		})
+	}
+}
+
+// Every answer names a request, so a sender can quote it in a bug report and
+// find the audit line. A request that sets none gets a minted one rather than
+// an empty header, and two such requests do not share it.
+func TestIngestMintsRequestIDWhenTheRequestSetsNone(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	base := "http://" + s.Addr() + "/healthz"
+	id := func(method string) string {
+		t.Helper()
+		req, err := http.NewRequest(method, base, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp.Header.Get("X-Request-Id")
+	}
+	first, second := id(http.MethodGet), id(http.MethodGet)
+	if first == "" || second == "" {
+		t.Fatalf("X-Request-Id not stated: %q then %q", first, second)
+	}
+	if first == second {
+		t.Errorf("two requests share the minted id %q, so the audit lines cannot be told apart", first)
+	}
+	sent := "caller-" + rand.Text()
+	req, err := http.NewRequest(http.MethodGet, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Request-Id", sent)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Request-Id"); got != sent {
+		t.Errorf("X-Request-Id = %q, want the request's own %q", got, sent)
+	}
+	// An id past the cap comes back cut, not as it was sent, so the README
+	// states the cap rather than claiming an unconditional echo.
+	over := strings.Repeat("k", maxRequestID+36)
+	req, err = http.NewRequest(http.MethodGet, base, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("X-Request-Id", over)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if got := resp.Header.Get("X-Request-Id"); got != over[:maxRequestID] {
+		t.Errorf("X-Request-Id = %q, want the first %d characters of the request's id", got, maxRequestID)
 	}
 }
 
