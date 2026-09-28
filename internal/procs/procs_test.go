@@ -490,8 +490,10 @@ func TestSnapshotErrorAuditedWhenNoCache(t *testing.T) {
 		t.Fatalf("audit line lost the cause: %s", line)
 	}
 
-	// With a snapshot to fall back on, the failure is a transient blip and
-	// the throttled sweep that returns stale processes must stay quiet.
+	// With a snapshot to fall back on, the first failure says so: the cache is
+	// why the panel still shows processes, and without the line the engine
+	// list goes stale with nothing on screen or in the log to explain it. A
+	// repeat of the same outage stays quiet, and a success clears the latch.
 	buf.Reset()
 	platformList = func() ([]raw, error) {
 		return []raw{annotateRaw(raw{pid: 42, name: "ollama", args: []string{"ollama", "serve"}})}, nil
@@ -501,8 +503,25 @@ func TestSnapshotErrorAuditedWhenNoCache(t *testing.T) {
 	if got := s.SnapshotAt(time.Now()); len(got) != 1 {
 		t.Fatalf("snapshot after a failure = %+v, want the last good one", got)
 	}
-	if line := buf.String(); strings.Contains(line, "process listing failed") {
-		t.Fatalf("a failure with a snapshot to return was audited: %s", line)
+	line = buf.String()
+	if !strings.Contains(line, "stale snapshot") {
+		t.Fatalf("a failure with a snapshot to return was not audited: %s", line)
+	}
+	buf.Reset()
+	if got := s.SnapshotAt(time.Now()); len(got) != 1 {
+		t.Fatalf("snapshot after a repeated failure = %+v, want the last good one", got)
+	}
+	if line := buf.String(); line != "" {
+		t.Fatalf("a repeated listing failure was audited again: %s", line)
+	}
+	platformList = func() ([]raw, error) {
+		return []raw{annotateRaw(raw{pid: 42, name: "ollama", args: []string{"ollama", "serve"}})}, nil
+	}
+	_ = s.SnapshotAt(time.Now())
+	platformList = func() ([]raw, error) { return nil, fail }
+	_ = s.SnapshotAt(time.Now())
+	if line := buf.String(); !strings.Contains(line, "stale snapshot") {
+		t.Fatalf("a listing that recovered and failed again was not audited: %s", line)
 	}
 }
 

@@ -321,8 +321,13 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 			break
 		}
 		var chunk openaiChunk
-		if json.Unmarshal([]byte(payload), &chunk) != nil {
-			continue
+		// A data frame the probe cannot decode is not a frame to skip: the
+		// tokens it carried are gone, and the frames after it are counted as
+		// if they were the whole generation, so the sample would report a
+		// short, plausible measurement with OK set. Same reasoning as the SSE
+		// error event below.
+		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
+			return 0, ttft, fmt.Errorf("decode stream frame: %w", err)
 		}
 		// llama.cpp, LiteLLM and other gateways emit SSE error events with
 		// HTTP 200; skipping them passed broken generations off as partial

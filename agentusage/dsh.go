@@ -6,6 +6,7 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -183,15 +184,20 @@ func parseDsh(line []byte) (values, string, bool) {
 // its head next poll, the way consumeAppend holds a trailing fragment. It
 // counts only when it parses in full; committing the offset past a fragment
 // that did not would drop those bytes permanently.
-func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values, complete int64, ok bool) {
+//
+// A read or a first-frame decode that produced nothing is returned as the
+// cause, not as a bare failure: the caller latches and reports it, and a nil
+// cause would clear the latch instead, leaving an unreadable session looking
+// like an idle one.
+func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values, complete int64, ok bool, rerr error) {
 	src, err := io.ReadAll(io.LimitReader(f, zstdTailBytes.Load()))
 	if err != nil {
-		return nil, 0, false
+		return nil, 0, false, fmt.Errorf("read zstd tail: %w", err)
 	}
 	plain, n, err := decodeZstdPrefix(src)
 	if err != nil {
 		if n == 0 {
-			return nil, 0, false
+			return nil, 0, false, fmt.Errorf("decode zstd frame at offset %d: %w", off, err)
 		}
 		// A complete frame failed to decode partway into the window. The
 		// frames before it are good and the offset stops at the bad one, so
@@ -256,7 +262,7 @@ func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values
 	if havePending {
 		take(pending, false)
 	}
-	return recs, off + int64(n), true
+	return recs, off + int64(n), true, nil
 }
 
 // ownsZstd decides ownership from the header frame. An incomplete opening

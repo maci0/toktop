@@ -97,7 +97,7 @@ func (w *Watcher) readNew(path string) {
 		rerr     error
 	)
 	if isDshZstd(path) {
-		recs, complete, ok = w.consumeZstd(path, f, off)
+		recs, complete, ok, rerr = w.consumeZstd(path, f, off)
 	} else {
 		recs, complete, ok, rerr = w.consumeAppend(f, off)
 	}

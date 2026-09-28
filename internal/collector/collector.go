@@ -438,9 +438,19 @@ type foldedErr struct {
 // old one.
 func (c *Collector) foldErr(key string, err error) string {
 	raw := err.Error()
-	home, _ := os.UserHomeDir()
+	home, herr := os.UserHomeDir()
 	if f, ok := c.errFold[key]; ok && f.raw == raw && f.home == home {
 		return f.text
+	}
+	if herr != nil {
+		// RedactHome folds the home on the same lookup and gives up with the
+		// message unchanged, so the text published below and on every
+		// --json run keeps the account's paths. That is a consequence of the
+		// environment, not a choice, and the operator is the one who can fix
+		// it, so it is said once per distinct engine error rather than left
+		// to be discovered in a path that was supposed to be folded.
+		audit().Warn("toktop: home directory unknown; engine errors keep their home paths",
+			"error", logcfg.RedactedField(herr.Error(), 256))
 	}
 	text := core.Snippet([]byte(core.RedactHome(raw)))
 	if c.errFold == nil {
@@ -985,6 +995,14 @@ func (c *Collector) ProbeAll() {
 			// The wall clock, not the collector's: the sample's At follows the
 			// seeded timeline a demo pins, and an elapsed time measured against
 			// that one is not a duration the operator ran.
+			//
+			// A generation the operator cancelled is not an engine failure:
+			// probe.Run reports it as an error, and recording it would write a
+			// "probe failed" line and a red sample on every quit. The poll path
+			// drops its sample on cancellation for the same reason.
+			if pctx.Err() != nil {
+				return
+			}
 			c.auditProbe(t, s, time.Since(started))
 			c.RecordProbe(s)
 		}(t)

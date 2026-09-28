@@ -126,6 +126,7 @@ func TestRunRejectsUsageWithoutContent(t *testing.T) {
 		kind        string
 		contentType string
 		body        string
+		wantErr     string
 	}{
 		{
 			name:        "stream usage only",
@@ -138,6 +139,9 @@ func TestRunRejectsUsageWithoutContent(t *testing.T) {
 			kind:        core.KindVLLM,
 			contentType: "text/event-stream",
 			body:        "data: {\"choices\":[{\"delta\":{\"content\":42}}]}\n\ndata: {\"usage\":{\"completion_tokens\":32}}\n\ndata: [DONE]\n\n",
+			// The frame is a decode failure, not an absent one: skipping it
+			// would have counted the frames after it as a whole generation.
+			wantErr: "decode stream frame:",
 		},
 		{
 			name:        "json usage only",
@@ -165,8 +169,12 @@ func TestRunRejectsUsageWithoutContent(t *testing.T) {
 			}))
 			defer srv.Close()
 
+			wantErr := tc.wantErr
+			if wantErr == "" {
+				wantErr = "empty stream"
+			}
 			s := Run(context.Background(), Request{Kind: tc.kind, Base: srv.URL, Model: "m"})
-			if s.OK || s.Err != "empty stream" || s.Tokens != 0 || s.TTFTms != 0 || s.TokPS != 0 {
+			if s.OK || !strings.HasPrefix(s.Err, wantErr) || s.Tokens != 0 || s.TTFTms != 0 || s.TokPS != 0 {
 				t.Fatalf("usage without content must not produce a measurement: %+v", s)
 			}
 		})

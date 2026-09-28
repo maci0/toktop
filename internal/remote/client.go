@@ -325,6 +325,11 @@ var (
 	keepaliveEvery     = 15 * time.Second
 	keepaliveReplies   = 5 * time.Second
 	forwardDialTimeout = 8 * time.Second
+	// forwardAcceptRetry paces the relay after an Accept that failed for a
+	// reason other than Close. Without it a descriptor-exhausted process
+	// would spin on the failed call, and with it the port keeps answering
+	// once the descriptors come back.
+	forwardAcceptRetry = 100 * time.Millisecond
 )
 
 // keepaliveMisses is how many unanswered probes close the connection. Three
@@ -700,7 +705,18 @@ func (c *Client) relay(l net.Listener, rport int) {
 	for {
 		local, err := l.Accept()
 		if err != nil {
-			return // listener closed by Close()
+			// Close is not the only way Accept returns. A descriptor
+			// exhausted at accept time, or a connection the kernel aborted,
+			// ends the goroutine just as surely, and the listener stays in
+			// the client's set: Forward keeps reporting the port as bound
+			// while nothing accepts on it, so every dashboard poll times out
+			// with no line anywhere saying why.
+			if errors.Is(err, net.ErrClosed) {
+				return
+			}
+			c.auditForwardFailure(rport, err)
+			time.Sleep(forwardAcceptRetry)
+			continue
 		}
 		if !c.acquireRelay(local) {
 			local.Close()

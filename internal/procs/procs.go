@@ -99,6 +99,12 @@ type Sampler struct {
 	// takes seconds); within the window the previous snapshot is returned.
 	refreshMin time.Duration
 	cached     []Info
+	// listFailed latches a listing failure so a host whose process table
+	// stays unreadable is reported once per outage instead of once per sweep.
+	// The cached snapshot is returned in the meantime, so without the latch
+	// nothing distinguishes a stale-but-working table from one that stopped
+	// answering entirely.
+	listFailed bool
 }
 
 // audit builds the process logger for the lines this package writes. A var so
@@ -181,9 +187,20 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		if len(s.cached) == 0 {
 			audit().Warn("toktop: process listing failed, no snapshot to fall back on",
 				"error", logcfg.RedactedField(err.Error(), 256))
+		} else if !s.listFailed {
+			// A snapshot on hand is why the panel still shows something, and
+			// that is exactly why the outage is invisible: every provider
+			// discovery port and every process match keeps being answered
+			// from the cache, so the engine list goes quietly stale. Latched
+			// like the transcript read failures, because the same sweep
+			// repeats every refreshMin for as long as the table is gone.
+			audit().Warn("toktop: process listing failed; the displayed processes are a stale snapshot",
+				"error", logcfg.RedactedField(err.Error(), 256))
 		}
+		s.listFailed = true
 		return slices.Clone(s.cached)
 	}
+	s.listFailed = false
 
 	// core.Age, like every other interval here: a backward step makes a raw
 	// subtraction negative, and the jiffies read in that frame are dropped

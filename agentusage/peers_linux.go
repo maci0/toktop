@@ -8,11 +8,14 @@ package agentusage
 import (
 	"bufio"
 	"encoding/hex"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 func init() { peersByPID = linuxPeersByPID }
@@ -48,7 +51,15 @@ func linuxPeersByPID(pids []int) map[int][]netip.AddrPort {
 	}
 	byInode := map[uint64]netip.AddrPort{}
 	for _, table := range []string{"/proc/net/tcp", "/proc/net/tcp6"} {
-		readTCPTable(table, allInodes, byInode)
+		if err := readTCPTable(table, allInodes, byInode); err != nil {
+			// A table that could not be read yields no peers for its
+			// inodes, and the caller reads that as "not the same engine".
+			// Silent, it would attribute a running agent's traffic to
+			// nothing while showing it as talking to the engine directly.
+			audit().Warn("agent usage: kernel TCP table unreadable; agent peers are unknown",
+				"path", table,
+				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+		}
 	}
 	for pid, inodes := range pidInodes {
 		seen := map[netip.AddrPort]bool{}
@@ -100,10 +111,14 @@ func socketInodes(pid int) map[uint64]bool {
 // readTCPTable pulls the remote address of every connection whose inode the
 // caller cares about. The kernel's table is fixed-width text: local address,
 // remote address, state, and further along, the inode.
-func readTCPTable(path string, want map[uint64]bool, into map[uint64]netip.AddrPort) {
+//
+// An error means into holds an incomplete picture, not that the process has
+// no peers: the entries decoded before the failure stay, and the caller
+// reports the gap rather than presenting the partial table as the truth.
+func readTCPTable(path string, want map[uint64]bool, into map[uint64]netip.AddrPort) error {
 	f, err := os.Open(path)
 	if err != nil {
-		return
+		return err
 	}
 	defer f.Close()
 
@@ -123,6 +138,13 @@ func readTCPTable(path string, want map[uint64]bool, into map[uint64]netip.AddrP
 			into[inode] = ap
 		}
 	}
+	// An I/O error or an over-long line stops the scan early; without this
+	// the truncated table is indistinguishable from a table in which the
+	// missing connections simply do not exist.
+	if err := sc.Err(); err != nil {
+		return fmt.Errorf("scan %s: %w", path, err)
+	}
+	return nil
 }
 
 // parseHexAddrPort decodes the kernel's "0100007F:1F90" spelling, which is the

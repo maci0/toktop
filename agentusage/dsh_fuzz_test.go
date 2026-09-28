@@ -116,7 +116,7 @@ func FuzzConsumeZstdRecordWalk(f *testing.F) {
 			pass int
 		)
 		for range int64(len(stream)) + 2 {
-			recs, next, ok := w.readZstd(t, path, pos)
+			recs, next, ok, _ := w.readZstd(t, path, pos)
 			if !ok {
 				break
 			}
@@ -193,7 +193,7 @@ func frameBoundaries(src []byte) map[int64]bool {
 // which is the case the harness above compares against.
 func mustReadZstd(t *testing.T, path string, off int64) []values {
 	t.Helper()
-	recs, _, ok := newDshWatcher(t).readZstd(t, path, off)
+	recs, _, ok, _ := newDshWatcher(t).readZstd(t, path, off)
 	if !ok {
 		t.Fatalf("uncapped read at %d failed", off)
 	}
@@ -216,7 +216,7 @@ func newDshWatcher(t *testing.T) *Watcher {
 // readZstd reads one window of path from off, the way readNew does: seek to
 // the committed offset, then let consumeZstd take the window. consumeZstd
 // reads from wherever the handle sits, so the seek belongs here.
-func (w *Watcher) readZstd(t *testing.T, path string, off int64) (recs []values, complete int64, ok bool) {
+func (w *Watcher) readZstd(t *testing.T, path string, off int64) (recs []values, complete int64, ok bool, rerr error) {
 	t.Helper()
 	f, err := os.Open(path)
 	if err != nil {

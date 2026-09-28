@@ -516,7 +516,7 @@ func (w *Watcher) seedBaseline(path string) {
 		rerr error
 	)
 	if isDshZstd(path) {
-		recs, _, ok = w.consumeZstd(path, f, 0)
+		recs, _, ok, rerr = w.consumeZstd(path, f, 0)
 	} else {
 		recs, _, ok, rerr = w.consumeAppend(f, off)
 	}
