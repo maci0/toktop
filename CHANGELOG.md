@@ -23,6 +23,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   ages out and is capped, so a replay inside the horizon stores nothing and
   the ledger cannot grow without bound.
 
+- The startup config line and the audit record named a bearer token as
+  `bearer=set` when it was not. The line is written before `bearer.Set` runs,
+  and a token carrying a line break is turned down there, leaving the `--add`
+  endpoints queried unauthenticated: every poll answered 401 while both
+  records claimed a credential was in force. A refused token is now named
+  `bearer=refused`, and the cleartext `--add` warning is reserved for a token
+  that is actually sent, so it keeps meaning what it says.
+
+- `$GITHUB_TOKEN` set to a blank value is named at the start of
+  `toktop update`. The anonymous rate-limit error it produced advised setting
+  the very variable the operator had already set, and read as a first run that
+  had never authenticated.
+
 ## [0.19.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

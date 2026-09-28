@@ -180,7 +180,8 @@ Environment (a flag always wins over the variable it mirrors):
   KIMI_CODE_HOME          where kimi's session logs are read (--agents),
                           default ~/.kimi-code; a relative value is ignored,
                           and so is one with no sessions directory in it
-  GITHUB_TOKEN            optional, authenticates toktop update's GitHub calls
+  GITHUB_TOKEN            optional, authenticates toktop update's GitHub calls;
+                          set but blank is named, and carries no token
   SSH_AUTH_SOCK           ssh-agent socket for ssh:// targets
   NO_COLOR                recognized by the terminal renderer, as usual
 An unrecognized TOKTOP_* name is reported as a typo at startup, and one that

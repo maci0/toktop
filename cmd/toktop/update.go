@@ -100,6 +100,8 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 		return 2
 	}
 
+	warnBlankGitHubToken()
+
 	rel, err := selfupdate.Check(ctx, *repo)
 	if err != nil {
 		return updateErr("cannot check for updates", err)
@@ -115,6 +117,21 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	}
 	_, err = fmt.Fprintf(out, "Installed %s to %s\n", rel.TagName, path)
 	return outputStatus(err)
+}
+
+// warnBlankGitHubToken names a $GITHUB_TOKEN that is set but carries no token.
+// The generic rate-limit message it produces advises setting the very variable
+// the operator already set, so the misconfiguration is reported before the
+// request rather than inferred from an error that reads as a first-run one.
+// Checked here, where the variable is read: the top-level command never reads
+// it, so a dashboard run has nothing to say about it.
+func warnBlankGitHubToken() {
+	v, set := os.LookupEnv(selfupdate.TokenEnv)
+	if !set || strings.TrimSpace(strings.TrimRight(v, "\r\n")) != "" {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "toktop update: $%s is set but blank; the GitHub API is queried unauthenticated\n",
+		selfupdate.TokenEnv)
 }
 
 // reportRelease prints what the check found and reports whether an install

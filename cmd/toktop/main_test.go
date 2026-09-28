@@ -1771,6 +1771,26 @@ func TestLogActiveConfig(t *testing.T) {
 			t.Fatalf("audit record %q, want bearer=set", got)
 		}
 	})
+	// bearer.Set runs after the config line and turns down a token carrying
+	// CR or LF, so the run queries the --add endpoints unauthenticated. A
+	// record reading bearer=set there describes a credential that is not in
+	// force, and the 401s it would explain arrive with nothing naming the
+	// cause.
+	t.Run("a refused token is named refused, not set", func(t *testing.T) {
+		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", bearer: "sk-secret\nghp_other"}
+		var buf strings.Builder
+		logActiveConfig(&buf, f, map[string]bool{"bearer": true}, 1, 0, false)
+		got := buf.String()
+		if strings.Contains(got, "bearer=set") {
+			t.Fatalf("logActiveConfig() = %q, want bearer=refused: the token is turned down at Set", got)
+		}
+		if !strings.Contains(got, "bearer=refused") {
+			t.Fatalf("logActiveConfig() = %q, want bearer=refused", got)
+		}
+		if strings.Contains(got, "ghp_other") {
+			t.Fatalf("logActiveConfig() leaked bearer: %q", got)
+		}
+	})
 }
 
 // --opencode-db is on by default: --agents reads opencode's store without
@@ -1979,6 +1999,45 @@ func TestWarnInsecureAdd(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := captureStderr(t, func() { warnInsecureAdd(tt.adds) })
+			if tt.want == "" {
+				if got != "" {
+					t.Fatalf("printed %q, want silence", got)
+				}
+				return
+			}
+			if !strings.Contains(got, tt.want) {
+				t.Fatalf("printed %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A $GITHUB_TOKEN that is set but blank sends no Authorization header, and the
+// anonymous rate-limit error then advises setting the very variable the
+// operator already set. It is named at startup so the misconfiguration reads
+// as itself rather than as a first run that has never authenticated.
+func TestWarnBlankGitHubToken(t *testing.T) {
+	tests := []struct {
+		name  string
+		token string
+		set   bool
+		want  string
+	}{
+		{name: "unset is silent", set: false},
+		{name: "empty is named", set: true, token: "", want: "is set but blank"},
+		{name: "whitespace is named", set: true, token: "  \t", want: "is set but blank"},
+		{name: "trailing newline alone is named", set: true, token: "\n", want: "is set but blank"},
+		{name: "a token is silent", set: true, token: "ghp_x"},
+		{name: "a token with a stripped newline is silent", set: true, token: "ghp_x\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set {
+				t.Setenv(selfupdate.TokenEnv, tt.token)
+			} else {
+				os.Unsetenv(selfupdate.TokenEnv)
+			}
+			got := captureStderr(t, warnBlankGitHubToken)
 			if tt.want == "" {
 				if got != "" {
 					t.Fatalf("printed %q, want silence", got)

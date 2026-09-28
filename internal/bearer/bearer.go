@@ -34,6 +34,15 @@ var (
 	allowed = map[string]bool{}
 )
 
+// Usable reports whether a token can be stored and sent as an Authorization
+// header, applying the same rule Set does. It is what lets a caller name the
+// credential as refused without having attempted to send it, so a record
+// written before the token is installed cannot claim a token that Set would
+// have turned down.
+func Usable(token string) bool {
+	return !strings.ContainsAny(strings.TrimSpace(token), "\r\n")
+}
+
 // Set stores the token applied to allowed engine requests. Tokens containing
 // CRLF or newline characters are refused to prevent HTTP header injection.
 // A refusal is returned, not silently downgraded to "no token": an operator
@@ -41,7 +50,7 @@ var (
 // without being told the credential was refused.
 func Set(token string) error {
 	token = strings.TrimSpace(token)
-	if strings.ContainsAny(token, "\r\n") {
+	if !Usable(token) {
 		return errors.New("bearer token contains CR or LF, refusing to send it as a header")
 	}
 	mu.Lock()

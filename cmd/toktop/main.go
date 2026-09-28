@@ -220,8 +220,13 @@ func runMain() int {
 	if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
 		if err := bearer.Set(tok); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v; the engine will be queried unauthenticated\n", err)
+		} else {
+			// Only when a token is in force: the cleartext warning is about
+			// the token crossing the network, and a refused one crosses
+			// nothing. Warning anyway trains the operator to read this line
+			// as routine rather than as the credential warning it is.
+			warnInsecureAdd(f.adds)
 		}
-		warnInsecureAdd(f.adds)
 	}
 	warnBearerFlag(explicit["bearer"], f.bearer)
 	warnBlankBearer(len(f.adds), f.demo)
@@ -663,7 +668,16 @@ func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, open
 	}
 	if nAdd > 0 && !f.demo {
 		if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
-			cfg = append(cfg, configFlag{key: "bearer", value: "set"})
+			// set or refused, never bare "set": bearer.Set runs after this
+			// line and turns down a token carrying CR or LF, leaving the run
+			// to query the --add endpoints unauthenticated. A record reading
+			// bearer=set there describes a credential that is not in force,
+			// and the 401s it explains arrive with nothing naming the cause.
+			state := "set"
+			if !bearer.Usable(tok) {
+				state = "refused"
+			}
+			cfg = append(cfg, configFlag{key: "bearer", value: state})
 		}
 	}
 	return cfg
