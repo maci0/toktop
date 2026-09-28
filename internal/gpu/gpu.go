@@ -121,12 +121,18 @@ func lookup(name string) (string, bool) {
 // run invokes a vendor CLI and reports its stdout. A failure returns
 // (nil, false) and is audited once per outage, not once per poll.
 //
+// name is the tool this build looks up and path is what lookup resolved it to.
+// The outage latch is keyed by the name and the audit line carries the path:
+// a resolved path changes when a driver is reinstalled or a symlink flips, and
+// keying the latch by it would make one tool look like a new one every time
+// the binary moved.
+//
 // The audit matters because the alternative is indistinguishable from the
 // truth: a driver that has been unloaded, a wedged nvidia-smi, a container
 // whose GPU device vanished all blank the GPU row, and a machine with no GPU
 // at all looks identical on screen. Without a line naming the tool and its
 // reason, an operator debugging a missing GPU readout has nothing to read.
-func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
+func run(ctx context.Context, name, path string, args ...string) ([]byte, bool) {
 	c, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(c, path, args...)
@@ -142,10 +148,10 @@ func run(ctx context.Context, path string, args ...string) ([]byte, bool) {
 	var out cappedOutput
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		noteRunFailure(path, err)
+		noteRunFailure(name, path, err)
 		return nil, false
 	}
-	noteRunOK(path)
+	noteRunOK(name, path)
 	return out.buf.Bytes(), true
 }
 
@@ -162,7 +168,9 @@ var audit = logcfg.Logger
 // up, so the table is bounded at a handful, and dropping an entry on recovery
 // loses a failure a concurrent poll had just recorded: the next failure reads
 // as a fresh outage and the log says a tool failed twice for one run of it.
-var runState sync.Map // tool path -> *toolRun
+// Keyed by name rather than by resolved path for that bound to hold: lookup
+// re-resolves after toolHitTTL, and a driver reinstall moves the binary.
+var runState sync.Map // tool name -> *toolRun
 
 type toolRun struct {
 	mu     sync.Mutex
@@ -173,8 +181,8 @@ type toolRun struct {
 // noteRunFailure records the start of an outage. Repeat failures of a tool
 // already recorded as failing add nothing: the line for the start of the
 // outage named the reason, and every later poll would only repeat it.
-func noteRunFailure(path string, err error) {
-	s, _ := runState.LoadOrStore(path, &toolRun{})
+func noteRunFailure(name, path string, err error) {
+	s, _ := runState.LoadOrStore(name, &toolRun{})
 	t := s.(*toolRun)
 	t.mu.Lock()
 	first := !t.failed
@@ -186,14 +194,15 @@ func noteRunFailure(path string, err error) {
 		return
 	}
 	audit().Warn("toktop: gpu vendor tool failed",
-		"tool", logcfg.Field(path, 256),
+		"tool", logcfg.Field(name, 256),
+		"path", logcfg.Field(path, 256),
 		"error", logcfg.Field(err.Error(), 256))
 }
 
 // noteRunOK clears a recorded outage and says so, so a tool that comes back is
 // distinguishable on the log from one that never failed.
-func noteRunOK(path string) {
-	s, ok := runState.Load(path)
+func noteRunOK(name, path string) {
+	s, ok := runState.Load(name)
 	if !ok {
 		return
 	}
@@ -207,7 +216,8 @@ func noteRunOK(path string) {
 	downFor := instant().Sub(t.since)
 	t.mu.Unlock()
 	audit().Info("toktop: gpu vendor tool answering again",
-		"tool", logcfg.Field(path, 256),
+		"tool", logcfg.Field(name, 256),
+		"path", logcfg.Field(path, 256),
 		"down_for", downFor.Round(time.Second))
 }
 
@@ -253,7 +263,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 	wg.Go(func() {
 		if p, ok := lookup("nvidia-smi"); ok {
-			if out, ok2 := run(ctx, p, NvidiaQuery, NvidiaFormat); ok2 {
+			if out, ok2 := run(ctx, "nvidia-smi", p, NvidiaQuery, NvidiaFormat); ok2 {
 				add(ParseNvidiaSMI(out))
 			}
 		}
@@ -263,7 +273,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 	})
 	wg.Go(func() {
 		if p, ok := lookup("xpu-smi"); ok {
-			add(sampleXPU(ctx, p))
+			add(sampleXPU(ctx, "xpu-smi", p))
 		}
 	})
 	wg.Wait()
@@ -279,7 +289,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 func sampleAMD(ctx context.Context) []core.GPUDevice {
 	if p, ok := lookup("rocm-smi"); ok {
-		if out, ok2 := run(ctx, p, RocmArgs()...); ok2 {
+		if out, ok2 := run(ctx, "rocm-smi", p, RocmArgs()...); ok2 {
 			if devs := ParseRocmSMI(out); len(devs) > 0 {
 				return devs
 			}
@@ -291,8 +301,8 @@ func sampleAMD(ctx context.Context) []core.GPUDevice {
 	return nil
 }
 
-func sampleXPU(ctx context.Context, xpu string) []core.GPUDevice {
-	out, ok := run(ctx, xpu, "discovery", "-j")
+func sampleXPU(ctx context.Context, name, xpu string) []core.GPUDevice {
+	out, ok := run(ctx, name, xpu, "discovery", "-j")
 	if !ok {
 		return nil
 	}
@@ -308,7 +318,7 @@ func sampleXPU(ctx context.Context, xpu string) []core.GPUDevice {
 	var wg sync.WaitGroup
 	for i, d := range discs {
 		wg.Go(func() {
-			mo, ok := run(ctx, xpu, "metrics", "-d", strconv.Itoa(d.ID), "-j")
+			mo, ok := run(ctx, name, xpu, "metrics", "-d", strconv.Itoa(d.ID), "-j")
 			if !ok {
 				return
 			}

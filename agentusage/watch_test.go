@@ -1810,3 +1810,66 @@ func TestCountedFilesAreCapped(t *testing.T) {
 		t.Fatalf("appending to a released transcript reported %d, want at least %d", got, before+5000)
 	}
 }
+
+// A per-file-owner adapter judges a transcript by the working directory
+// recorded in its header, and an own verdict outlives the recency window so a
+// session that comes back is read as growth rather than from byte zero. Left
+// unbounded that is one entry per session file ever judged ours, in five maps,
+// for the life of the run, and a machine-wide watch sees every session on the
+// host. The cap releases the oldest, and a released transcript keeps its skip
+// position, so the release costs a session's idle remainder and not a
+// double-counted history.
+func TestOwnedIdleTranscriptsAreCapped(t *testing.T) {
+	store := withStore(t, "copilot")
+	work := t.TempDir()
+	w := Watch("copilot", work, time.Now())
+	if w == nil {
+		t.Fatal("no copilot adapter")
+	}
+
+	n := stateCap + 8
+	for i := range n {
+		// No usage records, so a session judged ours carries no counts and
+		// never draws on countedCap's budget: this is the bookkeeping the
+		// owner cap alone bounds.
+		copilotSession(t, store, "session"+strconv.Itoa(i), work)
+	}
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := len(w.owner); got != n {
+		t.Fatalf("%d own verdicts recorded, want %d", got, n)
+	}
+	if len(w.seen) != 0 {
+		t.Fatalf("%d counted files for sessions with no records, want 0", len(w.seen))
+	}
+
+	old := time.Now().Add(-recencyWindow - time.Minute)
+	for i := range n {
+		p := filepath.Join(store, "session"+strconv.Itoa(i), "events.jsonl")
+		if err := os.Chtimes(p, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w.cached, w.scanned = nil, time.Time{}
+	w.Poll()
+	if got := len(w.owner); got > stateCap {
+		t.Fatalf("%d own verdicts retained after ageing, want at most %d", got, stateCap)
+	}
+	if got := len(w.offsets); got > stateCap {
+		t.Fatalf("%d skip positions retained after ageing, want at most %d", got, stateCap)
+	}
+	if got := len(w.stamps); got > stateCap {
+		t.Fatalf("%d stamps retained after ageing, want at most %d", got, stateCap)
+	}
+	// A session still inside the cap keeps its skip position at the end the
+	// read reached, so an append to it is growth and not a re-read.
+	for path, off := range w.offsets {
+		fi, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("skip position kept for a transcript that is gone: %s", err)
+		}
+		if off != fi.Size() {
+			t.Fatalf("skip position for %s is %d, want the file's end %d", filepath.Base(filepath.Dir(path)), off, fi.Size())
+		}
+	}
+}

@@ -405,7 +405,9 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 // the walk and are not carrying this attach's counts. Without it, stamps,
 // offsets and the owner cache grow by every session file that ever appeared
 // during a long --agents run, including other projects'. Counted files keep
-// their offsets so a later append is not read from the start and double-counted.
+// their offsets so a later append is not read from the start and double-counted,
+// and an own verdict outlives the window for the same reason, bounded by
+// trimOwned.
 func (w *Watcher) forgetIdle(live []string) {
 	keep := make(map[string]struct{}, len(live)+len(w.seen)+len(w.owner)+len(w.preexisting))
 	for _, path := range live {
@@ -471,7 +473,12 @@ func (w *Watcher) forgetIdle(live []string) {
 	for _, path := range drop {
 		w.dropFile(path)
 	}
-	w.trimCounted(live)
+	inWalk := make(map[string]struct{}, len(live))
+	for _, path := range live {
+		inWalk[path] = struct{}{}
+	}
+	w.trimCounted(inWalk, len(live))
+	w.trimOwned(inWalk)
 }
 
 // countedCap bounds the per-file bookkeeping for transcripts that have aged
@@ -481,6 +488,14 @@ func (w *Watcher) forgetIdle(live []string) {
 // stamps and offsets. A watcher left running against a long-lived agent would
 // otherwise hold one of each per session file written while it ran.
 const countedCap = 512
+
+// aged is a transcript the trim passes may release, with the last write the
+// stamp recorded. Oldest first, since the transcript least likely to be
+// appended to is the one whose remaining growth is cheapest to lose.
+type aged struct {
+	path   string
+	mtimeN int64
+}
 
 // trimCounted releases the bookkeeping of the least recently written counted
 // transcripts once there are more than countedCap of them. Ageing a file out
@@ -493,17 +508,13 @@ const countedCap = 512
 // went idle while the run held more sessions than the cap. The published
 // sample drops by that much, and Sample.Delta reports no growth, so the next
 // reading is measured from the smaller figure.
-func (w *Watcher) trimCounted(live []string) {
+//
+// A path released here re-enters trimOwned's budget below on the next rescan:
+// the counts are gone, so it is a judged transcript carrying nothing, and the
+// skip position alone is what the owner verdict exists to keep.
+func (w *Watcher) trimCounted(inWalk map[string]struct{}, live int) {
 	if len(w.seen) <= countedCap {
 		return
-	}
-	inWalk := make(map[string]struct{}, len(live))
-	for _, path := range live {
-		inWalk[path] = struct{}{}
-	}
-	type aged struct {
-		path   string
-		mtimeN int64
 	}
 	cut := make([]aged, 0, len(w.seen))
 	for path := range w.seen {
@@ -512,31 +523,87 @@ func (w *Watcher) trimCounted(live []string) {
 		}
 		cut = append(cut, aged{path: path, mtimeN: w.stamps[path].mtimeNanos})
 	}
-	room := countedCap - len(live)
+	room := countedCap - live
 	if room < 0 {
 		room = 0
 	}
 	if len(cut) <= room {
 		return
 	}
-	// Oldest first: the transcript least likely to be appended to is the one
-	// whose remaining growth is cheapest to lose.
 	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeN, b.mtimeN) })
 	for _, a := range cut[:len(cut)-room] {
-		if a.mtimeN == 0 {
-			// Never stamped, so the end is unknown and re-seeding it would
-			// read the whole file again. Drop it outright instead.
-			w.dropFile(a.path)
-			continue
-		}
-		fi, err := os.Stat(a.path)
-		if err != nil {
-			w.dropFile(a.path)
-			continue
-		}
-		w.offsets[a.path] = fi.Size()
-		w.forgetCounts(a.path)
+		w.releaseOffset(a.path)
 	}
+}
+
+// stateCap bounds the per-file bookkeeping of transcripts a per-file-owner
+// adapter judged to belong to this watcher but that no longer appear in the
+// walk: the owner verdict, the stamp, the skip position and any zstd carry.
+// A foreign verdict is not counted, since forgetIdle releases one the moment
+// its file ages out; an own verdict is kept because losing it re-reads the
+// whole transcript on its next appearance, and trimCounted's release of the
+// counts is what hands the path here.
+//
+// Same value as countedCap, and the same release order: least recently
+// written first. Without it a store that starts sessions faster than they age
+// out leaves an entry per session written during the run, in each of those
+// maps, for as long as the watcher lives: a machine-wide dsh watch walks every
+// session on the host, so the key space is every session anyone has started.
+//
+// A released transcript is forgotten outright rather than cut loose with a
+// seeded skip position, because the seeded position is the entry: holding it
+// is what the cap is bounding. What that costs is the whole of a released
+// session rather than the tail of it, should the session be appended to after
+// coming back from this far out of the window. The oldest go first, the same
+// order the counted-file cap uses, so the transcripts least likely to be
+// appended to are the ones the cap spends that on.
+const stateCap = countedCap
+
+// trimOwned releases the oldest judged transcripts past stateCap, so the
+// bookkeeping behind a verdict that outlived the recency window cannot grow by
+// every session the agent has ever started.
+func (w *Watcher) trimOwned(inWalk map[string]struct{}) {
+	var cut []aged
+	for path, mine := range w.owner {
+		if !mine {
+			continue
+		}
+		if _, ok := inWalk[path]; ok {
+			continue
+		}
+		if _, counted := w.seen[path]; counted {
+			continue
+		}
+		cut = append(cut, aged{path: path, mtimeN: w.stamps[path].mtimeNanos})
+	}
+	if len(cut) <= stateCap {
+		return
+	}
+	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeN, b.mtimeN) })
+	for _, a := range cut[:len(cut)-stateCap] {
+		w.dropFile(a.path)
+	}
+}
+
+// releaseOffset cuts a transcript loose without forgetting the file: the skip
+// position is seeded to the file's current end, so a later append is still
+// read as growth rather than re-read from byte zero. What is lost is the
+// remainder of a session that went idle, which the next reading is measured
+// against. A file that was never stamped, or that cannot be stat'd any more,
+// is dropped outright: seeding a guess would re-read a whole session and bill
+// it twice.
+func (w *Watcher) releaseOffset(path string) {
+	if w.stamps[path].mtimeNanos == 0 {
+		w.dropFile(path)
+		return
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		w.dropFile(path)
+		return
+	}
+	w.offsets[path] = fi.Size()
+	w.forgetCounts(path)
 }
 
 // forgetCounts drops what a transcript contributed to this attach without

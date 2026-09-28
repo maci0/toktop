@@ -51,6 +51,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A long `--agents` run held per-file bookkeeping for every transcript a
+  per-file-owner agent's store had ever shown it, judged ours and then aged out
+  of the recency window. Nothing released it: the verdict is kept so a session
+  that comes back is read from where it stopped rather than from byte zero, and
+  that keep had no cap, so a machine-wide watch grew by every session on the
+  host. The verdicts are now bounded like the counted files, oldest first, and
+  a transcript past the cap is read from its start if it is ever appended to
+  again.
+
+- A vendor GPU CLI that kept failing was tracked by the path it was run from,
+  and lookup re-resolves that path after ten minutes, so a driver reinstall or a
+  flipped symlink left a new entry per location the binary had ever had and made
+  one tool read as a new outage each time. The outage latch is keyed by the tool
+  name, and the audit line now carries the resolved path beside it.
+
 - A transcript store that could not be walked (a partial mount, a root that is
   not a directory) left the shared listing unstamped, but the watcher reading it
   kept the same empty answer as its own listing for a rescan window and aged its

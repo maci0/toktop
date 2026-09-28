@@ -60,6 +60,10 @@ func init() {
 	}
 }
 
+// systemProfiler is the tool the identity probe runs, named once because it is
+// the outage latch's key and the command's path in the same breath.
+const systemProfiler = "system_profiler"
+
 // identityRetry spaces out retries of an unresolved identity probe. Success
 // is still cached for the process lifetime; only failures come back here.
 const identityRetry = 30 * time.Second
@@ -72,7 +76,7 @@ const identityTimeout = 10 * time.Second
 func appleGPUs(ctx context.Context) []core.GPUDevice {
 	ctx, cancel := context.WithTimeout(ctx, identityTimeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "system_profiler", "SPDisplaysDataType", "-json")
+	cmd := exec.CommandContext(ctx, systemProfiler, "SPDisplaysDataType", "-json")
 	cmd.WaitDelay = pipeGrace // a hung profiler must not hold the caller past its deadline
 	groupKill(cmd)            // the profiler is a wrapper whose children must not outlive it
 	out, err := cmd.Output()
@@ -81,7 +85,7 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 		// is what both a Mac with no readable GPU and a profiler that failed
 		// look like, and the retry window above would otherwise hide the
 		// difference for the rest of the session.
-		noteRunFailure("system_profiler", err)
+		noteRunFailure(systemProfiler, systemProfiler, err)
 		return nil
 	}
 	var doc struct {
@@ -92,10 +96,10 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	// the recorded failure first would report "system_profiler answering
 	// again" and then leave the Mac with no GPU row for the whole session.
 	if uerr := json.Unmarshal(out, &doc); uerr != nil {
-		noteRunFailure("system_profiler", fmt.Errorf("output is not SPDisplaysDataType JSON: %w", uerr))
+		noteRunFailure(systemProfiler, systemProfiler, fmt.Errorf("output is not SPDisplaysDataType JSON: %w", uerr))
 		return nil
 	}
-	noteRunOK("system_profiler")
+	noteRunOK(systemProfiler, systemProfiler)
 	var devs []core.GPUDevice
 	for _, d := range doc.Displays {
 		dev, ok := appleGPUFromDisplay(d)
@@ -194,7 +198,7 @@ func applyIOAccelStats(ctx context.Context, devs []core.GPUDevice) {
 		// run() caps the spawn so a hung ioreg cannot pin ioAccelMu and stall
 		// every later Sample. The caller's budget (sysmon gpuBudget) is the
 		// parent, so a cancelled Sample does not wait out runTimeout.
-		out, ok := run(ctx, "ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
+		out, ok := run(ctx, "ioreg", "ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
 		noteIOAccel(ok, out)
 	}
 	devs[0].MemUsed = ioAccelMemUsed

@@ -29,14 +29,14 @@ func TestRunReclaimsPipesHeldByGrandchild(t *testing.T) {
 	// A control run first. Without it a sh that cannot execute at all would
 	// make the timed run below return instantly and pass, measuring an exec
 	// failure rather than the pipe reclaim.
-	if out, ok := run(context.Background(), "sh", "-c", "echo hello"); !ok || !strings.Contains(string(out), "hello") {
+	if out, ok := run(context.Background(), "sh", "sh", "-c", "echo hello"); !ok || !strings.Contains(string(out), "hello") {
 		t.Fatalf("control run = %q, %v; want hello, true", out, ok)
 	}
 	start := time.Now()
 	const deadline = 200 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	run(ctx, "sh", "-c", "sleep 5 & echo hello")
+	run(ctx, "sh", "sh", "-c", "sleep 5 & echo hello")
 	elapsed := time.Since(start)
 	if elapsed < deadline {
 		t.Fatalf("run returned after %s: the command was not run to its deadline", elapsed)
@@ -70,7 +70,7 @@ func TestRunKillsGrandchildOnDeadline(t *testing.T) {
 	const runDeadline = 2 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
-	run(ctx, "sh", "-c", "sleep 30 & echo $! > "+pidFile+"; sleep 30")
+	run(ctx, "sh", "sh", "-c", "sleep 30 & echo $! > "+pidFile+"; sleep 30")
 	pid, err := readPIDFile(pidFile)
 	if err != nil {
 		// sh was found and the script always writes the pid before it
@@ -116,7 +116,7 @@ func TestRunCapsUnboundedVendorOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	start := time.Now()
-	out, ok := run(ctx, "sh", "-c", "yes x | head -c 8000000")
+	out, ok := run(ctx, "sh", "sh", "-c", "yes x | head -c 8000000")
 	if ok {
 		t.Fatalf("run accepted %d bytes of unbounded vendor output, want a miss", len(out))
 	}
@@ -136,7 +136,7 @@ func TestRunReturnsOutputUnderTheCap(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, ok := run(ctx, "sh", "-c", "head -c 1024 /dev/zero | tr '\\0' 'x'")
+	out, ok := run(ctx, "sh", "sh", "-c", "head -c 1024 /dev/zero | tr '\\0' 'x'")
 	if !ok {
 		t.Fatal("run reported a miss for 1 KiB of vendor output")
 	}
@@ -165,7 +165,7 @@ func TestRunAuditsOutageOnceAndRecovery(t *testing.T) {
 
 	const tool = "/nonexistent/vendor-cli"
 	for range 3 {
-		if _, ok := run(ctx, tool, "--query"); ok {
+		if _, ok := run(ctx, tool, tool, "--query"); ok {
 			t.Fatalf("run reported success for a tool that does not exist")
 		}
 	}
@@ -177,17 +177,52 @@ func TestRunAuditsOutageOnceAndRecovery(t *testing.T) {
 	}
 
 	lines.Reset()
-	noteRunOK(tool)
+	noteRunOK(tool, tool)
 	if !strings.Contains(lines.String(), "gpu vendor tool answering again") {
 		t.Fatalf("recovery wrote no line:\n%s", lines.String())
 	}
 	// A recovery clears the latch, so a tool that breaks again is reported
 	// afresh instead of being silenced by the outage it just recovered from.
 	lines.Reset()
-	if _, ok := run(ctx, tool, "--query"); ok {
+	if _, ok := run(ctx, tool, tool, "--query"); ok {
 		t.Fatal("run reported success for a tool that does not exist")
 	}
 	if !strings.Contains(lines.String(), "gpu vendor tool failed") {
 		t.Fatalf("a second outage after a recovery wrote no line:\n%s", lines.String())
+	}
+}
+
+// A driver reinstall or a flipped symlink moves the binary, and lookup
+// re-resolves it after toolHitTTL, so the path a tool is run from is not fixed
+// for the life of the process. The outage latch is keyed by the tool's name:
+// the same tool failing from a new path is the same outage and is not audited
+// a second time, and the table holds one entry per vendor rather than one per
+// path that binary has ever had.
+func TestOutageLatchIsKeyedByToolName(t *testing.T) {
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	defer func() { audit = old }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	const tool = "toktop-vendor-cli-name-latch"
+	if _, ok := run(ctx, tool, "/nonexistent/vendor-cli-one", "--query"); ok {
+		t.Fatal("run reported success for a tool that does not exist")
+	}
+	if _, ok := run(ctx, tool, "/nonexistent/vendor-cli-two", "--query"); ok {
+		t.Fatal("run reported success for a tool that does not exist")
+	}
+	if n := strings.Count(lines.String(), "gpu vendor tool failed"); n != 1 {
+		t.Fatalf("audited %d outage lines for one tool failing from two paths, want 1:\n%s", n, lines.String())
+	}
+	s, ok := runState.Load(tool)
+	if !ok {
+		t.Fatal("the latch is not keyed by the tool name")
+	}
+	if tr := s.(*toolRun); !tr.failed {
+		t.Fatal("the latch cleared on a failure from a new path")
 	}
 }
