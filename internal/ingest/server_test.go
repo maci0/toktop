@@ -423,7 +423,13 @@ func TestIngestAcceptsWholeJSONNumberTokenCounts(t *testing.T) {
 }
 
 func TestIngestRejectsTokenCountOverflow(t *testing.T) {
-	for _, value := range []string{"9223372036854775808", "9223372036854775808.0", "9.223372036854776e18"} {
+	// Both sides of the int64 range. The negative values are the ones that
+	// round to -2^63 as a float64 and would otherwise pass the bound the
+	// float branch checks, so they answer 202 with a clamped zero.
+	for _, value := range []string{
+		"9223372036854775808", "9223372036854775808.0", "9.223372036854776e18",
+		"-9223372036854775809", "-9223372036854775809.0", "-9.223372036854776e18",
+	} {
 		t.Run(value, func(t *testing.T) {
 			for _, field := range []string{"prompt_tokens", "output_tokens", "thinking_tokens"} {
 				t.Run(field, func(t *testing.T) {
