@@ -6,8 +6,11 @@
 package agentusage
 
 import (
+	"bytes"
 	"database/sql"
+	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -444,4 +447,28 @@ func TestCrushSinceQueryCanUseUpdatedAtIndex(t *testing.T) {
 			t.Fatalf("a branch of the since predicate scans the table:\n%s", plan)
 		}
 	}
+}
+
+// A store that exists and will not read is polled several times a second, so
+// an unlatched audit line is terminal spam for as long as the dashboard runs.
+func TestStoreReadFailureIsLatchedPerOutage(t *testing.T) {
+	var lines bytes.Buffer
+	old := audit
+	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer func() { audit = old }()
+
+	storeReadState.Delete("opencode" + "\x00" + "/tmp/store")
+	auditStoreRead("opencode", "/tmp/store", errors.New("disk image is malformed"))
+	auditStoreRead("opencode", "/tmp/store", errors.New("disk image is malformed"))
+	if got := strings.Count(lines.String(), "agent usage store read failed"); got != 1 {
+		t.Fatalf("repeat failures of one store logged %d lines, want 1", got)
+	}
+
+	lines.Reset()
+	noteStoreReadOK("opencode", "/tmp/store")
+	auditStoreRead("opencode", "/tmp/store", errors.New("disk image is malformed"))
+	if got := strings.Count(lines.String(), "agent usage store read failed"); got != 1 {
+		t.Fatalf("a failure after recovery logged %d lines, want 1", got)
+	}
+	storeReadState.Delete("opencode" + "\x00" + "/tmp/store")
 }

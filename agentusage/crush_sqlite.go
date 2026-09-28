@@ -222,5 +222,6 @@ func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, 
 		auditStoreRead("crush", path, err)
 		return nil, false
 	}
+	noteStoreReadOK("crush", path)
 	return out, true
 }

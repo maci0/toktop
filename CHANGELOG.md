@@ -37,6 +37,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A transcript whose read failed once, and which then aged out of the watcher's
+  recency window, no longer keeps its path for the rest of the run. The
+  failure latch was only cleared by a read that committed, and a file that
+  never read again is in none of the maps the sweep walks, so a long session
+  accumulated one entry per transcript that hit a permissions or I/O error.
+
+- A session database that exists and will not read is named in the audit log
+  once per outage instead of once per poll. Stores are read several times a
+  second, so a corrupt page or a database under continuous write wrote a line
+  every poll for as long as the dashboard ran. A store that reads again clears
+  the latch, and its next failure is reported as the new thing it is.
+
+- The signal context and the `--ingest` listener are released on a clean exit.
+  `main` exited through `os.Exit`, which runs no deferred calls, so the
+  deferred `srv.Close` was never called and both were reclaimed by kernel
+  teardown alone.
+
 - A `span_ms` past a day on `POST /v1/events` clamps to `0`, as the field's
   documented bound says. The count was converted to nanoseconds before the
   bound was applied, and a large enough count wrapped int64 onto a small

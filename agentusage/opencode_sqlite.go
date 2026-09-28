@@ -211,5 +211,6 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 		total:    counter64(total.Int64),
 		input:    counter64(input.Int64),
 	}
+	noteStoreReadOK("opencode", o.path)
 	return v, v.present()
 }

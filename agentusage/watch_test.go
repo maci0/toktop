@@ -1521,6 +1521,23 @@ func TestReadFailureLatchAgesOut(t *testing.T) {
 	}
 }
 
+// The read-failure latch only clears on a read that commits, so a transcript
+// that failed once and then aged out kept its path for the life of the process.
+func TestDropFileReleasesReadFailedLatch(t *testing.T) {
+	w := Watch("dsh", t.TempDir(), time.Now())
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+
+	w.auditRead(path, errors.New("input/output error"))
+	if !w.readFailed[path] {
+		t.Fatal("the failure was not latched, so the drop below proves nothing")
+	}
+
+	w.dropFile(path)
+	if latched, ok := w.readFailed[path]; ok {
+		t.Fatalf("dropFile left the read-failure latch set: %v", latched)
+	}
+}
+
 // A shared transcript listing that no watcher has refreshed must leave the
 // process-wide cache. Clanker (and {dir} specs) key it on the project path,
 // so a dashboard that follows agents through many trees would otherwise pin

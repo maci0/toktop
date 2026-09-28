@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
@@ -96,13 +97,56 @@ func storeAbsent(path string) bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
 
+// storeReadState records which stores are currently failing, so a store that
+// does exist and will not read is reported once per outage rather than once
+// per poll. The read runs several times a second, and a corrupt page or a
+// database under continuous write fails every time, so an unlatched line is
+// terminal spam for as long as the dashboard runs and unbounded growth for a
+// host that redirects its log.
+//
+// An entry is never removed. The keys are the agent's stores, one per project
+// for a project-local store, so the table is bounded by what is on disk.
+var storeReadState sync.Map // agent + "\x00" + path -> *storeRead
+
+type storeRead struct {
+	mu     sync.Mutex
+	failed bool
+}
+
+func storeReadKey(agent, path string) string { return agent + "\x00" + path }
+
 // auditStoreRead records a read failure against a store that does exist. It
 // names the agent and the store so the operator can tell a corrupt or
 // permission-denied database from an idle agent, and keeps the driver's message
-// as the cause rather than restating the failure without it.
+// as the cause rather than restating the failure without it. A store already
+// recorded as failing adds nothing: the line naming the start of the outage
+// said the reason, and every later poll would only repeat it.
 func auditStoreRead(agent, path string, err error) {
+	s, _ := storeReadState.LoadOrStore(storeReadKey(agent, path), &storeRead{})
+	r := s.(*storeRead)
+	r.mu.Lock()
+	first := !r.failed
+	r.failed = true
+	r.mu.Unlock()
+	if !first {
+		return
+	}
 	audit().Warn("agent usage store read failed",
 		"agent", agent,
 		"path", core.RedactHome(path),
 		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+}
+
+// noteStoreReadOK clears a recorded outage, so a store that reads again is
+// distinguishable on the log from one that never did, and a failure after it
+// is reported as the new thing it is.
+func noteStoreReadOK(agent, path string) {
+	s, ok := storeReadState.Load(storeReadKey(agent, path))
+	if !ok {
+		return
+	}
+	r := s.(*storeRead)
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.failed = false
 }

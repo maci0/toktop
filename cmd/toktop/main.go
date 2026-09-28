@@ -39,7 +39,13 @@ import (
 	"github.com/maci0/toktop/internal/ui"
 )
 
-func main() {
+func main() { os.Exit(runMain()) }
+
+// runMain carries the exit code rather than exiting. os.Exit runs no defers,
+// so an exit from the body below released the signal context and the ingest
+// listener by kernel teardown alone, and the deferred srv.Close read as a
+// guaranteed close when nothing called it.
+func runMain() int {
 	// A reader that closes the pipe early (`toktop version | true`,
 	// `toktop --once | head -1`) must leave the exit code at 0, which is what
 	// the help screen promises and what outputStatus returns for a broken
@@ -60,11 +66,11 @@ func main() {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			code := runUpdate(ctx, os.Stdout, os.Args[2:])
 			stop()
-			os.Exit(code)
+			return code
 		case "help":
-			os.Exit(runHelp(os.Stdout, os.Args[2:]))
+			return runHelp(os.Stdout, os.Args[2:])
 		case "version":
-			os.Exit(runVersion(os.Stdout, os.Args[2:]))
+			return runVersion(os.Stdout, os.Args[2:])
 		}
 	}
 	// The flag package reports a bad flag in its own single-dash spelling;
@@ -73,27 +79,27 @@ func main() {
 	if err := topFS.Parse(os.Args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %s%s\n", flagParseError(err), missingUnitHint(err))
 		usage(os.Stderr)
-		os.Exit(2)
+		return 2
 	}
 
 	// Leftovers are forwarded so `toktop --help update` matches
 	// `toktop help update`, and `toktop --version extra` is a usage error
 	// like `toktop version extra`.
 	if f.showHelp {
-		os.Exit(runHelp(os.Stdout, topFS.Args()))
+		return runHelp(os.Stdout, topFS.Args())
 	}
 	if f.showVer {
-		os.Exit(runVersion(os.Stdout, topFS.Args()))
+		return runVersion(os.Stdout, topFS.Args())
 	}
 	log.SetFlags(0)
 
 	if err := validateFlags(f.once, f.interval, f.probeSecs, f.frames); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	if err := validateLogLevelEnv(); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	// Parsed before anything reads it: a bad --origin aborts the run rather
 	// than leaving the demo on the wall clock, which is the one input the
@@ -101,7 +107,7 @@ func main() {
 	origin, err := parseOrigin(f.origin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	// agentusage is a package other programs embed, so it audits through the
 	// process logger until a host hands it one. Here that host is toktop:
@@ -115,7 +121,7 @@ func main() {
 	if f.once && !f.plain && !f.jsonOut {
 		if err := validateOnceEnv(); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-			os.Exit(2)
+			return 2
 		}
 	}
 
@@ -124,13 +130,13 @@ func main() {
 	cmd, remoteTargets, err := interpretArgs(topFS.Args())
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+		return 2
 	}
 	switch cmd {
 	case "help":
-		os.Exit(runHelp(os.Stdout, remoteTargets))
+		return runHelp(os.Stdout, remoteTargets)
 	case "version":
-		os.Exit(runVersion(os.Stdout, nil))
+		return runVersion(os.Stdout, nil)
 	}
 	// Targets are parsed here, before the TTY check below, so a malformed
 	// ssh:// URL is named as the mistake it is rather than reported as
@@ -138,7 +144,7 @@ func main() {
 	targets, dupTargets, err := remote.ParseTargets(remoteTargets)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "toktop:", err)
-		os.Exit(2)
+		return 2
 	}
 	for _, dup := range dupTargets {
 		fmt.Fprintf(os.Stderr, "toktop: %s named more than once; attaching it once\n", dup.Host)
@@ -148,7 +154,7 @@ func main() {
 	topFS.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	if err := validateSSHKeyFlag(explicit["ssh-key"], f.sshKey); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		os.Exit(2)
+		return 2
 	}
 	// Both halves of opencode's gate, resolved once before the config line:
 	// the sqlite build tag decides whether the driver is linked in, and
@@ -168,14 +174,14 @@ func main() {
 	if !f.noIngest {
 		if err := validateIngestAddr(f.ingest); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-			os.Exit(2)
+			return 2
 		}
 	}
 	if f.sshKey != "" && !f.demo && len(remoteTargets) > 0 {
 		resolved, err := remote.ResolveKeyFile(f.sshKey)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: --ssh-key: %v\n", err)
-			os.Exit(2)
+			return 2
 		}
 		f.sshKey = resolved
 	}
@@ -187,7 +193,7 @@ func main() {
 			// home is folded to "~": this line is the only record of what is
 			// wrong with the file, and it gets pasted into issues.
 			fmt.Fprintf(os.Stderr, "toktop: %s\n", core.RedactHome(err.Error()))
-			os.Exit(2)
+			return 2
 		}
 	}
 
@@ -196,7 +202,7 @@ func main() {
 		// redirected they are garbage bytes in the capture, and --once is
 		// the supported way to get output without a terminal.
 		fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live dashboard needs one (use --once for static output)")
-		os.Exit(2)
+		return 2
 	}
 
 	// targets, not remoteTargets: remote.ParseTargets collapsed the repeated
@@ -262,7 +268,7 @@ func main() {
 		providers, sysFn, err := attachEngines(ctx, f, targets)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, "toktop:", err)
-			os.Exit(2)
+			return 2
 		}
 
 		engineAddrs = func() []string {
@@ -329,7 +335,7 @@ func main() {
 				// would run the dashboard without the event feed they asked
 				// for, with only a stderr line lost under the alt screen.
 				fmt.Fprintf(os.Stderr, "toktop: --ingest %s unusable: %v\n", f.ingest, err)
-				os.Exit(2)
+				return 2
 			}
 			fmt.Fprintf(os.Stderr, "toktop: ingest disabled (%v)\n", err)
 			// The dashboard comes up without the event feed the operator asked
@@ -390,12 +396,12 @@ func main() {
 
 	if f.once {
 		if code := runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain, f.jsonOut); code != 0 {
-			os.Exit(code)
+			return code
 		}
-		return
+		return 0
 	}
 
-	os.Exit(runTUI(ctx, cfg, ch, !f.noReload))
+	return runTUI(ctx, cfg, ch, !f.noReload)
 }
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the

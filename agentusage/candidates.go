@@ -504,6 +504,10 @@ func (w *Watcher) forgetCounts(path string) {
 // one per aged-out transcript, each up to maxLineBytes, and a path that
 // reappeared would have the stale tail prepended to a file that never wrote
 // it.
+//
+// The read-failure latch goes the same way. Only a committed read clears it, so
+// a transcript that failed once and then aged out kept its path for the life
+// of the process.
 func (w *Watcher) dropFile(path string) {
 	delete(w.stamps, path)
 	delete(w.offsets, path)
