@@ -274,17 +274,18 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 	w.mu.Unlock()
 }
 
-// clock returns the injected stamp clock, or the wall clock for a Watcher built
-// without one. It reads the field under mu, and callers invoke the result with
-// no lock held: the clock is caller-supplied, and calling it under mu is a
-// self-deadlock the moment it re-enters the watcher.
-func (w *Watcher) clock() func() time.Time {
+// instant reads the injected stamp clock, or the wall clock for a Watcher
+// built without one. The field is read under mu and the clock itself is
+// invoked with no lock held: it is caller-supplied, and calling it under mu is
+// a self-deadlock the moment it re-enters the watcher.
+func (w *Watcher) instant() time.Time {
 	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.now == nil {
-		return time.Now
+	fn := w.now
+	w.mu.Unlock()
+	if fn == nil {
+		return time.Now()
 	}
-	return w.now
+	return fn()
 }
 
 // resolveDir is the form a working directory is compared in: absolute, with
@@ -361,7 +362,7 @@ func uniqueRoots(roots []string) []string {
 func (w *Watcher) openTranscript(path string) (*os.File, error) {
 	refused := false
 	cause := error(nil)
-	for _, root := range w.rootsLocked(w.clock()()) {
+	for _, root := range w.rootsLocked(w.instant()) {
 		if root == "" {
 			continue
 		}
@@ -725,7 +726,7 @@ func (w *Watcher) read(force bool) (Sample, bool) {
 	}
 	// Stamped before mu is taken: reading the clock needs mu, and calling it
 	// under mu would deadlock against this watcher's own accessor.
-	at := w.clock()()
+	at := w.instant()
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	// Counts are what the transcripts say right now, not a running total that

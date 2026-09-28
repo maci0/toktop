@@ -128,7 +128,7 @@ func TestLoadDefinitionsRejectsNull(t *testing.T) {
 			if !strings.Contains(err.Error(), path) {
 				t.Fatalf("error = %v, want path %q", err, path)
 			}
-			spec, ok := definedSpec("existing-agent")
+			spec, ok := SpecFor("existing-agent")
 			if !ok || !slices.Equal(spec.Roots, []string{"/original"}) {
 				t.Fatalf("rejected file changed registry: %+v", spec)
 			}
@@ -143,7 +143,7 @@ func TestLoadDefinitionsEmptyObjects(t *testing.T) {
 			if err := LoadDefinitions(path); err != nil {
 				t.Fatal(err)
 			}
-			if _, ok := definedSpec("launchonly"); ok {
+			if _, ok := SpecFor("launchonly"); ok {
 				t.Fatal("launch-only definition registered")
 			}
 		})
@@ -195,7 +195,7 @@ func TestLoadDefinitionsRejectsOversizeFile(t *testing.T) {
 	if !errors.Is(err, ErrInvalidDefinitions) {
 		t.Fatalf("oversize file = %v, want ErrInvalidDefinitions", err)
 	}
-	if _, ok := definedSpec("a"); ok {
+	if _, ok := SpecFor("a"); ok {
 		t.Error("rejected oversize file still registered an agent")
 	}
 }
@@ -213,7 +213,7 @@ func TestLoadDefinitionsAcceptsFileAtCap(t *testing.T) {
 	if err := LoadDefinitions(path); err != nil {
 		t.Fatalf("file at the cap = %v, want nil", err)
 	}
-	if _, ok := definedSpec("a"); !ok {
+	if _, ok := SpecFor("a"); !ok {
 		t.Error("file at the cap did not register its agent")
 	}
 }
@@ -276,16 +276,16 @@ func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
 	}
 	dropDefs(t, "full")
 
-	if _, ok := definedSpec("launchonly"); ok {
+	if _, ok := SpecFor("launchonly"); ok {
 		t.Error("launch-only definition registered")
 	}
-	if _, ok := definedSpec("noroots"); ok {
+	if _, ok := SpecFor("noroots"); ok {
 		t.Error("roots-less definition registered")
 	}
-	if _, ok := definedSpec(""); ok {
+	if _, ok := SpecFor(""); ok {
 		t.Error("blank-named definition registered")
 	}
-	spec, ok := definedSpec("full")
+	spec, ok := SpecFor("full")
 	if !ok {
 		t.Fatal("full definition not registered")
 	}
@@ -296,9 +296,9 @@ func TestLoadDefinitionsRegistersOnlyTokenBearingSpecs(t *testing.T) {
 		t.Errorf("spec = %+v, want %+v", spec, want)
 	}
 	spec.Roots[0] = "mutated"
-	spec2, _ := definedSpec("full")
+	spec2, _ := SpecFor("full")
 	if spec2.Roots[0] == "mutated" {
-		t.Fatal("definedSpec published mutable internal slice")
+		t.Fatal("SpecFor published mutable internal slice")
 	}
 }
 
@@ -315,7 +315,7 @@ func TestLoadDefinitionsIgnoresRootlessEntryInCollisions(t *testing.T) {
 	}
 	dropDefs(t, "café")
 
-	if _, ok := definedSpec("café"); !ok {
+	if _, ok := SpecFor("café"); !ok {
 		t.Error("the one usable definition did not register")
 	}
 }
@@ -334,7 +334,7 @@ func TestLoadDefinitionsTrimsNamesAndSkipsBlankRoots(t *testing.T) {
 	}
 	dropDefs(t, "trimmed")
 
-	if _, ok := definedSpec("trimmed"); !ok {
+	if _, ok := SpecFor("trimmed"); !ok {
 		t.Fatal("whitespace name should be stored trimmed")
 	}
 	defsMu.RLock()
@@ -343,10 +343,10 @@ func TestLoadDefinitionsTrimsNamesAndSkipsBlankRoots(t *testing.T) {
 	if storedUntrimmed {
 		t.Fatal("untrimmed key should not be stored")
 	}
-	if _, ok := definedSpec("  trimmed  "); !ok {
+	if _, ok := SpecFor("  trimmed  "); !ok {
 		t.Fatal("lookup of the untrimmed name should still find the spec")
 	}
-	if _, ok := definedSpec("blankroots"); ok {
+	if _, ok := SpecFor("blankroots"); ok {
 		t.Fatal("blank-root spec should not be stored")
 	}
 	if Supported("blankroots") {
@@ -365,10 +365,10 @@ func TestLoadDefinitionsNormalizesNamesToNFC(t *testing.T) {
 	}
 	dropDefs(t, "caf\u00e9", "cafe\u0301")
 
-	if _, ok := definedSpec("caf\u00e9"); !ok {
+	if _, ok := SpecFor("caf\u00e9"); !ok {
 		t.Fatal("NFC lookup missed the NFD-defined agent")
 	}
-	if _, ok := definedSpec("cafe\u0301"); !ok {
+	if _, ok := SpecFor("cafe\u0301"); !ok {
 		t.Fatal("NFD lookup should compose to the same agent")
 	}
 	defsMu.RLock()
@@ -395,11 +395,11 @@ func TestLoadDefinitionsKeepsDistinctNFDSpellingSeparate(t *testing.T) {
 	}
 	dropDefs(t, "caf\u00e9", "cafe\u0301", "caf\u00e9d")
 
-	nfd, nfdOK := definedSpec("cafe\u0301")
+	nfd, nfdOK := SpecFor("cafe\u0301")
 	if !nfdOK {
 		t.Fatal("NFD-spelled agent not registered")
 	}
-	nfc, nfcOK := definedSpec("caf\u00e9d")
+	nfc, nfcOK := SpecFor("caf\u00e9d")
 	if !nfcOK {
 		t.Fatal("NFC-spelled agent not registered")
 	}

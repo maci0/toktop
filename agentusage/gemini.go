@@ -32,10 +32,6 @@ const geminiProjectFile = ".project_root"
 // the store.
 const geminiRootDepth = 4
 
-func parseGemini(line []byte) (values, string, bool) {
-	return parseGeminiRecord(line)
-}
-
 func parseGeminiRecord(line []byte) (values, string, bool) {
 	line = bytes.TrimPrefix(bytes.TrimSpace(line), utf8BOM)
 	var rec struct {

@@ -106,7 +106,7 @@ func splitASCIISpace(s string) []string {
 // decomposed accent ("cafe" + U+0301, what a macOS file system stores) is
 // otherwise missed by an agent registered precomposed in agents.json, and
 // the running agent never shows up. The canonical spelling is returned, since
-// that is the key definedSpec and sourceFor look up.
+// that is the key SpecFor and sourceFor look up.
 func agentName(comm string, argv []string, known map[string]bool) string {
 	if t := resolveAgent(canonicalTool(comm), known); t != "" {
 		return t

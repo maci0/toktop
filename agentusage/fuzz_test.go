@@ -11,8 +11,9 @@ import (
 )
 
 // FuzzParseAgentLines drives every per-agent transcript line parser
-// (parseClaude, parseQwen, parseCodex, parseDsh, parseKimi, parseGemini,
-// parseAgy, parseGrokUpdate and the session-cwd readers) with arbitrary bytes.
+// (parseClaude, parseQwen, parseCodex, parseDsh, parseKimi,
+// parseGeminiRecord, parseGrokUpdate and the session-cwd readers) with
+// arbitrary bytes.
 // Transcripts are files on disk whose records embed whatever
 // the model and its tools ingested, so a corrupted or hostile line must not be
 // able to poison a reading: no counter is ever negative (they are summed)
@@ -116,18 +117,10 @@ func FuzzParseAgentLines(f *testing.F) {
 			t.Fatalf("parseKimi not deterministic for %q", line)
 		}
 
-		g, gcwd, gok := parseGemini(line)
+		g, gcwd, gok := parseGeminiRecord(line)
 		assertUsage("gemini", g, gok)
-		if g2, gcwd2, gok2 := parseGemini(line); gok2 != gok || g2 != g || gcwd2 != gcwd {
-			t.Fatalf("parseGemini not deterministic for %q", line)
-		}
-
-		// agy writes the Gemini record shape from its own store, reached
-		// through a different adapter, so it is a separate entry point.
-		y, ycwd, yok := parseAgy(line)
-		assertUsage("agy", y, yok)
-		if y2, ycwd2, yok2 := parseAgy(line); yok2 != yok || y2 != y || ycwd2 != ycwd {
-			t.Fatalf("parseAgy not deterministic for %q", line)
+		if g2, gcwd2, gok2 := parseGeminiRecord(line); gok2 != gok || g2 != g || gcwd2 != gcwd {
+			t.Fatalf("parseGeminiRecord not deterministic for %q", line)
 		}
 
 		gr, grokcwd, grokOK := parseGrokUpdate(line)
@@ -154,7 +147,7 @@ func assertToolCallsRepeat(t *testing.T, line []byte) {
 	if len(raw) == 0 || raw[0] != '[' || bytes.Equal(raw, []byte("[]")) {
 		return
 	}
-	if _, _, ok := parseGemini(line); ok {
+	if _, _, ok := parseGeminiRecord(line); ok {
 		t.Fatalf("gemini: billed a turn twice from a record naming tool calls: %q", line)
 	}
 }

@@ -221,7 +221,7 @@ func warnUnusedEnv(bearerFlag, demo, noIngest, agents bool, nAdd, nRemote int) {
 		if demo {
 			reason = "with --demo"
 		}
-		for _, name := range [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"} {
+		for _, name := range bearerEnvVars {
 			if os.Getenv(name) != "" {
 				fmt.Fprintf(os.Stderr, "toktop: $%s has no effect %s\n", name, reason)
 			}
@@ -377,28 +377,23 @@ func parsePort(label, port string) (int, error) {
 	return n, nil
 }
 
-// resolveBearer returns the token sent to --add endpoints. An explicit
-// --bearer (including empty) wins so clearing the token does not fall through
-// to the environment; otherwise OMNIROUTE_API_KEY, then TOKTOP_BEARER.
-func resolveBearer(flagVal string, flagSet bool) string {
-	tok, _ := bearerToken(flagVal, flagSet)
-	return tok
-}
+// bearerEnvVars are the environment variables a bearer token is read from, in
+// precedence order.
+var bearerEnvVars = [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"}
 
-// bearerToken returns the token and the name of the environment variable it
-// came from, empty when none is set. The two are not separable by re-reading
-// the environment: a caller that wants to name the source of a token that
-// turned out to carry nothing needs to know which variable was consulted.
-func bearerToken(flagVal string, flagSet bool) (string, string) {
+// resolveBearer returns the token sent to --add endpoints, empty when none is
+// set. An explicit --bearer (including empty) wins so clearing the token does
+// not fall through to the environment; otherwise bearerEnvVars in order.
+func resolveBearer(flagVal string, flagSet bool) string {
 	if flagSet {
-		return trimBearer(flagVal), "--bearer"
+		return trimBearer(flagVal)
 	}
-	for _, name := range [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"} {
+	for _, name := range bearerEnvVars {
 		if v := trimBearer(os.Getenv(name)); v != "" {
-			return v, name
+			return v
 		}
 	}
-	return "", ""
+	return ""
 }
 
 // trimBearer drops the surrounding whitespace bearer.Set trims anyway, plus
@@ -420,7 +415,7 @@ func warnBlankBearer(nAdd int, demo bool) {
 	if demo || nAdd == 0 {
 		return
 	}
-	for _, name := range [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"} {
+	for _, name := range bearerEnvVars {
 		v, set := os.LookupEnv(name)
 		if !set || trimBearer(v) != "" {
 			continue

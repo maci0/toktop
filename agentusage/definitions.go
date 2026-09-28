@@ -173,11 +173,7 @@ func ResetDefinitions() {
 // false for it; [Supported] is the question that covers every agent. That holds
 // for one a definitions file tried to define as well, since LoadDefinitions
 // skips an entry an adapter outranks.
-func SpecFor(tool string) (Spec, bool) { return definedSpec(tool) }
-
-// definedSpec returns an agent's transcript location, whether compiled in
-// (the pi family) or loaded at runtime by LoadDefinitions.
-func definedSpec(tool string) (Spec, bool) {
+func SpecFor(tool string) (Spec, bool) {
 	tool = canonicalTool(tool)
 	defsMu.RLock()
 	defer defsMu.RUnlock()

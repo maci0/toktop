@@ -283,7 +283,7 @@ func walkTranscripts(root, suffix string, cutoff time.Time) ([]string, error) {
 // than on every poll, and a session created in between surfaces when the
 // window expires, the same bound a non-empty listing already works under.
 func (w *Watcher) candidates() []string {
-	return w.walkCandidates(w.clock()().Add(-recencyWindow), true)
+	return w.walkCandidates(w.instant().Add(-recencyWindow), true)
 }
 
 // attachCandidates lists every transcript in the store, however long it has
@@ -312,7 +312,7 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 		// previous generation left behind, which is the disowned store.
 		return nil
 	}
-	now := w.clock()()
+	now := w.instant()
 	force := w.scanned.IsZero()
 	if cache && !force && core.Age(now, w.scanned) < rescanEvery {
 		return w.cached

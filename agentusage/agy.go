@@ -39,10 +39,6 @@ const (
 // brain/<id>/.system_generated/logs is four levels.
 const agyHistoryDepth = 8
 
-func parseAgy(line []byte) (values, string, bool) {
-	return parseGeminiRecord(line)
-}
-
 // agySessionCwd is the workspace either index records for the conversation
 // whose transcript this path is. ok is false when neither index names this
 // conversation yet.

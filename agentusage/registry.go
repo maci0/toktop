@@ -157,7 +157,7 @@ var adapters = map[string]adapter{
 		roots:          func(string, time.Time) []string { return []string{home(".gemini", "tmp")} },
 		suffix:         ".jsonl",
 		kind:           perMessage,
-		parse:          parseGemini,
+		parse:          parseGeminiRecord,
 		sessionCwdFile: geminiSessionCwd,
 	},
 	// agy (Antigravity CLI) logs steps to
@@ -169,7 +169,7 @@ var adapters = map[string]adapter{
 		roots:          func(string, time.Time) []string { return []string{home(".gemini", "antigravity-cli")} },
 		suffix:         "transcript.jsonl",
 		kind:           perMessage,
-		parse:          parseAgy,
+		parse:          parseGeminiRecord,
 		sessionCwdFile: agySessionCwd,
 	},
 	// cursor-agent appends one JSONL per chat under
@@ -361,7 +361,7 @@ func adapterFor(tool string) (adapter, bool) {
 	if ad, ok := registeredAdapter(tool); ok {
 		return ad, true
 	}
-	spec, defined := definedSpec(tool)
+	spec, defined := SpecFor(tool)
 	if !defined {
 		return adapter{}, false
 	}
@@ -386,7 +386,7 @@ func (w *Watcher) refreshAdapter() {
 	if w.fromDefs && w.defsGen == gen {
 		return
 	}
-	spec, defined := definedSpec(w.tool)
+	spec, defined := SpecFor(w.tool)
 	if !defined {
 		// The reload stopped naming this agent, so the store the adapter
 		// walks is one no spec claims any more. Returning with the adapter in

@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -335,17 +334,22 @@ func parseKnownHosts(path string, b []byte) (map[string]string, error) {
 // the displaced copy on a tie, which is the order a store written without a
 // kill prefers.
 func copiesByRecency(path string) []string {
-	copies := []string{backupPath(path), displacedPath(path)}
-	modTime := make(map[string]time.Time, len(copies))
-	for _, copy := range copies {
-		if info, err := os.Stat(copy); err == nil {
-			modTime[copy] = info.ModTime()
+	type copy struct {
+		path string
+		at   time.Time
+	}
+	copies := []copy{{path: backupPath(path)}, {path: displacedPath(path)}}
+	for i := range copies {
+		if info, err := os.Stat(copies[i].path); err == nil {
+			copies[i].at = info.ModTime()
 		}
 	}
-	sort.SliceStable(copies, func(i, j int) bool {
-		return modTime[copies[i]].After(modTime[copies[j]])
-	})
-	return copies
+	slices.SortStableFunc(copies, func(a, b copy) int { return b.at.Compare(a.at) })
+	paths := make([]string, len(copies))
+	for i, c := range copies {
+		paths[i] = c.path
+	}
+	return paths
 }
 
 // pinKey returns the key material of a stored record, which is everything
