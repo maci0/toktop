@@ -42,11 +42,23 @@ func (m Model) engineStateTitle(w, shown int) string {
 	return moreTitle("ENGINE STATE", w, healthy-shown)
 }
 
+// moreTitle counts what the body dropped. The count alone is a dead end: a
+// panel that says "+3 more" and offers no way to reach those three reads as
+// three engines the tool cannot see, which is a different and wrong conclusion
+// from the one that is true. The way out is a bigger pane, so the title says
+// so, the way the compact strip's overflow line already does. A column too
+// narrow for the sentence keeps the bare count rather than losing the count:
+// an engine the reader cannot account for is the worse of the two.
 func moreTitle(title string, w, hidden int) string {
-	if hidden > 0 {
-		more := fmt.Sprintf("+%d more", hidden)
-		if lipgloss.Width(title)+lipgloss.Width(more)+2 <= w {
-			title += "  " + dim(more)
+	if hidden <= 0 {
+		return title
+	}
+	for _, form := range []string{
+		fmt.Sprintf("+%d more (enlarge window)", hidden),
+		fmt.Sprintf("+%d more", hidden),
+	} {
+		if lipgloss.Width(title)+lipgloss.Width(form)+2 <= w {
+			return title + "  " + dim(form)
 		}
 	}
 	return title

@@ -1855,15 +1855,17 @@ func TestMidRowPanelsCountOnlyWholeEngines(t *testing.T) {
 	if rows := len(strings.Split(strings.TrimRight(body, "\n"), "\n")); rows != 6 {
 		t.Errorf("ENGINES wrote %d rows, want 6 whole blocks:\n%s", rows, body)
 	}
-	if got := strip(m.enginesTitle(40, shown)); got != "ENGINES  +2 more" {
-		t.Errorf("ENGINES title = %q, want the two engines it did not draw", got)
+	// The count and the way out: a bare "+2 more" names two engines the frame
+	// gives no way to reach, which reads as two the tool cannot see.
+	if got := strip(m.enginesTitle(40, shown)); got != "ENGINES  +2 more (enlarge window)" {
+		t.Errorf("ENGINES title = %q, want the two engines it did not draw and how to reach them", got)
 	}
 	state, stateShown := m.gaugesBody(40, 7)
 	if stateShown != 2 {
 		t.Errorf("ENGINE STATE drew %d blocks into 7 rows, want 2", stateShown)
 	}
-	if got := strip(m.engineStateTitle(40, stateShown)); got != "ENGINE STATE  +3 more" {
-		t.Errorf("ENGINE STATE title = %q, want the three engines it did not draw", got)
+	if got := strip(m.engineStateTitle(40, stateShown)); got != "ENGINE STATE  +3 more (enlarge window)" {
+		t.Errorf("ENGINE STATE title = %q, want the three engines it did not draw and how to reach them", got)
 	}
 	if strings.Contains(strip(state), "engine-2") {
 		t.Errorf("ENGINE STATE drew a block it had no rows for:\n%s", state)
@@ -1891,8 +1893,13 @@ func TestEngineStateCountsShortBlocksByRow(t *testing.T) {
 	if shown != 2 {
 		t.Errorf("drawn %d blocks into 7 rows, want 2", shown)
 	}
-	if got := strip(m.engineStateTitle(40, shown)); got != "ENGINE STATE  +1 more" {
-		t.Errorf("ENGINE STATE title = %q, want +1 more", got)
+	if got := strip(m.engineStateTitle(40, shown)); got != "ENGINE STATE  +1 more (enlarge window)" {
+		t.Errorf("ENGINE STATE title = %q, want +1 more and the way to reach it", got)
+	}
+	// A column too narrow for the sentence keeps the count rather than losing
+	// it: an engine the reader cannot account for is the worse of the two.
+	if got := strip(m.engineStateTitle(22, shown)); got != "ENGINE STATE  +1 more" {
+		t.Errorf("narrow ENGINE STATE title = %q, want the bare count", got)
 	}
 }
 
@@ -2271,6 +2278,79 @@ func TestHelpListsExactlyTheKeysTheFooterAdvertises(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The compact strip prints the probe outcome (renderMinimal calls
+// probeReadout), so p acts on this layout and both the key line and the
+// compact help have to name it. They advertise it under the same condition
+// the full dashboard uses, so the two never disagree about a key that is
+// live in one and silent in the other.
+func TestCompactViewAdvertisesProbeKey(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  Config
+		snap core.Snapshot
+		want bool
+	}{
+		{
+			name: "prober and engines",
+			cfg:  Config{Version: "t", Prober: func() {}},
+			snap: core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}},
+			want: true,
+		},
+		{
+			name: "no prober in this run",
+			cfg:  Config{Version: "t"},
+			snap: core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}},
+			want: false,
+		},
+		{
+			name: "prober, no engines yet",
+			cfg:  Config{Version: "t", Prober: func() {}},
+			snap: core.Snapshot{},
+			want: false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := New(tc.cfg, nil)
+			m.snap = tc.snap
+			m.w, m.h, m.ready = 40, 12, true // below minDashW/minDashH: the strip
+			listed := false
+			for _, r := range m.helpRows() {
+				if r[0] == "p" {
+					listed = true
+				}
+			}
+			if listed != tc.want {
+				t.Errorf("compact help lists p = %v, want %v", listed, tc.want)
+			}
+			foot := strings.Contains(strip(m.renderMinimal()), "p probe")
+			if foot != tc.want {
+				t.Errorf("compact key line has p = %v, want %v", foot, tc.want)
+			}
+			assertFitsPane(t, "compact frame", m.View(), m.w, m.h)
+		})
+	}
+}
+
+// esc quits the dashboard from every view but the agents view, and the footer
+// advertises q alone. The in-app reference is the only place inside the
+// product that says what esc does on the dashboard, so it has to say it: a
+// reader who knows the key from another tool otherwise learns it by quitting.
+func TestHelpDocumentsEscapeFromDashboard(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.help, m.w, m.h, m.ready = true, 110, 36, true
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	var desc string
+	for _, r := range m.helpRows() {
+		if r[0] == "esc" {
+			desc = r[1]
+		}
+	}
+	if !strings.Contains(desc, "close") || !strings.Contains(desc, "quit") {
+		t.Errorf("esc row = %q, want both what it closes and what it quits", desc)
 	}
 }
 

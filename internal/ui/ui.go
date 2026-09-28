@@ -293,8 +293,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// header, the shared throughput chart and the host strip, so the
 			// frame never hides half the machine to show the other half.
 			// Without engines the agents view is already the view.
+			//
+			// A focus left on agents stays undoable: the footer then names the
+			// engine side, so pressing a can always get back out of a swap.
 			if len(m.snap.Providers) == 0 && !m.focusAgents {
-				m.setNotice("a: no engines to switch to")
+				m.setNotice("a: already on agents; no engines to swap back to")
 				return m, nil
 			}
 			// The compact strip draws no panels to swap, so the focus flip

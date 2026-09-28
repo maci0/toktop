@@ -168,13 +168,24 @@ func (m Model) renderHelp() string {
 func (m Model) helpRows() [][2]string {
 	if m.w < minDashW || m.h < minDashH {
 		// Short forms: the compact box has 34 cells of body, and a longer
-		// description is clipped mid-word by the pane.
-		return [][2]string{
+		// description is clipped mid-word by the pane. The three keys that
+		// close the box lead, so a pane too short for the whole list drops the
+		// row at the bottom rather than the way out of it.
+		rows := [][2]string{
 			{"q / ctrl+c", "close help, then quit"},
 			{"esc", "close help"},
-			{"space", "pause / resume"},
 			{"? / h", "close help"},
+			{"space", "pause / resume"},
 		}
+		// p belongs here too: the compact strip renders the probe outcome
+		// (renderMinimal prints probeReadout), so the key has a visible effect
+		// in this layout even though the PROBES panel it usually updates is
+		// not on screen. t and a stay out, because the strip draws no chart
+		// and no panels to swap; they answer the press with a notice instead.
+		if m.canProbe() {
+			rows = append(rows, [2]string{"p", "probe every engine"})
+		}
+		return rows
 	}
 	rows := [][2]string{
 		// Every key here is read from inside the help view, where q and esc
@@ -183,7 +194,12 @@ func (m Model) helpRows() [][2]string {
 		// the overlay go away and understands, and one who reads it as a
 		// dropped keystroke.
 		{"q / ctrl+c", "close this help (press again to quit)"},
-		{"esc", "close this help"},
+		// The esc row is the one key whose job differs between this screen and
+		// the dashboard behind it, so it names both. Read from here, esc closes
+		// the box; read from the dashboard it comes back from the agents view or
+		// quits. The footer advertises q alone, so without this line the quit is
+		// documented nowhere in the app.
+		{"esc", "close this; back or quit from the dashboard"},
 		{"space", "pause / resume streaming"},
 	}
 	if m.canProbe() {
@@ -297,10 +313,25 @@ func (m Model) renderMinimal() string {
 			lines = append(lines, clip(agentMiniLine(r), m.w))
 		}
 	}
-	// Only keys with a visible effect in this layout are advertised. p and t
-	// still work, but their results render only in the full dashboard. The
-	// compact help above adds esc, which quits from here too.
-	foot := dim(clip("q quit · space pause · ? help", m.w))
+	// Only keys with a visible effect in this layout are advertised. p is one
+	// of them: the strip prints the probe outcome above, so the key that
+	// produces it belongs beside the ones that act here. t is not (no chart on
+	// this layout) and a is not (no panels to swap); both answer the press with
+	// a notice instead. The compact help adds esc, which quits from here too.
+	//
+	// p is the one that gives way when the line is too narrow, the same order
+	// renderFooter sheds in: "? help" is how a reader finds the reference that
+	// lists the rest, so it stays and p goes rather than being clipped off the
+	// end of the row.
+	opt := ""
+	if m.canProbe() {
+		opt = " · p probe"
+	}
+	keys := "q quit · space pause" + opt + " · ? help"
+	if widthOf(keys) > m.w {
+		keys = "q quit · space pause · ? help"
+	}
+	foot := dim(clip(keys, m.w))
 	bodyH := max(m.h-lipgloss.Height(foot)-1, 0)
 	if len(lines) > bodyH && bodyH >= 3 {
 		hidden := len(lines) - (bodyH - 1)

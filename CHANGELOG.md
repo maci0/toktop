@@ -41,6 +41,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   so a sender correcting a typo from the `404` is not told a method the path
   refuses.
 
+- The ENGINES and ENGINE STATE panels named the engines they had no rows for
+  (`+3 more`) without saying how to reach them, which reads as three engines
+  the tool cannot see rather than three the pane was too short to draw. The
+  count now carries `(enlarge window)`, the way the compact strip's overflow
+  line already did. A column too narrow for the sentence keeps the bare count.
+
+- The compact strip prints the last probe's outcome, but neither its key line
+  nor its help listed `p`, the key that produces it. A pane too small for the
+  dashboard hid a control that works there.
+
+- `esc` quits the dashboard from every view but the agents one, and the footer
+  advertises `q` alone, so the quit was documented nowhere in the app. The
+  in-app key reference now says what `esc` does from the dashboard as well as
+  from the help overlay.
+
 - `toktop --demo --ingest` deduplicates agent events through a bounded
   15-minute id ledger, the way the live collector does. It answered a replay
   from the retained feed, which holds a couple of minutes of generated
