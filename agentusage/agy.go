@@ -193,17 +193,28 @@ const agyIndexCap = 32 << 20
 // the index read and reports the whole file unreadable.
 const agyHistoryLineMax = 1 << 20
 
-func loadAgyHistory(path string) (map[string]string, bool) {
-	dir := filepath.Dir(path)
-	r, err := os.OpenRoot(dir)
+// openAgyFile opens path through a root at its own directory, so a symlink
+// beside the store cannot redirect the read somewhere else. The root is
+// returned for the caller to close alongside the file.
+func openAgyFile(path string) (*os.Root, *os.File, bool) {
+	r, err := os.OpenRoot(filepath.Dir(path))
 	if err != nil {
+		return nil, nil, false
+	}
+	f, err := r.Open(filepath.Base(path))
+	if err != nil {
+		r.Close()
+		return nil, nil, false
+	}
+	return r, f, true
+}
+
+func loadAgyHistory(path string) (map[string]string, bool) {
+	r, f, ok := openAgyFile(path)
+	if !ok {
 		return nil, false
 	}
 	defer r.Close()
-	f, err := r.Open(filepath.Base(path))
-	if err != nil {
-		return nil, false
-	}
 	defer f.Close()
 	sc := bufio.NewScanner(io.LimitReader(f, agyIndexCap))
 	sc.Buffer(make([]byte, 0, appendReaderBytes), agyHistoryLineMax)
@@ -233,16 +244,11 @@ func loadAgyHistory(path string) (map[string]string, bool) {
 // JSON object is not parsed: a truncated object would drop the ids at the end,
 // which are the ones this file is read for.
 func loadAgyLast(path string) (map[string]string, bool) {
-	dir := filepath.Dir(path)
-	r, err := os.OpenRoot(dir)
-	if err != nil {
+	r, f, ok := openAgyFile(path)
+	if !ok {
 		return nil, false
 	}
 	defer r.Close()
-	f, err := r.Open(filepath.Base(path))
-	if err != nil {
-		return nil, false
-	}
 	defer f.Close()
 	b, err := io.ReadAll(io.LimitReader(f, agyIndexCap+1))
 	if err != nil || len(b) > agyIndexCap {

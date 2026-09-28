@@ -342,17 +342,12 @@ func malformedPin(path string, n int, line, why string) error {
 	return fmt.Errorf("%s: line %d is not a valid host record (%s): %s", path, n+1, why, core.Snippet([]byte(line)))
 }
 
-func writeKnownHosts(path string, store map[string]string) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	var b strings.Builder
-	for _, host := range slices.Sorted(maps.Keys(store)) {
-		b.WriteString(store[host] + "\n")
-	}
-	sweepStaleTempFiles(dir)
-	tmp, err := os.CreateTemp(dir, knownHostsTempPrefix+"*")
+// atomicWriteFile writes contents to path through a temp file in the same
+// directory, so a reader never sees a half-written store. The temp file is
+// owner-only from the moment it is created, and it is removed unless the
+// rename landed.
+func atomicWriteFile(path, contents string) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), knownHostsTempPrefix+"*")
 	if err != nil {
 		return err
 	}
@@ -361,7 +356,7 @@ func writeKnownHosts(path string, store map[string]string) error {
 		tmp.Close()
 		os.Remove(tmpName) // no-op once the rename succeeded
 	}()
-	if _, err := tmp.WriteString(b.String()); err != nil {
+	if _, err := tmp.WriteString(contents); err != nil {
 		return err
 	}
 	if err := tmp.Chmod(0o600); err != nil {
@@ -373,7 +368,20 @@ func writeKnownHosts(path string, store map[string]string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := replaceFile(tmpName, path); err != nil {
+	return replaceFile(tmpName, path)
+}
+
+func writeKnownHosts(path string, store map[string]string) error {
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	var b strings.Builder
+	for _, host := range slices.Sorted(maps.Keys(store)) {
+		b.WriteString(store[host] + "\n")
+	}
+	sweepStaleTempFiles(dir)
+	if err := atomicWriteFile(path, b.String()); err != nil {
 		return err
 	}
 	// The store is durable at this point, so a copy that does not land is a
@@ -440,33 +448,8 @@ func backupPath(path string) string { return path + backupSuffix }
 // newer than the store, and a later deletion of the store would hand back
 // pins that were never actually enforced.
 func writeBackup(path string, b string) error {
-	dir := filepath.Dir(path)
-	tmp, err := os.CreateTemp(dir, knownHostsTempPrefix+"*")
-	if err != nil {
-		return err
-	}
-	tmpName := tmp.Name()
-	defer func() {
-		tmp.Close()
-		os.Remove(tmpName) // no-op once the rename succeeded
-	}()
-	if _, err := tmp.WriteString(b); err != nil {
-		return err
-	}
 	// The copy names the same host keys, so it is as private as the store.
-	if err := tmp.Chmod(0o600); err != nil {
-		return err
-	}
-	if err := tmp.Sync(); err != nil {
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	if err := replaceFile(tmpName, backupPath(path)); err != nil {
-		return err
-	}
-	return nil
+	return atomicWriteFile(backupPath(path), b)
 }
 
 // knownHostsTempPrefix names the staging file the store is written to before

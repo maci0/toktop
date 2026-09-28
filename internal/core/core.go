@@ -244,7 +244,13 @@ func ProbeCmp(a, b ProbeSample) int {
 // window is trimmed in the same call, so a caller cannot keep one entry too
 // many or one too few.
 func AppendSorted[T any](s []T, item T, max int, cmp func(a, b T) int) []T {
-	s = InsertSorted(append(s, item), cmp)
+	s = append(s, item)
+	if n := len(s); n > 1 {
+		last := s[n-1]
+		i := sort.Search(n-1, func(j int) bool { return cmp(s[j], last) > 0 })
+		copy(s[i+1:], s[i:])
+		s[i] = last
+	}
 	if len(s) > max {
 		return s[len(s)-max:]
 	}
