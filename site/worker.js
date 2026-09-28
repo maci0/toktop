@@ -771,6 +771,50 @@ function assetErrorBody(status) {
   return "asset store error\n";
 }
 
+// The capture a health check reads. One file answers for the set, and this is
+// the one every page view depends on from outside the page: the social
+// crawlers that fetch og:image ask for exactly this path, so a deploy that
+// shipped without the captures is a deploy whose share cards are broken even
+// while the page itself answers 200. A binding that exists is not the same
+// thing as a file behind it, and only a read of the store tells them apart.
+const captureProbePath = SHARE_CARD_PATH;
+
+// reasonLine folds a store's answer into a single bounded line: the reason
+// rides a probe body and a log line, and the text it comes from is off the
+// wire (an error message from the store), so a newline in it would split the
+// line and a control character in it would write over the terminal reading it.
+// biome-ignore lint/suspicious/noControlCharactersInRegex: matching the control characters is the point.
+const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]+/g;
+
+function reasonLine(text) {
+  return text.replace(CONTROL_CHARS_RE, " ").trim().slice(0, 200);
+}
+
+// captureUnavailable names why the captures are not being served, or null
+// when they are. The read is one HEAD against a store that answers it from the
+// edge cache, once per probe, which is what a probe interval is measured in;
+// caching the verdict per isolate would only buy a stale answer, since the
+// verdict changes when a deploy changes the files and a deploy arrives as a
+// new isolate with nothing cached.
+//
+// The store's own failure is answered here rather than left to the caller's
+// catch: a probe must not answer 500 for a store that is down, since 500 says
+// the Worker is broken and the answer it needs to give is that the site is
+// degraded while the page still serves.
+async function captureUnavailable(request, env) {
+  if (!env?.ASSETS) return "no asset binding";
+  try {
+    const res = await env.ASSETS.fetch(
+      new Request(new URL(captureProbePath, request.url).toString(), { method: "HEAD" }),
+    );
+    if (res.status < 400) return null;
+    return reasonLine(`the share card answered ${res.status} from the asset store`);
+  } catch (err) {
+    // A throw carries any value, null included, so err may have no message.
+    return reasonLine(`the asset store could not be read: ${String(err?.message ?? err)}`);
+  }
+}
+
 // Every page answer (200 any encoding, 304) carries these; the security
 // headers ride along because a fresh load is exactly where they must apply.
 const PAGE_HEADERS = {
@@ -891,27 +935,37 @@ async function handle(request, env, started) {
     // what the last probe actually saw. HEAD must carry the GET headers
     // and no body (RFC 9110).
     //
-    // The probe reports degraded while the asset binding is missing rather
-    // than ok: the page still serves, but every capture it shows is a 404,
+    // The probe reports degraded rather than ok whenever the captures are not
+    // being served: the page still answers, but every image on it is a 404,
     // so a probe that keeps saying ok describes a site nobody can use. That
     // is the same call the ingest /healthz makes when it is refusing every
     // event, and it is what makes `make site-deploy` fail a deploy that
     // shipped without its assets instead of waiting out a green probe.
     //
-    // A degraded answer is a failure, so it is logged like one: the binding
-    // is a deploy-level thing, and on a site taking no image traffic the
-    // 503 is the only thing that says it. The per-isolate cap covers the
-    // probe, which would otherwise write a line per check. The healthy
-    // answer logs nothing, as every served answer does.
-    const degraded = !env?.ASSETS;
+    // A binding is not a capture. A deploy that shipped the Worker and left
+    // the files behind answers 200 here with every capture missing, and the
+    // page's own og:image broken, so the store is read as well: the share
+    // card is the one capture a request from outside the page always asks
+    // for, and its answer is what separates a bound store from a stocked one.
+    // That read is one HEAD per probe, against a store that answers it from
+    // the edge cache, which is the unit a probe interval is counted in.
+    //
+    // A degraded answer is a failure, so it is logged like one: the missing
+    // binding or the missing files are deploy-level things, and on a site
+    // taking no image traffic the 503 is the only thing that says it. The
+    // per-isolate cap covers the probe, which would otherwise write a line
+    // per check. The healthy answer logs nothing, as every served answer does.
+    const reason = await captureUnavailable(request, env);
+    const degraded = reason !== null;
     if (degraded) {
       logFailure(request, "health-degraded", {
         ...requestFields(request, started),
         status: 503,
+        reason,
       });
     }
     const healthBody = degraded
-      ? "degraded: no asset binding; the dashboard captures are not served\n"
+      ? `degraded: ${reason}; the dashboard captures are not served\n`
       : "ok\n";
     const healthHeaders = {
       "content-type": "text/plain; charset=utf-8",

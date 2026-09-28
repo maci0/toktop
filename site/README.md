@@ -92,14 +92,20 @@ asks for the path blind asks again on every visit; it is separate from the
 page's validator, so holding one never revalidates the other. Wrong methods
 are `405` with `Allow: GET, HEAD`.
 `/health` reports
-`degraded` with a `503` while the asset binding is missing, rather than `ok`:
-the page still serves then, but every capture it shows is a 404, so a probe
-saying `ok` describes a site nobody can use. A deploy that shipped without its
-assets therefore fails `make site-deploy` instead of passing on a green probe.
-That degraded answer is a failure, so it is logged as one (`health-degraded`,
-capped like the rest): the missing binding is a deploy-level fault, and on a
-site taking no image traffic the probe's own answer is the only thing naming
-it. The healthy answer logs nothing, as every served answer does.
+`degraded` with a `503` while the captures are not being served, rather than
+`ok`: the page still serves then, but every capture it shows is a 404, so a
+probe saying `ok` describes a site nobody can use. A deploy that shipped
+without its assets therefore fails `make site-deploy` instead of passing on a
+green probe. A binding is not a capture, so the probe reads the store rather
+than trusting the binding: it asks for the share card, the one capture a
+request from outside the page always fetches, and a `404`, a `5xx` or a store
+that throws is the same `degraded` with the reason named in the body and the
+line. The read is one `HEAD` per probe, against a store that answers it from
+the edge cache. That degraded answer is a failure, so it is logged as one
+(`health-degraded`, capped like the rest): the missing binding or the missing
+files are deploy-level faults, and on a site taking no image traffic the
+probe's own answer is the only thing naming it. The healthy answer logs
+nothing, as every served answer does.
 Image paths
 without an asset binding, and 404/5xx from the asset store, are `no-store`
 so a missing file is not cached as a day-long success. Error bodies are
@@ -191,17 +197,18 @@ a line per visit would bury the few that name a broken deploy.
 | `asset-store-error` | the asset store answered 5xx |
 | `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 and `/health` reports `degraded` |
 | `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size |
-| `health-degraded` | `/health` answered 503 because the asset binding is missing; the healthy answer logs nothing |
+| `health-degraded` | `/health` answered 503 because the captures are not served: no binding, or the store cannot produce the share card. The `reason` field says which; the healthy answer logs nothing |
 | `method-not-allowed` | a method the path does not take, on the page or on an image |
 | `not-acceptable` | the client refused every encoding the isolate can produce, so the page cannot be sent to it at all |
 
 Every request line carries the same fields: `event`, the request's ray under
-`ray` (empty off Cloudflare), its `method` and `path`, the `status` the
-client was given, the `duration_ms` the edge spent getting there, and
-whatever reason the event adds. A filter on method, path or status works
-across every event, `coding-dropped` included: it names the build that failed
-rather than the answer the client was given, and the request that asked for
-it is the first one on the line, so the ray and the fields filter on. That is
+`ray` (empty off Cloudflare), its `method` and `path`, the `duration_ms` the
+edge spent getting there, the `status` the client was given, and whatever
+reason the event adds. A filter on method, path or status works across every
+event, `coding-dropped` excepted: that one names the build that failed rather
+than the answer the client was given, so it carries no status (the fallback
+coding decides it afterwards), and the request that asked for it is the first
+one on the line, so the ray and the fields filter on. That is
 the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. Past 20 lines

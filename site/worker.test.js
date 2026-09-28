@@ -490,6 +490,7 @@ test("/health reports degraded while the asset binding is missing", async () => 
         path: "/health",
         status: 503,
         duration_ms: expect.any(Number),
+        reason: "no asset binding",
       },
       {
         event: "health-degraded",
@@ -498,8 +499,49 @@ test("/health reports degraded while the asset binding is missing", async () => 
         path: "/health",
         status: 503,
         duration_ms: expect.any(Number),
+        reason: "no asset binding",
       },
     ]);
+  } finally {
+    logs.restore();
+  }
+});
+
+// A binding is not a capture. A deploy that shipped the Worker and left the
+// files behind answers 200 here with every image on the page a 404, and the
+// deploy gate polls this path right after shipping, so the store is read and
+// a missing or failing capture is the 503 that stops the deploy.
+test("/health reports degraded when the store cannot serve the share card", async () => {
+  const missing = { ASSETS: { fetch: () => new Response("nope", { status: 404 }) } };
+  const logs = captureLogs();
+  try {
+    const res = await call({ "cf-ray": "probe-TOK" }, { path: "/health", env: missing });
+    expect(res.status).toBe(503);
+    expect(await res.text()).toBe(
+      "degraded: the share card answered 404 from the asset store; " +
+        "the dashboard captures are not served\n",
+    );
+    expect(logs.parse()).toEqual([
+      {
+        event: "health-degraded",
+        ray: "probe-TOK",
+        method: "GET",
+        path: "/health",
+        status: 503,
+        duration_ms: expect.any(Number),
+        reason: "the share card answered 404 from the asset store",
+      },
+    ]);
+
+    // A store that is down is the same answer, not a 500: the Worker is
+    // serving, the captures are not, and a 500 would name the wrong one.
+    const broken = { ASSETS: { fetch: () => Promise.reject(new Error("store unreachable")) } };
+    const down = await call({}, { path: "/health", env: broken });
+    expect(down.status).toBe(503);
+    expect(await down.text()).toBe(
+      "degraded: the asset store could not be read: store unreachable; " +
+        "the dashboard captures are not served\n",
+    );
   } finally {
     logs.restore();
   }
@@ -1495,7 +1537,9 @@ test("a HEAD that throws answers 500 with no body, like every other HEAD", async
 test("asset failures log their status; served requests log nothing", async () => {
   const logs = captureLogs();
   try {
-    const env = assetsEnv({ "/dashboard.webp": "webp-bytes" });
+    // The share card is stocked along with the capture: /health reads it, and
+    // a store without it is a degraded one, which is its own line.
+    const env = assetsEnv({ "/dashboard.webp": "webp-bytes", "/dashboard-card.png": "card" });
     const served = await call({}, { path: "/dashboard.webp", env });
     expect(served.status).toBe(200);
     expect((await call({ "cf-ray": "healthy-TOK" })).status).toBe(200);

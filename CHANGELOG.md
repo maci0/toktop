@@ -13,6 +13,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- The site's `/health` reads the asset store for the share card instead of
+  trusting the binding. A deploy that shipped the Worker and left the capture
+  files behind answered `ok` while every image on the page was a 404 and the
+  og:image was broken, so it passed `make site-deploy` and no probe named it.
+  A store that cannot produce the card is now the same `degraded` the missing
+  binding already was, with the reason in the body and in the
+  `health-degraded` line.
+
 ### Added
 
 - The THROUGHPUT and PROMPT panel titles name the peak their braille plot is
