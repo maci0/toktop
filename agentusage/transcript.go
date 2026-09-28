@@ -457,7 +457,7 @@ func (w *Watcher) sameDir(cwd string) bool {
 	// the whole store several times a second.
 	mine, decided := false, false
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		mine, decided = sameSpelling(resolved, w.dir), true
+		mine, decided = sameSpelling(resolved, w.dir) || sameSpelling(resolved, resolveDir(w.dir)), true
 	}
 	// Lazily: a Watcher built by Watch carries the map, one assembled by a
 	// caller or a test does not, and the verdict is worth caching either way.

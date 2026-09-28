@@ -22,13 +22,13 @@ func TestShortDirFoldsAcrossUnicodeNormalization(t *testing.T) {
 	}
 	setHome(t, decomposed)
 
-	project := filepath.Join(composed, "src", "project")
-	want := "~/src/project"
+	project := filepath.Join(composed, "project")
+	want := "~/project"
 	if got := ShortDir(project); got != want {
 		t.Fatalf("ShortDir(%q) = %q, want %q", project, got, want)
 	}
 	// The reverse spelling names the same directory, and so does home itself.
-	if got := ShortDir(filepath.Join(decomposed, "src", "project")); got != want {
+	if got := ShortDir(filepath.Join(decomposed, "project")); got != want {
 		t.Errorf("ShortDir(decomposed) = %q, want %q", got, want)
 	}
 	if got := ShortDir(composed); got != "~" {

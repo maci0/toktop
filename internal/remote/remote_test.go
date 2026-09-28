@@ -1568,7 +1568,9 @@ func TestDefaultKnownHostsPathXDG(t *testing.T) {
 func TestDefaultKnownHostsPathRejectsRelativeHome(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "")
 	t.Setenv("HOME", "relative/home")
-	t.Setenv("USERPROFILE", "relative/home") // os.UserConfigDir on windows
+	t.Setenv("USERPROFILE", "relative/home") // os.UserHomeDir on windows
+	t.Setenv("AppData", "relative/home")     // os.UserConfigDir on windows
+	t.Setenv("APPDATA", "relative/home")
 	if got := defaultKnownHostsPath(); got != "" {
 		t.Fatalf("defaultKnownHostsPath() = %q, want no store for a relative home", got)
 	}

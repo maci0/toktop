@@ -109,7 +109,7 @@ func TestSameDirRetriesACwdThatDidNotResolve(t *testing.T) {
 	}
 	link := filepath.Join(base, "link")
 	cur := time.Now()
-	w := &Watcher{dir: real, dirVerdict: map[string]dirVerdict{}, now: func() time.Time { return cur }}
+	w := &Watcher{dir: resolveDir(real), dirVerdict: map[string]dirVerdict{}, now: func() time.Time { return cur }}
 
 	if w.sameDir(link) {
 		t.Fatal("sameDir matched a path that does not exist")
