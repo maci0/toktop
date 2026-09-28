@@ -8,9 +8,16 @@ they live and what already stands in their way.
 - **Last reviewed:** 2026-09-28 (every claim below re-read against code at
   this commit: ingest, bearer, provider, probe, remote, selfupdate, selfreload,
   gpu, logcfg, agentwatch, agentusage, workflows, Makefile, site/worker.js).
-  This pass found one entry point the file did not name: `KIMI_CODE_HOME`
+  This pass found two controls the file did not carry, both landed in
+  `internal/ingest/server.go` after the previous read: the loopback `Host`
+  guard (M45, `loopbackHostGuard`), which refuses a DNS-rebinding request that
+  M21's `Origin` check structurally cannot see, and the home fold on the
+  recovered panic value and stack (M46). Adding the guard also corrected M21,
+  which claimed to close browser forgery from a visited page and now says what
+  it does and does not close. The previous pass found one entry point the file
+  did not name: `KIMI_CODE_HOME`
   relocates the kimi session store every `--agents` kimi watcher reads
-  (agentusage/kimi.go, 83, `kimiStore`), so it is now an entry point, a B6
+  (agentusage/kimi.go, `kimiStore` 82), so it is now an entry point, a B6
   input, an asset qualifier, and part of M44's absolute-only rule. Every
   behavioral claim re-read held as written; what had drifted were the
   references, and the corrections are in place rather than appended: the
@@ -34,7 +41,7 @@ targets, the static site worker at site/worker.js). Out of scope: the
 
 | # | Risk | Boundary | Where | State |
 |---|------|----------|-------|-------|
-| 1 | Ingest endpoint accepts unauthenticated events from any local process (any network peer if bound non-loopback via `--ingest`); forged telemetry renders as real agents | local processes -> ingest, network -> ingest | internal/ingest/server.go, cmd/toktop/main.go | No authentication; browser-driven forgery, DoS, injection, mixed-script names, and timestamp forgery mitigated (M3-M7, M21, M26, M30) |
+| 1 | Ingest endpoint accepts unauthenticated events from any local process (any network peer if bound non-loopback via `--ingest`); forged telemetry renders as real agents | local processes -> ingest, network -> ingest | internal/ingest/server.go, cmd/toktop/main.go | No authentication; both browser sender classes refused (cross-origin by M21, DNS rebinding by M45), plus DoS, injection, mixed-script names, and timestamp forgery mitigated (M3-M7, M21, M26, M30, M45) |
 | 2 | Trust-on-first-use accepts a first-contact MITM by design; only key *changes* are refused | operator -> ssh target | internal/remote/knownhosts.go | Documented residual risk (README "Auth" section) |
 | 3 | Self-update installs whatever binary the named GitHub repo published: integrity rests on the release's own checksums.txt over TLS; no external signature exists | runtime -> update channel | internal/selfupdate/selfupdate.go, .github/workflows/release.yml | Checksum + size + GitHub-host URL verification present; owner/name validated (M18); signing absent |
 | 4 | SSH engine relays bind loopback listeners (`127.0.0.1:0`); any local process can reach the remote engines those listeners front | local processes -> remote engines | internal/remote/client.go | Bound loopback-only; no listener auth |
@@ -46,7 +53,7 @@ probed endpoint" is closed by origin-scoped token application
 (commit 21e3feb); see mitigations M1. The previous claim that `--repo` is
 interpolated into the GitHub API path with no owner/name check is closed by
 `ValidateRepo` (selfupdate.go, 126, called from `Check` at 231 and from
-`toktop update` at cmd/toktop/update.go, 96). Nothing in this table is
+`toktop update` at cmd/toktop/update.go, 94). Nothing in this table is
 demonstrated by attacking anything; every claim cites code read at review time.
 
 ## Assets
@@ -121,8 +128,8 @@ What is worth stealing, corrupting, or denying:
   `~/.omp/agent/sessions`), cursor-agent
   (`~/.cursor/projects/<project>/agent-transcripts`, only lines that carry
   token counts), and kimi
-  (`~/.kimi-code/sessions`, agentusage/kimi.go, 69, relocated by
-  `KIMI_CODE_HOME` when that names an absolute path, agentusage/kimi.go, 83). Beyond plain JSONL, dsh's default
+  (`~/.kimi-code/sessions`, agentusage/kimi.go, the default store literal in `kimiStore` 87, relocated by
+  `KIMI_CODE_HOME` when that names an absolute path, agentusage/kimi.go, `kimiStore` 82). Beyond plain JSONL, dsh's default
   `session.v<N>.jsonl.zstd` (concatenated zstd frames, agentusage/dsh.go)
   and the same records under `~/.dsh-native/sessions`,
   crush's project database `.crush/crush.db`
@@ -177,12 +184,12 @@ Every externally reachable input, with its code location:
 1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
    NDJSON stream), `GET`/`HEAD /healthz`
    (internal/ingest/server.go; routes registered from the endpoint table at
-   `ingestEndpoints`, server.go, 305, the 405 `Allow` header names `GET, HEAD` at
+   `ingestEndpoints`, server.go, the 405 `Allow` header names `GET, HEAD` at
    the method guard). The health route is a
    load report, not a bare liveness probe: it answers 503 with a
    `degraded: N/64 event streams in flight` line and the same
    `Retry-After` a refused POST carries while every decode slot is held
-   (`handleHealth`, server.go, 543), so it cannot report `ok` for an endpoint that
+   (`handleHealth`, server.go), so it cannot report `ok` for an endpoint that
    is accepting nothing. Binds `127.0.0.1:8420`
    unless `--ingest` says otherwise (cmd/toktop/flags.go); any address is
    accepted, including routable interfaces. An empty `--ingest` is rejected
@@ -260,7 +267,7 @@ Every externally reachable input, with its code location:
    `XDG_DATA_HOME` (agentusage/opencode_sqlite.go, only when
    `--opencode-db` is on, which it is by default with `--agents`; a
    relative value is named as ignored at startup, like `GAUNTLET_HOME`),
-   `KIMI_CODE_HOME` (agentusage/kimi.go, 83, `kimiStore`; relocates the
+   `KIMI_CODE_HOME` (agentusage/kimi.go, `kimiStore` 82; relocates the
    kimi session store off `~/.kimi-code/sessions` for every kimi watcher,
    and is honored only when absolute, the rule M44 records for
    `GAUNTLET_HOME` and the XDG base directories, so a relative value
@@ -292,9 +299,10 @@ Every externally reachable input, with its code location:
    named by that response (internal/selfupdate/selfupdate.go).
    Asset URLs must be GitHub download hosts (`githubAssetURL`, enforced by
    `trustedAssetURL` in `applyTo`, 351);
-   redirects off those hosts are refused (`githubRedirect`, 216). The asset
+   redirects off those hosts are refused (`githubRedirect`, 212). The asset
    is verified against the downloaded checksums and size-capped before anything
-   is renamed over the running binary (`applyTo` 333).
+   is renamed over the running binary (`applyTo`, the `ChecksumFor`
+   comparison at 359).
 5. **SSH client sessions** (outbound): shell scripts executed on the remote
    for discovery and vitals (internal/remote/discover.go;
    internal/remote/stats.go); all returned text is parsed locally, and
@@ -518,8 +526,10 @@ Deployment surface:
 - **B1: local processes -> ingest server.** Any process running as any local
   user who can reach the socket can POST events. There is no named
   authentication point; fields are sanitized and clamped
-  (internal/ingest/event.go), and POSTs with a nonempty Origin header
-  are refused (internal/ingest/server.go). Request metadata goes to
+  (internal/ingest/event.go), and two sender classes are refused rather than
+  authenticated: POSTs with a nonempty Origin header (M21) and, on a loopback
+  bind, requests whose `Host` names anything but this machine (M45), which is
+  the class the Origin check cannot see. Request metadata goes to
   stderr subject to `TOKTOP_LOG_LEVEL` (server.go).
   Remote address and request id are not authenticated sender identities:
   `X-Request-Id` is caller-controlled, sanitized, and capped at 64 characters
@@ -592,7 +602,7 @@ Deployment surface:
   and which identity is offered (target.go); `GAUNTLET_HOME` /
   `~/.gauntlet/agents.json` defines which processes count as agents and which
   files are read (cmd/toktop/main.go); `KIMI_CODE_HOME` relocates the kimi
-  session store every kimi watcher reads (agentusage/kimi.go, 83, `kimiStore`,
+  session store every kimi watcher reads (agentusage/kimi.go, `kimiStore` 82,
   M44 for the absolute-only rule that keeps a relative value from becoming a
   store under the working directory); `PATH` decides which vendor
   CLIs execute (gpu.go, whose stdout is capped at 1 MiB, M33); `USER` /
@@ -629,8 +639,17 @@ ports that are then exposed on local loopback (client.go).
   models, and notes by POSTing to /v1/events; no origin auth exists
   (server.go). Renders beside genuine agentwatch data. The one
   sender class refused outright is the browser: a POST carrying an `Origin`
-  header gets 403 (server.go), closing cross-site forgery from web
-  pages the operator visits. Timestamps more than 2 minutes from arrival in
+  header gets 403 (server.go), closing cross-origin forgery from web
+  pages the operator visits. Origin alone is not the whole browser answer: a
+  page that resolves its own name to 127.0.0.1 for one fetch is same-origin
+  with a loopback-bound endpoint, so the browser sends no `Origin` and the
+  check never fires. The `Host` header survives that rebinding carrying the
+  attacker's own name, and on a loopback bind the host guard refuses it with
+  403 ahead of the route table (M45, `loopbackHostGuard`), so the rebinding
+  sender class is refused on the default bind too. The guard is deliberately
+  absent from a `--ingest` bound to a routable address, where peers name the
+  box whatever they like, and a rebinding page can only reach that bind
+  through the loopback interface in any case. Timestamps more than 2 minutes from arrival in
   either direction are clamped to arrival time (server.go): ahead, so the
   "live" marker cannot be pinned by a claimed far-future stamp, and behind,
   because a lagging sender's events sort to the front of the retained feed
@@ -647,19 +666,21 @@ ports that are then exposed on local loopback (client.go).
   id is visible as `accepted` above `stored` (server.go;
   internal/collector/collector.go).
 - *Information disclosure*: none beyond presence (`/healthz` answers any
-  requester, server.go). Residual: a routable bind would otherwise have
+  requester, server.go). The route table and the `Allow` header are learned
+  only by a request the host guard admits, since it runs ahead of both the
+  404 and the 405 (M45). Residual: a routable bind would otherwise have
   put peer IPs on stderr; logRemote drops them.
 - *Denial of service*: mitigated (see M3-M5, M30). Bounded three ways per
   connection (byte cap, 1 min body-idle, 10 min absolute lifetime) and a
   fourth across the endpoint: at most `maxInFlightEvents` 64 POST bodies are
   decoded at any instant, process-wide, and a POST arriving when every slot is
   held is refused at once with 503 and `Retry-After` rather than read
-  (M30: `eventSlots`, server.go, 444). Residual: the cap is a
+  (M30: `eventSlots`, server.go). Residual: the cap is a
   count, not a per-peer
   quota, so 64 stalled local POSTs still hold 64 descriptors and goroutines
   and the 65th legitimate sender is refused with them (gap 5); nothing
   attributes a slot to a peer, so one process can occupy all of them.
-  MaxHeaderBytes is 16 KiB (server.go, 91).
+  MaxHeaderBytes is 16 KiB (`maxHeaderBytes`, server.go).
 - *Elevation of privilege*: none; event content reaches only parsing and
   rendering.
 
@@ -749,9 +770,11 @@ ports that are then exposed on local loopback (client.go).
 - *Spoofing/tampering* (`toktop update`): the release lookup and downloads
   ride TLS. `ValidateRepo` admits only a GitHub owner/name
   (selfupdate.go, 126); `Check` builds the URL with `url.JoinPath`
-  (239). Asset URLs must be GitHub download hosts, and redirects off
-  those hosts are refused (selfupdate.go, 216 and 351). The asset
-  must match the release's own checksums.txt (`applyTo` 333), so a
+  (237). Asset URLs must be GitHub download hosts, and redirects off
+  those hosts are refused (selfupdate.go, `githubRedirect` 212 and the
+  `trustedAssetURL` gate in `applyTo` 347). The asset
+  must match the release's own checksums.txt (`applyTo`, the `ChecksumFor`
+comparison at 359), so a
   network attacker cannot
   substitute a binary. The trust anchor is the repo itself: whoever controls
   the repo (or its release pipeline) ships a binary that verifies against its
@@ -815,7 +838,7 @@ Controls verified in code, with the threats they cover:
 | M1: Origin-scoped bearer application. Token attached only to `Allow`-admitted origins, populated exclusively from operator `--add` URLs; `CheckRedirect` deletes the header on any hop off the original origin or outside the allow set, capped at 10 hops; `Set` blanks a token containing CR or LF, so an argv or env value cannot inject a header | Credential harvesting by scanned ports, forwarded remotes, and probes (B2/B4 disclosure; previous summary risk 1, fixed in commit 21e3feb); credential loss to a redirect target; header injection through a hostile token | internal/bearer/bearer.go, `Set` 51, `CheckRedirect` 108, `admits` 125; cmd/toktop/attach.go, 37; call sites provider/discover.go, 270; provider.go, 92; probe.go, 543; tests internal/bearer/bearer_test.go |
 | M2: Terminal escape/control-char sanitizer applied both at ingest and at render time (C0/C1 including UTF-8-encoded C1; bidi overrides/isolates; zero-width format; variation selectors), plus `core.SingleLine` for a field that occupies one cell, one report line or one log line: it folds the newlines and tabs `SanitizeText` keeps for block text into single spaces, because every renderer here measures a cell by its widest line and splits a rendered row on newlines into frame rows. Without it, a sender reaching the unauthenticated ingest endpoint or a process squatting a discovered port could print a line the dashboard reads as its own output ("up 9/9 engines", "agent stopped") and spend row budget that pushes the real rows off the pane. Mixed Latin+Cyrillic/Greek agent names collapse to `anonymous`. Every one of the three renderings applies the sanitizer, including the machine-readable one, so the JSON report is no less sanitized than the frame | OSC/CSI clipboard-cursor-title injection from engines, remotes, and events; a forged own-output line and row-budget displacement in the frame; mixed-script impersonation of agent names (asset: terminal integrity, dashboard integrity) | internal/core/sanitize.go, `SingleLine` 106; ingest side server.go; render side internal/ui/ui.go, internal/ui/plain.go, internal/ui/format.go, internal/ui/agents.go, internal/ui/json.go; model ids go through `core.ModelName` (M34) |
 | M3: Ingest body cap 1 MiB + MaxBytesReader | unbounded upload into decode loop (B1 DoS) | server.go |
-| M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go, `newServer` 71-95, `progressBody` 450-499, one armed write deadline per response (`armWrite`, 561, armed before every answer and cleared on keep-alive at 654)) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
+| M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go: `newServer`, the `http.Server` field block, `progressBody`, and the per-response `armWrite` closure, which arms the write deadline before every answer and clears it on keep-alive) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
 | M5: Event field caps (an `id` past 128 characters, or one that is nothing but whitespace or control characters, is refused with a `400` naming the field rather than clamped, since the id is the dedup key and a clamped one folds distinct keys onto one stored id; the display fields clamp: agent 64, model 128, via_engine 128, note 512; a kind outside the four known ones is lowercased, sanitized and clamped to 24 runes rather than replaced, so `kind: "banana"` reaches the feed as `banana` (folded to one line by `core.SingleLine`, so a kind cannot add a row); only a kind that is empty or sanitizes to empty becomes `turn`) + a note that is nothing but a working directory reduced to its last two components and folded through `core.RedactHome`, so a pushed path cannot name the account in a dashboard the operator redirects into a file (`shortNote`/`pathNote`, event.go, 90-130) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) + event-id dedup ledger bounded by a 15 min horizon and a 4096-entry cap, so a replay stays recognizable past the display ring and the ledger cannot grow without bound | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering); a dropped event from two ids clamped onto one dedup key; a pushed `$HOME` path in a retained note reaching a shared report | server.go; event.go:45-71, 90-130, 121-137, 183-189; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
 | M6: Event timestamp skew clamp: stamps >2 min from arrival in either direction reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing); a lagging sender's events refused as outside the retention window | server.go |
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go |
@@ -829,33 +852,35 @@ Controls verified in code, with the threats they cover:
 | M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | endpoints.go |
 | M16: Remote shell scripts: static bodies, only locally generated integers interpolated; no secret material sent to remote scripts | command injection into remote shell (B3 elevation) | discover.go; stats.go |
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance. A remote's stderr is quoted into a local error only as a sanitized tail of `stderrTailClusters` 300 grapheme clusters (`stderrTail`, client.go, 547-566, over `core.TailClusters`), and that error string is home-folded before it reaches a frame the operator is told to paste into an issue (internal/remote/stats.go, `poll`, 168-176), so a hostile remote cannot flood the local error or put an operator home path into a diagnostic report through a command that fails | credential handling in headless runs (B4); unbounded remote-chosen text in a displayed error, and a home path in a reported one (B3/B4 disclosure) | auth.go; remote/client.go, `stderrTail`; core/truncate.go, `TailClusters` 49 |
-| M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install. `toktop update --check` prints `rel.HTMLURL` for shell capture, and that page URL is held to the same GitHub-host rule as an asset (`TrustedReleaseURL`); a release naming no GitHub page is reported and nothing is printed for the `url=$(toktop update --check)` capture the help screen documents | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution, and a release-supplied URL captured into a shell variable (B5) | selfupdate.go, `ValidateRepo` 126, `Check` 231, `applyTo` 333, `TrustedReleaseURL` 190; cmd/toktop/update.go, `reportRelease` 134-149 |
+| M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install. `toktop update --check` prints `rel.HTMLURL` for shell capture, and that page URL is held to the same GitHub-host rule as an asset (`TrustedReleaseURL`); a release naming no GitHub page is reported and nothing is printed for the `url=$(toktop update --check)` capture the help screen documents | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution, and a release-supplied URL captured into a shell variable (B5) | selfupdate.go, `ValidateRepo` 126, `Check` 231, `applyTo` 329, `TrustedReleaseURL` 190; cmd/toktop/update.go, `reportRelease` |
 | M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo, query and fragment rejected; `--origin` parsed as RFC3339 or Unix seconds and refused when malformed, and both `--seed` and `--origin` named as having no effect without `--demo`; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, a silently reduced `--agents` watch set, a `?api_key=` credential in argv and in every rendered surface, and a demo replay that differs from the capture it was meant to reproduce | validate.go validateFlags, validateOnceEnv, validateIngestAddr, warnIgnoredFlags, parseOrigin; endpoints.go validateAddURL; main.go logActiveConfig | 
 | M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check, the release-source gate (M37), and two drift gates that make the CI build matrix and its build tags answerable to the Makefile targets the release job runs (`make check-ci-platforms`, `make check-ci-tags`; .github/workflows/ci.yml, 66-74), so a platform that stops being vetted in CI cannot silently keep being published. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, 8); the release workflow holds `contents: write` for its whole (single) job rather than for the publish step alone, because Actions accepts permissions on the workflow or the job and not on a step (.github/workflows/release.yml, 10-11 and 141-147), so the scope that can push a tag and its assets is the scope every step of that job runs with, and it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift, an unvetted shipped platform, and release-channel write scope (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 11 and 147, Makefile |
-| M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight) | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
+| M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight). On its own this closes cross-origin forgery and nothing else: a page resolving its own name to 127.0.0.1 for one fetch is same-origin with this endpoint, so the browser sends no `Origin` and M21 never fires. M45 is the control that closes that sender class | browser-driven dashboard forgery from any visited web page (B1 spoofing) | server.go, the `Origin` check in `handlePost`; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (`strconv.Atoi` at discover.go, 48), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 8) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
 | M24: SQLite session stores opened `mode=ro` with `_query_only=1`, `_defensive=1`, `_dqs=0`, and `trusted_schema=OFF`; crush walk capped at 16 parents; counters rejected above 1<<40; opencode directory list bound as parameters | accidental writes into agent databases, planted-schema SQL during a read, walk-to-root, overflow, and SQL injection via cwd (B7) | agentusage/sqlite.go; crush_sqlite.go; sample.go; opencode_sqlite.go |
 | M25: Structured request metadata to stderr; bodies excluded; caller-controlled X-Request-Id provides correlation only | B1 repudiation: successful POSTs visible at debug/info, suppressed at warn/error; error also suppresses 4xx. No durable storage or authenticated sender attribution | internal/ingest/server.go; internal/ingest/server_test.go |
-| M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, 91, `setSecurityHeaders` 124 |
-| M27: `logcfg.Remote` rewrites a non-loopback peer address to `"remote"` on the audit line, and `logcfg.RedactAddrs`/`RedactHandler` apply the same rewrite to text in the message, so a peer IP cannot reach stderr even when `http.Server.ErrorLog` interpolates it into a handshake or panic line | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | internal/logcfg/logcfg.go, `Remote` 156, `RedactAddrs` 174, `RedactHandler` 184; server.go, 86-87 |
+| M26: Ingest response headers (nosniff, DENY framing, CSP `default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`, CORP same-origin, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`) and MaxHeaderBytes 16 KiB | a fetched JSON body sniffed as HTML or framed when `--ingest` is exposed (B1 disclosure); header-bomb DoS | server.go, `maxHeaderBytes` and `setSecurityHeaders` |
+| M27: `logcfg.Remote` rewrites a non-loopback peer address to `"remote"` on the audit line, and `logcfg.RedactAddrs`/`RedactHandler` apply the same rewrite to text in the message, so a peer IP cannot reach stderr even when `http.Server.ErrorLog` interpolates it into a handshake or panic line | peer-IP disclosure when `--ingest` is bound off loopback (B1 information disclosure) | internal/logcfg/logcfg.go, `Remote` 156, `RedactAddrs` 174, `RedactHandler` 184; server.go, the `ErrorLog` field of the `http.Server` |
 | M28: Keyboard-interactive answers only a single non-echoing prompt | a hostile sshd harvesting the password across extra or echoing prompts (B4 disclosure) | auth.go |
 | M29: Transcript, candidate-walk, and crush paths opened under `os.OpenRoot`; a planted symlink out of the store is refused. The ownership scan is capped at `ownerScanLines` and refused durably when no header is found, so an undecided session is not re-read on every poll. A definition withdrawn from `agents.json` takes its adapter with it: `refreshAdapter` returns without one and `walkCandidates` stops (`adGone`, agentusage/candidates.go, 288), so a reload that drops an agent cannot leave the previous adapter walking the store it disowned for the life of the process | same-user (or writable-store) redirect of `--agents` reads to arbitrary files (B7 disclosure) | agentusage/watcher.go, 340; agentusage/candidates.go, 225 (`walkTranscripts`); agentusage/crush_sqlite.go, 124; agentusage/registry.go, `refreshAdapter` |
-| M30: In-flight POST cap. `eventSlots` (server.go, 444) is a process-wide counting channel of `maxInFlightEvents` 64 (`:438`) acquired before the body is read; a POST that cannot take a slot is refused immediately with 503 and one shared `Retry-After: 1` (RFC 9110 whole seconds) rather than queued. `handleHealth` reports the same degraded state with the same delay, so a probe that keeps saying `ok` while every POST is refused cannot be believed. `stallReason` names which of the two 408 bounds broke (`no body bytes for 1m` vs `stream exceeded the 10m lifetime`), since the raw i/o timeout is identical for both and the two have opposite sender-side fixes | a local pile-up of stalled POST bodies holding an fd and goroutine each for a minute (B1 DoS); a sender or health probe inventing a shorter retry interval than the slots free (B1 DoS) | internal/ingest/server.go, `maxInFlightEvents` 438, `eventSlots` 444, `stallReason` 526, `handleHealth` 543, the shared `retryAfterSeconds` 465, the 408 body in `handlePost` |
+| M30: In-flight POST cap. `eventSlots` (server.go) is a process-wide counting channel of `maxInFlightEvents` 64 acquired before the body is read; a POST that cannot take a slot is refused immediately with 503 and one shared `Retry-After: 1` (RFC 9110 whole seconds) rather than queued. `handleHealth` reports the same degraded state with the same delay, so a probe that keeps saying `ok` while every POST is refused cannot be believed. `stallReason` names which of the two 408 bounds broke (`no body bytes for 1m` vs `stream exceeded the 10m lifetime`), since the raw i/o timeout is identical for both and the two have opposite sender-side fixes | a local pile-up of stalled POST bodies holding an fd and goroutine each for a minute (B1 DoS); a sender or health probe inventing a shorter retry interval than the slots free (B1 DoS) | internal/ingest/server.go, `maxInFlightEvents`, `eventSlots`, `stallReason`, `handleHealth`, the shared `retryAfterSeconds`, and the 408 body in `handlePost` |
 | M31: `--ssh-key` is rejected when set to an empty value (exit 2). An empty value is indistinguishable from the flag never being given: the run silently fell back to `~/.ssh/config` and authenticated with a key the operator did not choose | silent identity substitution from a mistyped or quoted-empty flag (B4 disclosure) | cmd/toktop/validate.go, 290; cmd/toktop/main.go, 149-153 |
 | M32: `currentUser` validates `USER` and `USERNAME` through `validTargetField` before handing either to the transport and falls through to the passwd database when either is empty or would fail validation; the passwd name is passed through `basenameLogin` so a Windows `DOMAIN\user` yields `user`. `TOKTOP_SSH_PASSWORD` moved behind the exported `remote.PasswordEnv` constant so the startup warning that names an unusable variable spells it the way the code reads it | a hostile environment redirecting the ssh connection to a different account, or naming an invalid string the transport would reject later as a password failure (B6) | internal/remote/client.go, 81-104; internal/remote/target.go, 351; internal/remote/auth.go, 99-103; cmd/toktop/validate.go, 133-146 |
 | M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick (B5 DoS) | cmd/toktop/main.go, 144 (`remote.ParseTargets`); internal/remote/client.go, `Forward`; internal/gpu/gpu.go, 90-121 |
 | M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 91, `ModelName` 104; call sites internal/provider/openai.go, 66, 119, 152, 167; internal/provider/ollama.go, 40-42; internal/probe/probe.go, `ModelNameMax` 73-77 |
-| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, 68; internal/remote/client.go, 29; internal/collector/collector.go, 40; internal/gpu/gpu.go, 123; cmd/toktop/attach.go, 28; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 104, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own `logField` (client.go, 33) additionally runs `RedactAddrs` over the text. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; and a destination the operator typed (an engine `addr`) is not a peer address, so nothing short of the home fold removes it, while an ssh `target` is stripped of its account at the call site before the fold ever sees it (M40) | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68, `HomeHandler` 79, `Field` 149, `RedactedField` 189; internal/core/redact.go, `RedactHome` 24 |
+| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, the `logcfg.Logger()` call in `Serve`; internal/remote/client.go, 29; internal/collector/collector.go, 40; internal/gpu/gpu.go, 123; cmd/toktop/attach.go, 28; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 104, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own `logField` (client.go, 33) additionally runs `RedactAddrs` over the text. Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; a destination the operator typed (an engine `addr`) is not a peer address, so nothing short of the home fold removes it, while an ssh `target` is stripped of its account at the call site before the fold ever sees it (M40); and the one payload that quotes text the process did not author, the recovered panic value and its stack, is folded at the call site instead (M46) rather than by the handler, since `logcfg.Field` alone would not reach the message | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 68, `HomeHandler` 79, `Field` 149, `RedactedField` 189; internal/core/redact.go, `RedactHome` 24 |
 | M37: `make release` refuses a non-dev `VERSION` built from a tree that cannot be tied to the bytes shipped. `check-release-source` fails the cut when `git rev-parse HEAD` fails (a source export, where buildinfo has no commit to record and `SOURCE_DATE_EPOCH` falls back to 0, dating every archive member to the epoch) and, unless `ALLOW_DIRTY=1` is passed by name, when `git status --porcelain` is nonempty; a non-numeric `SOURCE_DATE_EPOCH` is refused too. `VERSION=dev` is exempt, since a dev build is a local artifact whose manifest records the tree honestly. This is the reproducibility half of the update channel's trust story: an artifact whose bytes do not match the commit the release page points at cannot be re-derived or audited by anyone who downloads it | a release cut from an uncommitted or non-git tree, shipping binaries that buildinfo names a commit for while the archive members carry something else, against the same trust anchor as summary risk 3 (B5 tampering/repudiation) | Makefile, `check-release-source`, a prerequisite of `release` |
 | M38: One watcher per agent store. `discover` stops the trackers of exited processes before it installs a follower onto a store a dead tracker was still tailing (`for _, t := range exited { w.stopOne(t) }` ahead of the install, internal/agentwatch/agentwatch.go, 270-272), and `stopOne` reports the dead watcher's final growth first, so the follower's baseline is taken after the stopped tracker's last sample. Two watchers on one store each report the same growth under their own PID, and the collector's id window cannot merge two sample ids, so every token written in the overlap is counted twice | doubled token counts and a follower whose baseline overlaps the partition it replaced: a dashboard-integrity defect on a path a process exit alone triggers, with no hostile input (B7 tampering) | internal/agentwatch/agentwatch.go, 270-272; test internal/agentwatch/handover_test.go |
-| M39: Clocks and callbacks a running goroutine reads are taken under a lock rather than raced. The ingest server's `SetNow` writes `s.now` under `nowMu` and `instant` reads it under `RLock` (internal/ingest/server.go, `nowMu` 36-39, `SetNow` 340, `instant` 345); the agent watcher guards the two fields `SetNow` and `SetOnError` write with `clockMu`, because every tracker's own reader goroutine stamps events from that clock (internal/agentwatch/agentwatch.go, `clockMu` with `reportError` releasing the lock before calling a caller-supplied sink); `gpu.Sample` collects its per-tool results under a local mutex; the host-vitals sampler reads its clock through `instant`, which takes `clockMu` before calling the caller's function, so a `SetNow` swap cannot tear against a cache window being aged (internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`) | a data race on the demo clock or the error sink between a handler goroutine and a tracker, which is a correctness and availability fault rather than a boundary crossing, recorded here because the ingest clock is set from demo mode and a race there lands in the same audit surface as B1 | internal/ingest/server.go, `nowMu` 36-39, `SetNow` 340, `instant` 345; internal/agentwatch/agentwatch.go, `clockMu`, `reportError`; internal/gpu/gpu.go, `Sample` 208-213; internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`; tests internal/ingest/server_test.go, internal/agentwatch/concurrency_test.go |
+| M39: Clocks and callbacks a running goroutine reads are taken under a lock rather than raced. The ingest server's `SetNow` writes `s.now` under `nowMu` and `instant` reads it under `RLock` (internal/ingest/server.go, `nowMu`, `SetNow`, `instant`); the agent watcher guards the two fields `SetNow` and `SetOnError` write with `clockMu`, because every tracker's own reader goroutine stamps events from that clock (internal/agentwatch/agentwatch.go, `clockMu` with `reportError` releasing the lock before calling a caller-supplied sink); `gpu.Sample` collects its per-tool results under a local mutex; the host-vitals sampler reads its clock through `instant`, which takes `clockMu` before calling the caller's function, so a `SetNow` swap cannot tear against a cache window being aged (internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`) | a data race on the demo clock or the error sink between a handler goroutine and a tracker, which is a correctness and availability fault rather than a boundary crossing, recorded here because the ingest clock is set from demo mode and a race there lands in the same audit surface as B1 | internal/ingest/server.go, `nowMu`, `SetNow`, `instant`; internal/agentwatch/agentwatch.go, `clockMu`, `reportError`; internal/gpu/gpu.go, `Sample` 208-213; internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`; tests internal/ingest/server_test.go, internal/agentwatch/concurrency_test.go |
 | M43: A JSONL record's own counters bound what it can put in a display. `grokMaxTurnMS` caps grok's reported turn length before it is multiplied out to nanoseconds, so a record naming a millisecond count near `MaxInt64` cannot wrap its span negative and report the turn's rate with the wrong sign. A session directory name that percent-decodes to a path carrying a NUL byte is refused rather than read as a working directory. agy's `last_conversations.json` winner is chosen by sorted workspace, not by Go's randomized map order, so one conversation named under two workspaces cannot change directory between polls. Pinned by `FuzzParseAgentLines` (every record parser, its negative-counter, determinism, and restatement-refusal invariants), `FuzzAgyIndex`, `FuzzGrokSessionCwd`, and `FuzzGrokSessionPath` | a hostile or corrupt session store steering attribution between workspaces, or reporting a rate of the wrong sign (B1 tampering) | agentusage/grok.go, `grokMaxTurnMS` and `grokSessionCwd`; agentusage/agy.go, `loadAgyLast`; tests agentusage/fuzz_test.go, agentusage/agy_grok_fuzz_test.go |
 | M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, 42-69 |
 | M40: The ssh account name is dropped where an audit line is written. `Target.LogHost` returns the host alone and every audit call site uses it (internal/remote/client.go, 226, 232, 362, 543, 757, 884; cmd/toktop/attach.go, 71, 78, 168, 211), and `Target.RedactUser` folds `user@` out of the error text the transport prefixes with the target (target.go, 174, at the connect, forward and connection-lost sites), so a `~/.ssh/config` User or the local login name does not reach the line either. `UserHost` remains what goes into the ssh argv and into the message on the operator's own terminal. The auth-chain lines are folded the same way: a default key path, the `$SSH_AUTH_SOCK` path and both error texts pass through `core.RedactHome`, and the socket through `logcfg.Field` | the account name of the ssh login reaching a line the operator pastes into a public issue, and a key or agent-socket path under `$HOME` naming the account in the same line (B4/response-readiness disclosure) | internal/remote/target.go, `LogHost` 166, `RedactUser` 174; internal/remote/auth.go, 233-240 and 245-254; tests internal/remote/audit_test.go |
 | M41: The agent definitions file is read under a cap and every diagnostic it produces is folded. `readCapped` reads through `io.LimitReader(f, maxDefinitionsBytes+1)` and refuses a longer file as `errDefinitionsTooLarge`, joined into `ErrInvalidDefinitions` so the caller contract (a missing file is nil, a file that exists but cannot be used is `ErrInvalidDefinitions`) is unchanged; `defsErr` renders every message through `core.RedactHome` and keeps the cause reachable through `errors.Is`/`errors.As` by wrapping rather than rewriting, because a `*fs.PathError` carries its own copy of the absolute path. The startup line that prints it folds again on the way out (cmd/toktop/main.go, 189) | an unbounded read of a file that is only nominally a few kilobytes (`json.Unmarshal` builds a second copy of everything it decodes), and the account name in the one diagnostic an operator pastes into an issue (B7/response-readiness disclosure, DoS) | agentusage/definitions.go, `maxDefinitionsBytes` 287, `readCapped` 468, `defsErr` 324, `redactedError` 311; cmd/toktop/main.go, `warnUnknownUsageKeys` and the startup line that prints it; tests agentusage/definitions_test.go |
 | M42: The release prerequisites are serialized. `.NOTPARALLEL: release` orders check-changelog, check-release-source, sbom and checksums, `checksums` depends on `sbom` rather than racing it, and `buildinfo` takes `dist-clean` as a prerequisite rather than a sibling, so `dist-clean` cannot delete binaries that `test-dist` is writing and the checksums glob cannot miss an SBOM that has not been written yet. `make release-verify` is the outer check that the published asset list matches `PLATFORMS` and re-verifies each download against the release's own `checksums.txt` | a `make -j release` publishing a `checksums.txt` that covers fewer files than the release ships, leaving an asset (the SBOM above all) with nothing to verify it against, against the same trust anchor as summary risk 3 (B5 tampering) | Makefile, `.NOTPARALLEL: release`, `checksums`, `buildinfo`, `release-verify` |
-| M44: A definitions file key this build cannot read is reported, and a home that cannot place an absolute store names none. `unknownUsageKeys` reads the file a second time for the keys its usage block does not decode, so a misspelled `roots` is named at startup instead of leaving the agent with no store (`agentusage.UnknownUsageKeys`, `cmd/toktop` `warnUnknownUsageKeys`); the load still succeeds, since the file is gauntlet's and a newer gauntlet can name a key this build does not read. `agentusage.HomeDir` accepts `os.UserHomeDir` only when absolute, so a relative or unset `$HOME` yields no built-in store rather than one under the working directory (`agentusage/registry.go`, `home`, `DefinitionsPath`, `kimiStore`; `internal/remote/knownhosts.go`, `defaultKnownHostsPath`); the same absolute-only rule gates the four variables that relocate a store from the environment (`GAUNTLET_HOME`, `KIMI_CODE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`; `agentusage/kimi.go`, 83, `kimiStore`, is the last of the four), and `warnIgnoredUserHome` names it when `GAUNTLET_HOME` placed the definitions file and the run continued. An unread usage key and an unusable home both read as agents that used no tokens, which is what an agent nobody defined also looks like |
+| M44: A definitions file key this build cannot read is reported, and a home that cannot place an absolute store names none. `unknownUsageKeys` reads the file a second time for the keys its usage block does not decode, so a misspelled `roots` is named at startup instead of leaving the agent with no store (`agentusage.UnknownUsageKeys`, `cmd/toktop` `warnUnknownUsageKeys`); the load still succeeds, since the file is gauntlet's and a newer gauntlet can name a key this build does not read. `agentusage.HomeDir` accepts `os.UserHomeDir` only when absolute, so a relative or unset `$HOME` yields no built-in store rather than one under the working directory (`agentusage/registry.go`, `home`, `DefinitionsPath`, `kimiStore`; `internal/remote/knownhosts.go`, `defaultKnownHostsPath`); the same absolute-only rule gates the four variables that relocate a store from the environment (`GAUNTLET_HOME`, `KIMI_CODE_HOME`, `XDG_CONFIG_HOME`, `XDG_DATA_HOME`; `kimiStore` at agentusage/kimi.go, 82, is the last of the four), and `warnIgnoredUserHome` names it when `GAUNTLET_HOME` placed the definitions file and the run continued. An unread usage key and an unusable home both read as agents that used no tokens, which is what an agent nobody defined also looks like | a misspelled key in the one file an operator hand-writes leaving an agent permanently reporting zero tokens, and a relative or unset home silently resolving a built-in store under the working directory (B6/B7 tampering, disclosure) | agentusage/definitions.go, `UnknownUsageKeys` 145, `DefinitionsPath` 494; cmd/toktop/main.go, `warnUnknownUsageKeys` 816; cmd/toktop/validate.go, `warnIgnoredUserHome` 157; agentusage/registry.go, `HomeDir` 480; agentusage/kimi.go, `kimiStore` 82; internal/remote/knownhosts.go, `defaultKnownHostsPath` 40 |
+| M45: Host guard on the loopback ingest endpoint. `loopbackHostGuard` (internal/ingest/server.go, 155) is built in `newServer` from the listener's own address and refuses any `Host` that is not a loopback address, `localhost`, or a name under the reserved `.localhost` suffix, folded ASCII over NFC through `core.FoldASCII` so a U+212A in the name cannot satisfy a compare the operator never wrote. It is nil for a listener bound to a routable or wildcard address, where the host is whatever the operator's peers call the box and no allowlist is right, and a `Server` built as a literal skips it. The check runs in `wrap` ahead of the routing table and ahead of the method guard, so a rebound request learns nothing about what the endpoint serves: the 404's endpoint list and the 405's `Allow` header are both downstream of it, and `/healthz` is covered along with the POST route | DNS rebinding against the default loopback bind: a page that resolves its own name to 127.0.0.1 for one fetch is same-origin with this endpoint, so it sends no `Origin` and M21 never fires, while the `Host` header it does carry names the attacker's own domain; forging rows from any visited page, and learning the served route table from the 404/405 (B1 spoofing, information disclosure) | internal/ingest/server.go, `loopbackHostGuard` 155, the guard in `wrap` 229, the refusal line at 231; tests internal/ingest/server_test.go, `TestIngestRejectsReboundHost`, `TestIngestAcceptsLoopbackHostNames`, `TestIngestSkipsHostGuardOffLoopback`; fuzz target internal/ingest/fuzz_test.go |
+| M46: The recovered panic value and its stack are the two audit payloads in the ingest package that reach the line untrimmed, so both are folded before they are logged: the panic text through `core.RedactHome` over `core.Snippet` (server.go, 218, the `recover` branch of `wrap`) and the stack through `core.RedactHome` inside the `logcfg.Field` cap (the `debug.Stack` argument on the same call). M35's home fold covered the fields this process authors; this is the one place it quotes text it did not | a panic raised while holding a sender-authored event field carrying whatever the sender wrote, and a stack frame naming the build's file paths, both landing in the stderr the operator pastes into a bug report (B1 disclosure, response readiness) | internal/ingest/server.go, the `recover` branch of `wrap`, 217-218; covered by M35's handler and the `logcfg.Field` cap |
 
 Documentation claims checked against code on 2026-09-28. What this pass
 found is in the header; the list below is what holds as written, so the next
@@ -864,6 +889,20 @@ Corrections are made in place and the wrong version is deleted, never
 appended: a diary of past drift is a fourth thing to keep current, and it
 reads as a claim about the code when it is not one.
 
+- The loopback `Host` guard holds as written (M45). `loopbackHostGuard`
+  is nil for a wildcard or routable listener, since a `*net.TCPAddr` with a
+  nil IP is not `IsLoopback` and that bind is already the state the startup
+  warning names; the check runs in `wrap` ahead of both the 404 and the 405,
+  so a refused request learns nothing about the route table; and the accepted
+  name forms are the loopback address, `localhost`, and any `.localhost`
+  suffix, folded ASCII over NFC. Pinned by
+  `TestIngestRejectsReboundHost`, `TestIngestAcceptsLoopbackHostNames`,
+  `TestIngestSkipsHostGuardOffLoopback`, and the ingest fuzz target.
+- The recovered panic value and its stack are folded (M46). Both audit
+  payloads on the `recover` branch of `wrap` now pass through
+  `core.RedactHome`, the message additionally through `core.Snippet`, which
+  is the only place in this package that quotes text the process did not
+  author onto the line an operator pastes into an issue.
 - The audit stream no longer carries the ssh account. The asset section, M35
   and the response-readiness list were written against `user@host` on the
   `target` attribute; `Target.LogHost` (internal/remote/target.go, 166) is
@@ -883,7 +922,13 @@ reads as a claim about the code when it is not one.
 - The line citations in the Makefile, the ingest server and the audit
   sites were re-anchored this pass; several had moved without any
   behavior changing underneath them, which is the case the symbol rule
-  below exists for.
+  below exists for. `internal/ingest/server.go` has since joined
+  `site/worker.js` and the `Makefile` on the symbol rule: three commits
+  touched it in one day and every line citation this file held for it
+  moved, so its references now name `ingestEndpoints`, `newServer`,
+  `loopbackHostGuard`, `eventSlots`, `maxInFlightEvents`, `stallReason`,
+  `handleHealth`, `progressBody`, `setSecurityHeaders`, `maxHeaderBytes`,
+  `logRequest` and `nowMu` rather than a line.
 - The B1 denial-of-service threat and gap 5 are written against the
   process-wide cap (`maxInFlightEvents` 64, M30): a flood of stalled local
   POSTs is refused at the 65th, not merely bounded at the 1-minute reap. The
@@ -974,7 +1019,7 @@ Other claims checked against code on this pass, all of which hold as written:
   agy, clanker, and the built-in pi, prime-agent, and feynman definitions
   (agentusage/registry.go, 93-121; agentusage/claude.go, 15; codex.go, 31).
 - The ingest route registers GET and HEAD on `/healthz`
-  (internal/ingest/server.go, `ingestEndpoints`, 279, and the 405 `Allow`
+  (internal/ingest/server.go, the `ingestEndpoints` table and the 405 `Allow`
   header written by the shared method guard); the `help` and `version` subcommands take arbitrary
   trailing arguments (cmd/toktop/main.go, 55-76).
 - `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are honored only when absolute. A
@@ -996,8 +1041,8 @@ Other claims checked against code on this pass, all of which hold as written:
 - SECURITY.md states there is no dedicated disclosure contact and no
   supported-version matrix, and that `toktop update` fetches the latest
   release. That matches selfupdate.go: `Check` always hits
-  `/releases/latest` (239), the named repo defaults to `maci0/toktop`
-  (`DefaultRepo`, 44), and `NewerThan` is exact-tag inequality (286), so there is
+  `/releases/latest` (237), the named repo defaults to `maci0/toktop`
+  (`DefaultRepo`, 44), and `NewerThan` is exact-tag inequality (282), so there is
   no channel of old majors to support. It invents no reporting SLA, and its
   link to this file resolves.
 
@@ -1014,8 +1059,11 @@ high-impact threats alone.
 
 1. **Dashboard poisoning.** A hostile local process (or LAN peer after an
    `--ingest 0.0.0.0` start) POSTs NDJSON naming agent "claude" with huge
-   token rates and a plausible note; a browser cannot do this (M21) but any
-   script or agent on the host can, without authenticating. Enabling path:
+   token rates and a plausible note; a browser cannot do this on the default
+   bind (M21 refuses the `Origin` it must send cross-origin, M45 refuses the
+   attacker's own name in the `Host` a rebinding fetch still carries) but any
+   script or agent on the host can, without authenticating, by addressing the
+   endpoint under its loopback `Host` and sending no `Origin` at all. Enabling path:
    ingest handlePost -> collector.RecordAgent (collector.go) -> UI
    agents feed. The operator's view of "which agent is burning tokens" is now
    attacker-chosen; nothing distinguishes forged rows from agentwatch-sourced
@@ -1062,9 +1110,12 @@ Recorded as threats with locations; fixes do not happen in this document:
 
 1. **No origin authentication on ingest** (risk 1, Medium): server.go.
    The routable-bind case is at least announced now (main.go) and the
-   browser sender class is refused (M21); every non-browser local process
-   still forges rows unchallenged, and a hostile script can simply omit
-   `Origin`.
+   browser sender classes are refused rather than trusted: the cross-origin
+   one by M21's 403 on `Origin`, and the rebinding one by M45's `Host` guard,
+   which is the one M21 structurally cannot see. Every non-browser local
+   process still forges rows unchallenged, and a hostile script can simply
+   omit `Origin` and address the endpoint by its loopback `Host`, which is
+   the accepted form.
 2. **TOFU first-contact acceptance** (risk 2, Medium): inherent design
    tradeoff, documented in README; candidate improvements (verification
    prompt, SSHFP/known_hosts import) belong to sec-review.
@@ -1081,7 +1132,7 @@ Recorded as threats with locations; fixes do not happen in this document:
    sec-review.
 5. **Ingest slots are a count, not a per-peer quota** (Low): the endpoint
    refuses more than `maxInFlightEvents` 64 concurrent POST
-   bodies and advertises `Retry-After` (M30, server.go, `maxInFlightEvents` 438, `eventSlots` 444),
+   bodies and advertises `Retry-After` (M30, server.go, `maxInFlightEvents` and `eventSlots`),
    so a flood is refused rather than absorbed. What the cap does not carry is
    a sender identity: one local process can hold every slot, and the 65th honest sender
    is refused alongside it. Per-peer attribution needs a peer notion this
@@ -1160,14 +1211,14 @@ Recorded as threats with locations; fixes do not happen in this document:
   and the same floor, `TOKTOP_LOG_LEVEL` (internal/logcfg), so the floor
   moves for all of them at once and none of them is silent because its own
   endpoint is off:
-  - the ingest server (`logcfg.Logger()` at internal/ingest/server.go, 68):
+  - the ingest server (`logcfg.Logger()` in `Serve`, internal/ingest/server.go):
     POST /v1/events, 404/405, and recovered handler panics. Default info
     includes successful POSTs; warn/error suppress them, and error also
     suppresses 4xx rejections. Successful health checks are not logged
     (server.go). Request ids can be supplied by callers (server.go), so they
     provide correlation, not sender identity. A body that trips a deadline
     names which bound it broke, in the 408 body rather than a log line
-    (M30, `stallReason` server.go, 526), so an operator can
+    (M30, `stallReason` in server.go), so an operator can
     tell a peer that stopped sending from one whose stream outlived the
     10-minute bound without reading the source for which branch fired.
   - the ssh client (`var audit = logcfg.Logger`, internal/remote/client.go,
@@ -1247,10 +1298,14 @@ Recorded as threats with locations; fixes do not happen in this document:
 - Every entry point, boundary, and mitigation line keeps its file reference so
   the next pass can diff claims against code mechanically.
 - A reference into a file that changes often names the symbol, the branch, or
-  the make target, not a line. That rule now covers `Makefile` and
-  `site/worker.js` as well as the Go files it was written for: both carry
-  hundreds of lines that no review touches, and a line number there reads as
-  a claim about the code when it is only a claim about where the code was.
+  the make target, not a line. That rule now covers `Makefile`,
+  `site/worker.js`, and `internal/ingest/server.go` as well as the Go files
+  it was written for: each carries hundreds of lines that no review touches,
+  and a line number there reads as a claim about the code when it is only a
+  claim about where the code was. A line number is kept only where the
+  reference is to a single short declaration in a file that is not churning
+  (an `M` row naming one constant), and a symbol is named alongside it
+  there too.
 - A reference into a file that changes often names the symbol as well as the
   line. `site/worker.js` is just under a thousand lines and every citation
   in this file moved
