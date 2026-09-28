@@ -678,15 +678,18 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			// A replayed stream decodes every line and records none, so naming
 			// the decoded count "recorded" would send a sender looking for
 			// events the feed never had.
+			// One event reads in the singular, and the two branches differ only
+			// in what the feed took: a replayed id decodes but is not recorded,
+			// so that count is reported as received, not recorded.
+			noun, verb := "events", "were"
+			if res.decoded == 1 {
+				noun, verb = "event", "was"
+			}
 			if res.stored == res.decoded {
-				if res.decoded == 1 {
-					msg += "; 1 earlier event in this stream was recorded"
-				} else {
-					msg += fmt.Sprintf("; %d earlier events in this stream were recorded", res.decoded)
-				}
+				msg += fmt.Sprintf("; %d earlier %s in this stream %s recorded", res.decoded, noun, verb)
 			} else {
-				msg += fmt.Sprintf("; %d earlier events in this stream were received, %d recorded",
-					res.decoded, res.stored)
+				msg += fmt.Sprintf("; %d earlier %s in this stream %s received, %d recorded",
+					res.decoded, noun, verb, res.stored)
 			}
 			// Resuming with the remaining lines is right only when the kept
 			// events carry no derived id. A derived id is the POST key plus

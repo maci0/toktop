@@ -614,15 +614,19 @@ type openaiChunk struct {
 }
 
 // openaiFrame pulls a JSON payload out of one stream line. SSE `data:` is
-// the OpenAI shape; a bare `{...}` line is what some proxies emit instead.
+// the OpenAI shape; a bare `{...}` line is what some proxies emit instead. A
+// data field with nothing after it carries no payload, so it is not a frame:
+// reporting one would hand the caller an empty string, which it decodes and
+// fails the whole probe over.
 func openaiFrame(line string) (payload string, ok bool) {
 	if strings.HasPrefix(line, "data:") {
-		return strings.TrimSpace(strings.TrimPrefix(line, "data:")), true
+		payload = strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+	} else if strings.HasPrefix(line, "{") {
+		payload = line
+	} else {
+		return "", false
 	}
-	if strings.HasPrefix(line, "{") {
-		return line, true
-	}
-	return "", false
+	return payload, payload != ""
 }
 
 // jsonNotStream reports whether a Content-Type names a plain JSON body rather

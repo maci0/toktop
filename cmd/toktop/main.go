@@ -404,14 +404,17 @@ func runMain() int {
 	}
 
 	if f.once {
-		if code := runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain, f.jsonOut); code != 0 {
-			return code
-		}
-		return 0
+		return runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain, f.jsonOut)
 	}
 
 	return runTUI(ctx, cfg, ch, !f.noReload)
 }
+
+// reloadPoll is how often the hot-reload watcher stats the executable. A dev
+// rebuild finishes well inside a second, and the check is one stat, so a short
+// poll is what makes the new build land while the operator is still looking at
+// the old one.
+const reloadPoll = 400 * time.Millisecond
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the
 // executable on disk is rebuilt (dev hot-reload). It returns the process exit
@@ -434,7 +437,7 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 			// Closed once the program exists so a rebuild during NewProgram
 			// still Quits instead of seeing current == nil and giving up.
 			ready = make(chan struct{})
-			go selfreload.Watch(wctx, self, 400*time.Millisecond, func() {
+			go selfreload.Watch(wctx, self, reloadPoll, func() {
 				reloaded.Store(true)
 				select {
 				case <-ready:
@@ -528,6 +531,24 @@ func waitForFrames(ctx context.Context, ch <-chan core.Snapshot, n int, wait tim
 	return snap, nil
 }
 
+// frameColumnsDefault and frameLinesDefault are the --once frame size used
+// when stdout is not a terminal. The help screen prints the same two numbers
+// as the fallback it promises, so they are named here rather than spelled in
+// both places.
+const (
+	frameColumnsDefault = 120
+	frameLinesDefault   = 38
+)
+
+// onceWaitFloor and onceWaitPolls bound how long --once waits for each
+// snapshot. Snapshots land one poll interval apart, so a slow-polling host
+// needs a proportionally patient wait: a fixed cap would abort a healthy
+// --interval 10s run before its second frame ever arrives.
+const (
+	onceWaitFloor = 5 * time.Second
+	onceWaitPolls = 3
+)
+
 // runOnce prints a single rendered frame sized to the terminal (or 120x38).
 // TOKTOP_COLUMNS / TOKTOP_LINES override detection (useful for capture);
 // validateOnceEnv rejected unusable values before this runs. With plain, the
@@ -542,7 +563,7 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 	// why validateOnceEnv and warnIgnoredFrameEnv both leave them alone in
 	// those two modes. Reading them here anyway would size a value nothing
 	// consumes.
-	w, h := 120, 38
+	w, h := frameColumnsDefault, frameLinesDefault
 	if !plain && !jsonOut {
 		if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= frameColumnsMin && th >= frameLinesMin {
 			w, h = min(tw, frameColumnsMax), min(th, frameLinesMax)
@@ -554,10 +575,7 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 			h = v
 		}
 	}
-	// Snapshots land one poll interval apart, so a slow-polling host needs a
-	// proportionally patient wait: a fixed cap would abort a healthy
-	// --interval 10s run before its second frame ever arrives.
-	wait := max(5*time.Second, 3*cfg.PollEvery)
+	wait := max(onceWaitFloor, onceWaitPolls*cfg.PollEvery)
 	snap, err := waitForFrames(ctx, ch, n, wait)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)

@@ -256,9 +256,9 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	user := t.userOr(currentUser())
+	login := t.userOr(currentUser())
 	cfg := &ssh.ClientConfig{
-		User:            user,
+		User:            login,
 		Auth:            methods,
 		HostKeyCallback: hk,
 	}
@@ -296,7 +296,7 @@ func dial(ctx context.Context, t Target) (*Client, error) {
 		cc.Close()
 		return nil, fmt.Errorf("ssh %s: %w", t.UserHost(), err)
 	}
-	c := &Client{Target: t, user: user, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
+	c := &Client{Target: t, user: login, conn: ssh.NewClient(cc, chans, reqs), closed: make(chan struct{}),
 		keepaliveDone: make(chan struct{}), connectedAt: time.Now(),
 		relays: map[net.Conn]struct{}{}, relayActive: make(chan struct{}, maxConcurrentRelays)}
 	go c.watchClose()
@@ -655,6 +655,11 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 	}
 	var lastErr error
 	seen := make(map[int]bool, len(rports))
+	// claimed is keyed by the local port claimed for a forward, which is the
+	// key listenEphemeralAvoiding reads. out is keyed by the remote port, so
+	// passing out would reserve nothing and let two forwards share a local
+	// port.
+	claimed := make(map[int]int, len(rports))
 	for _, rp := range rports {
 		if seen[rp] {
 			continue // a duplicate would bind a second listener no map entry reaches
@@ -662,9 +667,10 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 		seen[rp] = true
 		if local, ok := c.forwards[rp]; ok {
 			out[rp] = local
+			claimed[local] = rp
 			continue
 		}
-		l, err := listenEphemeralAvoiding(rports, out)
+		l, err := listenEphemeralAvoiding(rports, claimed)
 		if err != nil {
 			lastErr = err
 			continue
@@ -675,6 +681,7 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 		local := l.Addr().(*net.TCPAddr).Port
 		c.forwards[rp] = local
 		out[rp] = local
+		claimed[local] = rp
 		c.listeners = append(c.listeners, l)
 		go c.relay(l, rp)
 	}
@@ -692,6 +699,11 @@ func (c *Client) Forward(rports []int) (map[int]int, error) {
 // ephemeral range overlaps the ports an inference host serves on, so an
 // unchecked bind can return (say) 45000 for the 40000 forward and silently
 // point one engine at another's relay. Rebind until the pick is clear.
+//
+// taken is keyed by the local port already claimed, valued with the remote
+// port it is bound to: the check is against the port just handed back by the
+// kernel, so a map keyed the other way round reads as a set of remote ports
+// and reserves nothing.
 func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, error) {
 	for range forwardBindAttempts {
 		l, err := net.Listen("tcp", "127.0.0.1:0")

@@ -635,25 +635,26 @@ func logChanges(changes []healthChange, level slog.Level, msg, heldKey string) {
 // dropped with no line of its own, and its sender-side answer (stored under
 // accepted) is the one an ordinary replay also gets, so the agent list goes
 // empty with nothing on it that says why. The first line names the run; the
-// second names its end, when an event was retained again.
+// second names its end, when an event was retained again. The run's length is
+// on the second line, the one that closes it: the opening line is written
+// while the run is still going and has no end to measure yet.
 func logWindowRefusals(run windowRun) {
 	if run.empty() {
 		return
 	}
 	lg := audit()
 	if run.refused > 0 {
-		attrs := []any{
+		lg.Warn("toktop: agent events refused",
 			"agent", logcfg.Field(run.agent, core.AgentNameMax),
 			"refused", run.refused,
-			"reason", "older than the retained agent window",
-		}
+			"reason", "older than the retained agent window")
+	}
+	if run.recovered {
+		attrs := []any{"agent", logcfg.Field(run.back, core.AgentNameMax)}
 		if run.lostFor > 0 {
 			attrs = append(attrs, "down_for", run.lostFor)
 		}
-		lg.Warn("toktop: agent events refused", attrs...)
-	}
-	if run.recovered {
-		lg.Info("toktop: agent events stored again", "agent", logcfg.Field(run.back, core.AgentNameMax))
+		lg.Info("toktop: agent events stored again", attrs...)
 	}
 }
 

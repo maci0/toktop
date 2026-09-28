@@ -594,14 +594,14 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 	for {
 		select {
 		case <-ctx.Done():
-			w.poll(onChange) // one last read, so the tail of a run is not lost
-			return
 		case <-t.C:
-			if ctx.Err() != nil {
-				w.poll(onChange)
-				return
-			}
-			w.poll(onChange)
+		}
+		// The cancel branch reads once more, so the tail of a run is not lost.
+		// A tick that wins the race against the cancel is decided here rather
+		// than by a second copy of the same exit.
+		w.poll(onChange)
+		if ctx.Err() != nil {
+			return
 		}
 	}
 }

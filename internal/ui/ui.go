@@ -244,42 +244,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		key := msg.String()
-		// Help is a full-screen replacement view: action keys must not act
-		// blind on the dashboard it covers (space silently paused mid-read,
-		// p fired real probe generations). Only the dismiss, toggle and scroll
-		// keys stay live while help is up.
 		if m.help {
-			switch key {
-			case "q", "Q", "ctrl+c", "esc", "?", "h", "H", "enter":
-				m.help = false
-				m.helpScroll = 0
-				return m, nil
-			case "up", "ctrl+p":
-				m.helpScroll = max(m.helpScroll-1, 0)
-				return m, nil
-			case "down", "ctrl+n":
-				m.helpScroll = min(m.helpScroll+1, m.helpScrollMax())
-				return m, nil
-			// Page keys move a window, not a row: on the pane that needs
-			// scrolling at all, a row at a time is dozens of presses to reach
-			// the flag list, and each press looks like the key was dropped.
-			case "pgup":
-				m.helpScroll = max(m.helpScroll-m.helpWindow(), 0)
-				return m, nil
-			case "pgdown":
-				m.helpScroll = min(m.helpScroll+m.helpWindow(), m.helpScrollMax())
-				return m, nil
-			// The ends are a jump, because the flags at the bottom of the list
-			// are what a reader who had to scroll opened the box for.
-			case "home":
-				m.helpScroll = 0
-				return m, nil
-			case "end":
-				m.helpScroll = m.helpScrollMax()
-				return m, nil
-			default:
-				return m, nil
-			}
+			return m.updateHelpKey(key), nil
 		}
 		switch key {
 		case "q", "Q", "ctrl+c":
@@ -359,6 +325,37 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// updateHelpKey folds one keypress into the open help box. Help is a
+// full-screen replacement view: action keys must not act blind on the
+// dashboard it covers (space silently paused mid-read, p fired real probe
+// generations), so every key ends here, and only the dismiss, toggle and
+// scroll keys are live.
+func (m Model) updateHelpKey(key string) Model {
+	switch key {
+	case "q", "Q", "ctrl+c", "esc", "?", "h", "H", "enter":
+		m.help = false
+		m.helpScroll = 0
+	case "up", "ctrl+p":
+		m.helpScroll = max(m.helpScroll-1, 0)
+	case "down", "ctrl+n":
+		m.helpScroll = min(m.helpScroll+1, m.helpScrollMax())
+	// Page keys move a window, not a row: on the pane that needs
+	// scrolling at all, a row at a time is dozens of presses to reach
+	// the flag list, and each press looks like the key was dropped.
+	case "pgup":
+		m.helpScroll = max(m.helpScroll-m.helpWindow(), 0)
+	case "pgdown":
+		m.helpScroll = min(m.helpScroll+m.helpWindow(), m.helpScrollMax())
+	// The ends are a jump, because the flags at the bottom of the list
+	// are what a reader who had to scroll opened the box for.
+	case "home":
+		m.helpScroll = 0
+	case "end":
+		m.helpScroll = m.helpScrollMax()
+	}
+	return m
 }
 
 // --- view ------------------------------------------------------------------

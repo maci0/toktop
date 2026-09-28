@@ -493,8 +493,8 @@ const countedCap = 512
 // stamp recorded. Oldest first, since the transcript least likely to be
 // appended to is the one whose remaining growth is cheapest to lose.
 type aged struct {
-	path   string
-	mtimeN int64
+	path       string
+	mtimeNanos int64
 }
 
 // trimCounted releases the bookkeeping of the least recently written counted
@@ -521,7 +521,7 @@ func (w *Watcher) trimCounted(inWalk map[string]struct{}, live int) {
 		if _, ok := inWalk[path]; ok {
 			continue
 		}
-		cut = append(cut, aged{path: path, mtimeN: w.stamps[path].mtimeNanos})
+		cut = append(cut, aged{path: path, mtimeNanos: w.stamps[path].mtimeNanos})
 	}
 	room := countedCap - live
 	if room < 0 {
@@ -530,7 +530,7 @@ func (w *Watcher) trimCounted(inWalk map[string]struct{}, live int) {
 	if len(cut) <= room {
 		return
 	}
-	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeN, b.mtimeN) })
+	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeNanos, b.mtimeNanos) })
 	for _, a := range cut[:len(cut)-room] {
 		w.releaseOffset(a.path)
 	}
@@ -574,12 +574,12 @@ func (w *Watcher) trimOwned(inWalk map[string]struct{}) {
 		if _, counted := w.seen[path]; counted {
 			continue
 		}
-		cut = append(cut, aged{path: path, mtimeN: w.stamps[path].mtimeNanos})
+		cut = append(cut, aged{path: path, mtimeNanos: w.stamps[path].mtimeNanos})
 	}
 	if len(cut) <= stateCap {
 		return
 	}
-	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeN, b.mtimeN) })
+	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeNanos, b.mtimeNanos) })
 	for _, a := range cut[:len(cut)-stateCap] {
 		w.dropFile(a.path)
 	}
