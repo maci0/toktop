@@ -15,6 +15,7 @@ else.
 | ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts` (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
 | a copy of the store, refreshed by every write | the same path plus `.bak` (`writeBackup`) | `writeBackup` |
 | the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`) | `replaceFile` |
+| the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
 | the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/selfupdate.go`, `installDisplacing`) | `installDisplacing` |
 | the installed binary | the running executable's own path | `install` |
 
@@ -79,6 +80,34 @@ once and judging the fingerprint printed at first use, or restore the
 directory from whatever backs it up. Deleting the store is a deliberate
 way to do exactly that: a missing store with no copy beside it reads as an
 empty one, so the next connect pins each host again and says so on stderr.
+
+## Restoring a store that is present but damaged
+
+A missing store is read back from a copy on its own, so it needs no `cp`. A
+store that is *there* and does not parse is the other case, and toktop refuses
+it rather than reading a copy in its place: a copy predating the last write is
+missing pins, and standing those in silently re-trusts every host they
+covered. The refusal is the connect failing, with an error naming the line it
+could not read.
+
+The error also names the copy that does parse, and the command to put it back,
+so the repair is the `cp` above against the file it names:
+
+```sh
+cp ~/.config/toktop/known_hosts.bak ~/.config/toktop/known_hosts
+```
+
+Read the copy first if the store was hand-edited to something worth keeping,
+since the copy is the store as of the last write and carries no hand edit.
+A copy that does not parse is not named, because restoring it leaves a store
+toktop refuses the same way. The only other way out is deletion: a store
+removed on purpose re-pins on the next connect, at the cost of judging every
+fingerprint again.
+
+`TestReadKnownHostsNamesTheCopyToRestoreFrom` and
+`TestReadKnownHostsDoesNotNameADamagedCopy` in
+`internal/remote/remote_test.go` pin both halves, so a hint that starts
+naming a copy toktop would refuse fails there.
 
 ## Verifying a restore
 

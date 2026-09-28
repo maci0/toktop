@@ -270,6 +270,13 @@ func tofu() (ssh.HostKeyCallback, error) {
 //
 // The same host repeated verbatim is a no-op, not an error: re-running a
 // migration that concatenated the file must not brick the store.
+//
+// A file that does not parse is still refused rather than replaced by a copy
+// that does: a copy predating the last write is missing pins, and reading it
+// in place of a damaged store would re-trust every host the missing pins
+// covered. The error names a copy that parses, because a damaged store is the
+// one loss the operator repairs by copying a file back, and naming the
+// unbroken one is what turns the refusal into a repair.
 func readKnownHosts(path string) (map[string]string, error) {
 	for _, candidate := range append([]string{path}, copiesByRecency(path)...) {
 		b, err := os.ReadFile(candidate)
@@ -279,9 +286,44 @@ func readKnownHosts(path string) (map[string]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		return parseKnownHosts(candidate, b)
+		store, err := parseKnownHosts(candidate, b)
+		if err != nil {
+			return nil, withRecoveryHint(err, path)
+		}
+		return store, nil
 	}
 	return map[string]string{}, nil
+}
+
+// withRecoveryHint appends the copy of the store that still parses to a read
+// that refused the store, and the one command that puts it back. The error is
+// wrapped rather than replaced, so the record that could not be read stays the
+// part an operator reads first.
+func withRecoveryHint(err error, path string) error {
+	copy, ok := freshestParsedCopy(path)
+	if !ok {
+		return err
+	}
+	return fmt.Errorf("%w; %s still parses, so the pins this file held can be restored with: cp %s %s",
+		err, copy, copy, path)
+}
+
+// freshestParsedCopy returns the copy beside the store that a read would
+// accept, in the order a read would try them, and false when none of them
+// parses. A copy that is missing, unreadable, or damaged is not named: the
+// hint is a command an operator is meant to run, and one that restores a file
+// toktop would then refuse is worse than no hint.
+func freshestParsedCopy(path string) (string, bool) {
+	for _, candidate := range copiesByRecency(path) {
+		b, rerr := os.ReadFile(candidate)
+		if rerr != nil {
+			continue
+		}
+		if _, perr := parseKnownHosts(candidate, b); perr == nil {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 // parseKnownHosts turns store bytes into pins, naming path in every error so

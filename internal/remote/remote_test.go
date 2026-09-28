@@ -1321,6 +1321,80 @@ func TestReadKnownHostsRejectsBackupWithNoRecords(t *testing.T) {
 	}
 }
 
+// A damaged store is refused rather than replaced by a copy that parses, since
+// a copy predating the last write is missing pins and reading it in place of
+// the store would re-trust every host those pins covered. The refusal still
+// has to say where the pins are: a store damaged by a hand edit or a tail the
+// filesystem lost is the one loss an operator repairs by copying a file back,
+// and an error naming only the broken line leaves the copy beside it unnamed.
+func TestReadKnownHostsNamesTheCopyToRestoreFrom(t *testing.T) {
+	withKnownHosts(t)
+	path := knownHostsPath()
+	key := fakePublicKey("remembered")
+	line := "h:22 " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(key)))
+	if err := writeKnownHosts(path, map[string]string{"h:22": line}); err != nil {
+		t.Fatal(err)
+	}
+	// A tail the filesystem lost: the last record keeps its host field and
+	// nothing else.
+	if err := os.WriteFile(path, []byte("h:22 \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := readKnownHosts(path)
+	if err == nil {
+		t.Fatal("readKnownHosts accepted a store whose record cannot be parsed")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, backupPath(path)) {
+		t.Errorf("error should name the copy that parses, got: %v", err)
+	}
+	if !strings.Contains(msg, "cp "+backupPath(path)+" "+path) {
+		t.Errorf("error should carry the command that puts the copy back, got: %v", err)
+	}
+	// The refusal stands: the pins in the copy are not read in place of the
+	// store until the operator copies them there.
+	if _, err := os.Stat(backupPath(path)); err != nil {
+		t.Errorf("the refused read must leave the copy alone: %v", err)
+	}
+	store, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(store) != "h:22 \n" {
+		t.Errorf("the refused read must leave the store alone, got: %q", store)
+	}
+
+	// A connect is where the operator meets it, so the hint has to survive
+	// the way the run actually fails rather than only the read underneath it.
+	if _, err := tofu(); err == nil {
+		t.Fatal("a connect accepted a store whose record cannot be parsed")
+	} else if !strings.Contains(err.Error(), "cp "+backupPath(path)+" "+path) {
+		t.Errorf("the connect error should carry the repair, got: %v", err)
+	}
+}
+
+// A hint has to name a copy toktop would then accept. A copy that is itself
+// damaged restores a file the next read refuses, which leaves the operator
+// with a store they cannot use and an error that pointed them at it.
+func TestReadKnownHostsDoesNotNameADamagedCopy(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_hosts")
+	if err := os.WriteFile(path, []byte("h:22 not-a-key\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(backupPath(path), []byte("\n \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := readKnownHosts(path)
+	if err == nil {
+		t.Fatal("readKnownHosts accepted a store whose record cannot be parsed")
+	}
+	if strings.Contains(err.Error(), backupPath(path)) {
+		t.Errorf("error names a copy that does not parse, got: %v", err)
+	}
+}
+
 // A store that never existed has no copy either, and must keep reading as
 // empty: that is the one absence that means "no pins yet".
 func TestReadKnownHostsWithNoStoreOrCopy(t *testing.T) {
