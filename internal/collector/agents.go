@@ -6,6 +6,7 @@ import (
 	"golang.org/x/text/unicode/norm"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // The agent event feed: what RecordAgent retains, and the clock-offset ledger
@@ -130,6 +131,33 @@ func (c *Collector) drainWindowRefusals() windowRun {
 	c.windowLost, c.windowAgent = time.Time{}, ""
 	c.windowRecovered, c.windowLogged = "", false
 	return run
+}
+
+// logWindowRefusals writes the pair of lines one run of window refusals
+// produces. A sender whose events all sort behind the retained window is
+// dropped with no line of its own, and its sender-side answer (stored under
+// accepted) is the one an ordinary replay also gets, so the agent list goes
+// empty with nothing on it that says why. The first line names the run; the
+// second names its end, when an event was retained again.
+func logWindowRefusals(run windowRun) {
+	if run.empty() {
+		return
+	}
+	lg := audit()
+	if run.refused > 0 {
+		attrs := []any{
+			"agent", logcfg.Field(run.agent, core.AgentNameMax),
+			"refused", run.refused,
+			"reason", "older than the retained agent window",
+		}
+		if run.lostFor > 0 {
+			attrs = append(attrs, "down_for", run.lostFor)
+		}
+		lg.Warn("toktop: agent events refused", attrs...)
+	}
+	if run.recovered {
+		lg.Info("toktop: agent events stored again", "agent", logcfg.Field(run.back, core.AgentNameMax))
+	}
 }
 
 // RecordAgent stores an agent event (called from the ingest server) and

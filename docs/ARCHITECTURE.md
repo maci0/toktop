@@ -39,7 +39,11 @@ alongside them would be a layer importing sideways into itself.
 - `internal/bearer`: one process-wide optional `Bearer` token for gateways
   that require an API key.
 - `internal/collector`: polls providers on an interval, derives rates, and is
-  the `core.AgentRecorder` that posted events land on.
+  the `core.AgentRecorder` that posted events land on. One concern per file:
+  `collector.go` is the poll loop and the snapshot it builds, `host.go` the
+  vitals and process-table pollers, `rates.go` the counter baselines and
+  history rings, `health.go` one engine's entry and its outage latches,
+  `agents.go` the agent event feed, `probe.go` the probe wave.
 - `internal/core`: `Snapshot` and everything in it, plus generic sorted-ring
   helpers (`AppendSorted`, `AppendRetained`) and the `Tick`
   cadence every poller uses.
@@ -64,7 +68,11 @@ alongside them would be a layer importing sideways into itself.
   above every tier instead of inside `cmd/toktop`, where a reader looking for
   how a run starts would have found the supply-chain gate first.
 - `internal/remote`: attaches to engines on other hosts over one ssh
-  connection, with known-hosts checking and a relayed host-stats sampler.
+  connection, with known-hosts checking and a relayed host-stats sampler. One
+  concern per file: `client.go` is the connection and its keepalive, `session.go`
+  the command sessions, `forward.go` the local listeners piping remote ports,
+  `knownhosts.go` the host-key store, `target.go` the target spelling,
+  `discover.go` and `stats.go` the two samplers.
 - `internal/selfreload`: watches the running executable for a rebuild and
   signals the process to restart.
 - `internal/selfupdate`: replaces the running binary with a newer release.
