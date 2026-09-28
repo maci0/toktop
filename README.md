@@ -694,38 +694,36 @@ receive no credentials, so a hostile listener on a probed port cannot
 collect your gateway key. `--add` URLs must be `http://` or `https://` with
 a host and must not embed userinfo (`user:pass@`); the same endpoint may not
 be named twice, because two polls of it read as twice the tokens. An endpoint
-that needs
-the key is attached as `toktop --add http://127.0.0.1:20128` with the token
-in the environment. `--ingest` must be `host:port` (an empty address would
-bind every interface on an ephemeral port and is rejected). A bind that is not
-loopback is not rejected, because a relay on another host is a legitimate
-setup, but it is named at startup: the endpoint authenticates nothing, so every
-reachable peer can post events. Unknown
-`TOKTOP_*`
-variables are reported at startup, so a typo fails loudly instead of doing
-nothing (`TOKTOP_SCREENSHOT_FONT` is recognized so a developer export is
-not reported as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without
-`--add` (or set to a blank value, which is named as sending no token at all),
-`$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and
-`$TOKTOP_LOG_LEVEL` with `--demo --no-ingest` (and no `--agents`) are named as unused, matching the
-flag warnings, as is a `GAUNTLET_HOME` that is not an absolute path under
-`--agents` (or one with no `agents.json` under it), a relative `XDG_DATA_HOME` while opencode's database is read, a
-`KIMI_CODE_HOME` under `--agents` with no `sessions` directory in it, and
-a relative `XDG_CONFIG_HOME` with an `ssh://` target outside `--demo`. Out-of-range flag values (`--interval 0`, `--interval` below
-50ms or above 1h, negative `--probe`, `--probe` above 86400, `--frames < 1`
-or above 180 with `--once`, an empty `--repo`, a malformed or duplicated
-`--add` or
-`--ingest`, an `ssh://` URL with a password, a path other than the root `/`,
-a query, or a fragment)
-abort with exit code 2 instead of being silently adjusted; so do
-out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when `--once` renders, and
-a set-but-invalid `TOKTOP_LOG_LEVEL`. A bare `--interval 1` is rejected
-because it has no unit; use `1s` or `500ms`. A `--add` endpoint reached over
-plain `http://` on a host that is not this machine is named at startup: the
-bearer token would cross the network in cleartext. Startup prints one line of the knobs
-that apply (`interval`, `ingest`, mode flags); bearer tokens appear only
-as `bearer=set`, or `bearer=refused` when the token carries a line break and is
-therefore turned down, leaving the `--add` endpoints queried unauthenticated.
+that needs the key is attached as `toktop --add http://127.0.0.1:20128` with
+the token in the environment. `--ingest` must be `host:port` (an empty address
+would bind every interface on an ephemeral port and is rejected). A bind that
+is not loopback is not rejected, because a relay on another host is a
+legitimate setup, but it is named at startup: the endpoint authenticates
+nothing, so every reachable peer can post events. Unknown `TOKTOP_*` variables
+are reported at startup, so a typo fails loudly instead of doing nothing
+(`TOKTOP_SCREENSHOT_FONT` is recognized so a developer export is not reported
+as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without `--add` (or set to
+a blank value, which is named as sending no token at all),
+`$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and `$TOKTOP_LOG_LEVEL` with
+`--demo --no-ingest` (and no `--agents`) are named as unused, matching the flag
+warnings, as is a `GAUNTLET_HOME` that is not an absolute path under `--agents`
+(or one with no `agents.json` under it), a relative `XDG_DATA_HOME` while
+opencode's database is read, a `KIMI_CODE_HOME` under `--agents` with no
+`sessions` directory in it, and a relative `XDG_CONFIG_HOME` with an `ssh://`
+target outside `--demo`. Out-of-range flag values (`--interval 0`, `--interval`
+below 50ms or above 1h, negative `--probe`, `--probe` above 86400, `--frames`
+below 1 or above 180 with `--once`, an empty `--repo`, a malformed or duplicated
+`--add` or `--ingest`, an `ssh://` URL with a password, a path other than the
+root `/`, a query, or a fragment) abort with exit code 2 instead of being
+silently adjusted; so do out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when
+`--once` renders, and a set-but-invalid `TOKTOP_LOG_LEVEL`. A bare
+`--interval 1` is rejected because it has no unit; use `1s` or `500ms`. A
+`--add` endpoint reached over plain `http://` on a host that is not this
+machine is named at startup: the bearer token would cross the network in
+cleartext. Startup prints one line of the knobs that apply (`interval`,
+`ingest`, mode flags); bearer tokens appear only as `bearer=set`, or
+`bearer=refused` when the token carries a line break and is therefore turned
+down, leaving the `--add` endpoints queried unauthenticated.
 
 ## Build & test
 

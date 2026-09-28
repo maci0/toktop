@@ -61,6 +61,20 @@ func zstdFrame(t testing.TB, plain string) []byte {
 	return enc.EncodeAll([]byte(plain), nil)
 }
 
+// newDshWatch starts a dsh watcher over an empty store and returns it with
+// the working directory it watches and the transcript path beside it. name is
+// the store file a test writes, session.jsonl or session.jsonl.zstd.
+func newDshWatch(t *testing.T, name string) (w *Watcher, work, path string) {
+	t.Helper()
+	work = t.TempDir()
+	path = filepath.Join(withStore(t, "dsh"), name)
+	w = Watch("dsh", work, time.Now())
+	if w == nil {
+		t.Fatal("dsh should be supported")
+	}
+	return w, work, path
+}
+
 // skippableFrame is one RFC 8878 skippable frame: magic 0x184D2A5X, a
 // 4-byte little-endian size, then payload.
 func skippableFrame(nibble byte, payload []byte) []byte {
@@ -155,14 +169,7 @@ func TestParseDshV3RecordReadsNestedUsage(t *testing.T) {
 }
 
 func TestDshZstdSessionLog(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl.zstd")
-
-	w := Watch("dsh", work, time.Now())
-	if w == nil {
-		t.Fatal("dsh should be supported")
-	}
+	w, work, path := newDshWatch(t, "session.jsonl.zstd")
 
 	header := zstdFrame(t, dshHeader(work)+"\n")
 	first := zstdFrame(t, dshUsageChunk(110, 40, 800)+"\n"+dshMessage(110, 40, 800)+"\n")
@@ -198,14 +205,7 @@ func TestDshZstdSessionLog(t *testing.T) {
 // A record split across a frame boundary is one record. Counting each half
 // as a line would drop both and under-report the turn.
 func TestDshZstdRecordSplitAcrossFrames(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl.zstd")
-
-	w := Watch("dsh", work, time.Now())
-	if w == nil {
-		t.Fatal("dsh should be supported")
-	}
+	w, work, path := newDshWatch(t, "session.jsonl.zstd")
 	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\n"))
 	w.poll(nil)
 
@@ -249,10 +249,7 @@ func TestDshZstdIgnoresOtherProjects(t *testing.T) {
 }
 
 func TestDshZstdIncompleteFrameIsReread(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl.zstd")
-	w := Watch("dsh", work, time.Now())
+	w, work, path := newDshWatch(t, "session.jsonl.zstd")
 
 	header := zstdFrame(t, dshHeader(work)+"\n")
 	full := zstdFrame(t, dshMessage(77, 3, 10)+"\n")
@@ -271,10 +268,7 @@ func TestDshZstdIncompleteFrameIsReread(t *testing.T) {
 }
 
 func TestDshPlainJSONLStillWorks(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl")
-	w := Watch("dsh", work, time.Now())
+	w, work, path := newDshWatch(t, "session.jsonl")
 	append_(t, path, dshHeader(work), dshMessage(40, 5, 9))
 	w.poll(nil)
 	if got := w.Sample().Output; got != 40 {
@@ -283,10 +277,7 @@ func TestDshPlainJSONLStillWorks(t *testing.T) {
 }
 
 func TestDshZstdHandlesCRLF(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl.zstd")
-	w := Watch("dsh", work, time.Now())
+	w, work, path := newDshWatch(t, "session.jsonl.zstd")
 	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\r\n"))
 	appendBytes(t, path, zstdFrame(t, dshMessage(55, 10, 20)+"\r\n"))
 	w.poll(nil)
@@ -299,10 +290,7 @@ func TestDshZstdHandlesCRLF(t *testing.T) {
 }
 
 func TestDshZstdTailCapContinuesNextPoll(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl.zstd")
-	w := Watch("dsh", work, time.Now())
+	w, work, path := newDshWatch(t, "session.jsonl.zstd")
 
 	header := zstdFrame(t, dshHeader(work)+"\n")
 	first := zstdFrame(t, dshMessage(11, 0, 1)+"\n")
@@ -479,10 +467,7 @@ func zstdAtFrameBoundary(src []byte, off int) bool {
 // walks it lazily instead: the poll must cost the same whatever the window
 // holds, and the records around the empty run still count.
 func TestDshZstdWindowOfNewlinesCostsNoAllocations(t *testing.T) {
-	store := withStore(t, "dsh")
-	work := t.TempDir()
-	path := filepath.Join(store, "session.jsonl.zstd")
-	w := Watch("dsh", work, time.Now())
+	w, work, path := newDshWatch(t, "session.jsonl.zstd")
 	appendBytes(t, path, zstdFrame(t, dshHeader(work)+"\n"))
 
 	// 8 MiB of newlines compresses to a few hundred bytes, which is the
