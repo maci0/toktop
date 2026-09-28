@@ -289,9 +289,9 @@ func (s *Stats) Merge(into *core.SysSample) {
 	}
 }
 
-// host is the target label for a sample that has gone stale: the host is
-// stamped on a successful poll, so a target that never answered once has none
-// to show and its connection error stands alone.
+// host is the target label for a sample that has gone stale: the host a
+// successful poll stamped, else the target's own host, so a target that never
+// answered once still names itself beside its connection error.
 func (s *Stats) host() string {
 	if s.last.RemoteHost != "" {
 		return s.last.RemoteHost

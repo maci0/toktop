@@ -125,7 +125,7 @@ func (w *Watcher) SetNow(fn func() time.Time) {
 
 // SetOnError installs the sink for conditions Run cannot return. Pass nil to
 // disable reporting. Safe to call while Run is going, for the same reason
-// SetNow is: the write is taken under the lock engineError reads it under.
+// SetNow is: the write is taken under the lock reportError reads it under.
 func (w *Watcher) SetOnError(fn func(error)) {
 	w.clockMu.Lock()
 	w.onError = fn

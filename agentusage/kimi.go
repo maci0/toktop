@@ -133,10 +133,11 @@ func kimiRoots(dir string, now time.Time) []string {
 //
 // The wire log sits at <session>/agents/<agentId>/wire.jsonl, so the session
 // directory is above the agents/ directory rather than beside it. The walk up
-// is bounded and looks for the file instead of counting levels, since how deep
-// the agent id nests is the CLI's choice: a fixed count reads the wrong
-// directory the moment it changes, and a session with no state.json anywhere
-// then reports nothing forever. Each candidate is opened through os.Root, so a
+// looks for the file at each of kimiSessionDepth levels instead of assuming
+// one: how deep the agent id nests is the CLI's choice, and a fixed count
+// reads the wrong directory the moment it changes. A session nested deeper
+// than the bound reports nothing, so raise kimiSessionDepth with it. Each
+// candidate is opened through os.Root, so a
 // state.json swapped for a symlink out of the session directory is refused the
 // same way a transcript symlink is.
 func kimiSessionCwd(wirePath string) (string, bool) {
@@ -197,9 +198,6 @@ func readKimiState(dir string) (string, bool) {
 // a project directory that appears while the watcher runs, and nothing else: a
 // transcript found late is still read from its start, its usage being this
 // attach's either way.
-//
-// ponytail: one process-wide listing per store per window. Per-project
-// indexing (the CLI's own session_index.jsonl) if a profile ever asks for it.
 const kimiStoreEvery = 5 * time.Second
 
 // kimiListMax bounds the listing cache. A process reads one store; a test that

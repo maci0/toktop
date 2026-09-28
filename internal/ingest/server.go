@@ -214,8 +214,9 @@ func derivedKeyPrefix(key string) string {
 // of the same stream (lost 202, retry after a mid-stream 400) lands on the
 // same keys the collector already ignores. prefix comes from derivedKeyPrefix
 // for this POST's replay key; seq is 1-based within the POST. A derived id is
-// 16 hex chars plus the ":seq" suffix, well inside the 128-character id cap
-// applied when the event is stored.
+// 16 hex chars plus the ":seq" suffix, well inside the core.AgentIDMax cap
+// wireEventID applies to a caller-supplied id, so it never needs clamping of
+// its own and the collector stores it verbatim.
 func derivedEventID(prefix string, seq int) string {
 	if prefix == "" || seq < 1 {
 		return ""

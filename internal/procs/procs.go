@@ -108,9 +108,9 @@ type Sampler struct {
 }
 
 // audit builds the process logger for the lines this package writes. A var so
-// a test can point it at a handler it can read; the only call site is a
-// listing that has no last good snapshot to fall back on, so building it per
-// call costs nothing.
+// a test can point it at a handler it can read; the only call sites are the
+// two listing-failure lines below, both on the throttled sweep, so building
+// it per call costs nothing.
 var audit = logcfg.Logger
 
 // NewSampler returns a Sampler with the platform's default refresh window.

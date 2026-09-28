@@ -102,13 +102,9 @@ func (w *Watcher) readNew(path string) {
 		recs, complete, ok, rerr = w.consumeAppend(f, off)
 	}
 	if !ok {
-		if rerr == nil {
-			// consumeZstd reports a rejected decode with no error of its own.
-			// auditRead reads nil as "the read committed", so passing it
-			// through would clear the latch and stay silent on every poll
-			// while the same frame is read again and again.
-			rerr = errTranscriptUnread
-		}
+		// Both readers return the cause alongside a failure, and auditRead
+		// reads nil as "the read committed": a nil here would clear the latch
+		// and stay silent on every poll while the same bytes are read again.
 		w.auditRead(path, rerr)
 		return // read failed: nothing counted, offset and stamp unchanged, retried next poll
 	}

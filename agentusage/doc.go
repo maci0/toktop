@@ -67,8 +67,8 @@
 // connections against the endpoints an engine is advertised on. They read the
 // process table through Peers, and an unreadable one answers "not connected"
 // rather than raising an error. SetLogger sends the lines this package audits
-// (a transcript walk that
-// could not finish) to the logger the embedding program already writes to,
+// (a transcript walk, read or database read that could not finish) to the
+// logger the embedding program already writes to,
 // defaulting to the one from log/slog. SameDir and DirKey answer whether two
 // recorded paths name one directory and give that comparison a map key, which
 // is a per-platform question this package settles rather than each caller

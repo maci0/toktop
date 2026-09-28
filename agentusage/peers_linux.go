@@ -56,7 +56,7 @@ func linuxPeersByPID(pids []int) map[int][]netip.AddrPort {
 			// inodes, and the caller reads that as "not the same engine".
 			// Silent, it would attribute a running agent's traffic to
 			// nothing while showing it as talking to the engine directly.
-			audit().Warn("agent usage: kernel TCP table unreadable; agent peers are unknown",
+			auditLogger().Warn("agent usage: kernel TCP table unreadable; agent peers are unknown",
 				"path", table,
 				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 		}

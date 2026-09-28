@@ -112,7 +112,7 @@ type ProviderSnapshot struct {
 const MaxEventTokens = 1 << 40
 
 // MaxEventSpan bounds the model-reported duration on one AgentEvent. Span is
-// the denominator of the rate core.SummarizeAgents prefers over the gap
+// the denominator of the rate core.Summarize prefers over the gap
 // between events, so an unclamped value from a sender does not add tokens
 // twice: it divides them by a duration that never happened and reports a rate
 // orders of magnitude too low. A turn is bounded by a day; anything past that

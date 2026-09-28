@@ -17,8 +17,9 @@ import (
 // hid, and never hides one the footer is printing.
 func (m Model) canProbe() bool {
 	// p fires real generations and the probing marker lives on the PROBES
-	// panel, which is absent without engines. Advertising it here would be
-	// a key that appears to do nothing (same rule as renderMinimal).
+	// panel, which is absent without engines. The compact strip is the one
+	// layout that advertises p anyway, because it prints the probe outcome
+	// itself; everywhere else it would be a key that appears to do nothing.
 	return m.cfg.Prober != nil && len(m.snap.Providers) > 0
 }
 

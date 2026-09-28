@@ -749,7 +749,7 @@ func ema(prev, raw float64) float64 { return prev*(1-emaAlpha) + raw*emaAlpha }
 type timedRing struct {
 	buf  []float64   // fixed capacity HistoryLen, samples in insertion order
 	ts   []time.Time // the instant each buf entry was pushed
-	head int         // counts fills while filling; then indexes the oldest element
+	head int         // 0 until the ring wraps, then the index of the oldest sample
 }
 
 func (r *timedRing) push(v float64, now time.Time) {

@@ -40,7 +40,7 @@ alongside them would be a layer importing sideways into itself.
 - `internal/collector`: polls providers on an interval, derives rates, and is
   the `core.AgentRecorder` that posted events land on.
 - `internal/core`: `Snapshot` and everything in it, plus generic sorted-ring
-  helpers (`AppendSorted`, `InsertSorted`, `AppendRetained`) and the `Tick`
+  helpers (`AppendSorted`, `AppendRetained`) and the `Tick`
   cadence every poller uses.
 - `internal/demo`: a seeded simulated fleet, so `--demo` and the tests have
   something to render.

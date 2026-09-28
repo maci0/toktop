@@ -20,9 +20,10 @@ else.
 
 Everything else toktop touches is read-only, and belongs to something else:
 
-- agent transcripts and session databases (`--agents`): JSONL, zstd, and
-  SQLite files under `~/.claude`, `~/.codex`, `~/.kimi-code`, `~/.crush`
-  and the rest. toktop reads them and never writes them, so a lost agent
+- agent transcripts and session databases (`--agents`): JSONL and zstd files
+  under `~/.claude`, `~/.codex`, `~/.kimi-code` and the rest, plus SQLite
+  stores: opencode's, and crush's `.crush/crush.db` inside each watched
+  project. toktop reads them and never writes them, so a lost agent
   session is that agent's loss, not a toktop recovery. See
   [PRIVACY.md](PRIVACY.md) for the full list.
 - `~/.gauntlet/agents.json`: read to resolve `--agents`, never written.
