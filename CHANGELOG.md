@@ -28,6 +28,35 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The directory key a macOS or Windows watcher maps recorded working
+  directories by is folded with `core.FoldCase`, the case fold
+  `strings.EqualFold` compares by, rather than `strings.ToLower`. The two
+  spellings of a directory a case-insensitive volume looks up are equal
+  exactly when `EqualFold` says so, and `ToLower` is not: it is a full case
+  mapping, so U+0130 came back as a bare `i` and the two directories
+  `Users/i` and `Users/İ`, which the volume keeps apart, shared one key. The
+  session recorded under one was then watched as the other.
+
+- A recorded working directory that has lost bytes names no directory that can
+  be verified, and no longer matches one. `encoding/json` replaces every
+  ill-formed byte and every unpaired surrogate escape with U+FFFD, and
+  Gemini's `.project_root` is read as raw bytes, so a checkout under a name
+  that is not valid UTF-8 reached the comparison with those bytes already
+  collapsed. On Linux, where paths are compared exactly so that two
+  differently-spelled names stay two projects, `/work/a\xff1` and
+  `/work/a\xfe1` then compared equal and one checkout's tokens were billed to
+  the other. A session whose directory is refused instead goes uncounted
+  rather than misattributed.
+
+- The two startup warnings that name externally supplied strings, the unknown
+  usage keys in `~/.gauntlet/agents.json` and the unknown `TOKTOP_*`
+  environment variables, sanitize them first. Both are text the program did
+  not write, and an unknown-key warning is among the first things a run
+  prints, so an escape sequence in either reached the operator's terminal
+  from a definitions file or a wrapper script. The names are also capped at
+  64 characters, cut between grapheme clusters so a trailing emoji sequence
+  or a decomposed accent is never sliced in half.
+
 - An agent the snapshot cannot date shows `time unknown` in the agents table
   and the plain report instead of a blank cell. A blank read as a missing
   value, which is not what "no instant to measure against" means.

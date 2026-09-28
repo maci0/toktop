@@ -10,6 +10,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 )
 
 // readNew consumes the bytes appended to one transcript since the last poll.
@@ -416,6 +418,23 @@ func (w *Watcher) owns(path string) (mine, decided bool) {
 const dirVerdictMax = 256
 
 func (w *Watcher) sameDir(cwd string) bool {
+	// A recorded directory that has lost bytes names no directory that can be
+	// verified, so it must match nothing rather than match something.
+	// encoding/json replaces an ill-formed byte and an unpaired surrogate
+	// escape with U+FFFD, and gemini's .project_root is read as raw bytes, so
+	// a checkout under a name that is not valid UTF-8 reaches here with every
+	// such byte already collapsed to one. The comparison below is then exact
+	// on Linux (pathnorm_other.go) yet compares the wrong strings: two
+	// distinct directories, "/work/a\xff1" and "/work/a\xfe1", decode to the
+	// same spelling and a transcript from one is billed to the other, which is
+	// the cross-project attribution the exact comparison exists to prevent.
+	// The other half of the same loss is the reverse case, a name whose bytes
+	// no longer match any store spelling, where the session is silently
+	// uncounted; refusing the match is the only answer that cannot bill the
+	// tokens to the wrong checkout.
+	if strings.ContainsRune(cwd, utf8.RuneError) {
+		return false
+	}
 	if sameSpelling(cwd, w.dir) {
 		return true
 	}

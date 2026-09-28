@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/maci0/toktop/internal/core"
 	"golang.org/x/text/unicode/norm"
 )
 
@@ -45,4 +46,10 @@ func spellingEqual(a, b string) bool { return strings.EqualFold(a, b) }
 // dirKey is the map key form of a recorded path: normalized and case-folded,
 // which is how an APFS or HFS+ volume looks the name up, so one checkout
 // spelled two ways is one key.
-func dirKey(p string) string { return strings.ToLower(norm.NFC.String(p)) }
+//
+// The fold is core.FoldCase, the one strings.EqualFold compares by, because
+// that is the fold the volume performs. strings.ToLower is a full case mapping
+// and over-folds: it renders U+0130 as a bare "i", so the two directories
+// "Users/i" and "Users/İ" share a key although the volume keeps them apart,
+// and the session recorded under one is watched as the other.
+func dirKey(p string) string { return core.FoldCase(norm.NFC.String(p)) }

@@ -737,8 +737,28 @@ func warnUnknownEnv() {
 	if len(unknown) > 0 {
 		slices.Sort(unknown)
 		fmt.Fprintf(os.Stderr, "toktop: ignoring unknown environment variable(s): %s\n",
-			strings.Join(unknown, ", "))
+			strings.Join(reportedNames(unknown), ", "))
 	}
+}
+
+// maxReportedName caps one externally supplied name printed in a startup
+// warning. The names come from a definitions file and from the environment,
+// so a wrapper or a supervisor can put a megabyte-long key in one, and the
+// startup output is read in a terminal and pasted into issues.
+const maxReportedName = 64
+
+// reportedField makes one externally supplied name safe to print on stderr.
+// Both name sets are text this program did not write: a key out of
+// ~/.gauntlet/agents.json and a name out of the environment. Untreated, an
+// escape sequence in either reaches the operator's terminal, and an
+// unknown-key warning is the first thing a run prints, so it is the cheapest
+// place in the tree to plant a clipboard write or a title change. SanitizeText
+// drops the sequences, the bidi controls and the zero-width marks that render
+// one key as another, and the cap bounds what one name can spend, both
+// cutting between grapheme clusters so a name ending in an emoji or a
+// decomposed accent is never sliced mid-character.
+func reportedField(s string) string {
+	return core.TruncateClusters(core.SingleLine(s), maxReportedName)
 }
 
 // loadAgentDefs pulls in ~/.gauntlet/agents.json so --agents can follow
@@ -781,5 +801,16 @@ func warnUnknownUsageKeys(path string) {
 		return
 	}
 	fmt.Fprintf(os.Stderr, "toktop: %s: ignoring unknown usage key(s) %s (this build reads %s)\n",
-		core.RedactHome(path), strings.Join(unknown, ", "), strings.Join(agentusage.UsageKeyNames(), ", "))
+		core.RedactHome(path), strings.Join(reportedNames(unknown), ", "),
+		strings.Join(agentusage.UsageKeyNames(), ", "))
+}
+
+// reportedNames is reportedField over a list, so both startup warnings read
+// one sorted list of names the same way.
+func reportedNames(names []string) []string {
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = reportedField(name)
+	}
+	return out
 }

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // NTFS and the Windows APIs look names up case-insensitively and accept both
@@ -24,7 +26,7 @@ func dirVariants(p string) []string {
 	cleaned := filepath.Clean(p)
 	slash := filepath.ToSlash(cleaned)
 	out := []string{p}
-	for _, v := range []string{cleaned, slash, strings.ToLower(cleaned), strings.ToLower(slash)} {
+	for _, v := range []string{cleaned, slash, core.FoldCase(cleaned), core.FoldCase(slash)} {
 		if !slices.Contains(out, v) {
 			out = append(out, v)
 		}
@@ -41,6 +43,12 @@ func foldSpelling(p string) string { return filepath.ToSlash(filepath.Clean(p)) 
 func spellingEqual(a, b string) bool { return strings.EqualFold(a, b) }
 
 // dirKey is the map key form of a recorded path: cleaned, slash-normalized
-// and lowercased, which is how NTFS and the Windows APIs look the name up, so
+// and case-folded, which is how NTFS and the Windows APIs look the name up, so
 // one checkout spelled two ways is one key.
-func dirKey(p string) string { return strings.ToLower(foldSpelling(p)) }
+//
+// The fold is core.FoldCase, the one strings.EqualFold compares by, because
+// that is the fold NTFS performs. strings.ToLower is a full case mapping and
+// over-folds: it renders U+0130 as a bare "i", so the two paths "C:\Users\i"
+// and "C:\Users\İ" share a key although the volume keeps them apart, and the
+// session recorded under one is watched as the other.
+func dirKey(p string) string { return core.FoldCase(foldSpelling(p)) }
