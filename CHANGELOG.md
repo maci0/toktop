@@ -37,6 +37,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A `span_ms` past a day on `POST /v1/events` clamps to `0`, as the field's
+  documented bound says. The count was converted to nanoseconds before the
+  bound was applied, and a large enough count wrapped int64 onto a small
+  positive duration (18446744073710 ms landed on 448µs) that then passed the
+  clamp, so the event's tokens were divided by half a millisecond and the
+  agent's rate read billions of times too high. A token count too large for a
+  float64 (`1e400`) now says it is out of range, like a count past int64
+  already did, rather than claiming it is not an integer.
+
 - The ssh host-key store keeps a copy of itself. Every write leaves one at
   `known_hosts.bak` beside the store, and a store that goes missing, is
   emptied, or is overwritten by something else is read back from that copy

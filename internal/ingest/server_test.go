@@ -729,6 +729,14 @@ func TestIngestClampsOutOfRangeSpan(t *testing.T) {
 	}{
 		{"negative", `-1`, http.StatusAccepted},
 		{"absurd", `99999999999999`, http.StatusAccepted},
+		// A millisecond count past a day overflows int64 nanoseconds and wraps
+		// onto a small positive duration (18446744073710 ms is 448µs). Storing
+		// that would divide the event's tokens by half a millisecond and report
+		// a rate billions of times too high, so it drops to zero like any other
+		// out-of-range count.
+		{"int64-overflowing", `18446744073710`, http.StatusAccepted},
+		{"int64-overflowing-negative", `-18446744073710`, http.StatusAccepted},
+		{"float-overflow", `1e400`, http.StatusBadRequest},
 		{"fractional", `1.5`, http.StatusBadRequest},
 		{"string", `"2s"`, http.StatusBadRequest},
 	} {

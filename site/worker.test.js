@@ -378,6 +378,36 @@ test("non-GET methods and /health keep their contract", async () => {
   }
 });
 
+test("every error answer states its length, and a HEAD states the GET's", async () => {
+  const refused = await call({}, { method: "POST", env: staticAssets() });
+  const refusedBody = await refused.text();
+  expect(refused.status).toBe(405);
+  expect(refused.headers.get("content-length")).toBe(
+    String(new TextEncoder().encode(refusedBody).byteLength),
+  );
+
+  const missing = await call({}, { path: "/dashboard.avif", env: {} });
+  const missingBody = await missing.text();
+  expect(missing.status).toBe(404);
+  expect(missing.headers.get("content-length")).toBe(
+    String(new TextEncoder().encode(missingBody).byteLength),
+  );
+  const missingHead = await call({}, { path: "/dashboard.avif", method: "HEAD", env: {} });
+  expect(missingHead.status).toBe(404);
+  expect(missingHead.headers.get("content-length")).toBe(missing.headers.get("content-length"));
+  expect((await missingHead.arrayBuffer()).byteLength).toBe(0);
+
+  const unreadable = await call({ "accept-encoding": "identity;q=0" });
+  expect(unreadable.status).toBe(406);
+  const unreadableHead = await call({ "accept-encoding": "identity;q=0" }, { method: "HEAD" });
+  expect(unreadableHead.status).toBe(406);
+  expect(unreadableHead.headers.get("content-length")).toBe(
+    unreadable.headers.get("content-length"),
+  );
+  expect(unreadableHead.headers.get("vary")).toBe(unreadable.headers.get("vary"));
+  expect((await unreadableHead.arrayBuffer()).byteLength).toBe(0);
+});
+
 test("/health reports degraded while the asset binding is missing", async () => {
   const degraded = await call({}, { path: "/health", env: {} });
   expect(degraded.status).toBe(503);

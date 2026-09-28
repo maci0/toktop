@@ -219,14 +219,34 @@ func parseTokenFields(w agentEventWire) (prompt, output, thinking int64, err err
 // outside the bound is dropped to zero rather than refused, because a span
 // only ever scales a rate down and the three token fields set the precedent
 // of clamping rather than rejecting.
+//
+// The bound is applied to the millisecond count, before the conversion, not to
+// the converted duration: a count past a day times out of int64 nanoseconds
+// and wraps (18446744073710 ms lands on 448µs), and a wrapped value small
+// enough to pass ClampEventSpan is stored as a real span. The event's tokens
+// would then be divided by a duration of half a millisecond, so the rate reads
+// billions of times too high instead of falling back to the gap between
+// events.
 func parseSpanFields(w agentEventWire) (time.Duration, error) {
 	ms, err := parseTokenJSON(w.SpanMs, "span_ms")
 	if err != nil {
 		return 0, err
 	}
-	return core.ClampEventSpan(time.Duration(ms) * time.Millisecond), nil
+	if ms < 0 || ms > maxSpanMS {
+		return 0, nil
+	}
+	return time.Duration(ms) * time.Millisecond, nil
 }
 
+// maxSpanMS is core.MaxEventSpan in the unit the wire carries, so the bound is
+// one definition read two ways.
+const maxSpanMS = int64(core.MaxEventSpan / time.Millisecond)
+
+// parseTokenJSON reads one whole JSON number as an int64. A whole float
+// (100.0, 1e2) counts; a fractional remainder or a non-number is a 400. A
+// number too large for a float64 to hold is the same out-of-range answer a
+// value past MaxInt64 gets, not a claim that it is not an integer: it is one,
+// and the two limits are the same field being too big.
 func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
@@ -241,6 +261,10 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 			return 0, fmt.Errorf("bad json: %s is out of range", field)
 		}
 		return int64(f), nil
+	}
+	var numErr *strconv.NumError
+	if errors.As(err, &numErr) && errors.Is(numErr.Err, strconv.ErrRange) {
+		return 0, fmt.Errorf("bad json: %s is out of range", field)
 	}
 	return 0, fmt.Errorf("bad json: %s must be an integer", field)
 }

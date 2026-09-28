@@ -595,11 +595,20 @@ const ERROR_HEADERS = {
 // answers do: a failed request is the one a visitor reports, and its time at
 // the edge is part of that report. Without it the timing series only describes
 // the requests that worked.
-function errorResponse(started, status, body, extraHeaders = {}) {
-  return new Response(body, {
+//
+// The length is computed here rather than left to the runtime, for the same
+// reason /health computes it: a HEAD carries the GET's headers and no body
+// (RFC 9110), and a null-bodied Response reports a length of zero, which is
+// not the length of the answer the client would have got. Every answer on this
+// surface states its length, so a client sizing a body reads one across all of
+// them, and the HEAD rule sits in one place rather than at every call site.
+function errorResponse(request, started, status, body, extraHeaders = {}) {
+  const bytes = new TextEncoder().encode(body);
+  return new Response(request.method === "HEAD" ? null : bytes, {
     status,
     headers: {
       ...ERROR_HEADERS,
+      "content-length": String(bytes.byteLength),
       "server-timing": serverTiming(started),
       ...extraHeaders,
     },
@@ -613,14 +622,7 @@ function errorResponse(started, status, body, extraHeaders = {}) {
 // next to the served requests and the reason a visitor would report, so it
 // logs like the rest of the failures rather than passing in silence.
 function notAcceptable(request, started) {
-  return failRequest(
-    request,
-    started,
-    406,
-    "not-acceptable",
-    request.method === "HEAD" ? null : "not acceptable",
-    { vary: VARY },
-  );
+  return failRequest(request, started, 406, "not-acceptable", "not acceptable", { vary: VARY });
 }
 
 // One failure, one line and one answer. Every line carries the same request
@@ -637,7 +639,7 @@ function failRequest(request, started, status, event, body, extraHeaders = {}, f
     duration_ms: Date.now() - started,
     ...fields,
   });
-  return errorResponse(started, status, body, extraHeaders);
+  return errorResponse(request, started, status, body, extraHeaders);
 }
 
 // What the edge spent on the answer, in Server-Timing (RFC 8941), so the
@@ -734,21 +736,9 @@ export default {
     try {
       return await handle(request, env, started);
     } catch (err) {
-      // HEAD carries the GET headers and no body (RFC 9110), on the failure
-      // path as on the served one: a HEAD that throws is as reachable as a
-      // GET that does, and a body under it is the one answer the runtime
-      // will not strip for us.
-      return failRequest(
-        request,
-        started,
-        500,
-        "unhandled",
-        request.method === "HEAD" ? null : "internal error",
-        undefined,
-        {
-          error: String(err?.message ?? err),
-        },
-      );
+      return failRequest(request, started, 500, "unhandled", "internal error", undefined, {
+        error: String(err?.message ?? err),
+      });
     }
   },
 };
@@ -794,7 +784,7 @@ async function handle(request, env, started) {
         started,
         asset.status,
         asset.status === 404 || asset.status === 410 ? "asset-missing" : "asset-store-error",
-        request.method === "HEAD" ? null : assetErrorBody(asset.status),
+        assetErrorBody(asset.status),
       );
     }
     const headers = new Headers(asset.headers);
