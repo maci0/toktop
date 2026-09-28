@@ -83,7 +83,7 @@ func readAmdCards(cards []string) []core.GPUDevice {
 			d.Index, _ = strconv.Atoi(rest)
 		}
 		if b, err := os.ReadFile(filepath.Join(dev, "product_name")); err == nil {
-			d.Name = strings.TrimSpace(string(b))
+			d.Name = core.GPUName(string(b))
 		}
 		if u, err := readU64(dev, "mem_info_vram_used"); err == nil {
 			d.MemUsed = u

@@ -101,6 +101,20 @@ func ModelName(s string) string {
 	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
 }
 
+// GPUName is the one shape a GPU's reported name takes in this program, the
+// same treatment ModelName gives an engine-supplied model id and capped at
+// the same bound. The name is driver- and vendor-chosen text, and two of the
+// four sources are JSON: xpu-smi reports device_name and system_profiler
+// reports _name, either of which can carry an escaped newline. SanitizeText
+// keeps newlines, which is right for a block of text and wrong here: every
+// renderer measures a GPU cell with lipgloss.Width and splits the rendered row
+// on newlines, so a name with a newline in it does not stay inside its cell.
+// The rest of the name becomes a row of its own and the system panel loses its
+// alignment, for a card the operator never asked to misreport.
+func GPUName(s string) string {
+	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
+}
+
 // Snippet collapses raw bytes to at most SnippetCap characters (grapheme
 // clusters) on one line, cutting between characters so a trailing emoji or
 // accented letter from an engine's body is never sliced in half.

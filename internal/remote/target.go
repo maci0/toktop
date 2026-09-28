@@ -234,16 +234,23 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 		case "host":
 			inBlock = false
 			negated := false
+			// The pattern is folded the same way the name is. Folding only
+			// the name left an accented Host pattern the macOS editor wrote
+			// decomposed ("e" plus U+0301) compared against a composed name,
+			// and path.Match compares runes, so the block never matched: its
+			// HostName, User, Port and IdentityFile were all skipped and the
+			// dial went to the default port with the default key.
+			want := foldHost(name)
 			for pat := range strings.FieldsSeq(val) {
-				pat = core.FoldASCII(pat)
+				pat = foldHost(pat)
 				if strings.HasPrefix(pat, "!") {
-					if patternMatch(strings.TrimPrefix(pat, "!"), foldHost(name)) {
+					if patternMatch(strings.TrimPrefix(pat, "!"), want) {
 						negated = true
 						break
 					}
 					continue
 				}
-				if patternMatch(pat, foldHost(name)) {
+				if patternMatch(pat, want) {
 					inBlock = true
 				}
 			}

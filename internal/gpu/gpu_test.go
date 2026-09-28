@@ -542,3 +542,23 @@ func stubTools(t *testing.T, fn func(string) (string, error)) {
 	lookPath = fn
 	t.Cleanup(func() { lookPath = orig; clear() })
 }
+
+// A GPU name is one cell of the system panel, and the panel measures a cell
+// with lipgloss.Width before splitting the rendered row on newlines, so a
+// name carrying one does not stay inside its cell. Two of the four name
+// sources are JSON and can hold an escaped newline, and SanitizeText keeps
+// newlines on purpose, so the fold belongs where the name enters the program.
+func TestParseXpuDiscoveryFoldsANewlineOutOfTheName(t *testing.T) {
+	const body = `[{"device_id":0,"device_name":"Intel\u00ae Arc\u2122\nup 9/9 engines"}]`
+	order := parseXpuDiscovery([]byte(body))
+	if len(order) != 1 {
+		t.Fatalf("parseXpuDiscovery = %+v, want one device", order)
+	}
+	got := order[0].Name
+	if strings.ContainsAny(got, "\n\t") {
+		t.Errorf("name = %q, want no newline or tab left in the cell", got)
+	}
+	if want := "Intel® Arc™ up 9/9 engines"; got != want {
+		t.Errorf("name = %q, want %q", got, want)
+	}
+}

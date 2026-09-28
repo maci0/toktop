@@ -196,3 +196,35 @@ func TestParseTargetsCollapsesRepeats(t *testing.T) {
 		t.Fatalf("ParseTargets(distinct) = %+v with %d duplicates, want three targets", got, len(dupes))
 	}
 }
+
+// An accented Host pattern in ~/.ssh/config is the same host as the accented
+// name on the command line, whichever normalization form each side was
+// written in. A macOS editor saves the config decomposed while the URL and
+// DNS speak the composed form, and path.Match compares runes, so folding only
+// the name left the block unmatched: its HostName, User, Port and
+// IdentityFile were all skipped, and the dial went to the default port with
+// the default key.
+func TestParseSSHConfigMatchesAccentedPatternInEitherForm(t *testing.T) {
+	const composed = "caf\u00e9.example"    // é as one code point
+	const decomposed = "cafe\u0301.example" // e + combining acute
+
+	for _, tc := range []struct {
+		name    string
+		pattern string
+	}{
+		{"composed pattern", composed},
+		{"decomposed pattern", decomposed},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := []byte("Host " + tc.pattern + "\n  HostName 10.0.0.5\n  Port 2222\n  User deploy\n")
+			// The name arrives decomposed, as a macOS terminal supplies it.
+			entry := parseSSHConfig(cfg, decomposed)
+			if entry == nil {
+				t.Fatalf("parseSSHConfig(%s) = nil, want the block to match", tc.pattern)
+			}
+			if entry.HostName != "10.0.0.5" || entry.Port != 2222 || entry.User != "deploy" {
+				t.Errorf("parseSSHConfig(%s) = %+v, want 10.0.0.5:2222 as deploy", tc.pattern, entry)
+			}
+		})
+	}
+}
