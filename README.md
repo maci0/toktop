@@ -534,7 +534,7 @@ technology:
 
   ```
   $ toktop --once --plain
-  toktop v0.18.2
+  toktop v0.19.0
 
   5/5 engines up · out 1.5k tok/s · in 10k tok/s · 2 agents · session 24s
 

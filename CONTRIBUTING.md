@@ -7,12 +7,12 @@
   CI installs the same version via `go-version-file: go.mod`.
 - GNU Make and bash (`SHELL := /bin/bash` in the Makefile). On Windows, Git
   Bash plus `make`, or WSL.
-- A C compiler (`gcc` or `clang`) for `go test -race`. `make test` and
-  `make test-pkg` default to `-race` and `CGO_ENABLED=1`. `RACE=0` skips
-  both (no C compiler needed). Everything else (`make build`, `make vet`,
-  `make lint`, cross-compiles) keeps cgo off so analysis matches the
-  released artifacts. Plain builds and cross-compiles are pure Go and need
-  nothing else.
+- A C compiler (`gcc` or `clang`) for `go test -race`. `make test`,
+  `make test-pkg` and `make cover` default to `-race` and `CGO_ENABLED=1`,
+  and `make ci` runs `make test RACE=1`. `RACE=0` skips the race flag (no C
+  compiler needed). The analysis targets (`make build`, `make vet`,
+  `make lint`, cross-compiles) keep cgo off so analysis matches the
+  released artifacts; those are pure Go and need nothing else.
 - `bun` at the version in `.bun-version` for `make site-check` and
   `make site-lint`. The targets refuse a different version on PATH, matching
   CI's `bun-version-file`.
@@ -187,7 +187,7 @@ in day-to-day work:
 | `make test` | all tests, `-race -shuffle=on` (same flags as CI); `RACE=0` skips `-race` |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc guards |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-platforms`, `check-yaml`, `check-help-docs`) |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
@@ -239,9 +239,10 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
-the Linux leg of the test job runs every `make check` guard
-(`check-ci-tags`, `check-test-flags`, `check-ci-platforms`, `check-yaml`,
-`check-help-docs`).
+the Linux leg of the test job runs four of the `make check` guards
+(`check-ci-tags`, `check-test-flags`, `check-ci-platforms`, `check-help-docs`).
+The fifth, `check-yaml`, runs in the `scripts` job, which installs the pinned
+tool env that target lints with.
 Vulnerability analysis follows the host platform's build constraints.
 `staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
 Linux, macOS and Windows, plus cross-compiles of linux/amd64, linux/arm64,

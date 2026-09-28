@@ -247,12 +247,12 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	}
 	c.agents = agents
 	c.storedForWindow(key)
-	// Only a retained event is a reading of the sender's clock. A replayed
-	// POST carries the stamp of the original send, so its lead reads zero, and
-	// a minimum estimator cannot climb back off a zero it was handed: one
-	// retry after a slow response would pin the correction off for every later
-	// event, leaving a fast sender's stamps in this machine's future, where
-	// they never age out.
+	// Only a retained event is a reading of the sender's clock, and a minimum
+	// estimator never moves the offset upward, so nothing can pin it below
+	// the sender's true offset. A replayed POST is normally stopped earlier by
+	// the id ledger, and one that slips through carries the original send's
+	// stamp, so its lead is at least the offset already in force and this
+	// leaves the correction alone.
 	if cur, ok := c.agentSkews[key]; !ok || lead < cur {
 		c.agentSkews[key] = lead
 		// A fresh order entry, not a rewrite of the old one: forgetAgedAgentSkews

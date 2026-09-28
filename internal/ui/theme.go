@@ -67,9 +67,10 @@ var (
 		core.KindOmniRoute: lipgloss.NewStyle().Foreground(cBlue),
 	}
 
-	// panelStyle draws the rounded frame. panel() assembles its own border
-	// instead (see borderStyle): this stays for system.go's host strip, which
-	// frames two padBlock rows as one block.
+	// panelStyle is the whole lipgloss frame. panel() and frame() compose
+	// their own border out of borderStyle instead, which avoids a second
+	// width measurement per row; this survives only as frame()'s fallback
+	// for a block carrying a tab.
 	panelStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(cBorder).

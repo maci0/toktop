@@ -14,8 +14,9 @@ import (
 // The help screen and the help/version/update subcommands.
 
 // flagAliases are the one-letter spellings listed beside a long flag. The flag
-// package records no alias relationship, so the pairing is declared here;
-// without it PrintDefaults would list -h and --help as two unrelated flags.
+// package records no alias relationship and flagDocs visits every defined
+// flag, so without this pairing -h and --help would print as two unrelated
+// entries, one per line.
 var flagAliases = map[string]string{
 	"help":    "h",
 	"version": "v",

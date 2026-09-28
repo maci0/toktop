@@ -41,9 +41,11 @@ const (
 	unitRoundTo = 999.5
 )
 
-// Values past which the scaled form drops its decimal. A rate of 10.0k/tok/s
-// and a count of 1.0M carry no information in the second digit, and a
-// dot-separated rate reads as a float the reader must convert.
+// Values past which the scaled form changes spelling. rateNoDecimal is where a
+// rate drops its decimal (10.0k/tok/s reads better as 10k, and a dot-separated
+// rate looks like a float the reader must convert); countNoDecimal is where a
+// count changes unit to M, keeping its one decimal since the trailing zero
+// there is uniform.
 const (
 	rateNoDecimal  = 10000
 	countNoDecimal = 1000000

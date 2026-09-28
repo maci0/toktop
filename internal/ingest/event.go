@@ -166,12 +166,10 @@ type agentEventWire struct {
 	Note           string          `json:"note"`
 	// SpanMs is how long the model spent on this event's tokens, in
 	// milliseconds, carried raw for the same reason as the token counts: a
-	// sender that dumps a float should not abort the stream. core.AgentEvent
-	// has held Span since the local watcher began setting it, and a sender
-	// arriving over HTTP could not report one, so a pushed agent's rate was
-	// always the gap between events while a locally watched one was the
-	// model's own time. Zero, or absent, keeps the documented meaning: the
-	// gap between events.
+	// sender that dumps a float should not abort the stream. It is what lets
+	// a pushed agent report a model-side duration like a locally watched
+	// one, instead of having its rate derived from the gap between events.
+	// Zero, or absent, keeps the documented meaning: the gap between events.
 	SpanMs json.RawMessage `json:"span_ms"`
 }
 
