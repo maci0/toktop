@@ -158,7 +158,9 @@ The live dashboard needs a terminal; use --once when piping or redirecting.
 Environment (a flag always wins over the variable it mirrors):
   TOKTOP_BEARER           bearer token for --add endpoints; OMNIROUTE_API_KEY
                           is consulted first, and an explicit --bearer (even
-                          empty) suppresses both
+                          empty) suppresses both. Surrounding whitespace is
+                          trimmed; a blank value carries no token and is
+                          skipped in favor of the next source
   TOKTOP_SSH_PASSWORD     ssh password for ssh:// targets, for headless runs
   TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal,
                           else 120 when stdout is not one)
@@ -174,7 +176,8 @@ Environment (a flag always wins over the variable it mirrors):
   XDG_CONFIG_HOME         where the ssh host-key store lives, default
                           ~/.config; a relative value is ignored
   KIMI_CODE_HOME          where kimi's session logs are read (--agents),
-                          default ~/.kimi-code; a relative value is ignored
+                          default ~/.kimi-code; a relative value is ignored,
+                          and so is one with no sessions directory in it
   GITHUB_TOKEN            optional, authenticates toktop update's GitHub calls
   SSH_AUTH_SOCK           ssh-agent socket for ssh:// targets
   NO_COLOR                recognized by the terminal renderer, as usual

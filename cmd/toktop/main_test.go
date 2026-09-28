@@ -465,6 +465,10 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 	// t.TempDir is absolute on every platform; a hand-built "/srv/xdg" is
 	// drive-relative on Windows, where the warning is then correct.
 	abs := t.TempDir()
+	kimiHome := t.TempDir()
+	if err := os.Mkdir(filepath.Join(kimiHome, "sessions"), 0o700); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name       string
 		opencodeDB bool
@@ -476,7 +480,7 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 		wantStderr []string
 	}{
 		{name: "unset passes", opencodeDB: true, sshTarget: true, agents: true},
-		{name: "absolute passes", opencodeDB: true, sshTarget: true, agents: true, dataHome: abs, configHome: abs, kimiHome: abs},
+		{name: "absolute passes", opencodeDB: true, sshTarget: true, agents: true, dataHome: abs, configHome: abs, kimiHome: kimiHome},
 		{name: "relative data home is named", opencodeDB: true, dataHome: "share", wantStderr: []string{"$XDG_DATA_HOME"}},
 		{name: "relative config home is named", sshTarget: true, configHome: "cfg", wantStderr: []string{"$XDG_CONFIG_HOME"}},
 		{name: "relative kimi home is named", agents: true, kimiHome: "kimi", wantStderr: []string{"$KIMI_CODE_HOME"}},
@@ -487,6 +491,12 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 		{name: "data home unread without the opencode database", sshTarget: true, dataHome: "share"},
 		{name: "config home unread without an ssh target", opencodeDB: true, configHome: "cfg"},
 		{name: "kimi home unread without --agents", kimiHome: "kimi"},
+		// An absolute home with no sessions under it is named the way
+		// GAUNTLET_HOME names a missing agents.json: kimi never ran there, and
+		// every session would read as an agent producing no tokens. t.TempDir
+		// is absolute on every platform and exists with no sessions, so it is
+		// the missing-store case without a hand-built path.
+		{name: "absolute kimi home with no store is named", agents: true, kimiHome: abs, wantStderr: []string{"$KIMI_CODE_HOME"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1791,6 +1801,85 @@ func TestResolveBearer(t *testing.T) {
 	t.Setenv("TOKTOP_BEARER", "")
 	if got := resolveBearer("", false); got != "" {
 		t.Errorf("unset = %q, want empty", got)
+	}
+}
+
+// A bearer variable holding nothing usable is a wrapper that failed to read
+// its file, not a token: `export TOKTOP_BEARER=$(cat key)` on a missing file
+// sets it to the empty string, and a token file with a trailing space trims
+// away to nothing. Both used to win the precedence chain and authenticate
+// nothing, while the startup line still read bearer=set.
+func TestResolveBearerTrimsBlankValues(t *testing.T) {
+	t.Setenv("OMNIROUTE_API_KEY", "omni")
+	t.Setenv("TOKTOP_BEARER", "tok")
+
+	if got := resolveBearer("  sk  ", true); got != "sk" {
+		t.Errorf("whitespace-padded flag = %q, want sk", got)
+	}
+	t.Setenv("OMNIROUTE_API_KEY", "\n")
+	if got := resolveBearer("", false); got != "tok" {
+		t.Errorf("blank first env = %q, want the second source to win", got)
+	}
+	t.Setenv("TOKTOP_BEARER", "   ")
+	if got := resolveBearer("", false); got != "" {
+		t.Errorf("all blank = %q, want empty", got)
+	}
+	// The startup line reads the same resolution, so a blank variable cannot
+	// leave it claiming bearer=set for a run that sends no token.
+	f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420"}
+	var buf strings.Builder
+	logActiveConfig(&buf, f, map[string]bool{}, 1, 0, false)
+	if strings.Contains(buf.String(), "bearer") {
+		t.Errorf("config line %q claims a bearer for blank env variables", buf.String())
+	}
+}
+
+// A set-but-blank bearer variable is named where it can take effect: a --add
+// endpoint attached and no --demo, which is the only run that sends a token.
+func TestWarnBlankBearer(t *testing.T) {
+	tests := []struct {
+		name       string
+		omni       string
+		setOmni    bool
+		toktop     string
+		setToktop  bool
+		nAdd       int
+		demo       bool
+		wantStderr []string
+	}{
+		{name: "unset passes", nAdd: 1},
+		{name: "a token is silent", omni: "sk", setOmni: true, nAdd: 1},
+		{name: "no add endpoint passes", setToktop: true, nAdd: 0},
+		{name: "demo passes", setToktop: true, nAdd: 1, demo: true},
+		{name: "empty is named", setToktop: true, nAdd: 1, wantStderr: []string{"$TOKTOP_BEARER"}},
+		{name: "whitespace is named", omni: " \n", setOmni: true, nAdd: 1, wantStderr: []string{"$OMNIROUTE_API_KEY"}},
+		{name: "both blank are named", setOmni: true, nAdd: 1, setToktop: true, wantStderr: []string{"$OMNIROUTE_API_KEY", "$TOKTOP_BEARER"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			for name, set := range map[string]bool{"OMNIROUTE_API_KEY": tt.setOmni, "TOKTOP_BEARER": tt.setToktop} {
+				// Setenv marks the variable present, and a present-but-empty
+				// one is the case this names, so the silent cases unset it
+				// outright and the others set only the value under test.
+				if !set {
+					if err := os.Unsetenv(name); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { _ = os.Setenv(name, "") })
+					continue
+				}
+				t.Setenv(name, map[string]string{"OMNIROUTE_API_KEY": tt.omni, "TOKTOP_BEARER": tt.toktop}[name])
+			}
+			got := captureStderr(t, func() { warnBlankBearer(tt.nAdd, tt.demo) })
+			for _, want := range tt.wantStderr {
+				if !strings.Contains(got, want) {
+					t.Errorf("warnBlankBearer() printed %q, want mention of %q", got, want)
+				}
+			}
+			if len(tt.wantStderr) == 0 && got != "" {
+				t.Errorf("warnBlankBearer() printed %q, want silence", got)
+			}
+		})
 	}
 }
 

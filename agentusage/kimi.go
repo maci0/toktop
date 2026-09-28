@@ -66,6 +66,13 @@ func parseKimi(line []byte) (values, string, bool) {
 	return v, "", true
 }
 
+// KimiStorePath is the directory kimi's session logs are read from, after
+// KIMI_CODE_HOME is applied. Exported so the startup warning that names a
+// variable pointing at no session store resolves the path the same way the
+// reader does, the way logcfg.LevelEnv and remote.PasswordEnv are shared with
+// the top-level command.
+func KimiStorePath() string { return kimiStore() }
+
 // kimiStore is the directory Kimi Code CLI keeps its sessions in.
 //
 // KIMI_CODE_HOME is honored only when absolute, the rule the XDG base

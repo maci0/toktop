@@ -46,6 +46,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   float64 (`1e400`) now says it is out of range, like a count past int64
   already did, rather than claiming it is not an integer.
 
+- A bearer variable that is set but blank no longer authenticates nothing
+  while the startup line claims `bearer=set`. `export TOKTOP_BEARER=$(cat key)`
+  over a missing file sets it to the empty string, and a token read into a
+  variable can keep a trailing newline or space; either won the precedence
+  chain ahead of a variable that did hold a token, and the `--add` endpoints
+  answered 401 from then on with nothing saying why. Values are trimmed, a
+  blank one is skipped in favor of the next source, and a variable set to
+  nothing is named at startup with `--add` in play.
+
+- A `KIMI_CODE_HOME` naming a directory with no `sessions` under it is named at
+  startup, the way a `GAUNTLET_HOME` with no `agents.json` already was. kimi
+  creates that directory itself on first run, so a home it does not use left
+  every kimi session reading as an agent producing no tokens.
+
 - The ssh host-key store keeps a copy of itself. Every write leaves one at
   `known_hosts.bak` beside the store, and a store that goes missing, is
   emptied, or is overwritten by something else is read back from that copy

@@ -218,6 +218,7 @@ func main() {
 		warnInsecureAdd(f.adds)
 	}
 	warnBearerFlag(explicit["bearer"], f.bearer)
+	warnBlankBearer(len(f.adds), f.demo)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

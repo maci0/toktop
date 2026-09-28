@@ -155,6 +155,16 @@ func warnIgnoredGauntletHome(agents bool) {
 // XDG_CONFIG_HOME with an ssh:// target to connect to, KIMI_CODE_HOME with
 // --agents. Without one, the variable cannot take effect, and the rule
 // GAUNTLET_HOME follows above names only a --agents run for the same reason.
+//
+// An absolute KIMI_CODE_HOME is checked for the store under it, the way
+// GAUNTLET_HOME is checked for the file beside it. kimi creates its sessions
+// directory itself on first run, so a variable the operator set naming no
+// sessions directory is a home kimi does not use: every session reads as an
+// agent producing no tokens, which is the failure the relative case above
+// already names. The other two are not checked, because nothing is wrong with
+// a variable naming a directory the reader creates: the ssh host-key store is
+// written on first contact, and most machines running this have no opencode at
+// all.
 func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 	for _, e := range [...]struct {
 		name string
@@ -167,10 +177,31 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 		if !e.read {
 			continue
 		}
-		if v := os.Getenv(e.name); v != "" && !filepath.IsAbs(v) {
+		v := os.Getenv(e.name)
+		if v == "" {
+			continue
+		}
+		if !filepath.IsAbs(v) {
 			fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q and reading the default directory\n", e.name, v)
+			continue
+		}
+		if e.name == "KIMI_CODE_HOME" {
+			warnMissingKimiStore(v)
 		}
 	}
+}
+
+// warnMissingKimiStore names an absolute $KIMI_CODE_HOME with no sessions
+// directory under it. kimiRoots returns nothing for a store that cannot be
+// listed, and no watcher is built, so the dashboard shows no kimi agent at all
+// and reads as one that used no tokens.
+func warnMissingKimiStore(home string) {
+	store := agentusage.KimiStorePath()
+	if info, err := os.Stat(store); err == nil && info.IsDir() {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "toktop: $KIMI_CODE_HOME points at no kimi sessions (%s is missing); no kimi agent is watched\n",
+		core.RedactHome(store))
 }
 
 // warnUnusedEnv names secret and log-level variables that are set but will
@@ -325,13 +356,52 @@ func validateIngestAddr(addr string) error {
 // --bearer (including empty) wins so clearing the token does not fall through
 // to the environment; otherwise OMNIROUTE_API_KEY, then TOKTOP_BEARER.
 func resolveBearer(flagVal string, flagSet bool) string {
+	tok, _ := bearerToken(flagVal, flagSet)
+	return tok
+}
+
+// bearerToken returns the token and the name of the environment variable it
+// came from, empty when none is set. The two are not separable by re-reading
+// the environment: a caller that wants to name the source of a token that
+// turned out to carry nothing needs to know which variable was consulted.
+func bearerToken(flagVal string, flagSet bool) (string, string) {
 	if flagSet {
-		return flagVal
+		return trimBearer(flagVal), "--bearer"
 	}
-	if v := os.Getenv("OMNIROUTE_API_KEY"); v != "" {
-		return v
+	for _, name := range [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"} {
+		if v := trimBearer(os.Getenv(name)); v != "" {
+			return v, name
+		}
 	}
-	return os.Getenv("TOKTOP_BEARER")
+	return "", ""
+}
+
+// trimBearer drops the surrounding whitespace bearer.Set trims anyway, plus
+// the line ending `export TOKTOP_BEARER=$(cat key)` leaves behind. Without it
+// a variable holding only that newline is a non-empty string that wins the
+// precedence chain and then authenticates nothing: every --add endpoint
+// answers 401 while the startup line reads bearer=set. A value that is
+// whitespace is a wrapper that failed to read the file, not a token.
+func trimBearer(s string) string { return strings.TrimSpace(s) }
+
+// warnBlankBearer names a bearer variable that is set but carries no token,
+// where a --add endpoint is attached. The generic message is a 401 per poll
+// and names nothing about the cause, and the startup line still reports
+// bearer=set because the source was set, so an operator reading either is told
+// the run is authenticated. Blank values are read in precedence order and do
+// not win it: the token falls through to the next source, which is the right
+// resolution, but the variable that was set to nothing is still the mistake.
+func warnBlankBearer(nAdd int, demo bool) {
+	if demo || nAdd == 0 {
+		return
+	}
+	for _, name := range [...]string{"OMNIROUTE_API_KEY", "TOKTOP_BEARER"} {
+		v, set := os.LookupEnv(name)
+		if !set || trimBearer(v) != "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "toktop: $%s is set but blank; the --add endpoints are queried without a token\n", name)
+	}
 }
 
 // warnBearerFlag names the two --bearer footguns: a token on argv is

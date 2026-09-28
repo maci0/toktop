@@ -38,6 +38,7 @@ var publicFuncs = []string{
 	"Discover",
 	"EnableOpenCodeDB",
 	"InputRate",
+	"KimiStorePath",
 	"LoadDefinitions",
 	"MatchingEndpoints",
 	"Peers",
