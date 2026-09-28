@@ -242,7 +242,9 @@ about them belongs in this repository, and no CI job deploys the site.
 
 The Makefile takes `dist/site.lock` for the whole of either target, so a
 second deploy or a rollback on another machine will not run against the
-Worker at the same time. That lock is per checkout: `dist/` is gitignored, so
+Worker at the same time. `make clean` refuses while that lock is held, since
+removing `dist/` from under a running deploy would free it. That lock is per
+checkout: `dist/` is gitignored, so
 two clones can each hold it. The platform's own deployment history is what
 resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
@@ -435,9 +437,14 @@ pushing the tag again. Rebuild the same bytes and upload what is missing:
 ```
 git checkout v0.15.0
 make release VERSION=0.15.0
-gh release upload v0.15.0 dist/toktop_0.15.0_* --clobber
+gh release upload v0.15.0 dist/toktop_0.15.0_* dist/toktop-sbom-0.15.0* --clobber
 make release-verify VERSION=0.15.0
 ```
+
+The two globs are the whole asset set `release-verify` expects: the
+`toktop_<version>_*` binaries, buildinfo manifest and checksums tarball, and
+the `toktop-sbom-<version>*` file, which is spelled with a dash and is
+therefore not in the first glob.
 
 The rebuild is byte-identical to what was published, which is what makes this
 safe under the rule that forbids replacing a published version: the checksums

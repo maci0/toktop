@@ -1050,8 +1050,19 @@ pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + c
 	@$(MAKE) scripts-check
 	@$(MAKE) repro-check-pair
 
+# `rm -rf dist` takes the site deploy lock with it, and a lock nobody holds is
+# not a lock: a `make clean` running beside a `make site-deploy` frees the
+# directory the deploy is still using, so a second deploy starts alongside the
+# first and the platform keeps whichever upload landed last. dist-clean only
+# touches regular files at depth 1 and leaves the lock alone; this is the one
+# target that does not.
 .PHONY: clean
 clean: ## remove build artifacts
+	@if [ -d $(SITE_LOCK) ]; then \
+		echo "make clean: $(SITE_LOCK) is held; a site deploy or rollback is running." >&2; \
+		echo "  wait for it to finish, or remove the directory if that process is gone" >&2; \
+		exit 1; \
+	fi
 	rm -rf $(DIST) $(BINARY) coverage.out *.test
 
 .PHONY: check-changelog

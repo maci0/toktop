@@ -23,7 +23,10 @@ A deploy that reported success leaves `dist/site.deployed` behind, and a
 rollback moves it to `dist/site.rolled-back`: a second rollback finds nothing
 of this tree's to undo, says so, and exits 0 without calling wrangler at all.
 The markers are directories under `dist/`, so `make dist-clean` leaves them
-alone and `make clean` takes them with the rest of `dist/`. They record what
+alone and `make clean` takes them with the rest of `dist/`. The deploy lock is
+held the same way, and `make clean` refuses while it is held: removing `dist/`
+out from under a running deploy would free a lock nobody is watching and let a
+second upload race the first. They record what
 this tree did, not what the site is serving, so on a machine that never ran
 `make site-deploy` a rollback is a no-op rather than a guess.
 
