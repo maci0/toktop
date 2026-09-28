@@ -72,6 +72,10 @@ fetches nothing at all. Wrong methods are `405` with `Allow: GET, HEAD`.
 the page still serves then, but every capture it shows is a 404, so a probe
 saying `ok` describes a site nobody can use. A deploy that shipped without its
 assets therefore fails `make site-deploy` instead of passing on a green probe.
+That degraded answer is a failure, so it is logged as one (`health-degraded`,
+capped like the rest): the missing binding is a deploy-level fault, and on a
+site taking no image traffic the probe's own answer is the only thing naming
+it. The healthy answer logs nothing, as every served answer does.
 Image paths
 without an asset binding, and 404/5xx from the asset store, are `no-store`
 so a missing file is not cached as a day-long success. Error bodies are
@@ -161,16 +165,17 @@ a line per visit would bury the few that name a broken deploy.
 | `asset-store-error` | the asset store answered 5xx |
 | `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 and `/health` reports `degraded` |
 | `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size |
+| `health-degraded` | `/health` answered 503 because the asset binding is missing; the healthy answer logs nothing |
 | `method-not-allowed` | a method the path does not take, on the page or on an image |
 | `not-acceptable` | the client refused every encoding the isolate can produce, so the page cannot be sent to it at all |
 
 Every request line carries the same fields: `event`, the request's ray under
 `ray` (empty off Cloudflare), its `method` and `path`, the `status` the
 client was given, the `duration_ms` the edge spent getting there, and
-whatever reason the event adds. `coding-dropped` is the one exception: it names
-a compression build, not an answer the client was given, so it carries only
-`coding` and `error` beside `event` and `ray`. A filter on method, path or
-status works across every other event. That is
+whatever reason the event adds. A filter on method, path or status works
+across every event, `coding-dropped` included: it names the build that failed
+rather than the answer the client was given, and the request that asked for
+it is the first one on the line, so the ray and the fields filter on. That is
 the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. Past 20 lines

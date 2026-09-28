@@ -409,17 +409,85 @@ test("every error answer states its length, and a HEAD states the GET's", async 
 });
 
 test("/health reports degraded while the asset binding is missing", async () => {
-  const degraded = await call({}, { path: "/health", env: {} });
-  expect(degraded.status).toBe(503);
-  expect(await degraded.text()).toBe(
-    "degraded: no asset binding; the dashboard captures are not served\n",
-  );
-  expect(degraded.headers.get("cache-control")).toBe("no-store");
-  const head = await call({}, { method: "HEAD", path: "/health", env: {} });
-  expect(head.status).toBe(503);
-  expect(head.headers.get("content-length")).toBe(degraded.headers.get("content-length"));
-  expect((await head.arrayBuffer()).byteLength).toBe(0);
-  expect((await call({}, { path: "/health", env: staticAssets() })).status).toBe(200);
+  const logs = captureLogs();
+  try {
+    const degraded = await call({ "cf-ray": "probe-TOK" }, { path: "/health", env: {} });
+    expect(degraded.status).toBe(503);
+    expect(await degraded.text()).toBe(
+      "degraded: no asset binding; the dashboard captures are not served\n",
+    );
+    expect(degraded.headers.get("cache-control")).toBe("no-store");
+    const head = await call({}, { method: "HEAD", path: "/health", env: {} });
+    expect(head.status).toBe(503);
+    expect(head.headers.get("content-length")).toBe(degraded.headers.get("content-length"));
+    expect((await head.arrayBuffer()).byteLength).toBe(0);
+    expect((await call({}, { path: "/health", env: staticAssets() })).status).toBe(200);
+    // The 503 is a failure, so it carries the request behind it: the binding
+    // is a deploy-level thing, and on a site taking no image traffic the
+    // probe's answer is the only thing that says it. The healthy answer is a
+    // served one and writes nothing.
+    expect(logs.parse()).toEqual([
+      {
+        event: "health-degraded",
+        ray: "probe-TOK",
+        method: "GET",
+        path: "/health",
+        status: 503,
+        duration_ms: expect.any(Number),
+      },
+      {
+        event: "health-degraded",
+        ray: "",
+        method: "HEAD",
+        path: "/health",
+        status: 503,
+        duration_ms: expect.any(Number),
+      },
+    ]);
+  } finally {
+    logs.restore();
+  }
+});
+
+// A coding the runtime cannot build is a fallback, not a failed request: the
+// next acceptable coding answers, and the client sees a page. It is logged
+// anyway, because the slot then holds that failure for the isolate's life and
+// the site answers uncompressed from then on. A fresh isolate so the coding
+// cache starts empty.
+test("a coding the runtime cannot build is logged with the request behind it", async () => {
+  const NativeCompressionStream = globalThis.CompressionStream;
+  globalThis.CompressionStream = class extends NativeCompressionStream {
+    constructor(format) {
+      super(format);
+      if (format === "gzip") throw new Error("gzip unavailable");
+    }
+  };
+  const { default: freshWorker } = await import("./worker.js?coding-dropped");
+  const logs = captureLogs();
+  try {
+    const res = await freshWorker.fetch(
+      new Request(ORIGIN, {
+        headers: { "accept-encoding": "gzip, identity;q=0.5", "cf-ray": "zip-TOK" },
+      }),
+      staticAssets(),
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-encoding")).toBeNull();
+    expect(logs.parse()).toEqual([
+      {
+        event: "coding-dropped",
+        ray: "zip-TOK",
+        method: "GET",
+        path: "/",
+        duration_ms: expect.any(Number),
+        coding: "gzip",
+        error: "gzip unavailable",
+      },
+    ]);
+  } finally {
+    logs.restore();
+    globalThis.CompressionStream = NativeCompressionStream;
+  }
 });
 
 test("every page answer carries the security headers, not only revalidations", async () => {

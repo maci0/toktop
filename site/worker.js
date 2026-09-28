@@ -498,8 +498,10 @@ const BODIES = new Map();
 
 // The request rides along only so a dropped coding names the edge request
 // that hit it: the build is shared, so the first caller's ray is the one on
-// the line, not a claim about every request it served.
-function pageBody(coding, request) {
+// the line, not a claim about every request it served. It carries the same
+// method, path and duration every other failure line does, so one filter
+// covers this event with the rest.
+function pageBody(coding, request, started) {
   if (!BODIES.has(coding)) {
     BODIES.set(
       coding,
@@ -510,6 +512,7 @@ function pageBody(coding, request) {
         // memory, a stream that dies mid-pipeline) would ship the page at
         // its uncompressed size forever without a word, so name it.
         logFailure(request, "coding-dropped", {
+          ...requestFields(request, started),
           coding,
           // A throw carries any value, null included, so err may have no message.
           error: String(err?.message ?? err),
@@ -547,7 +550,7 @@ function acceptableCodings(qByCoding) {
 // The first acceptable coding this isolate can build, built here when no
 // earlier request wanted it. A coding the runtime cannot build falls through
 // to the next rather than costing the client the page.
-async function representationFor(acceptEncoding, request) {
+async function representationFor(acceptEncoding, request, started) {
   const qByCoding = parseAcceptEncoding(acceptEncoding);
   for (const coding of acceptableCodings(qByCoding)) {
     if (coding === null) return { coding, bytes: IDENTITY };
@@ -555,7 +558,7 @@ async function representationFor(acceptEncoding, request) {
     // cannot be built, so building them together would spend the bytes of a
     // body this request would then throw away.
     // biome-ignore lint/performance/noAwaitInLoops: a fallback chain, not a fan-out.
-    const bytes = await pageBody(coding, request);
+    const bytes = await pageBody(coding, request, started);
     if (bytes !== null) return { coding, bytes };
   }
   return null;
@@ -625,18 +628,26 @@ function notAcceptable(request, started) {
   return failRequest(request, started, 406, "not-acceptable", "not acceptable", { vary: VARY });
 }
 
-// One failure, one line and one answer. Every line carries the same request
-// fields, so a filter on method, path or status works across every event
-// rather than only the ones that happened to pass them in. The line names the
-// status the client got and the milliseconds the edge spent, so one pivot off
-// a visitor's report says whether it succeeded and how slowly; the answer
-// carries the same numbers as headers.
-function failRequest(request, started, status, event, body, extraHeaders = {}, fields = {}) {
-  logFailure(request, event, {
+// The request fields every failure line carries, so a filter on method, path
+// or duration works across every event rather than only the ones that
+// happened to pass them in. The duration is what the edge spent to reach the
+// failure, which is the number the answer's Server-Timing reports.
+function requestFields(request, started) {
+  return {
     method: request.method,
     path: new URL(request.url).pathname,
-    status,
     duration_ms: Date.now() - started,
+  };
+}
+
+// One failure, one line and one answer. The line names the status the client
+// got and the milliseconds the edge spent, so one pivot off a visitor's
+// report says whether it succeeded and how slowly; the answer carries the
+// same numbers as headers.
+function failRequest(request, started, status, event, body, extraHeaders = {}, fields = {}) {
+  logFailure(request, event, {
+    ...requestFields(request, started),
+    status,
     ...fields,
   });
   return errorResponse(request, started, status, body, extraHeaders);
@@ -820,7 +831,19 @@ async function handle(request, env, started) {
     // is the same call the ingest /healthz makes when it is refusing every
     // event, and it is what makes `make site-deploy` fail a deploy that
     // shipped without its assets instead of waiting out a green probe.
+    //
+    // A degraded answer is a failure, so it is logged like one: the binding
+    // is a deploy-level thing, and on a site taking no image traffic the
+    // 503 is the only thing that says it. The per-isolate cap covers the
+    // probe, which would otherwise write a line per check. The healthy
+    // answer logs nothing, as every served answer does.
     const degraded = !env?.ASSETS;
+    if (degraded) {
+      logFailure(request, "health-degraded", {
+        ...requestFields(request, started),
+        status: 503,
+      });
+    }
     const healthBody = degraded
       ? "degraded: no asset binding; the dashboard captures are not served\n"
       : "ok\n";
@@ -887,7 +910,7 @@ async function handle(request, env, started) {
       },
     });
   }
-  const chosen = await representationFor(acceptEncoding, request);
+  const chosen = await representationFor(acceptEncoding, request, started);
   if (chosen === null) {
     return notAcceptable(request, started);
   }
