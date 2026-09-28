@@ -157,15 +157,20 @@ func isDriveLetter(c byte) bool {
 }
 
 // nameContinues reports whether the text after a matched account name extends
-// it into a different name. A path separator, a quote, a colon or the end of
-// the text all end the name; letters, digits and the separators a shell or a
-// file system puts inside one do not.
+// it into a different name. A path separator or the end of the text end the
+// name, and so does a drive letter: "\Users\meC:\Users\me" names the home
+// twice, and reading that "C" as the start of a longer account name leaves the
+// first mention in the text this exists to remove. Letters, digits and the
+// separators a shell or a file system puts inside one do not.
 func nameContinues(rest string) bool {
 	if rest == "" {
 		return false
 	}
 	r, _ := utf8.DecodeRuneInString(rest)
 	if r == '/' || r == '\\' {
+		return false
+	}
+	if r < utf8.RuneSelf && isDriveLetter(byte(r)) && len(rest) > 1 && rest[1] == ':' {
 		return false
 	}
 	return r == '.' || r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
