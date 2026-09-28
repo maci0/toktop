@@ -41,13 +41,21 @@ const (
 	unitRoundTo = 999.5
 )
 
+// Values past which the scaled form drops its decimal. A rate of 10.0k/tok/s
+// and a count of 1.0M carry no information in the second digit, and a
+// dot-separated rate reads as a float the reader must convert.
+const (
+	rateNoDecimal  = 10000
+	countNoDecimal = 1000000
+)
+
 func fmtRate(v float64) string {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return "0.0"
 	}
 	k := v / 1000
 	switch {
-	case v >= 10000 || k >= unitRound:
+	case v >= rateNoDecimal || k >= unitRound:
 		return fmt.Sprintf("%.0fk", k)
 	case v >= unitRoundTo:
 		return fmt.Sprintf("%.1fk", k)
@@ -61,7 +69,7 @@ func fmtRate(v float64) string {
 func fmtCount(n int64) string {
 	k := float64(n) / 1000
 	switch {
-	case n >= 1000000 || k >= unitRound:
+	case n >= countNoDecimal || k >= unitRound:
 		return fmt.Sprintf("%.1fM", k/1000)
 	case n >= 1000:
 		return fmt.Sprintf("%.1fk", k)

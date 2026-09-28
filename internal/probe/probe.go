@@ -70,6 +70,11 @@ const probeLineMax = 16 << 10
 
 const probeStreamMax = 128 << 10
 
+// probeBufInit is the bufio fill size for a stream scan. A frame is a few
+// hundred bytes, so a small buffer is read a few times per stream and never
+// held for the whole response.
+const probeBufInit = 4 << 10
+
 // ModelNameMax caps the engine-supplied model id interpolated into the
 // generation request. It is core.ModelNameMax, the bound the provider layer
 // already stored ids under, so a name that reached a snapshot is one this
@@ -220,7 +225,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	}
 	defer resp.Body.Close()
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
-	sc.Buffer(make([]byte, 0, 4<<10), probeLineMax)
+	sc.Buffer(make([]byte, 0, probeBufInit), probeLineMax)
 	var reported, contentBytes, reasoning int
 	for sc.Scan() {
 		line := bytes.TrimSpace(sc.Bytes())
@@ -304,7 +309,7 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		return readOpenAIJSON(resp.Body, s)
 	}
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
-	sc.Buffer(make([]byte, 0, 4<<10), probeLineMax)
+	sc.Buffer(make([]byte, 0, probeBufInit), probeLineMax)
 	var reported, contentBytes, reasoning int
 	for sc.Scan() {
 		line := strings.TrimSpace(sc.Text())
@@ -433,10 +438,7 @@ func streamReadErr(ctx context.Context, err error, tokens int) error {
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() != nil {
-		return err
-	}
-	if tokens > 0 {
+	if ctx.Err() == nil && tokens > 0 {
 		return nil
 	}
 	return err

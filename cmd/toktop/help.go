@@ -42,7 +42,9 @@ var flagPlaceholders = map[string]string{
 // which contradicts the --long-form used by the examples, the prose below the
 // flag list, the README, and every error message naming a flag.
 func flagDocs(fs *flag.FlagSet) string {
-	names := make([]string, 0, fs.NFlag())
+	// NFlag counts the flags that were set, not the ones defined, so it sizes
+	// this at zero on the help path. VisitAll decides the length instead.
+	var names []string
 	fs.VisitAll(func(f *flag.Flag) { names = append(names, f.Name) })
 	slices.Sort(names)
 

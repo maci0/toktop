@@ -54,7 +54,7 @@ func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	if set["json"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --json has no effect without --once")
 	}
-	if set["json"] && f.plain {
+	if set["json"] && f.jsonOut && f.plain {
 		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect with --json; the JSON report replaces the text report")
 	}
 	if set["no-hot-reload"] && f.once {
@@ -345,11 +345,24 @@ func validateIngestAddr(addr string) error {
 	if err != nil {
 		return fmt.Errorf("--ingest address must be host:port, got %q", addr)
 	}
-	n, convErr := strconv.Atoi(port)
-	if convErr != nil || n < 0 || n > 65535 {
-		return fmt.Errorf("--ingest port must be 0-65535, got %q", port)
+	if _, err := parsePort("--ingest", port); err != nil {
+		return err
 	}
 	return nil
+}
+
+// portMax is the highest port a target or an ingest listener may name.
+const portMax = 65535
+
+// parsePort validates a textual port and reports it under the flag or option
+// the caller carries it for. Zero is accepted: it is the ephemeral port a
+// listener binds when the operator leaves the choice open.
+func parsePort(label, port string) (int, error) {
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 0 || n > portMax {
+		return 0, fmt.Errorf("%s port must be 0-%d, got %q", label, portMax, port)
+	}
+	return n, nil
 }
 
 // resolveBearer returns the token sent to --add endpoints. An explicit

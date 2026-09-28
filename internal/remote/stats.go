@@ -268,7 +268,7 @@ func (s *Stats) Merge(into *core.SysSample) {
 		into.RemoteErr = ""
 	default:
 		if into.RemoteErr == "" {
-			into.RemoteHost = s.last.RemoteHost
+			into.RemoteHost = s.host()
 		}
 	}
 }
@@ -312,10 +312,9 @@ func parseVitals(out string, s *core.SysSample) (loadsOK bool) {
 	if mem := section(1); strings.TrimSpace(mem) != "" {
 		sysmon.ParseMeminfo([]byte(mem), s)
 	}
+	// firstLine never returns a blank line, so Fields is non-empty here.
 	if up := firstLine(section(2)); up != "" {
-		if f := strings.Fields(up); len(f) > 0 {
-			s.HostUptime = sysmon.ParseUptimeSecs(f[0])
-		}
+		s.HostUptime = sysmon.ParseUptimeSecs(strings.Fields(up)[0])
 	}
 	if cpu := firstLine(section(3)); cpu != "" {
 		s.CPUModel = vitalsField(cpu)

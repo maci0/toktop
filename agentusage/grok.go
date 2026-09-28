@@ -83,7 +83,7 @@ const grokMaxTurnMS = math.MaxInt64 / int64(time.Millisecond)
 // carries counts. Anything else in the log, including the same word inside
 // a tool result, contributes nothing.
 func parseGrokUpdate(line []byte) (values, string, bool) {
-	line = bytes.TrimSpace(bytes.TrimPrefix(line, utf8BOM))
+	line = bytes.TrimPrefix(bytes.TrimSpace(line), utf8BOM)
 	var rec struct {
 		Method string `json:"method"`
 		Params struct {

@@ -237,7 +237,7 @@ func (c *Collector) sampleSys(force bool) *core.SysSample {
 	c.sysMu.Lock()
 	fn, cached := c.sysFn, c.sysCache
 	c.sysMu.Unlock()
-	if !force && (cached != nil || fn == nil) {
+	if !force && cached != nil {
 		return cached
 	}
 	if fn == nil {

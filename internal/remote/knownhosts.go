@@ -463,10 +463,9 @@ func writeBackup(path string, b string) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmpName, backupPath(path)); err != nil {
+	if err := replaceFile(tmpName, backupPath(path)); err != nil {
 		return err
 	}
-	core.SyncDir(dir)
 	return nil
 }
 

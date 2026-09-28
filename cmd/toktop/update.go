@@ -126,12 +126,7 @@ func reportRelease(out, status io.Writer, rel *selfupdate.Release, check bool) (
 	found := !rel.NewerThan(version)
 	if check {
 		var err error
-		if found {
-			_, err = fmt.Fprintf(status, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
-		} else {
-			_, err = fmt.Fprintf(status, "New release: %s (running %s)\n", rel.TagName, version)
-		}
-		if err != nil {
+		if _, err = fmt.Fprint(status, releaseLine(found, rel)); err != nil {
 			return outputStatus(err), false
 		}
 		// The help screen documents this as `url=$(toktop update --check)`,
@@ -151,12 +146,19 @@ func reportRelease(out, status io.Writer, rel *selfupdate.Release, check bool) (
 		_, err = fmt.Fprintln(out, rel.HTMLURL)
 		return outputStatus(err), false
 	}
+	_, err := fmt.Fprint(out, releaseLine(found, rel))
+	return outputStatus(err), !found
+}
+
+// releaseLine is the one wording for both outcomes. The --check path sends it
+// to stderr and the plain path to stdout, but the text must not differ: an
+// operator reading one and then the other should not see two phrasings of the
+// same answer.
+func releaseLine(found bool, rel *selfupdate.Release) string {
 	if found {
-		_, err := fmt.Fprintf(out, "toktop %s is current (latest release: %s)\n", version, rel.TagName)
-		return outputStatus(err), false
+		return fmt.Sprintf("toktop %s is current (latest release: %s)\n", version, rel.TagName)
 	}
-	_, err := fmt.Fprintf(out, "New release: %s (running %s)\n", rel.TagName, version)
-	return outputStatus(err), true
+	return fmt.Sprintf("New release: %s (running %s)\n", rel.TagName, version)
 }
 
 // updateErr maps a canceled context to the same 130 the --once path uses

@@ -13,6 +13,11 @@ import (
 // up, so both row caps read as one policy.
 const maxFeedEvents = 8
 
+// maxProbeRows bounds the probe results the plain report prints. A new enough
+// outcome beats an older one, and two rows carry "it works" and "it does not"
+// without burying either.
+const maxProbeRows = 2
+
 // PlainTextFrame renders one snapshot as a linear, text-only report: the
 // non-visual counterpart to the dashboard frame. That frame draws charts as
 // braille dot-matrix rows, panels as box-drawing borders and meters as bar
@@ -217,7 +222,7 @@ func writeProbesPlain(b *strings.Builder, s core.Snapshot) {
 	}
 	b.WriteString("\nPROBES\n")
 	shown := 0
-	for i := len(s.Probes) - 1; i >= 0 && shown < 2; i-- {
+	for i := len(s.Probes) - 1; i >= 0 && shown < maxProbeRows; i-- {
 		p := s.Probes[i]
 		if !p.OK {
 			line := fmt.Sprintf("failed %s", shorten(core.SingleLine(p.Model), 40))

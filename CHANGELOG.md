@@ -60,6 +60,34 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   creates that directory itself on first run, so a home it does not use left
   every kimi session reading as an agent producing no tokens.
 
+- `--plain --json=false` no longer warns that the JSON report replaces the
+  text report. The warning read the flag as given rather than its value, so a
+  run that printed the text report was told the opposite.
+
+- A CUDA version in `nvidia-smi` output with no driver version beside it is
+  reported. The parse dropped the whole file when the driver line was absent,
+  which is the coupling its own comment says it avoids.
+
+- A zero-byte `temp*_label` in a hwmon chip directory no longer blanks the
+  chip name. The label file exists to name a sensor that has no better name,
+  and an empty one left the gpu/junction needles with nothing to match.
+
+- `ps` rows naming pid 0 on macOS are no longer treated as processes, the
+  same guard the `/proc` walk applies.
+
+- The ssh host-key store's backup copy is renamed into place the way the store
+  is. It used a plain rename, which on Windows refuses to overwrite, so every
+  write after the first left the copy at its first contents while the store
+  moved on.
+
+- An agy `history.jsonl` that begins with a UTF-8 BOM indexes every
+  conversation again, and a BOM behind leading whitespace is stripped rather
+  than left to fail the JSON parse.
+
+- A dsh record, and a grok record whose BOM sits after leading whitespace, are
+  parsed instead of dropped. The other parsers in the package strip the BOM;
+  these two stripped it in an order that missed it.
+
 - The ssh host-key store keeps a copy of itself. Every write leaves one at
   `known_hosts.bak` beside the store, and a store that goes missing, is
   emptied, or is overwritten by something else is read back from that copy

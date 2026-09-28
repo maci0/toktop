@@ -125,6 +125,7 @@ type dshUsage struct {
 // harness's own usage fold leaves it out of durable session totals, so
 // counting it here would disagree with what dsh itself reports.
 func parseDsh(line []byte) (values, string, bool) {
+	line = bytes.TrimPrefix(line, utf8BOM)
 	var rec struct {
 		Type  string    `json:"type"`
 		Usage *dshUsage `json:"usage"`

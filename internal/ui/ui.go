@@ -489,16 +489,7 @@ func aggBoth(s core.Snapshot, sum core.AgentSummary) (out, in float64) {
 // aggIn is the header's input total: provider rates plus the feed's
 // unattributed share, off the frame's own walk.
 func (m Model) aggIn() float64 {
-	in := m.aggInProviders()
-	_, aIn := sumOwn(m.agentSum().Own)
-	return in + aIn
-}
-
-func (m Model) aggInProviders() float64 {
-	var in float64
-	for _, p := range m.snap.Providers {
-		in += p.InTokPS
-	}
+	_, in := aggBoth(m.snap, m.agentSum())
 	return in
 }
 

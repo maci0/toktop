@@ -15,6 +15,14 @@ import (
 // before the rest collapse into a count.
 const maxSummaryAgents = 3
 
+// Frame widths below which each AGENTS title hint is dropped, because adding
+// it would stretch the title past the pane. The local hint names the session
+// logs and is the longer of the two, so it needs the wider frame.
+const (
+	localHintMinW  = 78
+	ingestHintMinW = 56
+)
+
 // agentLiveWindow is how recently an agent must have reported for its recency
 // cell to read "live" rather than an idle span. Below it the idle string would
 // render as "idle 0s", which reads as stalled rather than current.
@@ -198,14 +206,15 @@ func (m Model) renderAgentsOnly() string {
 	// Where the tokens come from, and only where that is true: the same view
 	// is fed by the local session-log watch under --agents and by harness
 	// events POSTed to the ingest endpoint without it, and the session-log
-	// claim was wrong for the second.
-	switch {
-	case m.cfg.Agents:
-		if hint := dim("  local, read from their own session logs"); m.w >= 78 {
+	// claim was wrong for the second. Each hint names the frame width below
+	// which it would push the title past the pane, since the hint is longer
+	// than the other by design.
+	if m.cfg.Agents {
+		if hint := dim("  local, read from their own session logs"); m.w >= localHintMinW {
 			add(hint)
 		}
-	case m.cfg.IngestAddr != "":
-		if hint := dim("  from the ingest endpoint"); m.w >= 56 {
+	} else if m.cfg.IngestAddr != "" {
+		if hint := dim("  from the ingest endpoint"); m.w >= ingestHintMinW {
 			add(hint)
 		}
 	}

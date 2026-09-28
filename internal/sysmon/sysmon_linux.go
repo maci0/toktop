@@ -318,9 +318,6 @@ func parseNvidiaVersion(text string) (driver, cuda string) {
 			cuda = v
 		}
 	}
-	if driver == "" {
-		return "", ""
-	}
 	return driver, cuda
 }
 
@@ -495,7 +492,9 @@ func sensorLayout(key, root string, build func(string) []sensorInput) []sensorIn
 			delete(sensorLayouts, k)
 		}
 	}
-	if c, ok := sensorLayouts[key]; ok && core.Age(now, c.at) < sensorLayoutTTL {
+	// The sweep above already dropped every entry past its TTL, so anything
+	// still in the map is fresh.
+	if c, ok := sensorLayouts[key]; ok {
 		return c.inputs
 	}
 	// Build under the lock so concurrent samples share one walk and a
@@ -547,7 +546,10 @@ func listHwmon(root string) []sensorInput {
 		for _, in := range inputs {
 			label := chipName
 			base := strings.TrimSuffix(filepath.Base(in), "_input")
-			if lb, err := os.ReadFile(filepath.Join(chip, base+"_label")); err == nil {
+			// A zero-byte _label is a chip that has none, not one whose
+			// label is empty: falling back to the chip name keeps the
+			// gpu/junction needles working.
+			if lb, err := os.ReadFile(filepath.Join(chip, base+"_label")); err == nil && len(lb) > 0 {
 				label = sensorLabel(string(lb))
 			}
 			gpu := isGPUChip || core.ContainsAny(label, "gpu", "junction", "hotspot", "edge")

@@ -63,8 +63,8 @@ func parseDarwinProcesses(out string) []raw {
 			continue
 		}
 		pid, err := strconv.Atoi(fields[0])
-		if err != nil {
-			continue
+		if err != nil || pid <= 0 {
+			continue // not a process row
 		}
 		cpu, _ := strconv.ParseFloat(fields[1], 64)
 		if !(cpu >= 0) || math.IsInf(cpu, 0) {

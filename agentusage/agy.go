@@ -184,9 +184,14 @@ func agyIndex(root string) (map[string]string, bool) {
 	return ids, true
 }
 
-// agyHistoryCap bounds the index read. The file is one line per prompt, and
-// past this it is no longer a history this package will scan on a poll.
-const agyHistoryCap = 32 << 20
+// agyIndexCap bounds an index read. The history file is one line per prompt,
+// and past this it is no longer a history this package will scan on a poll.
+const agyIndexCap = 32 << 20
+
+// agyHistoryLineMax bounds one conversation record. bufio.Scanner aborts on
+// ErrTooLong rather than skipping the line, so a single oversized record ends
+// the index read and reports the whole file unreadable.
+const agyHistoryLineMax = 1 << 20
 
 func loadAgyHistory(path string) (map[string]string, bool) {
 	dir := filepath.Dir(path)
@@ -200,11 +205,11 @@ func loadAgyHistory(path string) (map[string]string, bool) {
 		return nil, false
 	}
 	defer f.Close()
-	sc := bufio.NewScanner(io.LimitReader(f, agyHistoryCap))
-	sc.Buffer(make([]byte, 0, 64<<10), 1<<20)
+	sc := bufio.NewScanner(io.LimitReader(f, agyIndexCap))
+	sc.Buffer(make([]byte, 0, appendReaderBytes), agyHistoryLineMax)
 	ids := map[string]string{}
 	for sc.Scan() {
-		line := bytes.TrimSpace(sc.Bytes())
+		line := bytes.TrimSpace(bytes.TrimPrefix(sc.Bytes(), utf8BOM))
 		if len(line) == 0 {
 			continue
 		}
@@ -217,19 +222,16 @@ func loadAgyHistory(path string) (map[string]string, bool) {
 		}
 		ids[rec.ConversationID] = rec.Workspace
 	}
-	if err := sc.Err(); err != nil && err != io.EOF {
+	if err := sc.Err(); err != nil {
 		return nil, false
 	}
 	return ids, true
 }
 
-// agyLastCap bounds the current-conversation index. Past this the JSON object
-// is not parsed: a truncated object would drop the ids at the end, which are
-// the ones this file is read for.
-const agyLastCap = 32 << 20
-
 // loadAgyLast inverts cache/last_conversations.json, workspace path to
-// conversation id, into conversation id to workspace.
+// conversation id, into conversation id to workspace. Past agyIndexCap the
+// JSON object is not parsed: a truncated object would drop the ids at the end,
+// which are the ones this file is read for.
 func loadAgyLast(path string) (map[string]string, bool) {
 	dir := filepath.Dir(path)
 	r, err := os.OpenRoot(dir)
@@ -242,8 +244,8 @@ func loadAgyLast(path string) (map[string]string, bool) {
 		return nil, false
 	}
 	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, agyLastCap+1))
-	if err != nil || len(b) > agyLastCap {
+	b, err := io.ReadAll(io.LimitReader(f, agyIndexCap+1))
+	if err != nil || len(b) > agyIndexCap {
 		return nil, false
 	}
 	var raw map[string]string

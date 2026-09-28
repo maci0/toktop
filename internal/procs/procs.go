@@ -229,6 +229,11 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	return slices.Clone(out)
 }
 
+// clampPctMax is the ceiling on a derived CPU percentage. Many-core boxes
+// legitimately exceed 100% of one core, so the cap is far above it; it exists
+// to bound a runaway multiplier, not to describe a real load.
+const clampPctMax = 100 * 1024
+
 // clampPct bounds a derived CPU percentage. Counter resets must not read as
 // negative load, and a runaway multiplier must stay bounded; many-core boxes
 // legitimately exceed 100% of one core.
@@ -236,10 +241,7 @@ func clampPct(v float64) float64 {
 	if !(v > 0) { // also catches NaN: every comparison with it is false
 		return 0
 	}
-	if v > 100*1024 {
-		return 100 * 1024
-	}
-	return v
+	return min(v, clampPctMax)
 }
 
 // portFlags and portFlagsEq are the argv spellings that carry an explicit
