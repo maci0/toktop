@@ -61,6 +61,16 @@ const evalDurationBandDiv = 4
 // trip) describes it better than the value does.
 const maxEvalDuration = 24 * time.Hour
 
+// probeFrameMax is the third hang-up, and the only one the other two cannot
+// supply. Token and byte budgets count what the engine *generated*: an engine
+// that emits frames carrying no content and no reasoning trips neither, so a
+// keepalive stream, a role-only first frame, or a gateway replaying empty
+// choices holds the generation open, and the generation is billed, until the
+// 30s client timeout. A probe needs 32 of content, so a window this wide is
+// several times any well-formed stream, and reaching it without a single token
+// means the exchange is not going to produce one.
+const probeFrameMax = 512
+
 // probeLineMax is the largest SSE/NDJSON frame we will buffer, and the cap on
 // a whole non-stream body. probeStreamMax (128 KiB) bounds a streamed body
 // overall. A 32-token completion plus wrapper JSON is hundreds of bytes; a
@@ -226,8 +236,20 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	defer resp.Body.Close()
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, probeBufInit), probeLineMax)
-	var reported, contentBytes, reasoning int
+	var reported, contentBytes, reasoning, frames int
+	hungUp := false
 	for sc.Scan() {
+		// The budget is checked per line, before the line is classified, so a
+		// line the decoder skips cannot escape it: a blank separator and a
+		// malformed frame both leave tokens and contentBytes at zero, and a
+		// stream of them is an exchange that will not end on its own. The
+		// frame that trips the cap is the one after the last looked at, so the
+		// counter is read here and advanced below.
+		if overBudget(tokens+reasoning, contentBytes, frames) {
+			hungUp = true
+			break
+		}
+		frames++
 		line := bytes.TrimSpace(sc.Bytes())
 		if len(line) == 0 {
 			continue
@@ -272,11 +294,12 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 			}
 			break
 		}
-		if overBudget(tokens+reasoning, contentBytes) {
+		if overBudget(tokens+reasoning, contentBytes, frames) {
+			hungUp = true
 			break
 		}
 	}
-	if err := streamReadErr(ctx, sc.Err(), tokens); err != nil {
+	if err := streamReadErr(ctx, sc.Err(), tokens, hungUp); err != nil {
 		return 0, 0, ttft, err
 	}
 	n, trust := resolveTokens(tokens, reported)
@@ -310,8 +333,17 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	}
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, probeBufInit), probeLineMax)
-	var reported, contentBytes, reasoning int
+	var reported, contentBytes, reasoning, frames int
+	hungUp := false
 	for sc.Scan() {
+		// Per line, ahead of the frame parser, for the reason the Ollama loop
+		// gives: an SSE comment or a non-JSON line is skipped below, and
+		// without this it would not count toward anything.
+		if overBudget(tokens+reasoning, contentBytes, frames) {
+			hungUp = true
+			break
+		}
+		frames++
 		line := strings.TrimSpace(sc.Text())
 		payload, ok := openaiFrame(line)
 		if !ok {
@@ -359,11 +391,12 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 				contentBytes += len(reason)
 			}
 		}
-		if overBudget(tokens+reasoning, contentBytes) { // engine ignored max_tokens: hang up
+		if overBudget(tokens+reasoning, contentBytes, frames) { // engine ignored max_tokens: hang up
+			hungUp = true
 			break
 		}
 	}
-	if err := streamReadErr(ctx, sc.Err(), tokens); err != nil {
+	if err := streamReadErr(ctx, sc.Err(), tokens, hungUp); err != nil {
 		return 0, ttft, err
 	}
 	n, _ := resolveTokens(tokens, reported)
@@ -375,9 +408,12 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 
 // overBudget reports that the client has seen enough generation to hang up.
 // Frame count catches engines that ignore max_tokens one token at a time;
-// byte count catches a single huge delta that would count as one frame.
-func overBudget(tokens, contentBytes int) bool {
-	return tokens >= probeTokens || contentBytes >= probeContentBytes
+// byte count catches a single huge delta that would count as one frame; the
+// raw frame count catches a stream that carries neither, which the other two
+// cannot see. frames is every line the scanner yielded, not just the decoded
+// ones: a keepalive the frame parser discards is still a billed round trip.
+func overBudget(tokens, contentBytes, frames int) bool {
+	return tokens >= probeTokens || contentBytes >= probeContentBytes || frames >= probeFrameMax
 }
 
 // longest returns the longest of the values, or "" when every one is empty.
@@ -451,12 +487,16 @@ func resolveTokens(observed, reported int) (tokens int, trustReported bool) {
 // caller's context is a real failure (shutdown must not mint a sample). A
 // mid-stream drop after at least one token still yields a timed sample:
 // hanging up is how we bound engines that ignore max_tokens, and a client
-// timeout would otherwise throw away TTFT already measured.
-func streamReadErr(ctx context.Context, err error, tokens int) error {
+// timeout would otherwise throw away TTFT already measured. The same is true of
+// a hang-up the client chose itself, which the transport reports as a
+// truncation: without hungUp the deliberate close reads as the engine dying
+// mid-generation, and a tokenless stream the client bounded on frame count
+// would be filed as a broken engine instead of one that never answered.
+func streamReadErr(ctx context.Context, err error, tokens int, hungUp bool) error {
 	if err == nil {
 		return nil
 	}
-	if ctx.Err() == nil && tokens > 0 {
+	if ctx.Err() == nil && (hungUp || tokens > 0) {
 		return nil
 	}
 	return err

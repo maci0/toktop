@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"maps"
+	"math"
 	"net"
 	"net/url"
 	"os"
@@ -883,6 +884,21 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 		"model", logcfg.Field(t.req.Model, 128),
 	}
 	if s.OK {
+		// The transition lines say whether an engine is answering; nothing
+		// else on the record says what it answered like. A throughput change
+		// is the thing a probe exists to catch, and the pane only holds the
+		// last frame of it: a regression that a later probe recovered from is
+		// gone, with no record that the engine was ever slow. One line per
+		// probe at debug costs an operator who asked for it a line per
+		// --probe tick and stays silent under the default floor, so the
+		// numbers are attributable to a model id without logging anything by
+		// default.
+		attrs = append(attrs,
+			"duration", took.Round(time.Millisecond),
+			"ttft_ms", math.Round(s.TTFTms),
+			"tok_per_s", math.Round(s.TokPS),
+			"tokens", s.Tokens)
+		lg.Debug("toktop: probe ok", attrs...)
 		if first {
 			attrs = append(attrs, "down_for", core.Age(c.instant(), since).Round(time.Second))
 			lg.Info("toktop: probe answering again", attrs...)

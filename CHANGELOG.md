@@ -83,6 +83,27 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   per token. A wave now probes four backends and the next wave resumes where
   it stopped, so the rest of the fleet is still measured.
 
+- A probe stream whose frames carried no content and no reasoning tripped
+  neither the token budget nor the byte budget, and a line the frame parser
+  skipped never counted toward anything. An SSE keepalive comment, a role-only
+  opening frame, or a gateway replaying empty choices held the generation open,
+  and billed, until the 30-second client timeout. Probes now hang up after
+  `probeFrameMax` frames, counted ahead of the parser so a skipped line still
+  counts.
+
+- A probe the client hung up on reported itself as the engine dying
+  mid-generation, because the transport reports a deliberate close as a
+  truncation. A tokenless stream bounded on frame count is now the "empty
+  stream" it is, not a broken engine.
+
+- A probe that kept answering wrote nothing to the audit log. The transition
+  lines say whether an engine is answering, not what it answered like, so a
+  throughput regression the next wave recovered from left no record at all. At
+  `TOKTOP_LOG_LEVEL=debug` every probe now logs its model, round trip, time to
+  first token, tokens per second, and token count; the default floor is
+  unchanged, and the transition latch still records one line per outage rather
+  than one per tick.
+
 - A probe of a thinking model that answered in one piece reported `empty
   stream`. Engines that ignore `stream: true` return the whole completion in a
   single body, where the trace lands in `message.reasoning_content` and

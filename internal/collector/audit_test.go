@@ -181,6 +181,48 @@ func (b *probeBackend) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 // dependency failure nothing else records: the PROBES pane shows it for the
 // frame it is drawn on and the engine keeps answering its polls. The audit log
 // gets the start of the run once, and its end once.
+// A probe that keeps answering is the steady state, so the transition latch
+// says nothing about it: the audit log holds no record of the throughput a
+// model was measured at, and a regression the next wave recovered from is gone
+// with it. Every probe is recorded at debug, with the model it measured, so
+// the numbers are attributable without a line per tick under the default floor.
+func TestProbeMeasurementsAreAudited(t *testing.T) {
+	oldGap := probeWaveGap
+	probeWaveGap = 0
+	t.Cleanup(func() { probeWaveGap = oldGap })
+
+	srv := httptest.NewServer(&probeBackend{})
+	defer srv.Close()
+
+	c := New([]provider.Provider{(&fakeProvider{label: "engine", addr: srv.URL}).asProvider()}, time.Second)
+	c.lastModel[srv.URL] = "m"
+	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	logs := captureAudit(t)
+
+	for range 2 {
+		c.ProbeAll()
+		waitFor(t, func() bool {
+			c.probeMu.Lock()
+			defer c.probeMu.Unlock()
+			return len(c.probeInflight) == 0
+		}, "probe never cleared")
+	}
+
+	if got := countLines(logs, "probe ok"); got != 2 {
+		t.Fatalf("probe lines = %d, want one per wave:\n%s", got, logs.String())
+	}
+	// One line per probe is the point, but the transitions must not start
+	// re-reporting with it: an engine that never failed has no run to end.
+	if got := countLines(logs, "probe answering again"); got != 0 {
+		t.Errorf("recovery lines = %d, want none for an engine that never failed:\n%s", got, logs.String())
+	}
+	for _, want := range []string{"engine=engine", "model=m", "ttft_ms=", "tok_per_s=", "tokens=2"} {
+		if !strings.Contains(logs.String(), want) {
+			t.Errorf("probe line does not carry %s:\n%s", want, logs.String())
+		}
+	}
+}
+
 func TestProbeFailuresAreAuditedOnce(t *testing.T) {
 	oldGap := probeWaveGap
 	probeWaveGap = 0

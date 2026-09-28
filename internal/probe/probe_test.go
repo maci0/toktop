@@ -596,6 +596,80 @@ func TestRunStopsOnReasoningBudget(t *testing.T) {
 	}
 }
 
+// A stream whose frames carry no content and no reasoning trips neither the
+// token budget nor the byte budget: a keepalive comment, a role-only opening
+// frame, or a gateway replaying empty choices. The probe has to hang up on the
+// frame count or the generation stays open, and billed, until the 30s client
+// timeout. The handler stays blocked after the last frame it will write, so a
+// probe that only ends because the stream closed cannot pass this.
+func TestRunStopsOnFrameBudget(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		kind     string
+		ct       string
+		keepaliv string
+	}{
+		{"openai_sse_comment", core.KindVLLM, "text/event-stream", ": ping\n\n"},
+		{"openai_empty_choices", core.KindVLLM, "text/event-stream", `data: {"choices":[]}` + "\n\n"},
+		{"ollama_no_content", core.KindOllama, "application/x-ndjson", `{"done":false}` + "\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The handler parks until the client hangs up. It has to be
+			// released before Close, which blocks on outstanding requests.
+			release := make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			t.Cleanup(unblock)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.ct)
+				flusher, _ := w.(http.Flusher)
+				for range probeFrameMax + 1 {
+					fmt.Fprint(w, tc.keepaliv)
+					if flusher != nil {
+						flusher.Flush()
+					}
+				}
+				<-release // only the client hanging up ends this handler
+			}))
+			defer srv.Close()
+			defer unblock()
+
+			done := make(chan core.ProbeSample, 1)
+			go func() { done <- Run(context.Background(), Request{Kind: tc.kind, Base: srv.URL, Model: "m"}) }()
+
+			select {
+			case s := <-done:
+				if s.OK || !strings.Contains(s.Err, "empty stream") {
+					t.Fatalf("a tokenless stream must not report a measurement: %+v", s)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("probe did not hang up on an endless tokenless stream")
+			}
+		})
+	}
+}
+
+// The frame budget is a hang-up, not a token count: a frame that carries
+// content is still worth probeTokens of it, and one that carries none must not
+// push a real generation past the cap the token budget sets.
+func TestOverBudgetFrameTerm(t *testing.T) {
+	for _, tc := range []struct {
+		name                    string
+		tokens, content, frames int
+		want                    bool
+	}{
+		{"under_every_budget", probeTokens - 1, probeContentBytes - 1, probeFrameMax - 1, false},
+		{"frame_budget", 0, 0, probeFrameMax, true},
+		{"token_budget", probeTokens, 0, 0, true},
+		{"byte_budget", 0, probeContentBytes, 0, true},
+	} {
+		if got := overBudget(tc.tokens, tc.content, tc.frames); got != tc.want {
+			t.Errorf("%s: overBudget(%d, %d, %d) = %v, want %v",
+				tc.name, tc.tokens, tc.content, tc.frames, got, tc.want)
+		}
+	}
+}
+
 func TestRunOpenAIStopsOnStreamBytes(t *testing.T) {
 	frame := "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"r\"}}]}\n\n"
 	prefix := strings.Repeat(frame, 2*probeStreamMax/len(frame)+1)
