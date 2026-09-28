@@ -444,3 +444,32 @@ func TestSummarizeSpanIsFirstToLastInTimeNotWalkOrder(t *testing.T) {
 		t.Errorf("claude own = %v/%v tok/s, want 80/200", o.TokPS, o.PromptPS)
 	}
 }
+
+// AgentRate is the shared shape of both views, so a field the attributed half
+// fills and the unattributed half leaves at zero is a hole in the model rather
+// than a display choice: a consumer that reads Own can never tell an agent
+// that reasoned from one that did not, and it reads the zero as a measurement.
+func TestSummarizeOwnReportsThinkingLikeRates(t *testing.T) {
+	now := time.Unix(1_700_000_100, 0)
+	events := []AgentEvent{
+		{At: now.Add(-2 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 10},
+		{At: now.Add(-1 * time.Second), Agent: "claude", OutputTokens: 40, PromptTokens: 100, ThinkingTokens: 15},
+	}
+	sum := Summarize(events, now)
+	if len(sum.Own) != 1 || len(sum.Rates) != 1 {
+		t.Fatalf("rates = %d, own = %d; want 1 each", len(sum.Rates), len(sum.Own))
+	}
+	// Nothing is routed, so both views are the same two events and the same
+	// three totals. Only the tokens of the direct half belong to Own, so a
+	// routed event's thinking is excluded there as its output is.
+	if got, want := sum.Own[0].Thinking, sum.Rates[0].Thinking; got != want {
+		t.Errorf("claude own thinking = %d, want %d (the same as the attributed row)", got, want)
+	}
+	if got, want := sum.Own[0].Thinking, int64(25); got != want {
+		t.Errorf("claude own thinking = %d, want %d", got, want)
+	}
+	// Thinking is a breakdown of Tokens, not an extra on top of them.
+	if got := sum.Own[0].Tokens; got != 80 {
+		t.Errorf("claude own tokens = %d, want 80; thinking must not be added to it", got)
+	}
+}

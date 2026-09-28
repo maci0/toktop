@@ -21,8 +21,12 @@ import (
 
 // AgentRate is one agent's measured throughput.
 type AgentRate struct {
-	Agent     string
-	TokPS     float64
+	Agent string
+	TokPS float64
+	// PromptPS is the input rate. Thinking is the reasoning subset of Tokens,
+	// a breakdown of it rather than an extra, and both views of the summary
+	// carry it: an unattributed row reports the same three totals its
+	// attributed sibling does, over the same events minus the routed ones.
 	PromptPS  float64
 	Tokens    int64
 	Prompt    int64
@@ -95,11 +99,12 @@ type agentAcc struct {
 	// Unattributed half. Kept per event rather than per agent: an
 	// agent that connects to (or leaves) a monitored engine mid-window
 	// contributes the slice that went direct.
-	ownTokens int64
-	ownPrompt int64
-	ownFirst  time.Time
-	ownLast   time.Time
-	ownN      int
+	ownTokens   int64
+	ownPrompt   int64
+	ownThinking int64
+	ownFirst    time.Time
+	ownLast     time.Time
+	ownN        int
 	// span is the sum of event durations the sender reported. spanned counts
 	// those events. A rate uses the durations only when every event in the
 	// window brought one: a grok turn is a single event minutes after the
@@ -178,6 +183,7 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			}
 			a.ownTokens = satAddPos(a.ownTokens, ev.OutputTokens)
 			a.ownPrompt = satAddPos(a.ownPrompt, ev.PromptTokens)
+			a.ownThinking = satAddPos(a.ownThinking, ev.ThinkingTokens)
 			if ev.Span > 0 {
 				a.ownSpan += ev.Span
 				a.ownSpanned++
@@ -222,10 +228,11 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 			continue
 		}
 		o := AgentRate{
-			Agent:  name,
-			Tokens: a.ownTokens,
-			Prompt: a.ownPrompt,
-			Last:   a.ownLast,
+			Agent:    name,
+			Tokens:   a.ownTokens,
+			Prompt:   a.ownPrompt,
+			Thinking: a.ownThinking,
+			Last:     a.ownLast,
 		}
 		if a.ownN > 0 && a.ownSpanned == a.ownN && a.ownSpan > 0 {
 			secs := a.ownSpan.Seconds()

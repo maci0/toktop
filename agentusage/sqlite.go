@@ -104,16 +104,51 @@ func storeAbsent(path string) bool {
 // terminal spam for as long as the dashboard runs and unbounded growth for a
 // host that redirects its log.
 //
-// An entry is never removed. The keys are the agent's stores, one per project
-// for a project-local store, so the table is bounded by what is on disk.
-var storeReadState sync.Map // agent + "\x00" + path -> *storeRead
+// The table is capped, not merely reasoned about. A project-local store is
+// found by walking up from the agent's working directory, so the key set is
+// every project an agent has ever run in, not every project on disk: a
+// dashboard left running across a churn of worktrees, containers and scratch
+// checkouts accumulates a row for a directory that is long gone, and nothing
+// read ever names it again. The count cap is the same trade the collector's id
+// ledger makes, in the same shape: an evicted store is a store that has failed
+// once and stayed quiet since, and its next failure is a new outage to report
+// anyway.
+var storeReadState = struct {
+	sync.Mutex
+	states map[string]*storeRead
+	order  []string // the same keys in insertion order, oldest first
+}{states: map[string]*storeRead{}}
+
+// maxStoreReads bounds the latch table. Real usage is a handful of agents in
+// a handful of projects; the cap only bites on a host churning project
+// directories faster than any of them recovers.
+const maxStoreReads = 256
 
 type storeRead struct {
-	mu     sync.Mutex
 	failed bool
 }
 
 func storeReadKey(agent, path string) string { return agent + "\x00" + path }
+
+// storeReadFor returns the latch for one store, recording its first sighting
+// so the order carries every live key. An eviction drops the oldest key rather
+// than the entry the caller is about to touch, so a store at the cap keeps its
+// own latch.
+func storeReadFor(key string) *storeRead {
+	storeReadState.Lock()
+	defer storeReadState.Unlock()
+	if r, ok := storeReadState.states[key]; ok {
+		return r
+	}
+	r := &storeRead{}
+	storeReadState.states[key] = r
+	storeReadState.order = append(storeReadState.order, key)
+	for len(storeReadState.order) > maxStoreReads {
+		delete(storeReadState.states, storeReadState.order[0])
+		storeReadState.order = storeReadState.order[1:]
+	}
+	return r
+}
 
 // auditStoreRead records a read failure against a store that does exist. It
 // names the agent and the store so the operator can tell a corrupt or
@@ -122,12 +157,11 @@ func storeReadKey(agent, path string) string { return agent + "\x00" + path }
 // recorded as failing adds nothing: the line naming the start of the outage
 // said the reason, and every later poll would only repeat it.
 func auditStoreRead(agent, path string, err error) {
-	s, _ := storeReadState.LoadOrStore(storeReadKey(agent, path), &storeRead{})
-	r := s.(*storeRead)
-	r.mu.Lock()
+	r := storeReadFor(storeReadKey(agent, path))
+	storeReadState.Lock()
 	first := !r.failed
 	r.failed = true
-	r.mu.Unlock()
+	storeReadState.Unlock()
 	if !first {
 		return
 	}
@@ -141,12 +175,9 @@ func auditStoreRead(agent, path string, err error) {
 // distinguishable on the log from one that never did, and a failure after it
 // is reported as the new thing it is.
 func noteStoreReadOK(agent, path string) {
-	s, ok := storeReadState.Load(storeReadKey(agent, path))
-	if !ok {
-		return
+	storeReadState.Lock()
+	defer storeReadState.Unlock()
+	if r, ok := storeReadState.states[storeReadKey(agent, path)]; ok {
+		r.failed = false
 	}
-	r := s.(*storeRead)
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.failed = false
 }

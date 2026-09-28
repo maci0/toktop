@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -459,7 +460,7 @@ func TestStoreReadFailureIsLatchedPerOutage(t *testing.T) {
 	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer func() { audit = old }()
 
-	storeReadState.Delete("opencode" + "\x00" + "/tmp/store")
+	forgetStoreRead("opencode", "/tmp/store")
 	auditStoreRead("opencode", "/tmp/store", errors.New("disk image is malformed"))
 	auditStoreRead("opencode", "/tmp/store", errors.New("disk image is malformed"))
 	if got := strings.Count(lines.String(), "agent usage store read failed"); got != 1 {
@@ -472,5 +473,49 @@ func TestStoreReadFailureIsLatchedPerOutage(t *testing.T) {
 	if got := strings.Count(lines.String(), "agent usage store read failed"); got != 1 {
 		t.Fatalf("a failure after recovery logged %d lines, want 1", got)
 	}
-	storeReadState.Delete("opencode" + "\x00" + "/tmp/store")
+	forgetStoreRead("opencode", "/tmp/store")
+}
+
+// forgetStoreRead drops one store's latch, so a test does not inherit the
+// state of an earlier one under the shared table.
+func forgetStoreRead(agent, path string) {
+	key := storeReadKey(agent, path)
+	storeReadState.Lock()
+	defer storeReadState.Unlock()
+	delete(storeReadState.states, key)
+	if i := slices.Index(storeReadState.order, key); i >= 0 {
+		storeReadState.order = slices.Delete(storeReadState.order, i, i+1)
+	}
+}
+
+// A project-local store is keyed by the directory the agent ran in, so the key
+// set is every project ever seen rather than every project on disk. The table
+// has to be capped, or a dashboard left running across a churn of worktrees
+// keeps a row for each one forever.
+func TestStoreReadLatchTableIsCapped(t *testing.T) {
+	forgetStoreRead("crush", "/tmp/capped")
+	defer forgetStoreRead("crush", "/tmp/capped")
+
+	for i := range maxStoreReads + 16 {
+		storeReadFor(storeReadKey("crush", fmt.Sprintf("/tmp/capped/%d", i)))
+	}
+	storeReadState.Lock()
+	n, order := len(storeReadState.states), len(storeReadState.order)
+	storeReadState.Unlock()
+	if n > maxStoreReads || order > maxStoreReads {
+		t.Fatalf("latch table holds %d entries and %d order rows, want at most %d of each",
+			n, order, maxStoreReads)
+	}
+	if n != order {
+		t.Errorf("the map holds %d entries and the order %d rows; every key needs a row to be evictable", n, order)
+	}
+	// The oldest keys are the ones that fall out, so the cap evicts a
+	// forgotten project rather than a store that is still being read.
+	noteStoreReadOK("crush", "/tmp/capped/0")
+	storeReadState.Lock()
+	_, present := storeReadState.states["crush"+"\x00"+"/tmp/capped/0"]
+	storeReadState.Unlock()
+	if present {
+		t.Error("the oldest key survived the cap; eviction must drop from the front of the order")
+	}
 }
