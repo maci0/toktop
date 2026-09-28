@@ -37,6 +37,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The web site no longer removes the focus outline from the skip link's
+  target. `main` takes focus from that key press, so a keyboard user who
+  activated the skip link had nothing to show where focus had landed.
+
+- A `kbd` keycap on the web site draws its border in the page's foreground
+  color rather than the divider token, which measured 1.3:1 against the
+  background. The border is the only thing that identifies the keycap as a
+  control, and it was under the 3:1 that boundary needs.
+
+- The shell prompt in the screenshot caption on the web site is hidden from
+  assistive technology, so a screen reader announces the command rather than
+  a "dollar" in front of it.
+
 - The working-directory note a macOS watcher builds strips the home directory
   across Unicode normalization, the way the log redactor already does. A home
   macOS stored decomposed and a working directory an agent recorded composed

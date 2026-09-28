@@ -181,7 +181,11 @@ const HTML = htmlForWire(`<!doctype html>
     top: .7rem; outline: 2px solid var(--accent); outline-offset: 2px;
   }
   main { max-width: 76rem; margin: 0 auto; }
-  main:focus { outline: none; }
+  /* main is the skip link's target, so it takes focus from the keyboard and
+     has to say so: with the outline removed, a keyboard user who activated
+     the skip link had no way to tell where focus landed (WCAG 2.4.7). It only
+     ever holds focus right after that key press, so the ring is a landing
+     marker rather than a frame around the page. */
   /* Anchor bar: brand + section jumps, sticky. */
   .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 1.25rem;
     align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
@@ -260,7 +264,12 @@ const HTML = htmlForWire(`<!doctype html>
     max-width: 62ch; margin: 0 0 1rem; font-size: var(--fs-small); }
   .keys dt, .keys dd { margin: 0; }
   .keys dd { color: var(--dim); }
-  kbd { border: 1px solid var(--line); border-radius: 4px;
+  /* A keycap is a UI component whose only boundary is this border, and
+     --line sits at 1.3:1 on the page background, under the 3:1 that
+     identifies a component's edges (WCAG 1.4.11). The border takes --fg so
+     the key reads as a key; the box-drawing --line stays on the rules that
+     divide the page rather than name a control. */
+  kbd { border: 1px solid var(--fg); border-radius: 4px;
     padding: 0 .4rem; font-family: inherit; font-size: var(--fs-micro); background: var(--bg); }
   /* Links must not be identified by color alone (WCAG 1.4.1): underline at
      rest, not just on hover. One device carries it. A transparent border that
@@ -332,7 +341,10 @@ const HTML = htmlForWire(`<!doctype html>
   </div>
 
   <figure class="shot">
-    <figcaption><span class="dim">$</span> toktop --demo</figcaption>
+    <!-- The prompt glyph is a shell decoration, not a character in the
+         command: aria-hidden keeps a screen reader from announcing
+         "dollar" ahead of the command it introduces. -->
+    <figcaption><span class="dim" aria-hidden="true">$</span> toktop --demo</figcaption>
     <picture>
       <source type="image/avif" srcset="${HERO_AVIF_SRCSET}" sizes="${HERO_SIZES}">
       <source type="image/webp" srcset="${HERO_WEBP_SRCSET}" sizes="${HERO_SIZES}">

@@ -29,6 +29,26 @@ const README_SIZES_RE = /([\d,]+) bytes identity \/ ([\d,]+) gzip \/\s*([\d,]+) 
 const README_VISIT_RE =
   /whole visit is those ([\d,]+) bytes[\s\S]*?([\d,]+) bytes in two requests/g;
 const thousandsStripped = (value) => Number(value.replaceAll(",", ""));
+// A rule that takes the focus indicator off the skip link's target, and the
+// shell prompt in the capture caption, which is decoration rather than part
+// of the command it introduces.
+const FOCUS_KILLED_RE = /main\s*:\s*focus[^{]*\{\s*outline:\s*none/;
+const SHELL_PROMPT_RE = /<figcaption><span class="dim" aria-hidden="true">\$<\/span>/;
+const KBD_RULE_RE = /kbd\s*\{[^}]*\}/;
+const paletteVarRE = (name) => new RegExp(`--dark-${name}: (#[0-9a-f]{6});`, "i");
+
+// WCAG 2.x relative contrast between two #rrggbb values, the measure the
+// page's own palette is held to: 4.5:1 for text, 3:1 for a control boundary.
+const relLuminance = (hex) => {
+  const ch = [0, 2, 4].map((i) => Number.parseInt(hex.slice(1 + i, 3 + i), 16) / 255);
+  return ch
+    .map((c) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4))
+    .reduce((sum, c, i) => sum + c * [0.2126, 0.7152, 0.0722][i], 0);
+};
+const relContrast = (a, b) => {
+  const [hi, lo] = [relLuminance(a), relLuminance(b)].sort((x, y) => y - x);
+  return (hi + 0.05) / (lo + 0.05);
+};
 const IMG_SIZE_RE = /width="(\d+)" height="(\d+)"/;
 const INLINED_ICON_RE = /rel="icon" href="data:image\/svg\+xml,([^"]+)"/;
 // The h1 is the terminal's own bold title; the brand above it is bold too.
@@ -287,7 +307,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4479);
+    expect(bytes.byteLength).toBe(4476);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -922,6 +942,38 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
   expect(identityBody.includes(":focus-visible")).toBe(true);
   expect(identityBody.includes('role="region"')).toBe(true);
   expect(identityBody.includes('aria-labelledby="install-heading"')).toBe(true);
+  expect(identityBody.includes('<html lang="en">')).toBe(true);
+});
+
+// The skip link is only useful if the reader can see where it put them. main
+// takes focus from that key press, and a rule that removed the outline there
+// left a keyboard user with no focus indicator at all (WCAG 2.4.7), so the
+// page must not suppress it on the skip target.
+test("the skip link's focus target keeps a visible focus indicator", () => {
+  expect(identityBody.includes('<main id="top" tabindex="-1">')).toBe(true);
+  expect(identityBody).not.toMatch(FOCUS_KILLED_RE);
+});
+
+// A shell prompt is decoration. Read out, the figcaption announced "dollar"
+// ahead of the command it introduces (WCAG 1.1.1 / 4.1.2).
+test("the shell prompt in the capture caption is hidden from assistive technology", () => {
+  expect(identityBody).toMatch(SHELL_PROMPT_RE);
+});
+
+// kbd is a UI component and this border is the only thing that draws it:
+// --line measures about 1.3:1 against the page background, under the 3:1 that
+// identifies a component's boundary (WCAG 1.4.11). Both schemes are measured,
+// so a token edit that helps one scheme cannot quietly break the other.
+test("a keycap's boundary meets the 3:1 non-text contrast floor in both schemes", () => {
+  const kbd = identityBody.match(KBD_RULE_RE)?.[0] ?? "";
+  expect(kbd).toContain("border: 1px solid var(--fg)");
+  const token = (name) => identityBody.match(paletteVarRE(name))?.[1];
+  for (const bg of [token("bg"), token("panel")]) {
+    expect(relContrast(token("fg"), bg)).toBeGreaterThanOrEqual(3);
+  }
+  // The divider the keycap replaced, recorded so a future edit that puts it
+  // back fails with the number it dropped to rather than only the inequality.
+  expect(relContrast(token("line"), token("bg"))).toBeCloseTo(1.32, 2);
 });
 
 // RFC 6928 initcwnd: ten ~1460-byte segments (~14 KB). Identity bytes plus
@@ -937,9 +989,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12972);
-  expect(gzipped).toBe(4479);
-  expect(brotli).toBe(3801);
+  expect(identity).toBe(12968);
+  expect(gzipped).toBe(4476);
+  expect(brotli).toBe(3794);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1023,7 +1075,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_378);
+  expect(visit).toBe(14_371);
   expect(visit).toBeLessThan(25_000);
 });
 
