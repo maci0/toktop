@@ -1,7 +1,7 @@
 // Copyright (C) 2026 Marcel W. Wysocki
 // SPDX-License-Identifier: MIT
 
-package main
+package repogate
 
 import (
 	"bufio"

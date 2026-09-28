@@ -2,8 +2,8 @@
 
 Every external package this repository ships or runs on, and the reason it is
 here. A dependency that cannot answer "what replaced writing it" does not land,
-and `cmd/toktop/deps_test.go` fails the build when a module in go.mod's direct
-require block is neither imported nor listed below.
+and `internal/repogate/deps_test.go` fails the build when a module in go.mod's
+direct require block is neither imported nor listed below.
 
 Pins live in one place per ecosystem: go.mod plus go.sum for Go, the
 requirements files under scripts/ for Python, the Makefile for the tools that
@@ -102,12 +102,12 @@ against.
   standard library or the modules above.
 - `make sbom` on every release: a CycloneDX inventory with per-module licenses
   ships next to the binaries.
-- `cmd/toktop/deps_test.go`: a direct require that nothing imports, or that has
-  no entry in this file, fails the test run. The same file requires an entry
-  here for every `tool` directive and every pin in the requirements files, a
-  version on every `go run`/`bunx`/`uvx`/`npx`/`pip install` invocation the
-  Makefile or a workflow step fetches with, and an entry here for the tool that
-  invocation names.
+- `internal/repogate/deps_test.go`: a direct require that nothing imports, or
+  that has no entry in this file, fails the test run. The same file requires an
+  entry here for every `tool` directive and every pin in the requirements
+  files, a version on every `go run`/`bunx`/`uvx`/`npx`/`pip install`
+  invocation the Makefile or a workflow step fetches with, and an entry here
+  for the tool that invocation names.
 - `TestWorkflowActionsAreCommitPinned`, same file: every third-party `uses:`
   in `.github/workflows/` is a 40-character commit id. A tag or a branch is a
   name the publisher can move, and the action runs with the job's token and

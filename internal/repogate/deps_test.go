@@ -1,4 +1,7 @@
-package main
+// Copyright (C) 2026 Marcel W. Wysocki
+// SPDX-License-Identifier: MIT
+
+package repogate
 
 import (
 	"fmt"
@@ -169,6 +172,8 @@ func TestDependencyTableMatchesManifest(t *testing.T) {
 //	4  sysmon, ingest, agentwatch
 //	5  remote, collector  the ssh client and the fan-in, over every engine-side package
 //	6  cmd/toktop         the only package allowed to wire the rest together
+//	7  repogate          the tests over the repository's own metadata, above the
+//	                      packages whose metadata they read
 //
 // logcfg sits below its consumers rather than beside them: procs, gpu and
 // ingest all reach for the redaction helpers, so a tier that held logcfg
@@ -181,6 +186,7 @@ var tiers = [][]string{
 	{"internal/sysmon", "internal/ingest", "internal/agentwatch"},
 	{"internal/remote", "internal/collector"},
 	{"cmd/toktop"},
+	{"internal/repogate"},
 }
 
 // tierOf maps every package in the module to its tier, and fails the test if

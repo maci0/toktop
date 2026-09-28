@@ -3,10 +3,10 @@
 How toktop's packages relate, and the rule that keeps them relating that way.
 
 The rule is one line: **a package imports only packages in a strictly lower
-tier.** `cmd/toktop/deps_test.go` holds the tiers in a Go slice and fails the
-build when an import points at or above its own tier, so a new package is
-placed deliberately rather than inheriting a direction by omission. This
-document is the map; the test is the enforcement.
+tier.** `internal/repogate/deps_test.go` holds the tiers in a Go slice and
+fails the build when an import points at or above its own tier, so a new
+package is placed deliberately rather than inheriting a direction by
+omission. This document is the map; the test is the enforcement.
 
 ## Tiers
 
@@ -19,6 +19,7 @@ document is the map; the test is the enforcement.
 | 4 | `internal/sysmon`, `internal/ingest`, `internal/agentwatch` | collection and event intake: host vitals, the localhost events endpoint, the bridge from `agentusage` watchers to the dashboard |
 | 5 | `internal/remote`, `internal/collector` | the two fan-ins: the ssh client and host-relayed stats, and the poller every engine-side package reports into |
 | 6 | `cmd/toktop` | the only package allowed to wire the rest together |
+| 7 | `internal/repogate` | no shipped code: the tests over the repository's own metadata (the tier table above, the dependency table, the tool pins, the changelog, the CI action refs) |
 
 `logcfg` sits below its consumers rather than beside them. `procs`, `gpu` and
 `ingest` all reach for the redaction helpers, so a tier that held `logcfg`
@@ -56,6 +57,12 @@ alongside them would be a layer importing sideways into itself.
   processes, over procfs on linux and the OS tooling elsewhere.
 - `internal/provider`: engine discovery and metric scraping for local
   OpenAI-compatible backends.
+- `internal/repogate`: no shipped code. It holds the tests over the
+  repository's own metadata: the tier table enforced above, the dependency
+  table, the tool pins, the changelog and the CI action refs. Those tests are
+  about files rather than about a Go package, so they sit in their own package
+  above every tier instead of inside `cmd/toktop`, where a reader looking for
+  how a run starts would have found the supply-chain gate first.
 - `internal/remote`: attaches to engines on other hosts over one ssh
   connection, with known-hosts checking and a relayed host-stats sampler.
 - `internal/selfreload`: watches the running executable for a rebuild and
@@ -116,7 +123,7 @@ other, and neither knows that a UI exists.
 - New behaviour on an existing subject goes in that subject's package, beside
   the code it sits next to. A change that makes you look for a second home is
   a change that wants a new package.
-- A new package needs a tier in `cmd/toktop/deps_test.go` and a row in the
+- A new package needs a tier in `internal/repogate/deps_test.go` and a row in the
   table above. It imports only lower tiers; if it cannot be placed, the
   boundary it straddles is not where the code is.
 - A package that does one job and has no peers belongs in tier 2. Promoted out
