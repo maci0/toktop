@@ -109,8 +109,22 @@ func FuzzRoute(f *testing.F) {
 				t.Errorf("404 carries Allow %q", w.Header().Get("Allow"))
 			}
 			for _, e := range ingestEndpoints {
-				if !strings.Contains(respBody, e.allow()+" "+e.path) {
-					t.Fatalf("404 for %q omits endpoint %s %s: %q", path, e.allow(), e.path, respBody)
+				if !strings.Contains(respBody, e.path+" ("+e.allow()+")") {
+					t.Fatalf("404 for %q omits endpoint %s (%s): %q", path, e.path, e.allow(), respBody)
+				}
+			}
+			// The list has to come apart, or a sender reading it has to guess
+			// where one endpoint's methods stop and the next path starts.
+			if got, want := advertisedEndpoints(respBody), len(ingestEndpoints); len(got) != want {
+				t.Fatalf("404 for %q splits into %d endpoints %q, want %d: %q", path, len(got), got, want, respBody)
+			}
+			for _, e := range ingestEndpoints {
+				methods, listed := advertisedEndpoints(respBody)[e.path]
+				if !listed {
+					t.Fatalf("404 for %q does not list %s: %q", path, e.path, respBody)
+				}
+				if methods != e.allow() {
+					t.Fatalf("404 for %q lists %s as %q, want %q", path, e.path, methods, e.allow())
 				}
 			}
 			if len(rec.evs) != 0 {
@@ -250,6 +264,31 @@ func FuzzIdempotentReplay(f *testing.F) {
 			}
 		}
 	})
+}
+
+// advertisedEndpoints reads a 404 body the way a client reading the endpoint
+// list has to: everything after the "endpoints: " prefix, one entry per
+// semicolon, each a path and a parenthesised method list. It maps path to the
+// methods that path was advertised with, so a test can compare the answer
+// against the table rather than against a substring of it.
+func advertisedEndpoints(body string) map[string]string {
+	_, list, ok := strings.Cut(body, "endpoints: ")
+	if !ok {
+		return nil
+	}
+	out := map[string]string{}
+	for entry := range strings.SplitSeq(strings.TrimRight(list, "\n"), "; ") {
+		path, rest, ok := strings.Cut(entry, " (")
+		if !ok {
+			// An entry with no method list is one the client cannot read a
+			// method off. Recording it under the empty string is enough for the
+			// comparison to fail, and keeps the parse from inventing a path.
+			out[entry] = ""
+			continue
+		}
+		out[path] = strings.TrimSuffix(rest, ")")
+	}
+	return out
 }
 
 // FuzzEventBoundary documents the caps core.SanitizeText and the per-field

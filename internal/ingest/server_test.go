@@ -510,7 +510,7 @@ func TestIngestRejectionsNameTheServedEndpoints(t *testing.T) {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}
 	for _, e := range ingestEndpoints {
-		if want := e.allow() + " " + e.path; !strings.Contains(string(body), want) {
+		if want := e.path + " (" + e.allow() + ")"; !strings.Contains(string(body), want) {
 			t.Errorf("404 body %q missing %q", body, want)
 		}
 	}

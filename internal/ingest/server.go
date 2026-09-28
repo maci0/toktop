@@ -394,12 +394,20 @@ func lookupEndpoint(path string) (endpoint, bool) {
 // methods it actually takes, the list the 405 on a known path builds its Allow
 // header and its own body from: a sender correcting one typo from the methods
 // the primary alone would not tell it not to repeat.
+//
+// Each entry is one path with its methods in parentheses, and the entries are
+// joined by a semicolon. Reading the methods off the front of the entry (the
+// "POST /v1/events" order) runs them into the next path across a comma, so
+// "POST /v1/events, GET, HEAD /healthz" can be split two ways and names a
+// third endpoint, "/events", that is not served. The parenthesised form is
+// unambiguous: split on "; ", take the methods between "(" and ")", and the
+// list a sender parses is the one the table holds.
 func notFoundMessage() string {
 	advertised := make([]string, 0, len(ingestEndpoints))
 	for _, e := range ingestEndpoints {
-		advertised = append(advertised, e.allow()+" "+e.path)
+		advertised = append(advertised, e.path+" ("+e.allow()+")")
 	}
-	return "not found; endpoints: " + strings.Join(advertised, ", ")
+	return "not found; endpoints: " + strings.Join(advertised, "; ")
 }
 
 func methodNotAllowedMessage(e endpoint, method string) string {

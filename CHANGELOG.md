@@ -67,6 +67,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   holding the lock across the call also made one slow clock a process-wide
   stall.
 
+- The endpoint list a `404` from the ingest server answers with reads
+  `not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)`. It ran the
+  methods in front of each path and separated the entries with a comma, so
+  `POST /v1/events, GET, HEAD /healthz` split two ways and named a third
+  endpoint, `/events`, that is not served. A sender that reads the list has to
+  be able to tell where one path's methods stop and the next path starts.
+
 - The working-directory note a macOS watcher builds strips the home directory
   across Unicode normalization, the way the log redactor already does. A home
   macOS stored decomposed and a working directory an agent recorded composed

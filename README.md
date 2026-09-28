@@ -356,7 +356,7 @@ Event fields are all optional; anything omitted gets the default:
 
 | field | type | default | notes |
 |---|---|---|---|
-| `id` | string | - | caller-chosen key, at most 128 characters; an id past the cap, or one that is nothing but whitespace or control characters, is a `400` naming the field rather than a truncated key, because the id is what the feed deduplicates on and two keys clamped onto one stored id would drop the second event as a duplicate. A repeat of a key recorded within the last 15 minutes is ignored. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
+| `id` | string | - | caller-chosen key, at most 128 characters; an id past the cap, or one that is nothing but whitespace or control characters, is a `400` naming the field rather than a truncated key, because the id is what the feed deduplicates on and two keys clamped onto one stored id would drop the second event as a duplicate. A repeat of a key recorded within the last 15 minutes is ignored, as long as the feed has taken fewer than 4096 ids in that window: the ledger holds that many, and a fleet that pushes events faster than that retires the oldest first, so a sender retrying a very old request under a new key is not deduplicated. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
 | `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); whitespace around the stamp is ignored, an empty or whitespace-only string takes the arrival instant like an absent one, and anything else unparseable is a `400` naming the field; stamps more than two minutes from arrival in either direction are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
@@ -369,7 +369,8 @@ Event fields are all optional; anything omitted gets the default:
 One POST answers `202` with `{"accepted":N,"stored":M}` once every event in
 the stream is decoded, where `accepted` is what the wire carried and
 `stored` is what the retained feed took. A replayed event (an id already
-recorded within the last 15 minutes) decodes fine and stores nothing, so the
+recorded within the last 15 minutes, and still among the 4096 ids the ledger
+holds) decodes fine and stores nothing, so the
 two counts differ
 on a retry after a lost 202. So does an event stamped behind the whole
 retained window: the feed holds the newest 512 events, and one older than all
@@ -379,8 +380,22 @@ count. The same pair is on the POST's log line.
 Other statuses: `400` for malformed JSON, a bad `ts`, a token count outside the
 64-bit range, or an `id` that cannot be stored whole, `408` when a stream
 stalls mid-body (the body names which bound broke: no bytes for a minute, or
-the 10 minute lifetime), and `413` past the 1 MiB body cap. `503` with
-`Retry-After: 1` means 64 bodies were already decoding, which is a pile-up
+the 10 minute lifetime), and `413` past the 1 MiB body cap.
+
+A failure partway through a stream keeps every event before the failing line,
+and the body says so and says how to recover: `...; 12 earlier events in this
+stream were recorded` (or `...; 12 earlier events in this stream were
+received, 12 recorded` when a replayed id decoded but the feed did not take
+it). The last sentence is the one to act on. Without an `Idempotency-Key` on
+the request it reads `resend the remaining events to continue`, which is safe
+because the lines that failed carry whatever ids the sender wrote. With one it
+reads `resend the whole request with the same Idempotency-Key`, because a
+derived id is that key plus the line's 1-based position: a resumed POST
+numbers its first line 1 again, lands on ids the feed already holds, and loses
+the rest of the stream silently. A single earlier event is named in the
+singular.
+
+`503` with `Retry-After: 1` means 64 bodies were already decoding, which is a pile-up
 and not a fault: wait the named second and resend the same request, under the
 same `Idempotency-Key` if it had one. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
@@ -394,7 +409,9 @@ the browser sends no `Origin` at all. An endpoint bound off loopback with
 name they use for the machine. Wrong methods on these paths answer `405` with
 `Allow` and a body naming the path and the methods it takes.
 Unknown paths answer `404` naming the two endpoints and the methods each one
-takes, so a POST to `/events` is not a generic not-found page. Error bodies are
+takes, as `not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)`, so
+a POST to `/events` is not a generic not-found page and a client can split the
+list on `; ` and read each path's methods off its own parentheses. Error bodies are
 short plain-text reasons
 that name the field or expected shape, and a malformed line in a stream also
 names the body offset it failed at; unknown fields are ignored, so
