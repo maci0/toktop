@@ -329,10 +329,10 @@ func (w *statusWriter) Write(p []byte) (int, error) {
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
 // SetNow overrides the clock used to stamp events that arrive without a
-// timestamp and to clamp far-future stamps. Request timeouts still use
-// wall time. Safe to call while Serve is running: the write is taken under
-// the same lock every handler reads it under. Demo mode passes the simulated
-// clock so harness POSTs stay on the seeded timeline.
+// timestamp and to clamp stamps that sit far from arrival. Request timeouts
+// still use wall time. Safe to call while Serve is running: the write is taken
+// under the same lock every handler reads it under. Demo mode passes the
+// simulated clock so harness POSTs stay on the seeded timeline.
 func (s *Server) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
@@ -414,13 +414,19 @@ const maxInFlightEvents = 64
 // server in it is the same bound. The channel is the var tests shrink.
 var eventSlots = make(chan struct{}, maxInFlightEvents)
 
-// maxEventSkew bounds how far ahead of arrival a claimed event timestamp may
-// sit before it is clamped to the arrival instant. The stamp is a sender's
-// word: a wrong clock (or a forged event, since this endpoint authenticates
-// nothing) can claim an instant hours ahead, which would pin the agent view's
-// "● live" marker (a negative idle duration reads as fresh) and render a
-// future wall-clock time in the feed until real time caught up. Modest skew
-// between machines stays honored.
+// maxEventSkew bounds how far a claimed event timestamp may sit from arrival
+// before it is clamped to the arrival instant. The stamp is a sender's word:
+// a wrong clock (or a forged event, since this endpoint authenticates
+// nothing) can claim an instant hours away from this one. Ahead, that pins
+// the agent view's "● live" marker (a negative idle duration reads as fresh)
+// and renders a future wall-clock time in the feed until real time caught up.
+// Behind, it is worse than a wrong clock on screen: the event sorts to the
+// front of the retained feed, so once the feed is full every later event of
+// that sender is refused as outside the window, the 202 reports stored below
+// accepted, and the sender is told to resend a stream that will be refused
+// again on every attempt. A sender whose clock lags by hours (a host that was
+// never on the network since boot, a restored VM snapshot) contributes
+// nothing at all that way. Modest skew between machines stays honored.
 const maxEventSkew = 2 * time.Minute
 
 // retryAfterSeconds is the delay every 503 from this endpoint advertises, in
@@ -715,7 +721,7 @@ func (s *Server) decodeStream(dec *json.Decoder, progress *progressBody, replayK
 		now := s.instant()
 		if ev.At.IsZero() {
 			ev.At = now
-		} else if ev.At.Sub(now) > maxEventSkew {
+		} else if ev.At.Sub(now) > maxEventSkew || now.Sub(ev.At) > maxEventSkew {
 			ev.At = now
 		}
 		// Body id wins: that is the event's own identity. When the sender

@@ -603,9 +603,11 @@ ports that are then exposed on local loopback (client.go).
   (server.go). Renders beside genuine agentwatch data. The one
   sender class refused outright is the browser: a POST carrying an `Origin`
   header gets 403 (server.go), closing cross-site forgery from web
-  pages the operator visits. Forged future timestamps are clamped to arrival
-  time beyond a 2-minute skew (server.go), so the "live" marker
-  cannot be pinned by a claimed far-future stamp. Mixed Latin+Cyrillic/Greek
+  pages the operator visits. Timestamps more than 2 minutes from arrival in
+  either direction are clamped to arrival time (server.go): ahead, so the
+  "live" marker cannot be pinned by a claimed far-future stamp, and behind,
+  because a lagging sender's events sort to the front of the retained feed
+  and are then refused as outside the window. Mixed Latin+Cyrillic/Greek
   agent names collapse to `anonymous` (server.go).
 - *Repudiation*: POST handlers emit remote, request id, status, accepted
   count, and stored count at info on success, warn for rejection/write
@@ -788,7 +790,7 @@ Controls verified in code, with the threats they cover:
 | M3: Ingest body cap 1 MiB + MaxBytesReader | unbounded upload into decode loop (B1 DoS) | server.go |
 | M4: Ingest read deadlines: 10 min absolute lifetime, 1 min idle extension, 5 s header timeout, 2 min idle reap, 30 s response write deadline armed before every error/response write (server.go, `newServer` 71-95, `progressBody` 450-499, one armed write deadline per response (`armWrite`, 561, armed before every answer and cleared on keep-alive at 654)) | slowloris/drip DoS and stalled-response resource pinning (B1) | server.go |
 | M5: Event field caps (an `id` past 128 characters, or one that is nothing but whitespace or control characters, is refused with a `400` naming the field rather than clamped, since the id is the dedup key and a clamped one folds distinct keys onto one stored id; the display fields clamp: agent 64, model 128, via_engine 128, note 512; a kind outside the four known ones is lowercased, sanitized and clamped to 24 runes rather than replaced, so `kind: "banana"` reaches the feed as `banana` (folded to one line by `core.SingleLine`, so a kind cannot add a row); only a kind that is empty or sanitizes to empty becomes `turn`) + a note that is nothing but a working directory reduced to its last two components and folded through `core.RedactHome`, so a pushed path cannot name the account in a dashboard the operator redirects into a file (`shortNote`/`pathNote`, event.go, 90-130) + token clamp (negative or >1<<40 to zero) + retention caps (512 events, 128 probes per snapshot) + event-id dedup ledger bounded by a 15 min horizon and a 4096-entry cap, so a replay stays recognizable past the display ring and the ledger cannot grow without bound | memory pinning via oversized or numerous events; wrap of agent totals (B1 DoS/tampering); a dropped event from two ids clamped onto one dedup key; a pushed `$HOME` path in a retained note reaching a shared report | server.go; event.go:45-71, 90-130, 121-137, 183-189; core.AgentHistoryLen / ProbeHistoryLen internal/core/core.go; collector.go |
-| M6: Event timestamp skew clamp: stamps >2 min in the future reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing) | server.go |
+| M6: Event timestamp skew clamp: stamps >2 min from arrival in either direction reset to arrival time | forged-future stamps pinning the live marker and feed ordering (B1 spoofing); a lagging sender's events refused as outside the retention window | server.go |
 | M7: Negative/absurd token counts clamped to zero; unknown kinds defaulted | junk values entering retained state (B1 tampering) | server.go |
 | M8: Engine response caps: 4 MiB JSON, 8 MiB text, 256-rune error snippets. The JSON cap covers discovery as well as polling: `decodeScanJSON` wraps `resp.Body` in `io.LimitReader(resp.Body, jsonBodyMax)` before `json.NewDecoder`, so a listener that answers a well-known-port scan is bounded by bytes, not only by the 700ms `scanTimeout` window | memory blowup and log flooding from hostile engines (B2 DoS/disclosure) | provider/provider.go `httpStatus` 72 and the poll decoder 116; core.Snippet; provider/discover.go, `decodeScanJSON` 72 |
 | M9: Non-finite rejection in metrics (per-value and family-sum overflow guard) and vendor CSV/JSON coercion | poisoned counters/rates propagating through history (B2 tampering) | provider.go; gpu.go; collector counter-reset clamp collector.go |

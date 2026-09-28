@@ -2029,9 +2029,14 @@ func TestProbeAllHonorsRetryAfter(t *testing.T) {
 	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 1 },
 		"model change bypassed the backend backoff")
 
-	clockMu.Lock()
-	now = now.Add(31 * time.Second)
-	clockMu.Unlock()
+	// The deadline is stamped on the monotonic clock (a Retry-After is a real
+	// wait, not a position on the collector's timeline), so it expires by
+	// ageing that clock, not by stepping the injected one.
+	c.probeMu.Lock()
+	for k, until := range c.probeBackoff {
+		c.probeBackoff[k] = until.Add(-31 * time.Second)
+	}
+	c.probeMu.Unlock()
 	c.ProbeAll()
 	waitFor(t, func() bool { return hits.Load() == 2 }, "expired backoff never re-armed")
 	waitFor(t, func() bool {

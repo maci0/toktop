@@ -338,7 +338,7 @@ Event fields are all optional; anything omitted gets the default:
 | field | type | default | notes |
 |---|---|---|---|
 | `id` | string | - | caller-chosen key, at most 128 characters; an id past the cap, or one that is nothing but whitespace or control characters, is a `400` naming the field rather than a truncated key, because the id is what the feed deduplicates on and two keys clamped onto one stored id would drop the second event as a duplicate. A repeat of a key recorded within the last 15 minutes is ignored. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
-| `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); stamps more than two minutes ahead of arrival are clamped to the arrival instant |
+| `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); stamps more than two minutes from arrival in either direction are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
 | `kind` | string | `turn` | known kinds: `turn`, `tool`, `error`, `note`; custom kinds pass through lowercased, capped at 24 characters |

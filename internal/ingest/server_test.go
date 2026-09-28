@@ -798,6 +798,43 @@ func TestIngestClampsFarFutureTimestamps(t *testing.T) {
 	}
 }
 
+// A claimed event timestamp far behind arrival is the mirror case: the event
+// sorts to the front of the retained feed, so a sender whose clock lags by
+// hours has every later event of its own stream refused as outside the window
+// and is told to resend a stream that is refused again. It must be clamped to
+// arrival like the far-future one, and modest skew must still be honored.
+func TestIngestClampsFarPastTimestamps(t *testing.T) {
+	rec := &memRecorder{}
+	frozen := time.Unix(1_700_000_000, 0).UTC()
+	s := startIngestAt(t, rec, frozen)
+
+	farPast := frozen.Add(-3 * time.Hour).Format(time.RFC3339)
+	nearPast := frozen.Add(-10 * time.Second).Format(time.RFC3339)
+	atBound := frozen.Add(-maxEventSkew).Format(time.RFC3339)
+	pastBound := frozen.Add(-maxEventSkew - time.Second).Format(time.RFC3339)
+	resp := post(t, "http://"+s.Addr()+"/v1/events",
+		`{"agent":"lagging","ts":"`+farPast+`"}`+"\n"+
+			`{"agent":"lagging","ts":"`+nearPast+`"}`+"\n"+
+			`{"agent":"lagging","ts":"`+atBound+`"}`+"\n"+
+			`{"agent":"lagging","ts":"`+pastBound+`"}`)
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 4)
+	if got := rec.evs[0].At; !got.Equal(frozen) {
+		t.Errorf("far-past stamp retained: %v, want clamped to %v", got, frozen)
+	}
+	if want := frozen.Add(-10 * time.Second); !rec.evs[1].At.Equal(want) {
+		t.Errorf("modest skew not honored: %v, want %v", rec.evs[1].At, want)
+	}
+	if want := frozen.Add(-maxEventSkew); !rec.evs[2].At.Equal(want) {
+		t.Errorf("stamp at the skew bound = %v, want retained %v", rec.evs[2].At, want)
+	}
+	if got := rec.evs[3].At; !got.Equal(frozen) {
+		t.Errorf("stamp one second past the bound = %v, want clamped to %v", got, frozen)
+	}
+}
+
 // An empty ts means "absent": every other event field defaults when empty,
 // so an empty string must not abort the stream with 400 while null and a
 // missing field both decode to "stamp on arrival".

@@ -70,12 +70,12 @@ type Client struct {
 	connectedAt   time.Time     // when the handshake finished, for the drop line's uptime
 	keepaliveDone chan struct{} // closed when the keepalive goroutine exits
 
-	// forwardWarnMu guards forwardWarnAt, which holds the unix nanosecond of
-	// the last audited failure per forwarded port. A remote engine that is
-	// down for the length of a run then reports at forwardWarnInterval
-	// instead of once per dashboard poll.
+	// forwardWarnMu guards forwardWarnAt, which holds the instant of the last
+	// audited failure per forwarded port. A remote engine that is down for the
+	// length of a run then reports at forwardWarnInterval instead of once per
+	// dashboard poll.
 	forwardWarnMu sync.Mutex
-	forwardWarnAt map[int]int64
+	forwardWarnAt map[int]time.Time
 }
 
 // Done fires when the connection drops for any reason, including Close.
@@ -740,16 +740,22 @@ const forwardWarnInterval = time.Minute
 // name what failed; the cause is the transport's own error, because "dial
 // tcp: connection refused" and "connection lost" call for different fixes and
 // the local dashboard reports both as a refused connection.
+//
+// The gap is measured on the monotonic reading time.Now carries, not on unix
+// nanoseconds. A wall-clock difference is wrong on either side of a step: a
+// backward NTP correction or a laptop resuming from sleep makes now-last
+// negative, which is under the interval, and the throttle then suppresses
+// every further line until real time passes the value it lost, so a remote
+// engine that stayed down for an hour after the step said nothing at all.
 func (c *Client) auditForwardFailure(rport int, err error) {
-	now := time.Now().UnixNano()
+	now := time.Now()
 	c.forwardWarnMu.Lock()
-	last := c.forwardWarnAt[rport]
-	if last != 0 && now-last < int64(forwardWarnInterval) {
+	if last, seen := c.forwardWarnAt[rport]; seen && now.Sub(last) < forwardWarnInterval {
 		c.forwardWarnMu.Unlock()
 		return
 	}
 	if c.forwardWarnAt == nil {
-		c.forwardWarnAt = make(map[int]int64)
+		c.forwardWarnAt = make(map[int]time.Time)
 	}
 	c.forwardWarnAt[rport] = now
 	c.forwardWarnMu.Unlock()

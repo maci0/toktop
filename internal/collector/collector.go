@@ -844,7 +844,7 @@ func (c *Collector) ProbeAll() {
 		if c.probeInflight[key] { // one generation per backend at a time
 			continue
 		}
-		if until, ok := c.probeBackoff[key]; ok && now.Before(until) {
+		if until, ok := c.probeBackoff[key]; ok && time.Now().Before(until) {
 			continue // 429/503: wait out Retry-After before POSTing again
 		}
 		delete(c.probeBackoff, key)
@@ -877,7 +877,17 @@ func (c *Collector) ProbeAll() {
 			s.At = now
 			if s.RetryAfter > 0 {
 				c.probeMu.Lock()
-				c.probeBackoff[t.key] = c.instant().Add(s.RetryAfter)
+				// The wall clock, carrying its monotonic reading, for the same
+				// reason the elapsed time below is measured on it: a backoff is
+				// a real wait, not a position on the collector's timeline. As an
+				// instant on that timeline it survived a clock step badly in
+				// both directions, and this is the direction that costs money:
+				// an NTP step forward past the deadline drops the wait and
+				// re-POSTs into a gateway that just asked for 429 backoff, and
+				// every retry is a billed probe. time.Now carries a monotonic
+				// reading and time.Now().Before uses it, so a step of either
+				// sign leaves the wait the length the engine asked for.
+				c.probeBackoff[t.key] = time.Now().Add(s.RetryAfter)
 				c.probeMu.Unlock()
 			}
 			// The wall clock, not the collector's: the sample's At follows the
