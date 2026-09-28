@@ -152,9 +152,19 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			if recov == http.ErrAbortHandler {
 				panic(recov)
 			}
+			// The recovered value and the stack are the only two audit payloads
+			// in this package that reach the line untrimmed. Every other sink
+			// here folds a home into "~" and clips to a snippet, because the
+			// audit stream outlives the run and gets pasted into issues. A
+			// panic is the one place this process quotes text it did not
+			// author: the handlers below decode event fields off the wire, so
+			// a panic raised while holding one carries whatever the sender
+			// wrote, and a stack frame names the file and line it unwound
+			// through. Folding both is what keeps an account name out of a log
+			// line that a bug report would carry with it.
 			s.logRequest(r, state.id, http.StatusInternalServerError, state.accepted, state.stored, time.Since(start),
-				fmt.Sprintf("panic: %v", recov),
-				"stack", logcfg.Field(string(debug.Stack()), 2048))
+				core.RedactHome(core.Snippet([]byte(fmt.Sprintf("panic: %v", recov)))),
+				"stack", logcfg.Field(core.RedactHome(string(debug.Stack())), 2048))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}()
 
