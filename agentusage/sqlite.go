@@ -165,7 +165,7 @@ func auditStoreRead(agent, path string, err error) {
 	if !first {
 		return
 	}
-	audit().Warn("agent usage store read failed",
+	auditLogger().Warn("agent usage store read failed",
 		"agent", agent,
 		"path", core.RedactHome(path),
 		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))

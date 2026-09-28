@@ -445,7 +445,7 @@ func (w *Watcher) auditRead(path string, err error) {
 		return
 	}
 	w.readFailed[path] = true
-	audit().Warn("agent usage transcript read failed; its usage is not counted until it reads again",
+	auditLogger().Warn("agent usage transcript read failed; its usage is not counted until it reads again",
 		"path", core.RedactHome(path),
 		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 }
@@ -458,7 +458,7 @@ func auditBaseline(path string, err error) {
 	if errors.Is(err, fs.ErrNotExist) {
 		return
 	}
-	audit().Warn("agent usage baseline could not be read; totals for this session will include its whole history",
+	auditLogger().Warn("agent usage baseline could not be read; totals for this session will include its whole history",
 		"path", core.RedactHome(path),
 		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 }

@@ -70,7 +70,24 @@ var (
 // that could not finish without configuring anything, and SetLogger hands it
 // the host's own logger (toktop hands it the audit log). A var, so a test can
 // point it at a handler it can read.
-var audit = slog.Default
+//
+// Every read goes through auditLogger, and every write through SetLogger, both
+// under auditMu. The watcher read loops call auditLogger from their own
+// goroutines, and a Go func value is two words: a host that calls SetLogger
+// after starting a watcher could otherwise leave a reader calling a new code
+// pointer against the old closure word.
+var (
+	auditMu sync.Mutex
+	audit   = slog.Default
+)
+
+// auditLogger returns the logger audit lines go to. Caller must not hold
+// auditMu.
+func auditLogger() *slog.Logger {
+	auditMu.Lock()
+	defer auditMu.Unlock()
+	return audit()
+}
 
 // SetLogger sends the lines this package audits to l. The default is the
 // process logger from [slog.Default]; a program that reads agents alongside
@@ -82,6 +99,8 @@ var audit = slog.Default
 // the host's to say. A host that needs its own name in the message prepends
 // it in the handler it passes.
 func SetLogger(l *slog.Logger) {
+	auditMu.Lock()
+	defer auditMu.Unlock()
 	if l == nil {
 		audit = slog.Default
 		return
@@ -98,7 +117,7 @@ func rootListKey(root, suffix string) string { return root + "\x00" + suffix }
 // leave the account spelled out in the value beside it, and a host that
 // installs its own logger (SetLogger) has no fold of its own to catch it.
 func auditWalkFailure(root string, err error) {
-	audit().Warn("agent transcript walk failed",
+	auditLogger().Warn("agent transcript walk failed",
 		"root", core.RedactHome(root),
 		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 }

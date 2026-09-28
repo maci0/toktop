@@ -164,8 +164,14 @@ func (s *Stats) poll(ctx context.Context) {
 		return
 	}
 	out, err := s.Client.Run(ctx, vitalsScript())
+	// The audit lines go out with s.mu released. A write to stderr has no
+	// deadline, and Merge takes s.mu on every frame, so a stalled reader on
+	// fd 2 would park the whole dashboard behind a log line.
+	var failedFirst bool
+	var recovered bool
+	var failedPolls int
+	var outage time.Duration
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if err != nil {
 		// Keep the last good sample; the reason rides along so the UI can
 		// name the target that stopped answering instead of dropping the
@@ -182,6 +188,10 @@ func (s *Stats) poll(ctx context.Context) {
 		// reason the recovery line will end.
 		if s.failedPolls == 1 {
 			s.failedSince = s.instant()
+			failedFirst = true
+		}
+		s.mu.Unlock()
+		if failedFirst {
 			audit().Warn("toktop: remote vitals poll failed",
 				"target", logcfg.RedactedField(s.Client.Target.LogHost(), 256),
 				"error", logcfg.RedactedField(s.Client.Target.RedactUser(err.Error()), 256))
@@ -189,16 +199,22 @@ func (s *Stats) poll(ctx context.Context) {
 		return
 	}
 	if s.failedPolls > 0 {
-		audit().Info("toktop: remote vitals poll recovered",
-			"target", logcfg.RedactedField(s.Client.Target.LogHost(), 256),
-			"failed_polls", s.failedPolls,
-			"outage", s.instant().Sub(s.failedSince).Round(time.Second))
+		recovered = true
+		failedPolls = s.failedPolls
+		outage = s.instant().Sub(s.failedSince).Round(time.Second)
 	}
 	s.failedPolls = 0
 	s.err = ""
 	s.loadsValid = parseVitals(out, &s.last)
 	s.last.RemoteHost = s.Client.Target.Host
 	s.at = s.instant()
+	s.mu.Unlock()
+	if recovered {
+		audit().Info("toktop: remote vitals poll recovered",
+			"target", logcfg.RedactedField(s.Client.Target.LogHost(), 256),
+			"failed_polls", failedPolls,
+			"outage", outage)
+	}
 }
 
 // Merge overlays fresh remote stats onto a local sample. Stale data (>20s)

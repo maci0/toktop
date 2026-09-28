@@ -722,24 +722,45 @@ func (c *Client) relay(l net.Listener, rport int) {
 				return
 			}
 			defer remote.Close()
-			piped := make(chan struct{}, 2)
+			piped := make(chan error, 2)
 			go func() {
 				_, cerr := io.Copy(remote, local)
-				if cerr != nil {
-					c.auditForwardFailure(rport, cerr)
-				}
-				piped <- struct{}{}
+				piped <- cerr
 			}()
 			go func() {
 				_, cerr := io.Copy(local, remote)
-				if cerr != nil {
-					c.auditForwardFailure(rport, cerr)
-				}
-				piped <- struct{}{}
+				piped <- cerr
 			}()
+			// Only the copy that ends first names the forward. Its peer is
+			// stopped by the half-closes below and reports the error those
+			// closes caused, which is not a failure of the forward.
+			first := <-piped
+			if !halfClose(local) || !halfClose(remote) {
+				// No half-close on this conn type, so the peer copy stays
+				// parked in io.Copy until the deferred Closes run, which is
+				// after this function returns. Close here instead, so the
+				// join below waits on a copy that is already finishing.
+				local.Close()
+				remote.Close()
+			}
 			<-piped
+			if first != nil {
+				c.auditForwardFailure(rport, first)
+			}
 		}(local)
 	}
+}
+
+// halfClose shuts down the write side of a relayed conn so the copy running in
+// the other direction sees EOF and returns. Reports whether the conn supports
+// it: a conn without CloseWrite (a test double, a wrapped type) has to be
+// closed outright to unblock its peer copy.
+func halfClose(conn net.Conn) bool {
+	hw, ok := conn.(interface{ CloseWrite() error })
+	if !ok {
+		return false
+	}
+	return hw.CloseWrite() == nil
 }
 
 // forwardWarnInterval is the shortest gap between two forwarded-port failure

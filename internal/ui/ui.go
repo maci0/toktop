@@ -134,6 +134,11 @@ type tickMsg time.Time
 // verbatim.
 type feedDownMsg string
 
+// feedClosedMsg reports that the feed channel itself was closed. The wait is
+// not re-issued from it: a receive on a closed channel returns at once, so
+// re-arming would spin a goroutine per frame for the rest of the run.
+type feedClosedMsg struct{}
+
 func waitSnap(ch <-chan core.Snapshot) tea.Cmd {
 	return func() tea.Msg {
 		snap, ok := <-ch
@@ -146,11 +151,15 @@ func waitSnap(ch <-chan core.Snapshot) tea.Cmd {
 
 // waitFeedErr blocks until the feed dies; re-issued after each delivery so a
 // restart-and-resignal cycle is still observed. A nil channel never fires.
+//
+// A closed channel yields feedClosedMsg rather than a nil tea.Msg: bubbletea
+// drops a nil message, so the wait would never be re-issued and the dashboard
+// would go silent about the feed for the rest of the run.
 func waitFeedErr(ch <-chan string) tea.Cmd {
 	return func() tea.Msg {
 		err, ok := <-ch
 		if !ok {
-			return nil
+			return feedClosedMsg{}
 		}
 		return feedDownMsg(err)
 	}
@@ -207,6 +216,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case feedDownMsg:
 		m.feedDown = string(msg)
 		return m, waitFeedErr(m.cfg.FeedErr)
+
+	case feedClosedMsg:
+		m.feedDown = "agent feed closed"
+		return m, nil
 
 	case snapMsg:
 		in := core.Snapshot(msg)

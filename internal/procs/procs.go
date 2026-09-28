@@ -156,10 +156,18 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	s.last = now
 	s.sweeping = true
 	s.mu.Unlock()
+	// Cleared by defer, not on the normal path: the flag is what every later
+	// caller short-circuits on, so a panic inside the platform lister would
+	// otherwise leave it set and freeze the process panel for the life of the
+	// process, with nothing to say why.
+	defer func() {
+		s.mu.Lock()
+		s.sweeping = false
+		s.mu.Unlock()
+	}()
 
 	list, err := platformList()
 	s.mu.Lock()
-	s.sweeping = false
 	defer s.mu.Unlock()
 	if err != nil {
 		// Last good snapshot; a transient listing error is not "no
