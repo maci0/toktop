@@ -215,6 +215,26 @@ func TestFoldSessionDirectoryFollowsTheFilesystem(t *testing.T) {
 	}
 }
 
+// The folding flag decides both how many placeholders the statement carries
+// and how many directory values are bound to it. Building the two from
+// separate reads of the flag splices a directory where the timestamp belongs,
+// which reads another directory's usage as this one's, so the two must agree
+// for every spelling count and either setting.
+func TestUsageQueryPlaceholdersMatchBoundDirectories(t *testing.T) {
+	dirs := []string{"/work", "/work/Équipe", "/work/sub"}
+	for _, fold := range []bool{false, true} {
+		for n := 1; n <= len(dirs); n++ {
+			query := usageQuery(n, fold)
+			// The trailing bound value is the since timestamp.
+			want := len(dirArgs(dirs[:n], fold)) + 1
+			if got := strings.Count(query, "?"); got != want {
+				t.Errorf("usageQuery(%d, fold=%v) has %d placeholders, want %d",
+					n, fold, got, want)
+			}
+		}
+	}
+}
+
 // A session recorded under a folded spelling of the watched directory matches
 // under the production GOOS default and with folding forced on, so a
 // regression that only folds in tests cannot hide. Linux compares bytes and

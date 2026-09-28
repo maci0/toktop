@@ -127,22 +127,48 @@ func init() {
 // usageQueryFor builds the query for n directory spellings. Only the number of
 // placeholders varies: every value still travels as a bound parameter.
 func usageQueryFor(n int) string {
+	return usageQuery(n, foldSessionDirectory.Load())
+}
+
+// usageQuery is usageQueryFor with the directory folding fixed by the caller.
+// The flag decides how many placeholders the statement carries and how many
+// arguments are bound to them, so one read of it has to govern both: a
+// statement built folded against a flat argument list, or the reverse, binds a
+// directory where the timestamp belongs and reads another directory's usage as
+// this one's.
+func usageQuery(n int, fold bool) string {
 	return fmt.Sprintf(usageQueryFormat,
 		jsonToken("$.tokens.output"),
 		jsonToken("$.tokens.reasoning"),
 		jsonToken("$.tokens.total"),
 		jsonToken("$.tokens.input"),
-		directoryPred(n),
+		directoryPred(n, fold),
 		jsonToken("$.role"))
 }
 
-func directoryPred(n int) string {
+func directoryPred(n int, fold bool) string {
 	ph := strings.TrimSuffix(strings.Repeat("?,", n), ",")
 	pred := "session.directory IN (" + ph + ")"
-	if foldSessionDirectory.Load() {
+	if fold {
 		pred = "(" + pred + " OR replace(session.directory, char(92), '/') COLLATE toktop_directory IN (" + ph + "))"
 	}
 	return pred
+}
+
+// dirArgs binds the directory spellings, in the order directoryPred lists
+// them: the plain forms first, then the folded set the second branch compares
+// against, and only when that branch is in the statement.
+func dirArgs(dirs []string, fold bool) []any {
+	args := make([]any, 0, 2*len(dirs))
+	for _, d := range dirs {
+		args = append(args, d)
+	}
+	if fold {
+		for _, d := range dirs {
+			args = append(args, foldDir(filepath.ToSlash(d)))
+		}
+	}
+	return args
 }
 
 func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
@@ -163,22 +189,16 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 	}
 	defer db.Close()
 
-	args := make([]any, 0, len(dirs)*2+1)
-	for _, d := range dirs {
-		args = append(args, d)
-	}
-	if foldSessionDirectory.Load() {
-		for _, d := range dirs {
-			args = append(args, foldDir(filepath.ToSlash(d)))
-		}
-	}
-	args = append(args, since.UnixMilli())
+	// One read of the folding flag decides the statement and its arguments
+	// together, so the placeholder count and the bound values cannot disagree.
+	fold := foldSessionDirectory.Load()
+	args := append(dirArgs(dirs, fold), since.UnixMilli())
 
 	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
 	defer cancel()
 
 	var out, thinking, total, input sql.NullInt64
-	row := db.QueryRowContext(ctx, usageQueryFor(len(dirs)), args...)
+	row := db.QueryRowContext(ctx, usageQuery(len(dirs), fold), args...)
 	if err := row.Scan(&out, &thinking, &total, &input); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) && !storeAbsent(o.path) {
 			auditStoreRead("opencode", o.path, err)
