@@ -75,7 +75,11 @@ that path blind, and the catch-all answered it with the whole page, 3,606 bytes
 of `text/html` for a request that wants an image. The Worker answers it with
 the icon the page already carries inline, from the same bytes, with no asset
 binding and no second request, and a browser that reads the `<link>` still
-fetches nothing at all. Wrong methods are `405` with `Allow: GET, HEAD`.
+fetches nothing at all. The answer carries a strong `ETag` derived from the
+icon's own bytes and revalidates to a bodyless `304`, because a client that
+asks for the path blind asks again on every visit; it is separate from the
+page's validator, so holding one never revalidates the other. Wrong methods
+are `405` with `Allow: GET, HEAD`.
 `/health` reports
 `degraded` with a `503` while the asset binding is missing, rather than `ok`:
 the page still serves then, but every capture it shows is a 404, so a probe

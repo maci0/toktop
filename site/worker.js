@@ -427,31 +427,48 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
 // and the 406 alike, so a cache holding the brotli body never answers a zstd
 // client, and the revalidation that reaches this Worker carries no coding of
 // its own to contradict.
-const ETAG_HASH = (() => {
+// FNV-1a over source text, as the 32-bit hex string every derived validator
+// here is built from. One hash for every constant in this file, so a second
+// validator cannot be a second implementation of it.
+function fnv1a(source) {
   let hash = 0x811c9dc5;
-  for (let i = 0; i < HTML.length; i++) {
+  for (let i = 0; i < source.length; i++) {
     // biome-ignore lint/suspicious/noBitwiseOperators: FNV-1a is defined by xor, not arithmetic.
-    hash ^= HTML.charCodeAt(i);
+    hash ^= source.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
   // biome-ignore lint/suspicious/noBitwiseOperators: the unsigned shift is how FNV-1a normalizes to 32 bits.
   return (hash >>> 0).toString(16);
-})();
+}
+
+const ETAG_HASH = fnv1a(HTML);
 
 const ETAG = `W/"${ETAG_HASH}"`;
+
+// The icon is a second constant in this file with the same deploy-time
+// lifetime as the page, so it answers the same way: a client that asks for
+// /favicon.ico blind asks again on every visit, and without a validator each
+// of those is a full 200. The tag is strong, unlike the page's, because the
+// icon ships as one encoding under one URL, so one strong tag describes every
+// representation of it.
+const ICON_ETAG_HASH = fnv1a(FAVICON_SVG);
+
+const ICON_ETAG = `"${ICON_ETAG_HASH}"`;
 
 // RFC 9110 weak comparison for If-None-Match: any list member counts, an
 // optional W/ prefix is ignored, and * matches whatever is held. Comparing
 // the stripped forms means validators sent back by older deploys (which used
-// a strong tag over the same hash) still revalidate to a 304.
-function ifNoneMatchMatches(headerValue) {
+// a strong tag over the same hash) still revalidate to a 304. The expected
+// hash is a parameter because the page and the icon each answer with their
+// own: a client holding one must not be told the other is fresh.
+function ifNoneMatchMatches(headerValue, expectedHash) {
   const value = headerValue?.trim();
   if (!value) return false;
   if (value === "*") return true;
   return value.split(",").some((raw) => {
     let candidate = raw.trim();
     if (candidate.startsWith("W/")) candidate = candidate.slice(2);
-    return candidate === `"${ETAG_HASH}"`;
+    return candidate === `"${expectedHash}"`;
   });
 }
 
@@ -898,17 +915,33 @@ async function handle(request, env, started) {
   // The one-page catch-all below would otherwise answer this with the whole
   // page, under text/html, to a request for an image.
   if (url.pathname === FAVICON_PATH) {
-    return new Response(request.method === "HEAD" ? null : FAVICON_BYTES, {
-      headers: {
-        "content-type": "image/svg+xml",
-        "content-length": String(FAVICON_BYTES.byteLength),
-        // The icon's bytes change only at a deploy, exactly like the page's,
-        // so it carries the page's freshness window rather than a longer one.
-        "cache-control": PAGE_CACHE_CONTROL,
-        "server-timing": serverTiming(started),
-        ...SECURITY_HEADERS,
-      },
-    });
+    // Revalidation is answered before the bytes are written, the same order the
+    // page uses: a 304 carries no body, so it must not cost a body either.
+    if (ifNoneMatchMatches(request.headers.get("if-none-match"), ICON_ETAG_HASH)) {
+      return new Response(null, {
+        status: 304,
+        headers: {
+          etag: ICON_ETAG,
+          // The icon's bytes change only at a deploy, exactly like the page's,
+          // so it carries the page's freshness window rather than a longer one.
+          "cache-control": PAGE_CACHE_CONTROL,
+          "server-timing": serverTiming(started),
+          ...SECURITY_HEADERS,
+        },
+      });
+    }
+    const iconHeaders = {
+      "content-type": "image/svg+xml",
+      "content-length": String(FAVICON_BYTES.byteLength),
+      etag: ICON_ETAG,
+      "cache-control": PAGE_CACHE_CONTROL,
+      "server-timing": serverTiming(started),
+      ...SECURITY_HEADERS,
+    };
+    if (request.method === "HEAD") {
+      return new Response(null, { headers: iconHeaders });
+    }
+    return new Response(FAVICON_BYTES, { headers: iconHeaders });
   }
   // One page: anything else is that page too, rather than a 404 nobody
   // learns anything from.
@@ -925,7 +958,7 @@ async function handle(request, env, started) {
   if (refusesEveryCoding(acceptEncoding)) {
     return notAcceptable(request, started);
   }
-  if (ifNoneMatchMatches(request.headers.get("if-none-match"))) {
+  if (ifNoneMatchMatches(request.headers.get("if-none-match"), ETAG_HASH)) {
     // Revalidation answers keep the validator and policy headers but no body.
     return new Response(null, {
       status: 304,

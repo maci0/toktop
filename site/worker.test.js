@@ -1110,6 +1110,26 @@ test("/favicon.ico answers with the icon, not the page", async () => {
   for (const name of SECURITY_HEADER_NAMES) {
     expect(res.headers.get(name)).not.toBeNull();
   }
+  // A client that asks for the path blind asks again on every visit, so the
+  // answer carries a validator and a repeat visit costs a 304 rather than the
+  // icon again. The tag is strong: the icon ships as one encoding under one
+  // URL, so unlike the page's it describes every representation of it.
+  const etag = res.headers.get("etag");
+  expect(etag).toBe(`"${etag.slice(1, -1)}"`);
+  const revalidated = await call({ "if-none-match": etag }, { path: "/favicon.ico" });
+  expect(revalidated.status).toBe(304);
+  expect(revalidated.headers.get("etag")).toBe(etag);
+  expect(revalidated.headers.get("content-length")).toBeNull();
+  expect(EDGE_DUR_RE.exec(revalidated.headers.get("server-timing") ?? "")?.[1]).toBeDefined();
+  expect(await revalidated.text()).toBe("");
+  // A client's page validator says nothing about the icon: they are separate
+  // constants in separate responses, and answering the icon fresh against the
+  // page's tag would hand back a 304 for bytes the client never holds.
+  const pageEtag = (await call()).headers.get("etag");
+  const wrongTag = await call({ "if-none-match": pageEtag }, { path: "/favicon.ico" });
+  expect(wrongTag.status).toBe(200);
+  expect(await wrongTag.text()).toBe(body);
+  expect((await call({ "if-none-match": "*" }, { path: "/favicon.ico" })).status).toBe(304);
   // HEAD carries the GET headers and no body, like every other HEAD here.
   const head = await call({}, { method: "HEAD", path: "/favicon.ico" });
   expect(head.status).toBe(200);
