@@ -138,14 +138,15 @@ GOTAGS_BARE := -tags "$(ZONE_TAG)"
 # RACE=0 skips it (and the C compiler) for a faster edit cycle.
 RACE    ?= 1
 race_flag = $(if $(filter 0,$(RACE)),,-race )
-# Lower bound for `make scripts-check`, read from the uv line of
+# Lower bound for the targets that install the Python tool env
+# (`make scripts-check`, `make check-yaml`), read from the uv line of
 # .tool-versions. That file is what CI installs (setup-uv version-file), so one
 # string covers both; a newer uv on PATH is fine. setup-uv v10 parses only the
 # formats it documents (uv.toml, pyproject.toml, .tool-versions, requirements
 # files, uv.lock), and .tool-versions is the one that carries a bare version.
 UV_MIN := $(shell awk '$$1 == "uv" { print $$2; exit }' .tool-versions 2>/dev/null)
 ifeq ($(UV_MIN),)
-$(error .tool-versions has no uv line; scripts-check and CI need a uv version)
+$(error .tool-versions has no uv line; scripts-check, check-yaml and CI need a uv version)
 endif
 # The Python tool env, built under dist/ (gitignored) by `uv pip install`.
 # Not `uv run --with-requirements`: that resolves and installs the same pins
@@ -302,12 +303,12 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	if command -v uv >/dev/null 2>&1; then \
 		have=$$(uv --version | awk '{print $$2}'); \
 		if uv_too_old "$$have"; then \
-			gap "uv $$have on PATH, make scripts-check needs >= $(UV_MIN)"; \
+			gap "uv $$have on PATH, make scripts-check and check-yaml need >= $(UV_MIN)"; \
 		else \
 			ok "uv $$have (>= $(UV_MIN))"; \
 		fi; \
 	else \
-		gap "uv is not on PATH (make scripts-check needs >= $(UV_MIN))"; \
+		gap "uv is not on PATH (make scripts-check and check-yaml need >= $(UV_MIN))"; \
 	fi; \
 	if [ "$$fail" != "0" ]; then \
 		echo "make prereqs: install the MISSING tools above; CONTRIBUTING.md 'Prerequisites' explains each" >&2; \
@@ -734,16 +735,21 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 # one file here no analyzer reads: gofmt, staticcheck, vet, biome, ruff, mypy
 # and black all look elsewhere. A YAML error there is worse than an unused
 # import, because the step it breaks is a gate, and a gate that does not parse
-# is a gate that does not run. yamllint at the version pinned below, via uvx
-# like govulncheck's `go run @version`, so no lockfile and no install into the
-# repo's own env, in the `tool@version` form bunx uses, so the fetch is the
-# one TestToolPinsAreExact and TestFetchedToolsAreDocumented already watch.
-# The rule set and its three deviations are in .yamllint. Only
-# .github/workflows: site/wrangler.jsonc is jsonc, and biome owns it.
-YAMLLINT_VERSION := 1.38.0
+# is a gate that does not run. The rule set and its three deviations are in
+# .yamllint. Only .github/workflows: site/wrangler.jsonc is jsonc, and biome
+# owns it.
+#
+# yamllint runs from the scripts env, the one black, ruff and mypy run from, so
+# its pin is a line in scripts/requirements-dev.txt with a hash on the wheel
+# like theirs. `uvx yamllint@1.38.0` pinned the linter and nothing else: uvx
+# resolves the linter's own requirements out of the index every run, so pyyaml
+# and pathspec arrived at whatever the registry served that minute, unhashed
+# and unreviewed, on the one gate in the tree with no fixed closure. A gate
+# whose linter can change under it is a gate nobody can reproduce a failure of.
 .PHONY: check-yaml
 check-yaml: ## fail if a workflow is invalid YAML or breaks the .yamllint rule set
-	@uvx --quiet yamllint@$(YAMLLINT_VERSION) --config-file .yamllint $(WORKFLOWS)
+	@$(MAKE) --no-print-directory scripts-env
+	@$(SCRIPTS_BIN)/yamllint --config-file .yamllint $(WORKFLOWS)
 
 # `make help` and the CONTRIBUTING.md target table both enumerate what a
 # contributor runs, and a target that reaches them through one and not the
@@ -836,7 +842,8 @@ require-uv: ## fail unless uv is on PATH at or above UV_MIN
 # interpreter moves, so an edited pin, a corrected hash or a Python bump is
 # picked up without `make clean`. Missing .python-version from the
 # prerequisites would leave a venv built on the old interpreter in place under
-# a new pin, and every later `make scripts-check` would answer from it.
+# a new pin, and every later `make scripts-check` or `make check-yaml` would
+# answer from it.
 .PHONY: scripts-env
 scripts-env: $(SCRIPTS_BIN)/.stamp ## Python tool env under dist/, hashes verified
 

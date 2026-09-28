@@ -52,7 +52,6 @@ hold both halves of it: the version and the reason.
 | `SBOM_TOOL` | `github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod` | Apache-2.0 | Writes the CycloneDX inventory a release ships, licenses included. |
 | `BIOME` | `@biomejs/biome` | MIT OR Apache-2.0 | Formats and lints the Worker. The Rust binary, not a JS tree, so the Worker keeps no manifest. |
 | `WRANGLER` | `wrangler` | MIT OR Apache-2.0 | Publishes and rolls back the Worker. The only thing here that talks to Cloudflare. |
-| `YAMLLINT_VERSION` | `yamllint` | LGPL-2.1 | Parses and lints `.github/workflows/`, where every merge gate is a step. No other analyzer in the tree reads a workflow, and a YAML error there is a gate that stops running rather than one that fails. |
 
 The two `go run` tools are pinned outside the module graph on purpose: their x/tools
 requirement is newer than the shipped build's, so joining the module graph would drag
@@ -61,23 +60,30 @@ every released binary up with them.
 ## Python, scripts/ only
 
 `scripts/screenshot.py` runs on a developer's machine and is never linked into
-a release artifact. The interpreter is pinned exactly in `.python-version` and
+a release artifact. `make check-yaml` is here for the same reason: it lints
+`.github/workflows/`, which nothing else in the tree parses. The interpreter is
+pinned exactly in `.python-version` and
 the Makefile passes it to `uv venv` as `--python`, so the pins below fix both
 what is installed and what it is installed into. The pins are exact, with
 sha256 hashes on the pure-Python
-packages (a registry swap of those files fails the install). pillow and pytokens
-ship per-platform or per-interpreter wheels, so they stay version pins: hashing
+packages (a registry swap of those files fails the install). pillow, pytokens
+and pyyaml ship per-platform or per-interpreter wheels only, so they stay
+version pins: hashing
 one wheel would refuse every other OS/arch/CPython. mypy and its compiled
 runtime deps (librt, ast-serialize) are in that second group for the same
 reason: mypy 2.x publishes per-interpreter wheels only. The install runs with
 `--no-deps`, so the two files are the entire closure: nothing is resolved out
 of the index to satisfy a dependency the files do not name, and a tool that
-grows one fails its first run rather than pulling an unpinned package.
+grows one fails its first run rather than pulling an unpinned package. That
+includes the analyzers' own requirements: yamllint used to run through `uvx`,
+which pinned the linter and left pyyaml and pathspec to be resolved out of the
+index on every run, so a linter's behavior could change under a gate that
+nothing in the tree could reproduce.
 
 - runtime: pyte (LGPL-3.0), wcwidth (MIT), pillow (MIT)
-- tools: black, ruff, mypy, and their transitive closure (click, packaging,
-  pathspec, platformdirs, mypy-extensions, pytokens, librt, ast-serialize,
-  typing-extensions)
+- tools: black, ruff, mypy, yamllint (LGPL-2.1), and their transitive closure
+  (click, packaging, pathspec, platformdirs, mypy-extensions, pytokens, librt,
+  ast-serialize, typing-extensions, pyyaml)
 
 ## JavaScript, site/ only
 

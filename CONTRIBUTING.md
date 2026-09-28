@@ -206,7 +206,7 @@ in day-to-day work:
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
 | `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, and keeps `-shuffle=on` (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
-| `make check-yaml` | fail unless every workflow in `.github/workflows/` is valid YAML and passes the `.yamllint` rule set, at the Makefile's `YAMLLINT_VERSION` pin (`make check` runs it) |
+| `make check-yaml` | fail unless every workflow in `.github/workflows/` is valid YAML and passes the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
@@ -278,12 +278,16 @@ Makefile against the login and deploy commands the docs name),
 `make scripts-check`, and `make repro-check-pair`.
 `scripts-check` installs the exact versions in
 `scripts/requirements-dev.txt` into an isolated env under `dist/`
-(`make scripts-env`, black, ruff, mypy, plus the renderer deps). Pure-Python pins
+(`make scripts-env`, black, ruff, mypy, yamllint, plus the renderer deps).
+Pure-Python pins
 carry a wheel sha256; bumping one of those lines means updating the hash too,
 and the install fails if a fetched file does not match. Do not run unpinned
 `uvx black` /
 `uvx ruff` /
-`uvx mypy`: those resolve to whatever PyPI returns today. Platform-specific
+`uvx mypy`: those resolve to whatever PyPI returns today. `make check-yaml`
+installs from the same file for the same reason; the workflows are the one
+thing here no Go analyzer reads, and a gate whose linter can change under it
+is a gate nobody can reproduce a failure of. Platform-specific
 files also need `make vet-cross` (the same gate `release.yml` runs before
 shipping).
 

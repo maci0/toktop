@@ -88,18 +88,11 @@ jobs:
       - name: every documented make target is in make help (linux only)
         if: runner.os == 'Linux'
         run: make check-help-docs
-      # The workflow is the one file in this repo no analyzer in `make check`
-      # reads, and a YAML error here is a gate that stops running rather than
-      # a gate that fails. It needs uv for the yamllint pin, so setup-uv is
-      # here too: this job is Go-only otherwise, and the guard runs in `make
-      # check` as well.
-      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
-        if: runner.os == 'Linux'
-        with:
-          version-file: ".tool-versions"
-      - name: yamllint over the workflows (linux only)
-        if: runner.os == 'Linux'
-        run: make check-yaml
+      # yamllint over the workflows runs in the scripts job below, which
+      # already has uv and the pinned tool env this target installs from. The
+      # workflow file is the one thing in this repo no Go analyzer reads, and a
+      # YAML error there is a gate that stops running rather than one that
+      # fails, so the gate is the Python one and the Python env it needs.
       # staticcheck resolves build tags per GOOS, so every runner analyzes its
       # own platform-specific files; the linux pass plus the matrix below
       # together cover all of them. The module pins the analyzer via a tool
@@ -169,6 +162,11 @@ jobs:
           cache-dependency-glob: |
             scripts/requirements.txt
             scripts/requirements-dev.txt
+      - name: yamllint over the workflows
+        # The Makefile's own guard for the one file in this repo no other
+        # analyzer reads, and the pin lives in scripts/requirements-dev.txt
+        # with the rest of this job's tools.
+        run: make check-yaml
       - name: format, lint and type-check the screenshot script
         # Pins live in scripts/requirements-dev.txt so local `make scripts-check`
         # and CI cannot run different black/ruff/mypy versions.

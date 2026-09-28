@@ -37,3 +37,14 @@ librt==0.15.0
 ast-serialize==0.11.2
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
+# yamllint reads .github/workflows/, which no analyzer elsewhere in the tree
+# parses. It ran through `uvx`, which resolved pyyaml and pathspec out of the
+# index at whatever the registry served that minute, unhashed and unpinned: the
+# only gate in the tree whose linter had no fixed closure. It is pinned here
+# for the reason black and ruff are. pyyaml ships per-platform wheels and no
+# py3-none-any one, so it is a version pin for the reason pillow is; pathspec
+# above is the same pin yamllint wants, and the two agreeing is the point of a
+# spelled-out closure.
+yamllint==1.38.0 \
+    --hash=sha256:fc394a5b3be980a4062607b8fdddc0843f4fa394152b6da21722f5d59013c220
+pyyaml==6.0.3
