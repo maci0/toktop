@@ -13,6 +13,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- `toktop --demo --ingest` deduplicates agent events through a bounded
+  15-minute id ledger, the way the live collector does. It answered a replay
+  from the retained feed, which holds a couple of minutes of generated
+  events: a POST carrying an `Idempotency-Key` and retried after its first
+  copy had rolled out of the window was counted a second time. The ledger
+  ages out and is capped, so a replay inside the horizon stores nothing and
+  the ledger cannot grow without bound.
+
 ## [0.19.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

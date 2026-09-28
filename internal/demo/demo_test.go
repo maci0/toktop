@@ -574,3 +574,50 @@ func TestRecordAgentSameIDKeptOnce(t *testing.T) {
 		t.Fatalf("events without id = %d, want 4 total", n)
 	}
 }
+
+// A retried POST arrives long after its first copy, by which time the feed has
+// turned over: the id is out of the retained window, so only the ledger can
+// answer the replay. Without it the same POST counted twice, which is the
+// whole cost a sender pays for a lost 202.
+func TestRecordAgentReplaySurvivesTheFeedTurningOver(t *testing.T) {
+	s := NewSource(time.Second, 1)
+	ev := core.AgentEvent{ID: "turn-1", Agent: "coder", OutputTokens: 50}
+	if !s.RecordAgent(ev) {
+		t.Fatal("first send was refused")
+	}
+	at := s.Now()
+	for range core.AgentHistoryLen + 8 {
+		at = at.Add(time.Second)
+		s.RecordAgent(core.AgentEvent{At: at, Agent: "coder", OutputTokens: 1})
+	}
+	if core.HasAgentID(s.agents, "turn-1") {
+		t.Fatal("turn-1 is still in the retained feed; the test proves nothing")
+	}
+	s.mu.Lock()
+	before := len(s.agents)
+	s.mu.Unlock()
+	if s.RecordAgent(ev) {
+		t.Fatal("a replay inside the horizon was retained a second time")
+	}
+	s.mu.Lock()
+	after := len(s.agents)
+	s.mu.Unlock()
+	if after != before {
+		t.Fatalf("feed = %d events after the replay, want %d", after, before)
+	}
+}
+
+// The ledger is bounded by its horizon, not forever: past it an id is a new
+// event again, so a stream posted under one Idempotency-Key hours later is
+// counted as what it is.
+func TestRecordAgentLedgerAgesOutWithTheHorizon(t *testing.T) {
+	s := NewSource(time.Second, 1)
+	ev := core.AgentEvent{ID: "turn-1", Agent: "coder", OutputTokens: 50}
+	if !s.RecordAgent(ev) {
+		t.Fatal("first send was refused")
+	}
+	s.stepAt(s.Now().Add(agentIDHorizon + time.Second))
+	if !s.RecordAgent(ev) {
+		t.Fatal("an id past the horizon is still suppressed, so the ledger never ages out")
+	}
+}
