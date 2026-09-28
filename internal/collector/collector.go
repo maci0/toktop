@@ -391,15 +391,6 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	}
 }
 
-// providerSnapshot builds one engine's snapshot entry from its poll result,
-// updating the per-key baselines, history rings and health state that entry is
-// keyed on. Call with c.mu held.
-//
-// The health transitions the poll caused are returned separately so emit can
-// collect the whole sweep's transitions and log them after the lock: an engine
-// going away is the dependency failure an operator needs named, and a slow
-// stderr must not stall the poll loop the snapshot depends on. The list is
-// empty when this engine crossed neither boundary.
 // foldedErr is one poll error's text after the home fold and the length
 // bound, kept alongside the exact error and the home it was folded against so
 // a repeat of that error can be answered from memory.
@@ -430,6 +421,15 @@ func (c *Collector) foldErr(key string, err error) string {
 	return text
 }
 
+// providerSnapshot builds one engine's snapshot entry from its poll result,
+// updating the per-key baselines, history rings and health state that entry is
+// keyed on. Call with c.mu held.
+//
+// The health transitions the poll caused are returned separately so emit can
+// collect the whole sweep's transitions and log them after the lock: an engine
+// going away is the dependency failure an operator needs named, and a slow
+// stderr must not stall the poll loop the snapshot depends on. The list is
+// empty when this engine crossed neither boundary.
 func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, changes []healthChange) {
 	ps = core.ProviderSnapshot{
 		Label: p.Label,

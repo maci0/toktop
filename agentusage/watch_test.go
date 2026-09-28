@@ -1501,6 +1501,26 @@ func TestDropFileReleasesZstdCarry(t *testing.T) {
 	}
 }
 
+// A transcript that never opened leaves no stamp and no offset, so ageing the
+// walk out had nothing to key the read-failure latch on: one entry per file a
+// long --agents run failed to read, held for the rest of the run.
+func TestReadFailureLatchAgesOut(t *testing.T) {
+	store := withStore(t, "dsh")
+	work := t.TempDir()
+
+	w := Watch("dsh", work, time.Now())
+	gone := filepath.Join(store, "unreadable.jsonl.z64")
+	w.readFailed[gone] = true
+	// A live transcript alongside it: ageing one out must not disturb the other.
+	live := filepath.Join(store, "session.jsonl.zstd")
+	appendBytes(t, live, zstdFrame(t, dshHeader(work)+"\n"))
+
+	w.forgetIdle([]string{live})
+	if _, latched := w.readFailed[gone]; latched {
+		t.Fatal("the read-failure latch outlived the transcript it named")
+	}
+}
+
 // A shared transcript listing that no watcher has refreshed must leave the
 // process-wide cache. Clanker (and {dir} specs) key it on the project path,
 // so a dashboard that follows agents through many trees would otherwise pin
