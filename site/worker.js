@@ -173,7 +173,7 @@ const HTML = htmlForWire(`<!doctype html>
     font-family: var(--mono); font-size: var(--fs-body); line-height: 1.6;
   }
   .skip-link {
-    position: absolute; top: -100px; left: 1.25rem; z-index: 100;
+    position: absolute; top: -100px; inset-inline-start: 1.25rem; z-index: 100;
     padding: .5rem 1rem; background: var(--panel); color: var(--fg);
     border: 1px solid var(--accent); text-decoration: none; font-size: var(--fs-small);
   }
@@ -189,7 +189,7 @@ const HTML = htmlForWire(`<!doctype html>
   .brand { font-weight: 700; font-size: var(--fs-lead); text-decoration: none; color: var(--fg);
     white-space: nowrap; }
   .brand .cursor { color: var(--accent); }
-  nav { display: flex; gap: 1.1rem; font-size: var(--fs-small); margin-left: auto; }
+  nav { display: flex; gap: 1.1rem; font-size: var(--fs-small); margin-inline-start: auto; }
   nav a { color: var(--dim); white-space: nowrap; padding: .3rem 0; }
   .hero { padding-top: 2.6rem; }
   /* The h1 is bold for the same reason the wordmark above it is: the dashboard
@@ -227,7 +227,7 @@ const HTML = htmlForWire(`<!doctype html>
   .dim { color: var(--dim); }
   /* The capture needs the 76rem column; copy does not. */
   p, ul { max-width: 62ch; }
-  ul { padding-left: 1.1rem; margin: 0; }
+  ul { padding-inline-start: 1.1rem; margin: 0; }
   li { margin-bottom: .5rem; }
   li b { font-weight: 600; }
   /* Feature grid: four panes, each a name, a job, a specimen. The System
