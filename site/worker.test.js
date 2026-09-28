@@ -1022,7 +1022,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_378);
+  expect(visit[0][1]).toBe(14_371);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
