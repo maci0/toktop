@@ -265,6 +265,7 @@ func TestLoadDefinitionsAcceptsFileAtCap(t *testing.T) {
 func TestLoadDefinitionsErrorsRedactHome(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
 	for _, tc := range []struct {
 		name string
 		body string
