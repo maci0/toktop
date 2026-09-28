@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -222,20 +221,30 @@ func TestSaturatesAbsurdVendorNumbers(t *testing.T) {
 	}
 }
 
-// vendorOrder is a package literal, so comparing two of its entries proves
-// nothing about Sample's sort. Sort the real keys and compare against the
-// order the dashboard is specified to draw.
+// vendorOrder is a package literal, so sorting its own keys and comparing the
+// result to a copy of those keys proves nothing. TestSampleOrdersVendorsAndIndices
+// drives Sample and pins the order the dashboard actually draws. What is left
+// to pin here is the table itself: every vendor the dashboard knows is ranked,
+// no vendor is ranked twice, and the ranks say which order those panels take.
 func TestVendorOrdering(t *testing.T) {
-	got := make([]string, 0, len(vendorOrder))
-	for v := range vendorOrder {
-		got = append(got, v)
-	}
-	sort.Slice(got, func(i, j int) bool { return vendorOrder[got[i]] < vendorOrder[got[j]] })
 	want := []string{"nvidia", "amd", "intel", "apple"}
-	if !slices.Equal(got, want) {
-		t.Fatalf("vendor sort order = %v, want %v", got, want)
+	if len(vendorOrder) != len(want) {
+		t.Fatalf("vendorOrder ranks %d vendors, want %d: %v", len(vendorOrder), len(want), vendorOrder)
 	}
-	var _ core.GPUDevice // keep import honest
+	seen := make(map[int]string, len(want))
+	for i, v := range want {
+		rank, ok := vendorOrder[v]
+		if !ok {
+			t.Fatalf("vendorOrder has no rank for %q", v)
+		}
+		if prev, dup := seen[rank]; dup {
+			t.Fatalf("vendors %q and %q share rank %d", prev, v, rank)
+		}
+		seen[rank] = v
+		if rank != i {
+			t.Fatalf("vendorOrder[%q] = %d, want %d: the dashboard draws panels in rank order", v, rank, i)
+		}
+	}
 }
 
 func TestLookupRetriesExpiredMisses(t *testing.T) {

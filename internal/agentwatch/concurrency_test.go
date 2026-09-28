@@ -122,9 +122,13 @@ func TestSetNowAndOnErrorWhileReporting(t *testing.T) {
 	}()
 
 	var wg sync.WaitGroup
+	var writeErr error
 	wg.Go(func() {
 		for i := range 200 {
-			appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 100+i))
+			if err := appendLineQuiet(filepath.Join(transcript, "s.jsonl"), usageLine(work, 100+i)); err != nil {
+				writeErr = err
+				return
+			}
 			time.Sleep(200 * time.Microsecond)
 		}
 	})
@@ -136,6 +140,9 @@ func TestSetNowAndOnErrorWhileReporting(t *testing.T) {
 		}
 	})
 	wg.Wait()
+	if writeErr != nil {
+		t.Fatalf("appending to the transcript: %v", writeErr)
+	}
 	cancel()
 	select {
 	case <-read:

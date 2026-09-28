@@ -523,14 +523,23 @@ func usageLine(cwd string, out int) string {
 
 func appendLine(t *testing.T, path, line string) {
 	t.Helper()
+	if err := appendLineQuiet(path, line); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// appendLineQuiet reports the failure instead of ending the goroutine it runs
+// on. testing.T.Fatal from off the test goroutine Goexits that goroutine and
+// lets the test continue, so the real cause surfaces later as a misleading
+// symptom.
+func appendLineQuiet(path, line string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 	if err != nil {
-		t.Fatal(err)
+		return err
 	}
 	defer f.Close()
-	if _, err := f.WriteString(line + "\n"); err != nil {
-		t.Fatal(err)
-	}
+	_, err = f.WriteString(line + "\n")
+	return err
 }
 
 func waitFor(t *testing.T, limit time.Duration, cond func() bool) {

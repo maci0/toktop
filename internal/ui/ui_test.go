@@ -2366,8 +2366,20 @@ func TestPanelTitlesShowHiddenCount(t *testing.T) {
 	m.snap = core.Snapshot{Providers: ps}
 	m.w, m.h, m.ready = 110, 32, true
 	out := strip(m.View())
-	if !strings.Contains(out, "+") || !strings.Contains(out, "more") {
-		t.Errorf("panels with overflow do not show hidden count in titles:\n%s", out)
+	// Anchor on a panel title line: a bare "+" and a bare "more" are both
+	// satisfied by unrelated text anywhere in the frame.
+	var bad []string
+	for _, line := range strings.Split(out, "\n") {
+		rest, ok := strings.CutPrefix(line, "ENGINES  ")
+		if !ok {
+			continue
+		}
+		if n, _, ok := strings.Cut(rest, " more (enlarge window)"); !ok || n == "" || strings.TrimLeft(n, "0123456789") != "" {
+			bad = append(bad, line)
+		}
+	}
+	if len(bad) != 1 {
+		t.Fatalf("panel titles with overflow = %v, want exactly one ENGINES title carrying a hidden count:\n%s", bad, out)
 	}
 }
 

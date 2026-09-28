@@ -159,13 +159,19 @@ func TestRatesDeriveAndSmooth(t *testing.T) {
 	if out != 0 || in != 0 {
 		t.Fatalf("first sample must seed baseline, got %v/%v", out, in)
 	}
+	// Pin the arithmetic, not a band around it: a wrong alpha or a doubled
+	// weight lands inside the old 106..299 window and passes. The literals are
+	// raw 300 tok/s smoothed with the production alpha of 0.35 from 0, then
+	// from that result.
+	const alpha = 0.35
 	out, _ = c.rates("p", &provider.Metrics{OutTotal: 400}, now.Add(time.Second))
-	if out < 104 || out > 106 { // raw rate 300 tok/s smoothed with alpha .35 from 0
-		t.Fatalf("smoothed rate = %v", out)
+	first := (0 * (1 - alpha)) + (300 * alpha)
+	if out != first {
+		t.Fatalf("first smoothing step = %v, want %v", out, first)
 	}
 	out, _ = c.rates("p", &provider.Metrics{OutTotal: 700}, now.Add(2*time.Second))
-	if out <= 105 || out >= 300 {
-		t.Fatalf("second smoothing step = %v", out)
+	if want := first*(1-alpha) + 300*alpha; out != want {
+		t.Fatalf("second smoothing step = %v, want %v", out, want)
 	}
 }
 
@@ -2202,6 +2208,9 @@ func TestProviderErrorIsCappedAndOneLine(t *testing.T) {
 	if len(snap.Providers) != 1 {
 		t.Fatalf("providers = %d, want 1", len(snap.Providers))
 	}
+	if msg := snap.Providers[0].Err; !strings.Contains(msg, "cannot unmarshal") {
+		t.Fatalf("provider error = %q, want the poll's own reason", msg)
+	}
 	if got := len([]rune(snap.Providers[0].Err)); got > core.SnippetCap {
 		t.Errorf("provider error is %d characters, want at most SnippetCap (%d)", got, core.SnippetCap)
 	}
@@ -2211,6 +2220,9 @@ func TestProviderErrorIsCappedAndOneLine(t *testing.T) {
 	c2 := New([]provider.Provider{p2.asProvider()}, time.Hour)
 	c2.emit(context.Background(), ch2)
 	snap2 := <-ch2
+	if msg := snap2.Providers[0].Err; !strings.Contains(msg, "connection refused") {
+		t.Fatalf("provider error = %q, want the poll's own reason", msg)
+	}
 	if msg := snap2.Providers[0].Err; strings.ContainsAny(msg, "\n\t") {
 		t.Errorf("provider error %q kept a line break; the snapshot row it feeds would print as two lines", msg)
 	}

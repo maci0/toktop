@@ -6,6 +6,7 @@ package core
 import (
 	"math"
 	"testing"
+	"time"
 )
 
 func TestSatCoercions(t *testing.T) {
@@ -92,6 +93,29 @@ func TestSatAddPos(t *testing.T) {
 	for _, tc := range tests {
 		if got := satAddPos(tc.a, tc.b); got != tc.want {
 			t.Errorf("satAddPos(%d, %d) = %d, want %d", tc.a, tc.b, got, tc.want)
+		}
+	}
+}
+
+// ClampEventTokens has a boundary table; ClampEventSpan divides by its result
+// as a rate denominator, so the drop rule (zero, not the nearest bound) is
+// what keeps a sender's bogus duration from reading as a plausible rate.
+func TestClampEventSpanDropsRatherThanPullsBack(t *testing.T) {
+	tests := []struct {
+		name string
+		in   time.Duration
+		want time.Duration
+	}{
+		{"zero", 0, 0},
+		{"in range", time.Second, time.Second},
+		{"at the bound", MaxEventSpan, MaxEventSpan},
+		{"one past the bound", MaxEventSpan + time.Nanosecond, 0},
+		{"negative", -time.Nanosecond, 0},
+		{"max duration", time.Duration(math.MaxInt64), 0},
+	}
+	for _, tc := range tests {
+		if got := ClampEventSpan(tc.in); got != tc.want {
+			t.Errorf("ClampEventSpan(%s) = %s, want %s", tc.name, got, tc.want)
 		}
 	}
 }

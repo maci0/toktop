@@ -55,19 +55,29 @@ func TestPollSeesATranscriptCreatedAfterTheWatchBegan(t *testing.T) {
 	}
 }
 
+// swapRootLists installs m as the process-global listing cache for the
+// duration of the test and puts the previous map back on return. Leaving a
+// fabricated listing behind would make the rest of the suite's results depend
+// on which of these tests ran first.
+func swapRootLists(t *testing.T, m map[string]rootListing) func() {
+	t.Helper()
+	rootListMu.Lock()
+	saved := rootLists
+	rootLists = m
+	rootListMu.Unlock()
+	return func() {
+		rootListMu.Lock()
+		rootLists = saved
+		rootListMu.Unlock()
+	}
+}
+
 // Expired listings must leave the shared map, or every (root, suffix) pair
 // a long --agents run ever walked would stay for the process lifetime.
 func TestRootListCacheDropsExpiredKeys(t *testing.T) {
-	rootListMu.Lock()
-	rootLists = map[string]rootListing{
+	defer swapRootLists(t, map[string]rootListing{
 		"stale\x00.jsonl": {files: []string{"gone"}, at: time.Now().Add(-rescanEvery - time.Second)},
-	}
-	rootListMu.Unlock()
-	t.Cleanup(func() {
-		rootListMu.Lock()
-		rootLists = map[string]rootListing{}
-		rootListMu.Unlock()
-	})
+	})()
 
 	dir := t.TempDir()
 	now := time.Now()
@@ -84,17 +94,10 @@ func TestRootListCacheDropsExpiredKeys(t *testing.T) {
 func TestRootListCacheDropsExpiredKeysOnHit(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
-	rootListMu.Lock()
-	rootLists = map[string]rootListing{
+	defer swapRootLists(t, map[string]rootListing{
 		"stale\x00.jsonl":          {files: []string{"gone"}, at: now.Add(-rescanEvery - time.Second)},
 		rootListKey(dir, ".jsonl"): {files: []string{"fresh.jsonl"}, at: now},
-	}
-	rootListMu.Unlock()
-	t.Cleanup(func() {
-		rootListMu.Lock()
-		rootLists = map[string]rootListing{}
-		rootListMu.Unlock()
-	})
+	})()
 
 	got := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
 	if len(got) != 1 || got[0] != "fresh.jsonl" {
@@ -117,11 +120,7 @@ func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Now()
 	key := rootListKey(dir, ".jsonl")
-	t.Cleanup(func() {
-		rootListMu.Lock()
-		rootLists = map[string]rootListing{}
-		rootListMu.Unlock()
-	})
+	defer swapRootLists(t, map[string]rootListing{})()
 
 	if got := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false); len(got) != 0 {
 		t.Fatalf("empty store listed %v, want nothing", got)
@@ -162,16 +161,9 @@ func TestListTranscriptsReleasesTheWalkClaim(t *testing.T) {
 func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.T) {
 	dir := t.TempDir()
 	walk := make(chan struct{})
-	rootListMu.Lock()
-	rootLists = map[string]rootListing{
+	defer swapRootLists(t, map[string]rootListing{
 		rootListKey(dir, ".jsonl"): {at: time.Now().Add(-rescanEvery - time.Second), walk: walk},
-	}
-	rootListMu.Unlock()
-	t.Cleanup(func() {
-		rootListMu.Lock()
-		rootLists = map[string]rootListing{}
-		rootListMu.Unlock()
-	})
+	})()
 
 	done := make(chan []string, 1)
 	go func() {

@@ -36,6 +36,11 @@ func TestClassifySGLang(t *testing.T) {
 	if m.DirectOutPS != 512.5 {
 		t.Errorf("direct throughput = %v", m.DirectOutPS)
 	}
+	// The collector branches on the flag, not the value: clearing it here
+	// would leave every engine-reported tok/s silently unreported.
+	if !m.HasDirectOutPS {
+		t.Errorf("HasDirectOutPS = false with DirectOutPS = %v; the collector would not show it", m.DirectOutPS)
+	}
 	if m.InTotal != 100 || m.OutTotal != 200 {
 		t.Errorf("totals = %v/%v", m.InTotal, m.OutTotal)
 	}
@@ -50,6 +55,13 @@ func TestClassifyQueueIgnoresDurations(t *testing.T) {
 	}, &m)
 	if m.Waiting != 0 {
 		t.Errorf("duration histogram leaked into waiting: %d", m.Waiting)
+	}
+	// A throughput family with no generation or decode word in its name is a
+	// prompt rate, and the collector must not present it as output tok/s.
+	var tp Metrics
+	classify(parseProm("# HELP x request_throughput 88.0\n# TYPE x request_throughput gauge\nx:request_throughput 88.0\n"), &tp)
+	if tp.HasDirectOutPS || tp.DirectOutPS != 0 {
+		t.Errorf("request_throughput set DirectOutPS = %v has=%v, want no output rate", tp.DirectOutPS, tp.HasDirectOutPS)
 	}
 }
 

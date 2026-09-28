@@ -298,13 +298,23 @@ func captureStderr(t *testing.T, f func()) string {
 	old := os.Stderr
 	os.Stderr = w
 	defer func() { os.Stderr = old }()
+	// The pipe holds roughly 64 KiB. Reading only after f returns wedges the
+	// whole suite on any help screen that outgrows the buffer, so drain it
+	// concurrently.
+	out := make(chan string, 1)
+	go func() {
+		b, err := io.ReadAll(r)
+		if err != nil {
+			out <- ""
+			return
+		}
+		out <- string(b)
+	}()
 	f()
 	w.Close()
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(out)
+	s := <-out
+	r.Close()
+	return s
 }
 
 func captureWarnUnknownEnv(t *testing.T) string {
@@ -993,14 +1003,16 @@ func TestWarnIgnoredFlags(t *testing.T) {
 }
 
 func TestWaitForFrames(t *testing.T) {
-	mark := core.Snapshot{Uptime: 7 * time.Second} // comparable field identifies the frame
+	// Distinct uptimes per frame, so returning the first instead of the last,
+	// or reading a single frame and returning nil, cannot pass.
+	mark := core.Snapshot{Uptime: 7 * time.Second}
 	t.Run("collects the requested frames", func(t *testing.T) {
 		ch := make(chan core.Snapshot, 2)
 		ch <- mark
-		ch <- mark
+		ch <- core.Snapshot{Uptime: 9 * time.Second}
 		got, err := waitForFrames(context.Background(), ch, 2, time.Second)
-		if err != nil || got.Uptime != mark.Uptime {
-			t.Fatalf("waitForFrames() = %+v, %v; want the sent frame, nil", got, err)
+		if err != nil || got.Uptime != 9*time.Second {
+			t.Fatalf("waitForFrames() = %+v, %v; want the last of two frames, nil", got, err)
 		}
 	})
 	t.Run("timeout names the cause", func(t *testing.T) {
@@ -2067,6 +2079,14 @@ func TestWarnBlankGitHubToken(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// os.Unsetenv has no restoring counterpart, so the unset case
+			// would take the caller's $GITHUB_TOKEN with it and every later
+			// test in the package would see it gone.
+			if prev, ok := os.LookupEnv(selfupdate.TokenEnv); ok {
+				t.Cleanup(func() { _ = os.Setenv(selfupdate.TokenEnv, prev) })
+			} else {
+				t.Cleanup(func() { _ = os.Unsetenv(selfupdate.TokenEnv) })
+			}
 			if tt.set {
 				t.Setenv(selfupdate.TokenEnv, tt.token)
 			} else {

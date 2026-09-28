@@ -335,3 +335,32 @@ func TestHomeHandlerLeavesOtherValuesAlone(t *testing.T) {
 		}
 	}
 }
+
+// The wrapper exists for its composition: the address fold has to run before
+// the collapse and the cap, or a payload after the address splits the redacted
+// tag across two lines and the peer address survives the cap unredacted. Field
+// alone is covered above; this is the order RedactedField pins.
+func TestRedactedFieldRedactsBeforeTheCapAndCollapse(t *testing.T) {
+	cases := []struct {
+		name, in, want string
+		n              int
+	}{
+		{"off-box peer", "dial tcp 192.168.1.1:8080 refused", "dial tcp remote refused", 40},
+		{"loopback keeps its port", "dial tcp 127.0.0.1:54321 refused", "dial tcp loopback:54321 refused", 40},
+		{"v6 peer", "dial tcp [2001:db8::1]:443 refused", "dial tcp remote refused", 40},
+		// A payload long enough to cut the field must cut it after the fold,
+		// never between the words of the redacted tag.
+		{"cap after the fold", "10.0.0.5:8000 " + strings.Repeat("y", 60), "remote yyyyy", 12},
+	}
+	for _, c := range cases {
+		got := RedactedField(c.in, c.n)
+		if got != c.want {
+			t.Errorf("%s: RedactedField(%q, %d) = %q, want %q", c.name, c.in, c.n, got, c.want)
+		}
+		for _, ip := range []string{"192.168.1.1", "10.0.0.5", "127.0.0.1", "2001:db8::1"} {
+			if strings.Contains(got, ip) {
+				t.Errorf("%s: RedactedField(%q, %d) = %q still carries %s", c.name, c.in, c.n, got, ip)
+			}
+		}
+	}
+}
