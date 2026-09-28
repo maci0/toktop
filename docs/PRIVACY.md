@@ -107,6 +107,15 @@ written. The host alone says which target a line is about, and the account
 still appears in the message toktop prints to your own terminal, next to the
 password prompt when one is needed.
 
+What a remote host prints is folded the same way, against the remote's own
+account: a vitals script that fails in the peer's login shell reports the
+path of the account it ran as, and that text rides the stderr tail into the
+frame, the `--json` report and the audit log. The account named in the target
+is the one toktop logs about, so a home spelling that account (`/home/<user>`,
+`/Users/<user>`, `<drive>:\Users\<user>`, in any case) becomes `~` before the
+line is built. A longer name that merely starts with the account, such as
+`/home/<user>-old`, is a different home and is left alone.
+
 ## The website
 
 [toktop.ai](../site/worker.js) is one static page. It sets no cookies, runs

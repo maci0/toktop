@@ -470,7 +470,7 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 	select {
 	case r := <-done:
 		if r.err != nil {
-			return r.out, fmt.Errorf("remote command failed: %w%s", r.err, stderrTail(stderr.String()))
+			return r.out, c.redactPeerHome(fmt.Errorf("remote command failed: %w%s", r.err, stderrTail(stderr.String())))
 		}
 		return r.out, nil
 	case <-ctx.Done():
@@ -485,7 +485,7 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 		case <-time.After(stderrDrainGrace):
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("remote command timed out: %w%s", ctx.Err(), stderrTail(stderr.String()))
+			return "", c.redactPeerHome(fmt.Errorf("remote command timed out: %w%s", ctx.Err(), stderrTail(stderr.String())))
 		}
 		return "", ctx.Err()
 	}
@@ -562,6 +562,19 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		}()
 		return nil, ctx.Err()
 	}
+}
+
+// redactPeerHome folds the remote account's home directory out of a peer's
+// own words before they leave Run. Everything built from what a remote script
+// printed is quoted into the frame, the --json report and the audit log, and
+// those outlive the run: a vitals script failing in the peer's login shell
+// reports the path of the account it ran as, which core.RedactHome cannot
+// touch because the local account is a different one.
+func (c *Client) redactPeerHome(err error) error {
+	if err == nil {
+		return nil
+	}
+	return errors.New(core.RedactUserHome(c.Target.User, err.Error()))
 }
 
 // stderrTailClusters bounds how much of a peer's stderr is quoted into a

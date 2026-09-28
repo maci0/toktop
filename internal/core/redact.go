@@ -75,6 +75,97 @@ func RedactHome(msg string) string {
 	return msg
 }
 
+// userHomePrefixes are the directories a home sits under on the systems a
+// remote login can land on. Which one applies is not knowable from here, so
+// each is tried: a path that does not exist on the peer costs nothing.
+var userHomePrefixes = []string{"/home/", "/Users/", `\Users\`}
+
+// RedactUserHome rewrites the home directory of the named account in msg to
+// "~". RedactHome only folds the home of the account toktop runs as, and the
+// text a remote host produces names the peer's account instead: a failing
+// vitals script reports "/home/<user>/.bashrc: No such file" from the far
+// side, and that line is quoted into the frame, into the --json report and
+// into the audit log, all of which outlive the run and get pasted into
+// issues.
+//
+// Case and Unicode normalization are folded whatever the local platform does
+// with names, because the peer's platform is not the local one: the account
+// being hidden is the same account spelled a case away, and a fold that
+// missed it would leave the name in the text it exists to remove.
+func RedactUserHome(user, msg string) string {
+	// A user is one path component. A name carrying a separator or a volume
+	// would fold text the account never named, and the empty name is not an
+	// account at all.
+	if user == "" || msg == "" || user == "." || user == ".." {
+		return msg
+	}
+	if strings.ContainsAny(user, `/\:`) {
+		return msg
+	}
+	spelled := normalizeSpelling(user)
+	scan := normalizeSpelling(msg)
+	for _, prefix := range userHomePrefixes {
+		scan = foldUserHomePrefix(scan, prefix+spelled)
+	}
+	return scan
+}
+
+// foldUserHomePrefix rewrites every occurrence of home in msg that the
+// account ends, leaving the ones it only starts: "/home/me" hides
+// "/home/mem" and "/home/me-too", which are other accounts.
+func foldUserHomePrefix(msg, home string) string {
+	var b strings.Builder
+	for {
+		at, n, ok := indexFold(msg, home)
+		if !ok {
+			b.WriteString(msg)
+			return b.String()
+		}
+		b.WriteString(msg[:volumeStart(msg, at)])
+		if nameContinues(msg[at+n:]) {
+			// Another account's name begins here. Copy the matched bytes
+			// rather than the pattern, which folds to them and need not be
+			// spelled the same way, and resume after them so the search does
+			// not stall on the same prefix.
+			b.WriteString(msg[at : at+n])
+			msg = msg[at+n:]
+			continue
+		}
+		b.WriteByte('~')
+		msg = msg[at+n:]
+	}
+}
+
+// volumeStart returns where the drive letter of a Windows path beginning at
+// at starts, or at itself when there is none. A home under the drive reads
+// "C:\Users\me", and leaving the volume behind would fold it to "C:~", which
+// names a directory rather than the account that owns it.
+func volumeStart(msg string, at int) int {
+	if at >= 2 && msg[at-1] == ':' && isDriveLetter(msg[at-2]) {
+		return at - 2
+	}
+	return at
+}
+
+func isDriveLetter(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// nameContinues reports whether the text after a matched account name extends
+// it into a different name. A path separator, a quote, a colon or the end of
+// the text all end the name; letters, digits and the separators a shell or a
+// file system puts inside one do not.
+func nameContinues(rest string) bool {
+	if rest == "" {
+		return false
+	}
+	r, _ := utf8.DecodeRuneInString(rest)
+	if r == '/' || r == '\\' {
+		return false
+	}
+	return r == '.' || r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
 // replaceFold replaces every case-insensitive occurrence of old with new,
 // leaving the matched text's own spelling to the caller. Runes are compared
 // one at a time because a folded rune is not always as wide as the one it

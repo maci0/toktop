@@ -168,6 +168,49 @@ func TestReplaceFold(t *testing.T) {
 	}
 }
 
+// The peer's account, not the local one: the local home is folded by
+// RedactHome, so what a remote command reports about itself has to be folded
+// by name. The home directory is spelled the way each of the systems a remote
+// login lands on spells one, and none of them knows which one applies here.
+func TestRedactUserHomeFoldsTheNamedAccountsHome(t *testing.T) {
+	cases := []struct{ user, in, want string }{
+		{"me", "/home/me/.bashrc: No such file", "~/.bashrc: No such file"},
+		{"me", "cd /home/me", "cd ~"},
+		{"me", "/home/me", "~"},
+		{"me", `/Users/me\bin: access denied`, `~\bin: access denied`},
+		{"me", `C:\Users\me\bin: access denied`, `~\bin: access denied`},
+		// The peer's platform is not the local one, so the fold does not
+		// depend on the local file system's case rules: a home spelled in
+		// another case names the same account and is folded too.
+		{"me", "/home/ME/.bashrc", "~/.bashrc"},
+		// A longer name starting with the account is another account, and
+		// folding it would hide a directory the message was about.
+		{"me", "/home/mem/.bashrc", "/home/mem/.bashrc"},
+		{"me", "/home/me-too/.bashrc", "/home/me-too/.bashrc"},
+		{"me", "/srv/engines/model: truncated", "/srv/engines/model: truncated"},
+		// No account, nothing to fold: the caller has no user for the target
+		// (a bare host, a ~/.ssh/config entry toktop did not read a User from).
+		{"", "/home/me/.bashrc", "/home/me/.bashrc"},
+		// A name carrying a separator is not one path component, and folding
+		// on it would rewrite text the account never named.
+		{"../me", "/home/../me/x", "/home/../me/x"},
+		{"..", "/home/../x", "/home/../x"},
+		{"C:", `/Users/C:/x`, `/Users/C:/x`},
+	}
+	for _, c := range cases {
+		if got := RedactUserHome(c.user, c.in); got != c.want {
+			t.Errorf("RedactUserHome(%q, %q) = %q, want %q", c.user, c.in, got, c.want)
+		}
+	}
+}
+
+func TestRedactUserHomeFoldsEveryOccurrence(t *testing.T) {
+	msg := "read /home/me/.bashrc, write /home/me/.profile"
+	if got := RedactUserHome("me", msg); strings.Contains(got, "/home/me") {
+		t.Errorf("RedactUserHome(%q) = %q, want every occurrence folded", msg, got)
+	}
+}
+
 // absPath builds an absolute path under a fake root, spelled the way this
 // platform spells one. Windows paths need a volume, so "\home\private-user" is
 // drive-relative there and RedactHome rightly leaves it alone; a test that

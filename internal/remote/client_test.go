@@ -1149,6 +1149,32 @@ func TestStderrBufRetainsBoundedTail(t *testing.T) {
 	}
 }
 
+// A failing remote script reports paths from the account it ran as, and that
+// stderr is quoted into the frame, the --json report and the audit log. The
+// fold the local home gets cannot reach it, since the peer is a different
+// account on a different host.
+func TestRunFoldsThePeersHomeFromItsStderr(t *testing.T) {
+	withKnownHosts(t)
+	srv := newTestSSHServer(t, "", 0)
+	defer srv.Close()
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	_, err = cli.Run(t.Context(), `printf '%s\n' '/home/tester/.bashrc: no such file' >&2; exit 1`)
+	if err == nil {
+		t.Fatal("a failing script must fail Run")
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "/home/tester") {
+		t.Errorf("Run error = %q, want the peer's home directory folded", msg)
+	}
+	if !strings.Contains(msg, "~/.bashrc") {
+		t.Errorf("Run error = %q, want the rest of the line kept", msg)
+	}
+}
+
 func TestStderrTailTruncatesToTail(t *testing.T) {
 	if got := stderrTail("   \n "); got != "" {
 		t.Errorf("blank stderr = %q, want empty", got)
