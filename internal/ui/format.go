@@ -227,40 +227,62 @@ func singleCellRune(r rune) bool {
 }
 
 // skipEscape returns the index just past one escape sequence whose ESC is at
-// i-1, for the shapes that carry no cells: CSI, OSC and the two-byte form.
+// i-1, for the two shapes that carry no cells: CSI and OSC.
 // ok is false for anything else, so a string with a sequence this does not
 // model is measured by lipgloss instead of by a rule that might be wrong.
 //
 // An unterminated sequence is a bail: swallowing the rest of the string would
-// report a width for a payload whose cells were never counted.
+// report a width for a payload whose cells were never counted. So is every
+// shape but CSI and OSC. ESC followed by a plain byte is a two-byte escape to
+// a terminal, but the escape this measures against resolves it differently:
+// "\x1bX0" measures 0 cells there and one cell here, and a two-cell answer for
+// "\x1bXab" against none. The styled strings the frame measures are all CSI
+// (SGR) or OSC, so declining the rest costs the fast path nothing and keeps it
+// from answering a shape it has no rule for.
 func skipEscape(s string, i int) (int, bool) {
 	if i >= len(s) {
 		return 0, false
 	}
 	switch s[i] {
-	case '[': // CSI: parameter bytes 0x30-0x3F, intermediates 0x20-0x2F, final 0x40-0x7E
+	case '[': // CSI: parameter bytes 0x30-0x3F, then intermediates 0x20-0x2F,
+		// then the final byte 0x40-0x7E. The two classes are walked in that
+		// order because the sequence puts them there: "\x1b[ 0A" carries a
+		// parameter after an intermediate, which is malformed, and measuring
+		// it as a well-formed sequence would report a cell fewer than the
+		// escape it is not.
 		i++
-		for i < len(s) && s[i] >= 0x20 && s[i] <= 0x3f {
+		for i < len(s) && s[i] >= 0x30 && s[i] <= 0x3f {
+			i++
+		}
+		for i < len(s) && s[i] >= 0x20 && s[i] <= 0x2f {
 			i++
 		}
 		if i < len(s) && s[i] >= 0x40 && s[i] <= 0x7e {
 			return i + 1, true
 		}
 		return 0, false
-	case ']': // OSC: terminated by BEL or ST (ESC backslash)
+	case ']': // OSC: terminated by BEL or ST (ESC backslash). A body carrying a
+		// control byte is a bail, the way a control byte in a CSI body is:
+		// lipgloss resolves "\x1b]\x1a0\a" to a cell, this scan to none, and
+		// the difference lands in the column the row is padded to.
 		i++
 		for i < len(s) {
-			if s[i] == 0x07 {
+			switch c := s[i]; {
+			case c == 0x07:
 				return i + 1, true
-			}
-			if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '\\' {
-				return i + 2, true
+			case c == 0x1b:
+				if i+1 < len(s) && s[i+1] == '\\' {
+					return i + 2, true
+				}
+				return 0, false
+			case c < 0x20 || (c >= 0x7f && c <= 0x9f):
+				return 0, false
 			}
 			i++
 		}
 		return 0, false
-	default: // two-byte escape: ESC plus one byte
-		return i + 1, true
+	default:
+		return 0, false
 	}
 }
 
