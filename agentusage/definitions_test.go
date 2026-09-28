@@ -138,6 +138,23 @@ func TestLoadDefinitionsRejectsNull(t *testing.T) {
 	}
 }
 
+// A refused file names one entry, and it has to be the same one every time:
+// a message that alternates between two offending agents is a report nobody
+// can reproduce from what it tells them.
+func TestLoadDefinitionsNamesTheSameEntryEveryRun(t *testing.T) {
+	path := writeDefs(t, `{"aaa-null": null, "zzz-null": null}`)
+	const first = `agent "aaa-null"`
+	for range 20 {
+		err := LoadDefinitions(path)
+		if !errors.Is(err, ErrInvalidDefinitions) {
+			t.Fatalf("LoadDefinitions() = %v, want ErrInvalidDefinitions", err)
+		}
+		if !strings.Contains(err.Error(), first) {
+			t.Fatalf("error = %v, want it to name %s", err, first)
+		}
+	}
+}
+
 func TestLoadDefinitionsEmptyObjects(t *testing.T) {
 	for _, body := range []string{`{}`, `{"launchonly": {}}`, `{"launchonly": {"usage": null}}`} {
 		t.Run(body, func(t *testing.T) {

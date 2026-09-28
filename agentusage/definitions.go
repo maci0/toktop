@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -358,6 +359,9 @@ func defsErr(causes []error, format string, args ...any) error {
 // [ErrCollidingDefinitions], so a caller can name it without reading the
 // message.
 //
+// Entries are walked in sorted name order, so a file this call refuses always
+// names the same entry, whatever order the JSON object decoded into.
+//
 // Loading is additive per name, so a second load of the same agent replaces
 // that agent rather than adding a second copy. [ResetDefinitions] drops
 // everything this call added.
@@ -399,7 +403,12 @@ func LoadDefinitions(path string) error {
 	}
 	var pending []pendingSpec
 	seen := make(map[string]string, len(file))
-	for name, def := range file {
+	// Sorted, not map order: every diagnostic below names the entry it stopped
+	// on, and a run that named a different one of the same two from line to
+	// line is a bug report nobody can reproduce. The order the pending specs
+	// are applied in is settled the same way.
+	for _, name := range slices.Sorted(maps.Keys(file)) {
+		def := file[name]
 		if def == nil {
 			return defsErr([]error{ErrInvalidDefinitions}, "%s: %s: agent %q must be an object, not null", ErrInvalidDefinitions, path, name)
 		}
