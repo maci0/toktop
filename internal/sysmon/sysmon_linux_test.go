@@ -169,6 +169,48 @@ func reset() {
 	hostStaticMu.Unlock()
 }
 
+// The host identity window ages on the injected clock, so a run replaying on
+// a stepped timeline expires it by stepping the clock. On the wall clock the
+// window is a function of how long the process happened to run: two replays
+// of one seed read the same /etc/os-release and cache it at different
+// moments, and the host strip of the frame differs with nothing in the run
+// to tell them apart.
+func TestHostStaticWindowAgesOnTheInjectedClock(t *testing.T) {
+	reset()
+	orig := loadHostStatic
+	t.Cleanup(func() {
+		loadHostStatic = orig
+		reset()
+		SetNow(nil)
+	})
+
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	var stepped time.Time
+	SetNow(func() time.Time { return stepped })
+
+	var n int
+	loadHostStatic = func() hostStatic {
+		n++
+		return hostStatic{osName: "Debian", kernel: "6.1"}
+	}
+
+	stepped = base
+	if got := hostStaticInfo(); got.osName != "Debian" || n != 1 {
+		t.Fatalf("first sample = %+v after %d probes, want Debian after 1", got, n)
+	}
+
+	stepped = base.Add(hostStaticRetry - time.Second)
+	hostStaticInfo()
+	if n != 1 {
+		t.Fatalf("probe ran %d times inside the window, want 1", n)
+	}
+
+	stepped = base.Add(hostStaticRetry)
+	if got := hostStaticInfo(); got.osName != "Debian" || n != 2 {
+		t.Fatalf("probe ran %d times after the window on the injected clock, want 2: %+v", n, got)
+	}
+}
+
 func TestHostStaticInfoRetriesEmptyDrivers(t *testing.T) {
 	reset()
 	orig := loadHostStatic

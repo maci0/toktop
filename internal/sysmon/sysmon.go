@@ -8,6 +8,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -22,6 +23,44 @@ const gpuBudget = 3 * time.Second
 // host over the remote vitals path, so a value here is untrusted: every
 // conversion saturates or rejects rather than wrapping into a small,
 // plausible-looking reading.
+
+// clock is the instant every cache in the platform files ages against: the
+// CPU model memo, the host-identity retry window and the sensor layout sweep
+// on Linux, the boot-time subtraction on Darwin. It is a var so SetNow can
+// replace it, the seam the rest of this program's sampled subsystems already
+// expose. Left on the wall clock it is also the reason a host identity and a
+// sensor layout are a function of how long the process happened to run: two
+// replays of one seed read the same files and cache them at different
+// moments, so a frame's host strip is not reproducible.
+var (
+	clockMu sync.RWMutex
+	clock   = time.Now
+)
+
+// SetNow overrides the clock the platform caches age against, restoring the
+// wall clock for nil. Call it before sampling starts, the way
+// provider.SetNow asks: the caches are package state shared by every caller,
+// so a swap made mid-run moves their windows under the goroutines reading
+// them. It does not touch the I/O the sampler does, the way a request
+// deadline stays real time.
+func SetNow(fn func() time.Time) {
+	if fn == nil {
+		fn = time.Now
+	}
+	clockMu.Lock()
+	clock = fn
+	clockMu.Unlock()
+}
+
+// instant reads the injected clock, calling it outside the lock. The cache
+// locks are safe to hold across it: SetNow takes clockMu and no cache lock,
+// so there is no order for a caller to disagree with.
+func instant() time.Time {
+	clockMu.RLock()
+	fn := clock
+	clockMu.RUnlock()
+	return fn()
+}
 
 // Hooks implemented by each platform file.
 var (

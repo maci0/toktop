@@ -54,7 +54,7 @@ func noteProcFailure(path string, err error) {
 	p.mu.Lock()
 	first := !p.failed
 	if first {
-		p.failed, p.since = true, time.Now()
+		p.failed, p.since = true, instant()
 	}
 	p.mu.Unlock()
 	if !first {
@@ -77,7 +77,7 @@ func noteProcOK(path string) {
 		return
 	}
 	p.failed = false
-	downFor := time.Since(p.since)
+	downFor := instant().Sub(p.since)
 	p.mu.Unlock()
 	audit().Info("toktop: host vitals source readable again",
 		"source", logcfg.Field(path, 256),
@@ -135,11 +135,11 @@ func cpuModelCached() string {
 	if cpuModelVal != "" {
 		return cpuModelVal
 	}
-	if !cpuModelAt.IsZero() && core.Age(time.Now(), cpuModelAt) < cpuModelRetry {
+	if !cpuModelAt.IsZero() && core.Age(instant(), cpuModelAt) < cpuModelRetry {
 		return cpuModelVal
 	}
 	cpuModelVal = cpuModelProbe()
-	cpuModelAt = time.Now()
+	cpuModelAt = instant()
 	return cpuModelVal
 }
 
@@ -190,9 +190,9 @@ var (
 func hostStaticInfo() hostStatic {
 	hostStaticMu.Lock()
 	defer hostStaticMu.Unlock()
-	if hostStaticAt.IsZero() || (hostStaticFill < hostStaticTries && core.Age(time.Now(), hostStaticAt) >= hostStaticRetry) {
+	if hostStaticAt.IsZero() || (hostStaticFill < hostStaticTries && core.Age(instant(), hostStaticAt) >= hostStaticRetry) {
 		hostStaticVal = mergeHostStatic(hostStaticVal, loadHostStatic())
-		hostStaticAt = time.Now()
+		hostStaticAt = instant()
 		hostStaticFill++
 	}
 	res := hostStaticVal
@@ -486,9 +486,9 @@ var (
 func sensorLayout(key, root string, build func(string) []sensorInput) []sensorInput {
 	sensorLayoutMu.Lock()
 	defer sensorLayoutMu.Unlock()
-	now := time.Now()
+	at := instant()
 	for k, c := range sensorLayouts {
-		if core.Age(now, c.at) >= sensorLayoutTTL {
+		if core.Age(at, c.at) >= sensorLayoutTTL {
 			delete(sensorLayouts, k)
 		}
 	}
@@ -500,7 +500,7 @@ func sensorLayout(key, root string, build func(string) []sensorInput) []sensorIn
 	// Build under the lock so concurrent samples share one walk and a
 	// slower empty result cannot overwrite a newer fill.
 	inputs := build(root)
-	sensorLayouts[key] = cachedSensors{inputs: inputs, at: now}
+	sensorLayouts[key] = cachedSensors{inputs: inputs, at: at}
 	return inputs
 }
 

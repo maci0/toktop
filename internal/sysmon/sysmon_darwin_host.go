@@ -77,7 +77,11 @@ func boottimeWallFallback() time.Duration {
 	if sec <= 0 {
 		return 0
 	}
-	d := time.Since(time.Unix(sec, 0))
+	// The injected clock, not time.Since: uptime is "now minus boot", and on a
+	// run replaying on a pinned timeline the subtraction against the wall
+	// clock puts the one host field the frame carries from a real host on a
+	// different axis from every timestamp beside it.
+	d := instant().Sub(time.Unix(sec, 0))
 	if d < 0 {
 		return 0
 	}

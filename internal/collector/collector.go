@@ -181,10 +181,18 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 // and agent events that arrive without a timestamp. Safe to call while Run is
 // going: the poller and the probe fan-out read the clock from their own
 // goroutines, and the write is taken under the same lock they read it under.
+//
+// The same clock is handed to the host-vitals sampler, which ages its CPU
+// model memo, its host-identity retry window and its sensor layout sweep
+// against it. A collector that stamps its frames on a seeded timeline while
+// those windows age on the wall clock decides the host strip of a frame by
+// how long the process happened to run, which is the one thing a replay
+// cannot reproduce.
 func (c *Collector) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
 	}
+	sysmon.SetNow(fn)
 	c.clockMu.Lock()
 	defer c.clockMu.Unlock()
 	c.now = fn

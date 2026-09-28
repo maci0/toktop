@@ -217,3 +217,23 @@ func TestSplitSizeTokenIsRuneSafe(t *testing.T) {
 		t.Errorf("bare unit = %d, want 0", got)
 	}
 }
+
+// The clock seam the platform caches age against. It has to take an override
+// and put the wall clock back, because a nil that left the previous override
+// installed would carry a test's frozen instant into every later sample in
+// the process.
+func TestSetNowOverridesAndNilRestores(t *testing.T) {
+	t.Cleanup(func() { SetNow(nil) })
+
+	base := time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)
+	SetNow(func() time.Time { return base })
+	if got := instant(); !got.Equal(base) {
+		t.Fatalf("instant() = %v, want the injected %v", got, base)
+	}
+
+	SetNow(nil)
+	got := instant()
+	if got.Before(base) {
+		t.Fatalf("instant() = %v after SetNow(nil), want the wall clock at or after %v", got, base)
+	}
+}
