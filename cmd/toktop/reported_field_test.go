@@ -43,7 +43,7 @@ func TestReportedFieldStripsTerminalControl(t *testing.T) {
 // points are the ones that would overflow first: a decomposed accent and a ZWJ
 // emoji, which are one character in two and three code points.
 func TestReportedFieldCapsOnGraphemeClusters(t *testing.T) {
-	emoji, accented := "\U0001f469‍\U0001f4bb", "é"
+	emoji, accented := "\U0001f469\u200d\U0001f4bb", "é"
 	for _, unit := range []string{emoji, accented} {
 		got := reportedField(strings.Repeat(unit, maxReportedName+10))
 		if n := uniseg.GraphemeClusterCount(got); n != maxReportedName {

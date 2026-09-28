@@ -16,11 +16,14 @@
 #     pinned action line, and unwrapping a SHA is not a defect to fix.
 #   comments-indentation: the pinned `uses:` lines carry a trailing `# v7.0.1`.
 #     That comment names the tag the SHA resolves to, so it stays.
-#   truthy: `on:` is a GitHub Actions key and a YAML 1.1 boolean, so every
-#     workflow trips the default rule on its first line. Checking values would
-#     also reject `enabled: false` nowhere and `no-await-in-loops: off` nowhere
-#     else. Disabled rather than narrowed, because the key cannot be rewritten
-#     without breaking the workflow.
+#   truthy: narrowed to values, not disabled. `on:` is a GitHub Actions key and
+#     a YAML 1.1 boolean, so the key check trips on line one of every workflow
+#     and the key cannot be rewritten without breaking it. The value half is
+#     kept, because that is where a real defect lives: a quoted `cache: "false"`
+#     or `enable-cache: True` is a string GitHub ignores, so the step runs
+#     un-cached or the flag silently does nothing and the run still reports ok.
+#     Every boolean value in the workflows is lowercase and unquoted, so
+#     check-keys: false is a rule the tree already passes.
 #   document-start: a workflow is not a YAML document anyone concatenates or
 #     includes, and `---` as its first line is not a GitHub Actions convention.
 #     Its absence says nothing about the file being wrong.
@@ -30,4 +33,4 @@ rules:
   line-length: { max: 200 }
   comments-indentation: disable
   document-start: disable
-  truthy: disable
+  truthy: { check-keys: false, level: error }

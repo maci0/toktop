@@ -818,12 +818,21 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 # the same way: a YAML error in it does not fail a run, it stops every update
 # from being offered and the tree keeps building on pins nobody offered to
 # move. Same argument as the workflows, so the same gate.
+#
+# --strict makes a warning fail the gate. yamllint reports several default rules
+# at warning level and exits 0 on them, so without it the tree is a gate that
+# passes with findings on it: truthy ships a warning, so `cache: "true"` would
+# print and the run would still be green. The three rules disabled in .yamllint
+# are the only ones that warned, and they are disabled on the merits, so nothing
+# else in the set is at warning level today and --strict costs nothing. ci.yml
+# calls this target rather than yamllint directly, so the flag is the same
+# locally and remotely.
 GITHUB_YAML := $(WORKFLOWS) .github/dependabot.yml
 
 .PHONY: check-yaml
 check-yaml: ## fail if a workflow or .github/dependabot.yml is invalid YAML or breaks the .yamllint rule set
 	@$(MAKE) --no-print-directory scripts-env
-	@$(SCRIPTS_BIN)/yamllint --config-file .yamllint $(GITHUB_YAML)
+	@$(SCRIPTS_BIN)/yamllint --strict --config-file .yamllint $(GITHUB_YAML)
 
 # `make help` and the CONTRIBUTING.md target table both enumerate what a
 # contributor runs, and a target that reaches them through one and not the
