@@ -209,7 +209,7 @@ func newDshWatcher(t *testing.T) *Watcher {
 		ad:         adapter{kind: perMessage, parse: parseDsh, sessionCwd: genericSessionCwd},
 		zstdCarry:  map[string][]byte{},
 		owner:      map[string]bool{},
-		dirVerdict: map[string]bool{},
+		dirVerdict: map[string]dirVerdict{},
 	}
 }
 

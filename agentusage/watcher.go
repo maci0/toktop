@@ -45,8 +45,9 @@ type Watcher struct {
 	// repeats the same handful of project directories on every record, and
 	// each miss costs a full EvalSymlinks walk; the map turns that per-record
 	// cost into a map probe. It is cleared when it outgrows dirVerdictMax,
-	// so a store full of one-off cwds cannot grow it without bound.
-	dirVerdict map[string]bool
+	// so a store full of one-off cwds cannot grow it without bound. An entry
+	// whose walk did not resolve is retried, not kept: see dirVerdictRetry.
+	dirVerdict map[string]dirVerdict
 	// defsGen is the definitions generation w.ad was derived from, and
 	// fromDefs whether it was derived at all: see refreshAdapter.
 	defsGen  uint64
@@ -166,7 +167,7 @@ func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now,
 		offsets: map[string]int64{}, preexisting: map[string]bool{}, stamps: map[string]fileStamp{},
 		zstdCarry: map[string][]byte{},
-		owner:     map[string]bool{}, dirVerdict: map[string]bool{},
+		owner:     map[string]bool{}, dirVerdict: map[string]dirVerdict{},
 		base: map[string]int{}, baseThink: map[string]int{},
 		baseInput: map[string]int{},
 		seen:      map[string]values{}, total: map[string]int{},

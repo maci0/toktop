@@ -11,7 +11,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 	"unicode/utf8"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // readNew consumes the bytes appended to one transcript since the last poll.
@@ -438,21 +441,45 @@ func (w *Watcher) sameDir(cwd string) bool {
 	if sameSpelling(cwd, w.dir) {
 		return true
 	}
-	if mine, seen := w.dirVerdict[cwd]; seen {
-		return mine
+	now := w.instant()
+	if v, seen := w.dirVerdict[cwd]; seen && (v.decided || core.Age(now, v.at) < dirVerdictRetry) {
+		return v.mine
 	}
-	mine := false
+	// A cwd that does not resolve is an unanswered question, not an answer:
+	// EvalSymlinks fails on a directory the store has not created yet, on one
+	// behind a mount that is not up, and on a path whose parent is a dangling
+	// symlink. Cached as false for the watcher's life it decides the project's
+	// fate on the first poll and keeps it: every session of that checkout goes
+	// uncounted for as long as the dashboard runs, with no line to say why.
+	// The retry window is the one the other memos here use for an unresolved
+	// value (cpuModelRetry, hostStaticRetry, kimiStoreEvery), and it costs one
+	// symlink walk per distinct unresolvable cwd per window, against a walk of
+	// the whole store several times a second.
+	mine, decided := false, false
 	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
-		mine = sameSpelling(resolved, w.dir)
+		mine, decided = sameSpelling(resolved, w.dir), true
 	}
 	// Lazily: a Watcher built by Watch carries the map, one assembled by a
 	// caller or a test does not, and the verdict is worth caching either way.
 	if w.dirVerdict == nil {
-		w.dirVerdict = map[string]bool{}
+		w.dirVerdict = map[string]dirVerdict{}
 	}
 	if len(w.dirVerdict) >= dirVerdictMax {
 		clear(w.dirVerdict)
 	}
-	w.dirVerdict[cwd] = mine
+	w.dirVerdict[cwd] = dirVerdict{mine: mine, decided: decided, at: now}
 	return mine
+}
+
+// dirVerdictRetry spaces out re-asking about a cwd whose symlink walk did not
+// resolve. A decided verdict does not age out: the comparison is a fact about
+// two paths, not a reading of a value that changes.
+const dirVerdictRetry = 30 * time.Second
+
+// dirVerdict is one memoized sameDir answer. decided says the comparison ran;
+// a false one that never did is retried rather than trusted.
+type dirVerdict struct {
+	mine    bool
+	decided bool
+	at      time.Time
 }

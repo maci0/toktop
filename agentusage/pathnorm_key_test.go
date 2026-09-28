@@ -6,7 +6,9 @@ package agentusage
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 )
 
 // DirKey is what a caller keys a map by, SameDir what it compares with, and a
@@ -58,7 +60,7 @@ func TestSameDirRejectsLostBytes(t *testing.T) {
 	if err := os.Mkdir(real, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	w := &Watcher{dir: real, dirVerdict: map[string]bool{}}
+	w := &Watcher{dir: real, dirVerdict: map[string]dirVerdict{}}
 
 	// One real byte each, and both are invalid UTF-8, so a rune walk decodes
 	// either to U+FFFD. The first is what the JSON decoder would have handed
@@ -85,8 +87,44 @@ func TestSameDirRejectsLostBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.dir = accented
-	w.dirVerdict = map[string]bool{}
+	w.dirVerdict = map[string]dirVerdict{}
 	if !w.sameDir(accented) {
 		t.Error("sameDir stopped matching an accented directory name")
+	}
+}
+
+// TestSameDirRetriesACwdThatDidNotResolve pins the retry on an unresolvable
+// recorded directory. EvalSymlinks fails on a path the store has not created
+// yet, and memoizing that failure as "not this project" decides the question
+// for the watcher's life: every session of the checkout that appears next goes
+// uncounted with nothing on screen to say why.
+func TestSameDirRetriesACwdThatDidNotResolve(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation needs a privilege windows does not grant by default")
+	}
+	base := t.TempDir()
+	real := filepath.Join(base, "real")
+	if err := os.Mkdir(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(base, "link")
+	cur := time.Now()
+	w := &Watcher{dir: real, dirVerdict: map[string]dirVerdict{}, now: func() time.Time { return cur }}
+
+	if w.sameDir(link) {
+		t.Fatal("sameDir matched a path that does not exist")
+	}
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	// Inside the retry window the memo still answers, so the window is what
+	// bounds the symlink walk rather than every record of every session.
+	cur = cur.Add(dirVerdictRetry - time.Second)
+	if w.sameDir(link) {
+		t.Error("sameDir re-walked a cwd inside the retry window")
+	}
+	cur = cur.Add(2 * time.Second)
+	if !w.sameDir(link) {
+		t.Error("sameDir kept refusing a cwd that resolved to the watched directory")
 	}
 }
