@@ -17,15 +17,24 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/text/cases"
+	"github.com/maci0/toktop/internal/core"
 	"golang.org/x/text/unicode/norm"
 	"modernc.org/sqlite"
 )
 
-var dirFolder = cases.Fold()
-
+// foldDir brings a stored session directory and a watched one to the one
+// spelling the database matches on: composed, then simple case folded.
+//
+// core.FoldCase, the fold strings.EqualFold compares by, not x/text
+// cases.Fold. Full folding is a case mapping, and it over-folds: it renders
+// U+00DF as "ss" and U+0130 as "i" plus a combining dot, so the stored
+// "/work/straße" and the watched "/work/strasse", two directories a
+// case-insensitive volume keeps apart, match, and one checkout's tokens are
+// billed to the other. Simple folding keeps them apart, and it is the fold
+// the volume performs: two runes are fold-equivalent exactly when they share
+// a simple folding orbit.
 func foldDir(s string) string {
-	return norm.NFC.String(dirFolder.String(s))
+	return core.FoldCase(norm.NFC.String(s))
 }
 
 func init() {

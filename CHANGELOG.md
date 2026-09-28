@@ -28,6 +28,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The working-directory note a macOS watcher builds strips the home directory
+  across Unicode normalization, the way the log redactor already does. A home
+  macOS stored decomposed and a working directory an agent recorded composed
+  are one directory and differ byte for byte, so the relation came back
+  outside home, the `~` rewrite did not happen, and the note kept the whole
+  absolute path, account name included.
+
+- opencode's stored session directory is folded with `core.FoldCase`, the
+  simple case fold `strings.EqualFold` compares by, rather than the full case
+  folding `x/text/cases.Fold` performs. Full folding is a case mapping and
+  over-folds: it renders `ß` as `ss` and `U+0130` as `i` plus a combining dot,
+  so a stored `/work/straße` and a watched `/work/strasse`, two directories a
+  case-insensitive volume keeps apart, matched, and one checkout's tokens were
+  billed to the other.
+
 - The directory key a macOS or Windows watcher maps recorded working
   directories by is folded with `core.FoldCase`, the case fold
   `strings.EqualFold` compares by, rather than `strings.ToLower`. The two

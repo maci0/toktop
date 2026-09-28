@@ -616,3 +616,31 @@ func TestOpenCodeDBPathIgnoresRelativeXDGDataHome(t *testing.T) {
 		t.Fatalf("relative XDG_DATA_HOME resolved the database to %q", got)
 	}
 }
+
+// The fold matches directories, and a directory is not a case mapping. Full
+// folding renders U+00DF as "ss" and U+0130 as "i" plus a combining dot, so a
+// stored "/work/straße" would match a watched "/work/strasse": two
+// directories a case-insensitive volume keeps apart, with one checkout's
+// tokens billed to the other. Simple folding keeps them apart and still
+// matches the case differences the volume equates.
+func TestFoldDirKeepsDirectoriesFullFoldingMerges(t *testing.T) {
+	merged := [][2]string{
+		{"/work/straße", "/work/strasse"},
+		{"/work/i", "/work/İ"},
+	}
+	for _, pair := range merged {
+		if got := foldDir(pair[1]); got == foldDir(pair[0]) {
+			t.Errorf("foldDir folded %q onto %q (%q): distinct directories must not match", pair[1], pair[0], got)
+		}
+	}
+	equated := [][2]string{
+		{"/work/équipe", "/work/Équipe"},
+		{"/work/straße", "/work/Straße"},
+		{"cafe\u0301/x", "café/x"}, // NFD and NFC are one directory on macOS
+	}
+	for _, pair := range equated {
+		if foldDir(pair[1]) != foldDir(pair[0]) {
+			t.Errorf("foldDir(%q) = %q, want it to equal foldDir(%q) = %q", pair[1], foldDir(pair[1]), pair[0], foldDir(pair[0]))
+		}
+	}
+}

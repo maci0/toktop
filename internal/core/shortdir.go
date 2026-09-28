@@ -35,7 +35,13 @@ func stripHome(dir string) (string, bool) {
 	if err != nil || home == "" {
 		return "", false
 	}
-	cleanDir, cleanHome := resolvePath(dir), resolvePath(home)
+	// Both sides go through normalizeSpelling first, the way RedactHome
+	// compares them: a home macOS stored decomposed is the same account as
+	// the composed spelling a process carries in its working directory, and
+	// filepath.Rel compares bytes. Skipped, the relation came back "..",
+	// the home was not stripped, and the note kept the whole absolute path,
+	// account name included, which is the one thing stripping it prevents.
+	cleanDir, cleanHome := normalizeSpelling(resolvePath(dir)), normalizeSpelling(resolvePath(home))
 	rel, err := filepath.Rel(cleanHome, cleanDir)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", false
