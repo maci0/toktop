@@ -66,8 +66,10 @@ func (l *AgentIDLedger) Add(id string, now time.Time) {
 // Len is how many distinct ids the ledger holds.
 func (l *AgentIDLedger) Len() int { return len(l.ids) }
 
-// Tracked is how many entries the eviction order carries, which can exceed Len
-// while an id sits in the order twice (recorded, evicted, reused).
+// Tracked is how many entries the eviction order carries. Every Add runs the
+// sweep, which retires an id's older record the moment the newer one lands, so
+// the order holds one entry per held id: Tracked equals Len, and both are
+// bounded by AgentIDLedgerMax.
 func (l *AgentIDLedger) Tracked() int { return len(l.order) }
 
 // Held reports whether id is in the ledger right now, without ageing anything
@@ -79,10 +81,10 @@ func (l *AgentIDLedger) Held(id string) bool {
 }
 
 // forget drops the entries the window has moved past, then, if the count cap
-// is still exceeded, the oldest ones. An id can appear twice in the order
-// (recorded, evicted, reused), so an entry is only removed from the index when
-// it is still the occurrence that reached the front: the newer record of the
-// same id must survive its own older twin.
+// is still exceeded, the oldest ones. An entry is removed from the index only
+// when it is still the occurrence that reached the front: a record superseded
+// by a newer one of the same id no longer stands for it, and dropping it from
+// the index would retire the record that replaced it.
 func (l *AgentIDLedger) forget(cutoff time.Time) {
 	for len(l.order) > 0 {
 		front := l.order[0]
