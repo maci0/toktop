@@ -193,6 +193,7 @@ endif
 # assets rather than inside them, so it is a build record and not a file the
 # Worker serves.
 SITE_PUBLIC    := site/public
+DOCS_IMAGES    := docs/images
 ENCODER_RECORD := site/encoders.txt
 
 # Pin locale and timezone for every recipe: glob expansion order and formatted
@@ -482,7 +483,7 @@ ENCODER_VERSIONS = magick -version 2>&1 | sed -n 1p; avifenc --version 2>&1 | se
 require-encoders:
 	@for tool in magick avifenc; do \
 		command -v $$tool >/dev/null 2>&1 || { \
-			echo "make site-assets: $$tool is not on PATH (ImageMagick 7 and libavif); see CONTRIBUTING.md 'Prerequisites'" >&2; \
+			echo "make site-assets, make readme-assets: $$tool is not on PATH (ImageMagick 7 and libavif); see CONTRIBUTING.md 'Prerequisites'" >&2; \
 			exit 1; \
 		}; \
 	done
@@ -490,7 +491,7 @@ require-encoders:
 		have=$$({ $(ENCODER_VERSIONS); } | tr -d '\r'); \
 		want=$$(tr -d '\r' < $(ENCODER_RECORD)); \
 		if [ "$$have" != "$$want" ]; then \
-			echo "make site-assets: the encoders on this machine are not the ones that produced the captures in $(SITE_PUBLIC):" >&2; \
+			echo "make site-assets, make readme-assets: the encoders on this machine are not the ones that produced the captures in $(SITE_PUBLIC) and $(DOCS_IMAGES):" >&2; \
 			printf '%s\n' "$$have" | sed 's/^/  have: /' >&2; \
 			printf '%s\n' "$$want" | sed 's/^/  want: /' >&2; \
 			echo "  install those builds to recapture byte-identically, or delete $(ENCODER_RECORD) and" >&2; \
@@ -521,6 +522,23 @@ site-assets: require-encoders require-bun ## rebuild the site dashboard captures
 		avifenc -q 32 -s 2 -y 444 --ignore-exif --ignore-xmp \
 			$(DIST)/$$stem.png $(SITE_PUBLIC)/$$stem.avif; \
 	done
+	@{ $(ENCODER_VERSIONS); } | tr -d '\r' > $(ENCODER_RECORD)
+	@bun test site/
+
+# The README's capture, and only that one. GitHub's renderer drops srcset and
+# picture, so the repository front page gets exactly the image the README
+# names, at whatever size that file is: the 3240px PNG it used to name was
+# 303,865 bytes on every visit, where the same frame at 1920px in AVIF is
+# 45,559, a 85% cut of the first thing a reader downloads. 1920px is the slot
+# that fills the README's width=900 at 2x; the encode is the site recipe's,
+# so the two captures are the same bytes and a re-capture cannot show the
+# repository and the landing page different dashboards.
+.PHONY: readme-assets
+readme-assets: require-encoders ## rebuild the README's dashboard capture from docs/images/dashboard.png
+	@mkdir -p $(DIST)
+	magick docs/images/dashboard.png -strip -resize 1920x $(DIST)/readme-dashboard.png
+	avifenc -q 32 -s 2 -y 444 --ignore-exif --ignore-xmp \
+		$(DIST)/readme-dashboard.png $(DOCS_IMAGES)/dashboard.avif
 	@{ $(ENCODER_VERSIONS); } | tr -d '\r' > $(ENCODER_RECORD)
 	@bun test site/
 

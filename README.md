@@ -4,7 +4,7 @@
 hammering them.
 
 <p align="center">
-  <img src="docs/images/dashboard.png" alt="toktop dashboard" width="900">
+  <img src="docs/images/dashboard.avif" alt="toktop dashboard" width="900" height="528">
 </p>
 
 ```

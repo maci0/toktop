@@ -155,6 +155,17 @@ HTML identity size, the compressed transfer sizes under the initial congestion
 window, the AVIF/WebP byte ceilings and the card's width and
 weight, so a recapture that blows the budget fails there.
 
+The README shows the same frame and is the other browser surface in the
+repository. GitHub's renderer drops `srcset` and `picture`, so it gets the one
+file the README names, at whatever size that file is, and it used to name the
+3240px PNG: 303,865 bytes on the first thing a reader downloads, against
+45,559 for `docs/images/dashboard.avif`, the site's 1920w candidate at the
+same encode settings. `make readme-assets` rebuilds that one file from the
+same source with the same encoders, so the two captures stay the same bytes
+and a recapture cannot leave the repository and the landing page showing
+different dashboards. `bun test site/` pins the README's byte budget and that
+the file is the capture `site/public/dashboard.avif` already ships.
+
 ## Make targets
 
 `make help` lists everything. The ones expected in day-to-day work:
@@ -180,6 +191,7 @@ weight, so a recapture that blows the budget fails there.
 | `make site-fmt` | rewrite those files with the biome formatter, then re-lint |
 | `make site-check` | `bun test site/` |
 | `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick`, `avifenc`, and the pinned `bun`) |
+| `make readme-assets` | rebuild the README's dashboard capture in `docs/images/dashboard.avif` from the same source frame, then run `bun test site/` (same tools) |
 | `make site-deploy` | run `site-lint` and `site-check`, then deploy the site Worker at the `WRANGLER` pin and poll `/health` |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag (`make check` runs it) |

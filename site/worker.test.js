@@ -874,6 +874,30 @@ test("the PNG fallback stays bounded", () => {
   expect(assetBytes("dashboard.png")).toBeLessThan(320_000);
 });
 
+// The repository front page is a browser surface too, and a bigger download
+// than the site it links to: GitHub's renderer drops srcset and picture, so
+// the README gets exactly the one file it names, at whatever size that file
+// is. It named the 3240px PNG, 303,865 bytes, where the same frame at 1920px
+// in AVIF is 45,559. The ceiling and the identity of the bytes are both
+// pinned: the capture is the site's 1920w candidate, so a re-capture cannot
+// leave the repository showing one dashboard and the landing page another.
+const REPO = join(import.meta.dir, "..");
+const README_IMAGE = "docs/images/dashboard.avif";
+const README_BUDGET = 60_000;
+test("the README names a capture inside its own byte budget", () => {
+  const readme = readFileSync(join(REPO, "README.md"), "utf8");
+  const [tag] = readme.match(/<img\b[^>]*>/g) ?? [];
+  expect(tag).toBeDefined();
+  expect(tag).toContain(`src="${README_IMAGE}"`);
+  // The height the box is reserved with, so the README's own render does not
+  // shift the image down the page after it paints.
+  expect(tag).toMatch(IMG_SIZE_RE);
+  const bytes = readFileSync(join(REPO, README_IMAGE));
+  expect(bytes.byteLength).toBeLessThan(README_BUDGET);
+  expect(bytes.byteLength).toBeLessThan(assetBytes("dashboard.png") * 0.2);
+  expect(bytes).toEqual(readFileSync(join(PUBLIC, "dashboard.avif")));
+});
+
 // The share card is the same frame at the width a card is laid out at. The
 // og:image crawlers fetch it on every share, so the pixels past 1200 are
 // bytes they download and never draw: the 3240px original is 304 KB of which
