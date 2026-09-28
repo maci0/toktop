@@ -47,6 +47,20 @@ const call = (headers = {}, init = {}) =>
 
 const identityBody = await call().then((r) => r.text());
 
+// The page is set in one font token, so that token is where script coverage is
+// decided. A family named in it is matched per run, so one run in a script no
+// family covers goes to the generic keyword, and there the platform's own
+// monospace is what renders: a proportional face, which is the one thing the
+// code blocks on the page cannot survive, or boxes.
+const FONT_TOKEN_RE = /--mono:\s*([^;]+);/;
+// A script the page has no family for, and the generic keyword it falls to.
+const UNCOVERED_SCRIPTS = [
+  ["CJK", "Noto Sans Mono CJK"],
+  ["Cyrillic", "Noto Sans Mono"],
+  ["Devanagari", "Noto Sans Mono Devanagari"],
+  ["Arabic", "Noto Sans Arabic"],
+];
+
 async function decompress(bytes, format) {
   const out = await new Response(
     new Response(bytes).body.pipeThrough(new DecompressionStream(format)),
@@ -262,7 +276,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4388);
+    expect(bytes.byteLength).toBe(4442);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -653,6 +667,25 @@ test("every step of the type scale is in the same unit", () => {
   expect([...new Set(steps.map(([, , , unit]) => unit))]).toEqual(["rem"]);
 });
 
+// The page is monospaced on purpose, and a reader in Arabic or Japanese is not
+// a hypothetical one. A stack that names only Latin families leaves every other
+// script to the generic monospace keyword, which is the platform's choice
+// rather than the page's: a proportional-metrics face on some systems, boxes
+// on a desktop with no matching family. Naming one family per script is the
+// whole fix, and it costs no webfont, because the page ships none.
+test("the font token names a family for every script the page can fall to", () => {
+  const token = FONT_TOKEN_RE.exec(identityBody);
+  expect(token).not.toBeNull();
+  const stack = token[1].replace(/\s+/g, " ");
+  // A family may only follow the Latin ones; leading with a script-specific
+  // face would let it take over the Latin run too.
+  expect(stack.indexOf("Noto Sans Mono CJK")).toBeGreaterThan(stack.indexOf("Consolas"));
+  for (const [script, family] of UNCOVERED_SCRIPTS) {
+    expect(stack, `no ${script} family in --mono`).toContain(family);
+  }
+  expect(stack.endsWith("monospace")).toBe(true);
+});
+
 // The hero is the terminal's own title, and the terminal draws that title bold
 // (internal/ui/theme.go, wordmark). At the default weight the largest type on
 // the page read lighter than the sticky wordmark directly above it, so the
@@ -894,9 +927,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12732);
-  expect(gzipped).toBe(4388);
-  expect(brotli).toBe(3706);
+  expect(identity).toBe(12890);
+  expect(gzipped).toBe(4442);
+  expect(brotli).toBe(3759);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -955,7 +988,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_283);
+  expect(visit).toBe(14_336);
   expect(visit).toBeLessThan(25_000);
 });
 

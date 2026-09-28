@@ -123,7 +123,15 @@ const HTML = htmlForWire(`<!doctype html>
     --bg: var(--dark-bg); --panel: var(--dark-panel); --line: var(--dark-line);
     --fg: var(--dark-fg); --dim: var(--dark-dim);
     --accent: var(--dark-accent); --warm: var(--dark-warm);
-    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    /* One token, the whole page in it. The Latin faces come first, then one
+       named family per script, because a run no family covers goes to the
+       generic keyword and the platform's monospace is the one thing the code
+       blocks cannot survive: a proportional face, or boxes. Naming the
+       families loads nothing, they are what the reader already has. */
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas,
+      "Sarasa Mono SC", "Noto Sans Mono CJK SC", "Noto Sans Mono CJK JP",
+      "Noto Sans Mono", "Noto Sans Mono Devanagari", "Noto Sans Arabic",
+      monospace;
     /* The type scale, one named step per level. Size is what separates the
        levels: no uppercase, no tracking, no color change, so a section start
        has to be legible as one. The page is monospaced, so a level is read as

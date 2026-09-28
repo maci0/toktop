@@ -48,6 +48,14 @@ the one weight on the page: the terminal draws its own title bold
 page read lighter than the wordmark directly above it. Every level below the
 h1 is size alone.
 
+The page is set in one family, `--mono`, and that token names a family for
+every script the page can be read in, not only the Latin ones. A run no family
+covers falls to the generic `monospace` keyword, which is the platform's choice
+rather than the page's: a proportional-metrics face on some systems, boxes on a
+desktop with no matching family, and the code blocks on the page are laid out
+in columns. Naming the families loads no font file, they are the ones the
+reader already has.
+
 The vertical rhythm is the same idea turned down a notch: `--space-tight`,
 `--space-section` and `--space-runout` in `:root` are the only places the page
 writes a gap between sections. A literal in each rule that wants one leaves a
@@ -159,7 +167,7 @@ Worker spent before writing the response, failures included: a failed request
 is the one a visitor reports, and a timing series that covered only the served
 requests would describe exactly the ones nobody is asking about. A byte-count
 test cannot see a
-regression here: the page can send the same 3,643 bytes slowly. With the
+regression here: the page can send the same 3,759 bytes slowly. With the
 header, a RUM script or a visitor's own devtools reads the edge's share of
 time to first byte on the connection they actually had, and no third party
 has to be added to the page to collect it.
@@ -230,10 +238,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 12,524 bytes identity / 4,328 gzip /
-3,643 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,643 bytes
-plus the 10,577-byte 768w capture, 14,220 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 12,890 bytes identity / 4,442 gzip /
+3,759 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,759 bytes
+plus the 10,577-byte 768w capture, 14,336 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no
