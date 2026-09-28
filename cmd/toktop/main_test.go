@@ -761,6 +761,103 @@ func TestLongFlagKeepsOneLetterAlias(t *testing.T) {
 	}
 }
 
+// A flag that belongs to a subcommand is answered with the command line that
+// would work, the way a misplaced subcommand word is.
+func TestSubcommandFlagHintNamesTheSubcommand(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			name: "update flag, long spelling",
+			in:   "flag provided but not defined: --check",
+			want: " (toktop update --check)",
+		},
+		{
+			name: "update flag, the single-dash spelling the package also parses",
+			in:   "flag provided but not defined: -repo",
+			want: " (toktop update --repo owner/name)",
+		},
+		{
+			name: "a typo is not a misplaced flag",
+			in:   "flag provided but not defined: --chek",
+			want: "",
+		},
+		{
+			name: "a flag the top level does declare",
+			in:   "flag provided but not defined: --demo",
+			want: "",
+		},
+		{
+			name: "a failure that is not an unknown flag",
+			in:   `invalid value "abc" for flag -frames: parse error`,
+			want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := subcommandFlagHint(errors.New(tc.in)); got != tc.want {
+				t.Errorf("subcommandFlagHint(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// A value the flag package rejected as unparseable is told what it should have
+// been. "parse error" names neither the expectation nor a value that would
+// work, and every numeric flag reported it identically.
+func TestValueHintNamesTheExpectedValue(t *testing.T) {
+	for _, tc := range []struct{ name, in, want string }{
+		{
+			name: "whole number flag",
+			in:   `invalid value "abc" for flag -frames: parse error`,
+			want: " (expected a whole number of snapshots, 1-180)",
+		},
+		{
+			name: "seconds flag",
+			in:   `invalid value "1.5" for flag -probe: parse error`,
+			want: " (expected a whole number of seconds, 0-86400)",
+		},
+		{
+			name: "seed flag",
+			in:   `invalid value "1.5" for flag -seed: parse error`,
+			want: " (expected a whole number)",
+		},
+		{
+			name: "duration with a misspelled unit",
+			in:   `invalid value "1x" for flag -interval: parse error`,
+			want: " (expected a Go duration such as 1s or 500ms)",
+		},
+		{
+			name: "duration as a bare number is read as nanoseconds",
+			in:   `invalid value "1" for flag -interval: parse error`,
+			want: " (a bare number is nanoseconds; use 1s or 500ms)",
+		},
+		{
+			name: "a flag's own error already says what is wrong",
+			in:   `invalid value "ftp://x" for flag -add: URL must be http:// or https://`,
+			want: "",
+		},
+		{
+			name: "a flag not in the table",
+			in:   `invalid value "x" for flag -ssh-key: parse error`,
+			want: "",
+		},
+		{
+			name: "an unknown flag names no value",
+			in:   "flag provided but not defined: -bogus",
+			want: "",
+		},
+		{
+			name: "a non-boolean value is a different failure",
+			in:   `invalid boolean value "x" for -demo: parse error`,
+			want: "",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := valueHint(errors.New(tc.in)); got != tc.want {
+				t.Errorf("valueHint(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
 // flagSection returns the lines between the "Flags:" heading and the prose
 // that follows the list.
 func flagSection(t *testing.T, help string) string {

@@ -262,7 +262,7 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 		return fmt.Errorf("--interval must be positive, got %s", interval)
 	}
 	// A value under a millisecond is one written without a usable unit. The
-	// flag package rejects a bare number at Parse (missingUnitHint names the
+	// flag package rejects a bare number at Parse (valueHint names the
 	// unit there), so what lands here is a spelled-out unit that is simply too
 	// small; the parenthetical states the reading rule, not a claim about this
 	// particular value.

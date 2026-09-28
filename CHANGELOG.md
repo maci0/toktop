@@ -27,6 +27,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A value the flag package could not parse ended in its bare `parse error`,
+  which names neither the expectation nor a value that would work, and every
+  numeric flag reported it identically. `--frames abc`, `--probe 1.5` and
+  `--seed 1.5` now name the value each flag takes, and `--interval` keeps the
+  note that a bare number there reads as nanoseconds.
+
+- `--check` and `--repo` written at the top level were answered with a bare
+  "flag provided but not defined", naming neither the subcommand they belong
+  to nor the command line that would work, while a misplaced subcommand word
+  got a hint. Both now answer with the `toktop update` line that would run.
+
 - Two crush tests failed on a machine with a crush database in an ancestor of
   the system temp directory. `crushDBPath` walks up to the project root, so a
   `/tmp/.crush` left by another run is what the walk found and the assertions

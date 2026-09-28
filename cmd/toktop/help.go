@@ -233,22 +233,79 @@ func flagParseError(err error) string {
 	return msg
 }
 
-// missingUnitHint names the one mistake behind --interval's bare "parse
-// error": a value with no unit. The flag package reads a number there as
-// nanoseconds and says nothing about it, so `--interval 1` produced a message
-// naming neither the flag's expectation nor a value that would work. The hint
-// is appended only when the value really is a bare number; one that carries a
-// unit and still failed was misspelled, and the unit is not the answer.
-func missingUnitHint(err error) string {
+// subcommandFlags are the flags that live on a subcommand rather than on the
+// top-level command. Written at the top level they are a placement mistake,
+// and the flag package's "flag provided but not defined" names neither the
+// subcommand they belong to nor the command line that would work. This is the
+// same treatment unexpectedArg gives a subcommand word that did not come
+// first.
+var subcommandFlags = map[string]string{
+	"check": "toktop update --check",
+	"repo":  "toktop update --repo owner/name",
+}
+
+// subcommandFlagHint names the subcommand a misplaced flag belongs to. Only a
+// flag that is genuinely undefined is answered, and only with a command line
+// that would work; a name no subcommand declares gets nothing, as a misplaced
+// word that names no command does.
+func subcommandFlagHint(err error) string {
+	const unknownFlag = "flag provided but not defined: "
+	name, ok := strings.CutPrefix(err.Error(), unknownFlag)
+	if !ok {
+		return ""
+	}
+	line, ok := subcommandFlags[strings.TrimLeft(name, "-")]
+	if !ok {
+		return ""
+	}
+	return " (" + line + ")"
+}
+
+// valueForms names what each value flag's value has to look like. The flag
+// package reports every one of them the same way ("parse error"), which names
+// neither the expectation nor a value that would work, so `--frames abc` and
+// `--seed 1.5` read the same as a malformed duration.
+var valueForms = map[string]string{
+	"frames":   "a whole number of snapshots, 1-180",
+	"interval": "a Go duration such as 1s or 500ms",
+	"probe":    "a whole number of seconds, 0-86400",
+	"seed":     "a whole number",
+}
+
+// valueHint appends to a parse failure what the value was supposed to be. It
+// reads the flag name in the single-dash spelling the flag package emits, the
+// same spelling flagParseError rewrites, so both run over the same message.
+//
+// --interval has a second spelling worth naming: a bare number there is read as
+// nanoseconds and the package says nothing about it, so `--interval 1` named
+// neither the unit nor a value that would work. The unit hint is given only for
+// a value that really is a bare number; one carrying a unit and still failing
+// was misspelled, and the unit is not the answer.
+func valueHint(err error) string {
 	const prefix = "invalid value \""
 	raw, rest, ok := strings.Cut(strings.TrimPrefix(err.Error(), prefix), "\"")
-	if !ok || !strings.HasPrefix(rest, " for flag -interval: ") {
+	if !ok {
 		return ""
 	}
-	if _, err := strconv.ParseInt(raw, 10, 64); err != nil {
+	const forFlag = " for flag -"
+	after, ok := strings.CutPrefix(rest, forFlag)
+	if !ok {
 		return ""
 	}
-	return " (a bare number is nanoseconds; use 1s or 500ms)"
+	name, tail, _ := strings.Cut(after, ": ")
+	if tail != "parse error" {
+		return ""
+	}
+	if name == "interval" {
+		if _, convErr := strconv.ParseInt(raw, 10, 64); convErr == nil {
+			return " (a bare number is nanoseconds; use 1s or 500ms)"
+		}
+	}
+	form, ok := valueForms[name]
+	if !ok {
+		return ""
+	}
+	return " (expected " + form + ")"
 }
 
 // longFlag renders a flag name the help screen and the README use. The flag
