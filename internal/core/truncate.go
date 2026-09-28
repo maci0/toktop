@@ -96,22 +96,12 @@ const ModelNameMax = 256
 // engine cannot put a control character or an unbounded string into the
 // dashboard, into a probe body, or into the machine-readable report. The
 // probe's own cap is the same bound, so a name that survives here is one the
-// probe will send unchanged.
+// probe will send unchanged. A GPU's reported name takes the same shape: it is
+// driver- and vendor-chosen text, two of its four sources are JSON, and
+// SanitizeText keeps newlines, which is right for a block of text and wrong
+// for a name the system panel measures with lipgloss.Width and splits on
+// newlines.
 func ModelName(s string) string {
-	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
-}
-
-// GPUName is the one shape a GPU's reported name takes in this program, the
-// same treatment ModelName gives an engine-supplied model id and capped at
-// the same bound. The name is driver- and vendor-chosen text, and two of the
-// four sources are JSON: xpu-smi reports device_name and system_profiler
-// reports _name, either of which can carry an escaped newline. SanitizeText
-// keeps newlines, which is right for a block of text and wrong here: every
-// renderer measures a GPU cell with lipgloss.Width and splits the rendered row
-// on newlines, so a name with a newline in it does not stay inside its cell.
-// The rest of the name becomes a row of its own and the system panel loses its
-// alignment, for a card the operator never asked to misreport.
-func GPUName(s string) string {
 	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
 }
 

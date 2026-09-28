@@ -352,11 +352,11 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 		return "", fmt.Errorf("release %s asset URL is not a GitHub download", rel.TagName)
 	}
 
-	archive, err := fetch(ctx, sumsURL, maxChecksumsArchive)
-	if err != nil {
+	var archive bytes.Buffer
+	if _, err := fetch(ctx, sumsURL, &archive, maxChecksumsArchive); err != nil {
 		return "", fmt.Errorf("cannot fetch checksums: %w", err)
 	}
-	sums, err := ChecksumListing(archive)
+	sums, err := ChecksumListing(archive.Bytes())
 	if err != nil {
 		return "", fmt.Errorf("cannot read %s: %w", sumsFile, err)
 	}
@@ -407,7 +407,7 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 		}
 	}()
 
-	sum, err := download(ctx, assetURL, tmp)
+	sum, err := fetch(ctx, assetURL, tmp, maxAssetBytes)
 	if err != nil {
 		return "", err
 	}
@@ -525,65 +525,13 @@ func restoreDisplaced(self, displaced string) error {
 	return nil
 }
 
-// fetch reads a release asset whole, refusing one past limit. It asks for
-// identity bytes: the asset is a tar.gz whose gzip framing belongs to the
-// file, and a host that also labels the body Content-Encoding: gzip would
-// otherwise have the transport decompress it, handing ChecksumListing a plain
-// tar it cannot read.
-func fetch(ctx context.Context, url string, limit int64) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Accept-Encoding", "identity")
-	resp, err := client.Do(req)
-	if err != nil {
-		if resp != nil {
-			resp.Body.Close()
-		}
-		return nil, fmt.Errorf("%s: %w", url, err)
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s returned %s", url, resp.Status)
-	}
-	// Read one past the cap so a truncated body cannot be parsed as a
-	// complete archive: LimitReader alone would silently clip it.
-	b, err := io.ReadAll(io.LimitReader(resp.Body, limit+1))
-	if err != nil {
-		return nil, fmt.Errorf("%s: %w", url, err)
-	}
-	if int64(len(b)) > limit {
-		return nil, fmt.Errorf("%s exceeds %d bytes", url, limit)
-	}
-	return b, nil
-}
-
-// fileChecksum is the hex SHA-256 of path, capped the same way a download is
-// so a huge existing file cannot fill memory on the "already current" check.
-func fileChecksum(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	h := sha256.New()
-	n, err := io.Copy(h, io.LimitReader(f, maxAssetBytes+1))
-	if err != nil {
-		return "", err
-	}
-	if n > maxAssetBytes {
-		return "", fmt.Errorf("file %s exceeds %d bytes", path, maxAssetBytes)
-	}
-	return hex.EncodeToString(h.Sum(nil)), nil
-}
-
-// download streams url into w and returns the hex SHA-256 of what was
-// written. Like fetch, it asks for identity bytes: the returned digest is
-// checked against checksums.txt over the installed binary, and a transport
-// that transparently decompressed the body would both write the wrong bytes
-// and hash bytes nobody else hashed.
-func download(ctx context.Context, url string, w io.Writer) (string, error) {
+// fetch streams a release asset into w, refusing one past limit, and returns
+// the hex SHA-256 of what it wrote. It asks for identity bytes: the asset is a
+// tar.gz whose gzip framing belongs to the file, and a host that also labels
+// the body Content-Encoding: gzip would otherwise have the transport
+// decompress it, handing ChecksumListing a plain tar it cannot read and
+// hashing bytes nobody else hashed.
+func fetch(ctx context.Context, url string, w io.Writer, limit int64) (string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return "", err
@@ -601,14 +549,33 @@ func download(ctx context.Context, url string, w io.Writer) (string, error) {
 		return "", fmt.Errorf("%s returned %s", url, resp.Status)
 	}
 	h := sha256.New()
-	// One past the cap, so a truncated archive cannot be hashed as if it were
-	// the whole asset.
-	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(resp.Body, maxAssetBytes+1))
+	// Read one past the cap, so a truncated body cannot be written or hashed
+	// as the whole asset: LimitReader alone would silently clip it.
+	n, err := io.Copy(io.MultiWriter(w, h), io.LimitReader(resp.Body, limit+1))
 	if err != nil {
 		return "", fmt.Errorf("%s: %w", url, err)
 	}
+	if n > limit {
+		return "", fmt.Errorf("%s exceeds %d bytes", url, limit)
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// fileChecksum is the hex SHA-256 of path, capped the same way a download is
+// so a huge existing file cannot fill memory on the "already current" check.
+func fileChecksum(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(f, maxAssetBytes+1))
+	if err != nil {
+		return "", err
+	}
 	if n > maxAssetBytes {
-		return "", fmt.Errorf("%s exceeds %d bytes", url, maxAssetBytes)
+		return "", fmt.Errorf("file %s exceeds %d bytes", path, maxAssetBytes)
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
 }

@@ -428,7 +428,6 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 	if hotReload {
 		if selfErr != nil {
 			fmt.Fprintf(os.Stderr, "toktop: hot reload disabled (%v)\n", selfErr)
-			hotReload = false
 		} else {
 			wctx, cancel := context.WithCancel(ctx)
 			defer cancel()
@@ -558,10 +557,7 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 	// Snapshots land one poll interval apart, so a slow-polling host needs a
 	// proportionally patient wait: a fixed cap would abort a healthy
 	// --interval 10s run before its second frame ever arrives.
-	wait := 5 * time.Second
-	if d := 3 * cfg.PollEvery; d > wait {
-		wait = d
-	}
+	wait := max(5*time.Second, 3*cfg.PollEvery)
 	snap, err := waitForFrames(ctx, ch, n, wait)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)

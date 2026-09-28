@@ -100,7 +100,7 @@ func validateAddURL(raw string) error {
 		return fmt.Errorf("URL missing host, got %q", raw)
 	}
 	if port := u.Port(); port != "" {
-		if _, err := parsePort("URL", port); err != nil {
+		if err := parsePort("URL", port); err != nil {
 			return err
 		}
 	}

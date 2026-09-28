@@ -126,6 +126,7 @@ func TestModelNameBoundsEngineSuppliedID(t *testing.T) {
 		{"plain", "llama-3.1-8b-instruct.Q4_K_M", "llama-3.1-8b-instruct.Q4_K_M"},
 		{"surrounding space", "  qwen2:7b  ", "qwen2:7b"},
 		{"sgr recolor", "\x1b[31mllama3\x1b[0m", "llama3"},
+		{"escaped newline", "A100\nspoofed", "A100 spoofed"},
 		{"osc52 clipboard", "\x1b]52;c;YU9UQw==\x07llama3", "llama3"},
 		{"control characters", "ll\x00a\x07m3", "llam3"},
 		{"empty", "", ""},
@@ -148,35 +149,5 @@ func TestModelNameCapsLongID(t *testing.T) {
 	flags := ModelName(strings.Repeat("\U0001F1E9\U0001F1EA", 400))
 	if n := uniseg.GraphemeClusterCount(flags); n != ModelNameMax || !utf8.ValidString(flags) {
 		t.Errorf("ModelName(400 flags) = %d clusters, valid=%v", n, utf8.ValidString(flags))
-	}
-}
-
-// A GPU's reported name goes through the same cell as a model id, and the two
-// of its four sources are JSON. An escaped newline survives SanitizeText on
-// purpose, so SingleLine in GPUName is the only thing keeping a driver-supplied
-// name from breaking the system panel's row alignment.
-func TestGPUNameCollapsesToOneLine(t *testing.T) {
-	cases := []struct{ name, in, want string }{
-		{"plain", "NVIDIA GeForce RTX 4090", "NVIDIA GeForce RTX 4090"},
-		{"escaped newline", "A100\nspoofed", "A100 spoofed"},
-		{"surrounding space", "  Apple M3 Max  ", "Apple M3 Max"},
-		{"osc52 clipboard", "\x1b]52;c;YU9UQw==\x07Apple M3", "Apple M3"},
-		{"empty", "", ""},
-	}
-	for _, c := range cases {
-		got := GPUName(c.in)
-		if got != c.want {
-			t.Errorf("GPUName(%s) = %q, want %q", c.name, got, c.want)
-		}
-		if strings.ContainsAny(got, "\n\r") {
-			t.Errorf("GPUName(%s) = %q kept a line break", c.name, got)
-		}
-	}
-}
-
-func TestGPUNameCapsLongName(t *testing.T) {
-	got := GPUName("g" + strings.Repeat("x", ModelNameMax*4))
-	if n := uniseg.GraphemeClusterCount(got); n != ModelNameMax {
-		t.Errorf("GPUName kept %d clusters, want %d", n, ModelNameMax)
 	}
 }

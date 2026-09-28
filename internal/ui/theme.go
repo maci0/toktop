@@ -194,6 +194,19 @@ func heatColor(f float64) lipgloss.Color {
 	}
 }
 
+// heatBand is the three-band ramp the percentage meters share: green below
+// warn, amber below crit, red above. A NaN reading is green, since it carries
+// no value to alarm on.
+func heatBand(v, warn, crit float64) lipgloss.Color {
+	if math.IsNaN(v) || v < warn {
+		return cGreen
+	}
+	if v < crit {
+		return cYellow
+	}
+	return cRed
+}
+
 // wordmark is TOKTOP in the site accent. Static: built once, reused every frame.
 var wordmark = lipgloss.NewStyle().Bold(true).Foreground(cGreen).Render("TOKTOP")
 

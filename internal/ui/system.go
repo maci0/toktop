@@ -5,7 +5,6 @@ package ui
 import (
 	"fmt"
 	"maps"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -191,12 +190,8 @@ func shortVendor(v string) string {
 	switch v {
 	case "nvidia":
 		return "nv"
-	case "amd":
-		return "amd"
-	case "intel":
-		return "intel"
-	case "apple":
-		return "apple"
+	case "amd", "intel", "apple":
+		return v
 	default:
 		return "gpu"
 	}
@@ -219,29 +214,9 @@ func sysCPUTemps(sy *core.SysSample) []core.TempReading {
 	return sy.Temps
 }
 
-func tempColor(celsius float64) lipgloss.Color {
-	if math.IsNaN(celsius) || celsius < 60 {
-		return cGreen
-	}
-	switch {
-	case celsius < 80:
-		return cYellow
-	default:
-		return cRed
-	}
-}
+func tempColor(celsius float64) lipgloss.Color { return heatBand(celsius, 60, 80) }
 
-func memHeat(v float64) lipgloss.Color {
-	if math.IsNaN(v) || v < 70 {
-		return cGreen
-	}
-	switch {
-	case v < 90:
-		return cYellow
-	default:
-		return cRed
-	}
-}
+func memHeat(v float64) lipgloss.Color { return heatBand(v, 70, 90) }
 
 func fmtTempC(milliC int) string {
 	return fmt.Sprintf("%.0f°", float64(milliC)/1000)

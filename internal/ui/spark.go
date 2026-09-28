@@ -31,14 +31,12 @@ func tailCols(vals []float64, w int) ([]float64, float64) {
 	return cols, vMax
 }
 
-// brailleBits maps (sub-row, sub-column) within a braille cell to its Unicode
-// bit: dot1..8 = 0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80.
-var brailleBits = [4][2]byte{
-	{0x01, 0x08},
-	{0x02, 0x10},
-	{0x04, 0x20},
-	{0x40, 0x80},
-}
+// brailleRowMask is the pair of dots a filled sub-row sets, both columns at
+// once: dot1..8 = 0x01,0x02,0x04,0x08,0x10,0x20,0x40,0x80.
+var brailleRowMask = [4]byte{0x09, 0x12, 0x24, 0xC0}
+
+// brailleGuideDot is the left dot of the bottom sub-row, drawn alone.
+const brailleGuideDot = 0x40
 
 // ChartStyle tunes BrailleChart rendering.
 type ChartStyle struct {
@@ -147,7 +145,7 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 	for cx := range w {
 		col := colColors[cx]
 		if _, ok := sides[string(col)]; !ok {
-			sides[string(col)] = fgSides(col)
+			sides[string(col)] = styleSides(lipgloss.NewStyle().Foreground(col))
 		}
 	}
 
@@ -160,12 +158,12 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 			for sr := range 4 {
 				dy := cy*4 + sr
 				if float64(dotH-dy) <= level {
-					pattern |= int(brailleBits[sr][0]) | int(brailleBits[sr][1])
+					pattern |= int(brailleRowMask[sr])
 				}
 			}
 			// faint guides only where data leaves the bottom row empty
 			if pattern == 0 && cy == h-1 && st.Grid[cx] {
-				pattern = int(brailleBits[3][0])
+				pattern = brailleGuideDot
 			}
 			if pattern == 0 {
 				rows[cy].WriteByte(' ')
@@ -197,9 +195,9 @@ func GaugeBar(pct float64, w int, heat func(float64) lipgloss.Color) string {
 	return bar + " " + fmt.Sprintf("%.0f%%", pct)
 }
 
-// fgSides splits a foreground style's rendering of one rune into the escape
-// prefix and reset suffix around it, so a caller that draws many cells in the
-// same color renders the style once instead of once per cell.
+// styleSides splits a style's rendering of one rune into the escape prefix and
+// reset suffix around it, so a caller that draws many cells in the same color
+// renders the style once instead of once per cell.
 //
 // The split reads the style's own output for a sentinel rune rather than
 // composing the escape itself, so it tracks the active color profile: a
@@ -209,10 +207,6 @@ func GaugeBar(pct float64, w int, heat func(float64) lipgloss.Color) string {
 // A style writes the same prefix and the same suffix whatever it wraps, so
 // prefix+suffix is the run's frame: the caller substitutes its own text
 // between them and gets the bytes Style.Render would have produced.
-func fgSides(c lipgloss.Color) [2]string {
-	return styleSides(lipgloss.NewStyle().Foreground(c))
-}
-
 func styleSides(st lipgloss.Style) [2]string {
 	const sentinel = 'X'
 	out := st.Render(string(rune(sentinel)))

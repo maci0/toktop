@@ -4,6 +4,7 @@ package procs
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -26,7 +27,7 @@ func listLinux() ([]raw, error) {
 		if err != nil || pid <= 0 {
 			continue // not a process dir
 		}
-		base := procPath(e.Name())
+		base := filepath.Join(procRoot, e.Name())
 		cmdlineB, err := os.ReadFile(base + "/cmdline")
 		if err != nil {
 			continue // vanished or kernel thread

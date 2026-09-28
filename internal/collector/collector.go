@@ -23,9 +23,7 @@ import (
 	"github.com/maci0/toktop/internal/sysmon"
 )
 
-const (
-	emaAlpha = 0.35
-)
+const emaAlpha = 0.35
 
 // defaultInterval is the poll period New falls back to when the caller passes
 // a non-positive one. A zero or negative interval would otherwise make
@@ -380,26 +378,17 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// needs named, and the dashboard's own "down" marker is replaced a frame
 	// later. Collected, not written inline, so a slow stderr cannot stall the
 	// poll loop the snapshot depends on.
-	var failed, recovered, slow, fast []healthChange
+	// One bucket per changeKind, indexed by it, so a new boundary picks its
+	// log level at the call below rather than falling through a switch that
+	// quietly reports it at the wrong one.
+	var buckets [changeFast + 1][]healthChange
 	snap.Agents = slices.Clone(c.agents)
 	snap.Probes = slices.Clone(c.probes)
 	snap.Sys = cloneSys(sys)
 	for i, r := range results {
 		ps, changes := c.providerSnapshot(c.providers[i], r, now, byPort)
 		for _, change := range changes {
-			// One bucket per kind, and every kind is listed: a new boundary
-			// chooses its log level here rather than falling through to a
-			// default that quietly reports it at the wrong one.
-			switch change.kind {
-			case changeDown:
-				failed = append(failed, change)
-			case changeUp:
-				recovered = append(recovered, change)
-			case changeSlow:
-				slow = append(slow, change)
-			case changeFast:
-				fast = append(fast, change)
-			}
+			buckets[change.kind] = append(buckets[change.kind], change)
 		}
 		snap.Providers = append(snap.Providers, ps)
 	}
@@ -407,10 +396,10 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// a stalled stderr must not stall the poll loop the snapshot depends on.
 	refused := c.drainWindowRefusals()
 	c.mu.Unlock()
-	logHealth(failed, slog.LevelWarn, "toktop: engine not answering")
-	logHealth(recovered, slog.LevelInfo, "toktop: engine answering again")
-	logSlow(slow, slog.LevelWarn, "toktop: engine poll slow")
-	logSlow(fast, slog.LevelInfo, "toktop: engine poll back to normal")
+	logChanges(buckets[changeDown], slog.LevelWarn, "toktop: engine not answering", "down_for")
+	logChanges(buckets[changeUp], slog.LevelInfo, "toktop: engine answering again", "down_for")
+	logChanges(buckets[changeSlow], slog.LevelWarn, "toktop: engine poll slow", "slow_for")
+	logChanges(buckets[changeFast], slog.LevelInfo, "toktop: engine poll back to normal", "slow_for")
 	logWindowRefusals(refused)
 	// Send outside the critical section: a stalled consumer must neither pin
 	// emit past cancellation nor freeze RecordAgent/RecordProbe/ProbeAll
@@ -607,11 +596,17 @@ type healthChange struct {
 // tests can shrink it instead of sleeping past the real one.
 var slowPollThreshold = provider.PollTimeout / 2
 
-// logHealth writes one audit line per engine that changed state this poll. The
+// logChanges writes one audit line per engine in a boundary bucket. The
 // transitions are already deduplicated in emit, so a fleet of engines that is
 // down produces one line when it goes down and one when it returns however
 // many intervals passed in between.
-func logHealth(changes []healthChange, level slog.Level, msg string) {
+//
+// heldKey names how long the run lasted under each boundary, and the two
+// boundaries carry different extras: an answering transition names the failure
+// text that started the outage, and a latency one the duration that tripped it,
+// which no snapshot exposes, since the dashboard shows whether an engine
+// answered but never how long the answer took.
+func logChanges(changes []healthChange, level slog.Level, msg, heldKey string) {
 	if len(changes) == 0 {
 		return
 	}
@@ -620,33 +615,15 @@ func logHealth(changes []healthChange, level slog.Level, msg string) {
 		attrs := []any{
 			"engine", logcfg.Field(ch.p.Label, 128),
 			"addr", logcfg.Field(ch.p.Addr, 256),
-			"reason", logcfg.Field(ch.reason, 256),
 		}
-		if ch.heldFor > 0 {
-			attrs = append(attrs, "down_for", ch.heldFor.Round(time.Millisecond))
-		}
-		lg.Log(context.Background(), level, msg, attrs...)
-	}
-}
-
-// logSlow writes one audit line per engine that crossed the latency boundary.
-// It carries the duration that tripped it, which no snapshot exposes: the
-// dashboard shows whether an engine answered, never how long the answer took.
-func logSlow(changes []healthChange, level slog.Level, msg string) {
-	if len(changes) == 0 {
-		return
-	}
-	lg := audit()
-	for _, ch := range changes {
-		attrs := []any{
-			"engine", logcfg.Field(ch.p.Label, 128),
-			"addr", logcfg.Field(ch.p.Addr, 256),
+		if ch.reason != "" {
+			attrs = append(attrs, "reason", logcfg.Field(ch.reason, 256))
 		}
 		if ch.took > 0 {
 			attrs = append(attrs, "duration", ch.took.Round(time.Millisecond))
 		}
 		if ch.heldFor > 0 {
-			attrs = append(attrs, "slow_for", ch.heldFor.Round(time.Millisecond))
+			attrs = append(attrs, heldKey, ch.heldFor.Round(time.Millisecond))
 		}
 		lg.Log(context.Background(), level, msg, attrs...)
 	}
@@ -1048,11 +1025,6 @@ func cloneSys(s *core.SysSample) *core.SysSample {
 	return &out
 }
 
-func hostIsLoopback(u *url.URL) bool {
-	host := u.Hostname()
-	return strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
-}
-
 // httpPort extracts the TCP port from a backend URL. Non-http(s) addresses
 // (tests use fake://, and a blank Addr is not a listener) must not fall
 // through to port 80: that would attach GPUStack-on-80 process stats to
@@ -1082,5 +1054,6 @@ func loopbackPort(addr string) (port int, loopback bool) {
 	if err != nil {
 		return 0, false
 	}
-	return httpPort(u), hostIsLoopback(u)
+	host := u.Hostname()
+	return httpPort(u), strings.EqualFold(host, "localhost") || net.ParseIP(host).IsLoopback()
 }

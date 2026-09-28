@@ -117,7 +117,7 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 	dev := core.GPUDevice{Vendor: "apple"}
 	if name, ok := d["_name"].(string); ok {
-		dev.Name = core.GPUName(name)
+		dev.Name = core.ModelName(name)
 	}
 	if s, ok := vramField(d, "vram"); ok {
 		dev.MemTotal = parseSizeString(s)
@@ -138,7 +138,7 @@ func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
 	}
 	if dev.Name == "" {
 		if s, ok := d["sppci_model"].(string); ok {
-			dev.Name = core.GPUName(s)
+			dev.Name = core.ModelName(s)
 		}
 	}
 	return dev, dev.Name != ""

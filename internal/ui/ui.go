@@ -2,7 +2,6 @@
 package ui
 
 import (
-	"math"
 	"strings"
 	"time"
 
@@ -427,17 +426,7 @@ func (m Model) lastProbe() (core.ProbeSample, bool) {
 	return core.ProbeSample{}, false
 }
 
-func kvHeat(v float64) lipgloss.Color {
-	if math.IsNaN(v) || v < 60 {
-		return cGreen
-	}
-	switch {
-	case v < 85:
-		return cYellow
-	default:
-		return cRed
-	}
-}
+func kvHeat(v float64) lipgloss.Color { return heatBand(v, 60, 85) }
 
 // snapNow is the instant rate windows and idle spans use: the snapshot's
 // own stamp when the collector filled one in, otherwise the header clock.

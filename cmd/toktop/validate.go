@@ -380,7 +380,7 @@ func validateIngestAddr(addr string) error {
 	if err != nil {
 		return fmt.Errorf("--ingest address must be host:port, got %q", addr)
 	}
-	if _, err := parsePort("--ingest", port); err != nil {
+	if err := parsePort("--ingest", port); err != nil {
 		return err
 	}
 	return nil
@@ -392,12 +392,12 @@ const portMax = 65535
 // parsePort validates a textual port and reports it under the flag or option
 // the caller carries it for. Zero is accepted: it is the ephemeral port a
 // listener binds when the operator leaves the choice open.
-func parsePort(label, port string) (int, error) {
+func parsePort(label, port string) error {
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 0 || n > portMax {
-		return 0, fmt.Errorf("%s port must be 0-%d, got %q", label, portMax, port)
+		return fmt.Errorf("%s port must be 0-%d, got %q", label, portMax, port)
 	}
-	return n, nil
+	return nil
 }
 
 // bearerEnvVars are the environment variables a bearer token is read from, in

@@ -378,13 +378,13 @@ func ParseNvidiaSMI(b []byte) []core.GPUDevice {
 		devs = append(devs, core.GPUDevice{
 			Vendor:   "nvidia",
 			Index:    index,
-			Name:     core.GPUName(name),
+			Name:     core.ModelName(name),
 			MilliC:   core.SatInt(flexF(tail[0]) * 1000),
 			MemUsed:  mibBytes(flexF(tail[1])),
 			MemTotal: mibBytes(flexF(tail[2])),
 			UtilPct:  flexF(tail[3]),
 			PowerW:   flexF(tail[4]),
-			Driver:   core.GPUName(driver),
+			Driver:   core.ModelName(driver),
 		})
 	}
 	return devs
@@ -486,7 +486,7 @@ func parseXpuDiscovery(b []byte) []xpuDevice {
 	}
 	order := make([]xpuDevice, 0, len(list))
 	for _, d := range list {
-		order = append(order, xpuDevice{ID: d.DeviceID, Name: core.GPUName(d.DeviceName)})
+		order = append(order, xpuDevice{ID: d.DeviceID, Name: core.ModelName(d.DeviceName)})
 	}
 	return order
 }
