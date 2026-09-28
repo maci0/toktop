@@ -105,6 +105,27 @@ func get(ctx context.Context, c *http.Client, url string) (*http.Response, error
 	return resp, nil
 }
 
+// drainCap bounds the tail drainAndClose throws away so a connection can be
+// reused. The bytes go to io.Discard, so this bounds time rather than memory:
+// an endpoint streaming an endless body would otherwise hold the call on a read
+// that answers nothing. Past the cap the connection is simply not reused, which
+// is what closing an undrained body did anyway.
+const drainCap = 64 << 10
+
+// drainAndClose reads out the tail of a body the caller stopped reading and
+// then closes it. net/http only returns a connection to the idle pool when its
+// body is closed at EOF (the reason getJSON drains), so a decode that stops at
+// the end of the JSON value has to finish the transfer here.
+//
+// Discovery does exactly that on a dozen requests per candidate port: every
+// decodeScanJSON caller abandons the body at the end of the JSON value, and the
+// body of a /metrics exposition is read whole, so without the drain every probe
+// pays a fresh dial and leaves a socket in TIME_WAIT.
+func drainAndClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, drainCap))
+	body.Close()
+}
+
 func getJSON(ctx context.Context, url string, out any) error {
 	resp, err := get(ctx, httpClient, url)
 	if err != nil {
