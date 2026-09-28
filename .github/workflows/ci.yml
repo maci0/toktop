@@ -72,6 +72,13 @@ jobs:
       - name: the build matrix below is the Makefile's PLATFORMS
         if: runner.os == 'Linux'
         run: make check-ci-platforms
+      # The fourth doc guard, and the only one 'make check' runs that this job
+      # did not: a target added to CONTRIBUTING.md's table without the '## '
+      # comment is missing from `make help`, so the run that is supposed to
+      # find it is the one that never learns the name.
+      - name: every documented make target is in make help (linux only)
+        if: runner.os == 'Linux'
+        run: make check-help-docs
       # staticcheck resolves build tags per GOOS, so every runner analyzes its
       # own platform-specific files; the linux pass plus the matrix below
       # together cover all of them. The module pins the analyzer via a tool

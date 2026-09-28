@@ -228,7 +228,9 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 ## Before opening a PR
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
-Linux only, plus `make govulncheck` for both sqlite tag halves on Linux.
+Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
+the Linux leg of the test job runs every `make check` guard
+(`check-ci-tags`, `check-ci-platforms`, `check-help-docs`).
 Vulnerability analysis follows the host platform's build constraints.
 `staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
 Linux, macOS and Windows, plus cross-compiles of linux/amd64, linux/arm64,
