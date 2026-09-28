@@ -337,7 +337,7 @@ func ParseNvidiaSMI(b []byte) []core.GPUDevice {
 			MemTotal: mibBytes(flexF(tail[2])),
 			UtilPct:  flexF(tail[3]),
 			PowerW:   flexF(tail[4]),
-			Driver:   driver,
+			Driver:   core.GPUName(driver),
 		})
 	}
 	return devs

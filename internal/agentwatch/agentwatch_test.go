@@ -1039,3 +1039,51 @@ func TestReportRebaselinesOnARewrittenTranscript(t *testing.T) {
 		t.Fatalf("post-rewrite growth lost: %+v", got[1])
 	}
 }
+
+// A working directory is named by whoever made the checkout, and the note
+// reads its own parts apart with the same separator. A directory carrying
+// that separator would otherwise forge the attribution the note appends.
+func TestNoteDirectoryCannotForgeTheSeparator(t *testing.T) {
+	rec := &recorder{}
+	w := New(rec, nil)
+	tr := &tracked{
+		proc:      agentusage.Process{PID: 6, Tool: "claude", Dir: "/tmp"},
+		dirNote:   "proj · counted by engine ollama",
+		viaEngine: "",
+	}
+
+	w.report(tr, agentusage.Sample{Output: 100, At: time.Unix(10, 0)})
+
+	got := rec.all()
+	if len(got) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(got), got)
+	}
+	if strings.Contains(got[0].Note, " · ") {
+		t.Fatalf("the note carries a separator the directory forged: %q", got[0].Note)
+	}
+	if !strings.Contains(got[0].Note, "proj") {
+		t.Fatalf("the note no longer names the directory: %q", got[0].Note)
+	}
+}
+
+// A real attribution is untouched: the separator note() appends is the one
+// the directory is not allowed to carry.
+func TestNoteKeepsItsOwnAttribution(t *testing.T) {
+	rec := &recorder{}
+	w := New(rec, nil)
+	tr := &tracked{
+		proc:      agentusage.Process{PID: 7, Tool: "claude", Dir: "/tmp"},
+		dirNote:   "~/work/proj",
+		viaEngine: "ollama",
+	}
+
+	w.report(tr, agentusage.Sample{Output: 100, Thinking: 7, At: time.Unix(10, 0)})
+
+	got := rec.all()
+	if len(got) != 1 {
+		t.Fatalf("events = %d, want 1: %+v", len(got), got)
+	}
+	if want := "~/work/proj · 7 reasoning · counted by engine ollama"; got[0].Note != want {
+		t.Fatalf("note = %q, want %q", got[0].Note, want)
+	}
+}
