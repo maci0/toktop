@@ -23,6 +23,27 @@ import (
 
 // crushDB writes a database shaped like crush's own, with the sessions given.
 // Each value is {completion_tokens, prompt_tokens, updated_at}.
+// skipIfCrushAbove skips when a crush database sits in an ancestor of dir.
+// crushDBPath walks up to the project root, and a t.TempDir tree's ancestors
+// end at the system temp directory, so a crush install anywhere above it (a
+// /tmp/.crush left by another run) is what the walk finds. A test asserting
+// "nothing above this tree" cannot be right in that state, and reading the
+// stray database instead of the tree would be a different assertion entirely.
+func skipIfCrushAbove(t *testing.T, dir string) {
+	t.Helper()
+	for cur := filepath.Dir(dir); ; {
+		path := filepath.Join(cur, crushDBRel)
+		if _, err := os.Stat(path); err == nil {
+			t.Skipf("a crush database exists above the test tree at %s", path)
+		}
+		parent := filepath.Dir(cur)
+		if parent == cur {
+			return
+		}
+		cur = parent
+	}
+}
+
 func crushDB(t *testing.T, dir string, sessions map[string][3]int64) {
 	t.Helper()
 	path := filepath.Join(dir, ".crush", "crush.db")
@@ -146,9 +167,10 @@ func TestCrushSourceCountsOneDatabaseOnce(t *testing.T) {
 // A tree crush has never run in reports nothing, which is not an error.
 func TestCrushSourceWithoutADatabase(t *testing.T) {
 	dir := t.TempDir()
+	skipIfCrushAbove(t, dir)
 	got, ok := (crushDBSource{}).sessions([]string{dir}, time.Now())
-	if !ok {
-		t.Fatalf("a tree with no crush database is an answer, not a failed read (sessions %+v)", got)
+	if !ok || len(got) != 0 {
+		t.Fatalf("sessions %+v (ok=%v) from a tree with no crush database", got, ok)
 	}
 	// The walk climbs to a project root, so a store a parent of the temporary
 	// tree happens to hold is a legitimate find and asserting on it would
@@ -306,12 +328,13 @@ func TestCrushSourceSumsOneDatabaseOnce(t *testing.T) {
 // must not be followed: the store is writable by the agent, so a planted
 // link could otherwise pull in another project's sessions as usage.
 func TestCrushDBSymlinkOutsideProjectIsIgnored(t *testing.T) {
+	dir := t.TempDir()
+	skipIfCrushAbove(t, dir)
 	outside := t.TempDir()
 	crushDB(t, outside, map[string][3]int64{
 		"stolen": {9999, 0, time.Now().UnixMilli()},
 	})
 	outsidePath := filepath.Join(outside, ".crush", "crush.db")
-	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, ".crush"), 0o755); err != nil {
 		t.Fatal(err)
 	}

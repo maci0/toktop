@@ -1169,3 +1169,34 @@ func TestRunOllamaOutOfRangeEvalDurationUsesWallClock(t *testing.T) {
 		})
 	}
 }
+
+// A thinking model that answers in one piece carries its trace in
+// message.reasoning_content and can leave content empty. A non-stream parse
+// that read content alone called a working engine an empty stream, which
+// reads as a broken backend and latches a "probe failed" audit line.
+func TestRunOpenAINonStreamReasoningOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{"reasoning_content", `{"choices":[{"message":{"reasoning_content":"one two three"}}],"usage":{"completion_tokens":3}}`},
+		{"reasoning", `{"choices":[{"message":{"reasoning":"one two three"}}],"usage":{"completion_tokens":3}}`},
+		{"delta reasoning", `{"choices":[{"delta":{"reasoning_content":"one two three"}}]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, tc.body)
+			}))
+			defer srv.Close()
+
+			s := Run(context.Background(), Request{Kind: core.KindOpenAI, Base: srv.URL, Model: "m"})
+			if !s.OK {
+				t.Fatalf("reasoning-only completion = %+v, want a timed sample", s)
+			}
+			if s.Tokens == 0 {
+				t.Fatalf("reasoning-only completion reported %d tokens, want the generated frames", s.Tokens)
+			}
+		})
+	}
+}

@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -2350,5 +2351,99 @@ func TestRecordAgentOffsetAgesOutWithTheHorizon(t *testing.T) {
 	}
 	if last := c.agents[len(c.agents)-1].At; last.After(now) {
 		t.Fatalf("newest event = %v, in this machine's future", last)
+	}
+}
+
+// probeWaveGap spaces waves but never bounded their width: on a fleet wider
+// than the cap, one --probe tick fired a generation against every backend at
+// once, and an OpenAI-compatible gateway bills every one of them. A wave takes
+// at most probeWaveMax backends, and the ones it holds back are picked up by
+// the next wave instead of starving behind the first few.
+func TestProbeAllCapsWaveWidthAndRotates(t *testing.T) {
+	oldGap := probeWaveGap
+	probeWaveGap = 0
+	defer func() { probeWaveGap = oldGap }()
+
+	// Spelled out rather than read from probeWaveMax: a cap that drifts is
+	// the regression, and an assertion that moves with it cannot catch one.
+	const wantPerWave = 4
+	const fleet = wantPerWave*2 + 1
+	var mu sync.Mutex
+	probed := map[string]bool{}
+	var inflight, peak atomic.Int32
+	// One server stands in for the fleet, tagged by query so each backend
+	// keeps its own provider key: a real fleet is a list of distinct
+	// endpoints, and collapsing them to one would test dedup instead.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := inflight.Add(1)
+		for {
+			hi := peak.Load()
+			if n <= hi || peak.CompareAndSwap(hi, n) {
+				break
+			}
+		}
+		time.Sleep(5 * time.Millisecond) // hold the generation open
+		inflight.Add(-1)
+		mu.Lock()
+		probed[r.URL.RawQuery] = true
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"choices":[{"message":{"content":"ok"}}],"usage":{"completion_tokens":1}}`)
+	}))
+	defer srv.Close()
+
+	provs := make([]provider.Provider, 0, fleet)
+	for i := range fleet {
+		provs = append(provs, (&fakeProvider{
+			label: fmt.Sprintf("engine-%02d", i),
+			addr:  srv.URL + "/?i=" + strconv.Itoa(i),
+			kind:  core.KindOpenAI,
+			m:     &provider.Metrics{Models: []core.ModelInfo{{Name: "m"}}},
+		}).asProvider())
+	}
+	c := New(provs, time.Second)
+	if len(c.providers) != fleet {
+		t.Fatalf("fleet collapsed to %d providers, want %d", len(c.providers), fleet)
+	}
+	for _, p := range c.providers {
+		c.lastModel[providerKey(p)] = "m"
+	}
+
+	covered := func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(probed)
+	}
+	wave := func() {
+		t.Helper()
+		waitFor(t, func() bool {
+			c.probeMu.Lock()
+			defer c.probeMu.Unlock()
+			return len(c.probeInflight) == 0
+		}, "a wave never drained")
+		c.ProbeAll()
+	}
+
+	wave()
+	waitStay(t, 60*time.Millisecond, func() bool {
+		c.probeMu.Lock()
+		defer c.probeMu.Unlock()
+		return len(c.probeInflight) <= wantPerWave
+	}, "wave exceeded the per-wave backend cap in flight")
+	if p := peak.Load(); p > wantPerWave {
+		t.Fatalf("peak concurrent generations = %d, want <= %d", p, wantPerWave)
+	}
+	if got := covered(); got > wantPerWave {
+		t.Fatalf("one wave reached %d backends, want <= %d", got, wantPerWave)
+	}
+
+	for range fleet {
+		wave()
+		if covered() == fleet {
+			break
+		}
+	}
+	if got := covered(); got != fleet {
+		t.Fatalf("probed %d of %d backends; the ones past the cap starved", got, fleet)
 	}
 }

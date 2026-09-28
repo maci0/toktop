@@ -27,6 +27,26 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- Two crush tests failed on a machine with a crush database in an ancestor of
+  the system temp directory. `crushDBPath` walks up to the project root, so a
+  `/tmp/.crush` left by another run is what the walk found and the assertions
+  about a tree with no database read that file instead. Both now name the path
+  they cannot see past and skip, rather than failing on a store they did not
+  create.
+
+- One auto-probe tick fired a generation against every backend at once. The
+  wave gate spaced waves but never bounded their width, so a fleet wider than
+  four turned `--probe 1` into a burst of concurrent requests a gateway bills
+  per token. A wave now probes four backends and the next wave resumes where
+  it stopped, so the rest of the fleet is still measured.
+
+- A probe of a thinking model that answered in one piece reported `empty
+  stream`. Engines that ignore `stream: true` return the whole completion in a
+  single body, where the trace lands in `message.reasoning_content` and
+  `content` can be empty; the count read `content` alone, so a working engine
+  read as broken and latched a `probe failed` audit line. The whole-body parse
+  counts the reasoning fields the streaming parse already counted.
+
 - `agentusage.LoadDefinitions` returned a bare `os` error for a definitions
   file that exists but cannot be read, so a program checking
   `errors.Is(err, agentusage.ErrInvalidDefinitions)` for "this file is

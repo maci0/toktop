@@ -130,6 +130,7 @@ type Collector struct {
 
 	probeMu       sync.Mutex // guards the probe fan-out state below
 	lastProbeWave time.Time  // wave gate: see probeWaveGap
+	probeCursor   int        // rotation offset into the wave's targets: see probeWaveMax
 	probeInflight map[string]bool
 	probeBackoff  map[string]time.Time
 	probeDown     map[string]*probeDownState
@@ -831,6 +832,15 @@ func providerKey(p provider.Provider) string {
 // token, so waves also never overlap per backend.
 var probeWaveGap = 500 * time.Millisecond
 
+// probeWaveMax is how many backends one wave probes. probeWaveGap spaces
+// waves but never bounds their width: on a fleet of N backends a single tick
+// (--probe as low as 1s, or a held 'p') fires N generations at once, and on
+// an OpenAI-compatible gateway every one of them is billed. A wave takes this
+// many and leaves the rest to the next one, resuming where it stopped
+// (probeCursor), so a fleet wider than the cap still gets every backend
+// probed rather than the first few over and over.
+const probeWaveMax = 4
+
 // probeTarget pairs a probe request with the collector state key it belongs
 // to. The key is not always the request's Base: providers with no endpoint
 // (see providerKey) share Base "", so inflight and backoff bookkeeping keyed
@@ -941,7 +951,14 @@ func (c *Collector) ProbeAll() {
 	}
 	c.lastProbeWave = now
 	var live []probeTarget
-	for _, t := range targets {
+	examined := 0
+	// The walk starts at probeCursor and wraps once, so a wave that fills the
+	// cap advances the cursor past exactly the targets it considered: a
+	// backend later in the order is probed on the next wave instead of
+	// starving behind the first probeWaveMax forever.
+	for i := 0; i < len(targets) && len(live) < probeWaveMax; i++ {
+		examined++
+		t := targets[(c.probeCursor+i)%len(targets)]
 		key := t.key
 		if c.probeInflight[key] { // one generation per backend at a time
 			continue
@@ -952,6 +969,12 @@ func (c *Collector) ProbeAll() {
 		delete(c.probeBackoff, key)
 		c.probeInflight[key] = true
 		live = append(live, t)
+	}
+	// Only a wave that examined a target moves the rotation: a wave whose
+	// every backend is inflight or in backoff probed nothing, and turning the
+	// cursor there would shift which backends the next wave skips.
+	if examined > 0 {
+		c.probeCursor = (c.probeCursor + examined) % len(targets)
 	}
 	c.probeMu.Unlock()
 

@@ -542,7 +542,9 @@ type openaiChunk struct {
 			ReasoningContent string `json:"reasoning_content"`
 		} `json:"delta"`
 		Message struct {
-			Content string `json:"content"`
+			Content          string `json:"content"`
+			Reasoning        string `json:"reasoning"`
+			ReasoningContent string `json:"reasoning_content"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage *struct {
@@ -607,7 +609,12 @@ func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.
 		if text == "" {
 			text = c.Delta.Content
 		}
-		if text != "" {
+		// A thinking model that answers in one piece carries its whole trace
+		// in message.reasoning_content and can leave content empty, so a
+		// count that read content alone called a working engine an empty
+		// stream. The same two fields the streaming path reads.
+		if text != "" || c.Message.Reasoning != "" || c.Message.ReasoningContent != "" ||
+			c.Delta.Reasoning != "" || c.Delta.ReasoningContent != "" {
 			n++
 		}
 	}
