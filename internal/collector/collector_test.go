@@ -1531,8 +1531,19 @@ func TestEmitSurvivesNilMetrics(t *testing.T) {
 	fp := fakeProvider{label: "empty"}
 	ch := make(chan core.Snapshot, 1)
 	c := New([]provider.Provider{fp.asProvider()}, time.Hour)
-	c.emit(context.Background(), ch)
-	snap := <-ch
+	// A cold cache samples the real host here, down to the vendor GPU CLIs.
+	// Pin both samplers so the deadline below measures emit, not the machine.
+	c.SetSysFn(func() core.SysSample { return core.SysSample{} })
+	c.procFn = func() []procs.Info { return nil }
+	done := make(chan struct{})
+	go func() { defer close(done); c.emit(context.Background(), ch) }()
+	var snap core.Snapshot
+	select {
+	case snap = <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("emit did not produce a snapshot")
+	}
+	<-done
 	if len(snap.Providers) != 1 {
 		t.Fatalf("providers = %d, want 1", len(snap.Providers))
 	}
@@ -1905,6 +1916,15 @@ func TestProbeAllDropsModelOnceUnloaded(t *testing.T) {
 	c.ProbeAll()
 	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
 		"probe ran against an unloaded model")
+
+	// The negative above only means something if this harness would have
+	// seen a hit: a wave that never reaches the server passes it too. Load
+	// the model back and prove the same path records one.
+	fp.m = &provider.Metrics{Models: []core.ModelInfo{{Name: "m"}}}
+	emitOnce(t, c)
+	c.ProbeAll()
+	waitFor(t, func() bool { return hits.Load() == 1 },
+		"the same wave never reached the engine with a model loaded, so the negative above proved nothing")
 }
 
 // Catalog entries without VRAM must lose to a loaded model, otherwise 'p'

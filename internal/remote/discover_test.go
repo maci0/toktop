@@ -85,10 +85,10 @@ func TestVitalsScript(t *testing.T) {
 			t.Errorf("vitalsScript missing %q", want)
 		}
 	}
-	// One named mark per section, the same seven parseVitals reads.
+	// One named mark per section, the same set parseVitals reads.
 	marks := strings.Count(s, "echo "+sectionMark)
-	if marks != 7 {
-		t.Errorf("vitalsScript has %d section marks, want 7", marks)
+	if marks != len(sectionNames) {
+		t.Errorf("vitalsScript has %d section marks, want %d", marks, len(sectionNames))
 	}
 	if got := strings.Count(s, sectionMark); got != marks {
 		t.Errorf("vitalsScript has %d sectionMark occurrences, want the %d that name a section", got, marks)

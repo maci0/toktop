@@ -372,7 +372,10 @@ func TestMergeReplacesDriversWithTheRemoteGPUs(t *testing.T) {
 const rocmJSON = `{"card0":{"Temperature (Sensor edge) (C)":"52.0","GPU use (%)":"88","Used Memory (VRAM)":"12271640576","Total Memory (VRAM)":"17163091968"}}`
 
 // sectionNames is the order vitalsScript writes its sections, which is the
-// order vitalsDumpFrom's parts are supplied in.
+// order vitalsDumpFrom's parts are supplied in, and the full set parseVitals
+// reads: TestScriptSectionsCoverParser holds the script and the parser to it
+// both ways, so a second list of the section names would be a list that can
+// drift from both.
 var sectionNames = []string{secLoadavg, secMeminfo, secUptime, secCPU, secOS, secKernel, secGPU}
 
 // vitalsDumpFrom builds a full vitals payload, one named section per part, in
@@ -469,9 +472,12 @@ func TestScriptSectionsCoverParser(t *testing.T) {
 			}
 		}
 	}
-	read := map[string]bool{
-		secLoadavg: true, secMeminfo: true, secUptime: true,
-		secCPU: true, secOS: true, secKernel: true, secGPU: true,
+	read := map[string]bool{}
+	for _, name := range sectionNames {
+		read[name] = true
+	}
+	if len(read) != len(sectionNames) {
+		t.Fatalf("sectionNames repeats a section: %v", sectionNames)
 	}
 	for name := range read {
 		if !written[name] {

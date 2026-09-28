@@ -167,11 +167,21 @@ func TestRootListCacheKeepsTheClaimOfAWalkOlderThanTheRescanInterval(t *testing.
 	})()
 
 	done := make(chan []string, 1)
+	entered := make(chan struct{})
 	go func() {
 		now := time.Now()
 		files, _ := listTranscripts(dir, ".jsonl", now.Add(-recencyWindow), now, false)
+		// Without this the caller below could win the 50ms race against a
+		// goroutine the scheduler never ran, and the no-return window would
+		// prove nothing at all.
+		close(entered)
 		done <- files
 	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the waiter never started")
+	}
 
 	// The claim is the wait branch: a second walk would answer at once.
 	select {

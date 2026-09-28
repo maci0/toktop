@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // SyncDir is best effort by contract: a write that already renamed its file
@@ -70,4 +71,51 @@ func TestExpandHome(t *testing.T) {
 			}
 		})
 	}
+}
+
+// SweepStaleTemps deletes off disk, on the self-update and known-hosts write
+// paths, so the age gate is the whole contract: a staging file younger than
+// StaleTempAge may still be a write in flight, and a file carrying another
+// prefix belongs to someone else. Both survive; only the aged one goes.
+func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
+	dir := t.TempDir()
+	write := func(name string, age time.Duration) string {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		when := time.Now().Add(-age)
+		if err := os.Chtimes(path, when, when); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	aged := write("known_hosts.tmp-old", StaleTempAge+time.Hour)
+	fresh := write("known_hosts.tmp-new", time.Hour)
+	other := write("known_hosts", StaleTempAge+time.Hour)
+	sub := filepath.Join(dir, "known_hosts.tmp-dir")
+	if err := os.Mkdir(sub, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(sub, time.Now().Add(-StaleTempAge-time.Hour), time.Now()); err != nil {
+		t.Fatal(err)
+	}
+
+	SweepStaleTemps(dir, "known_hosts.tmp")
+
+	if _, err := os.Stat(aged); !os.IsNotExist(err) {
+		t.Errorf("the aged staging file survived the sweep: %v", err)
+	}
+	// A directory is never a staging file, however old or however prefixed.
+	for _, kept := range []string{fresh, other, sub} {
+		if _, err := os.Stat(kept); err != nil {
+			t.Errorf("%s was swept: %v", filepath.Base(kept), err)
+		}
+	}
+}
+
+// A directory the caller cannot read is not a reason to fail the write that
+// is about to happen: the sweep runs before it.
+func TestSweepStaleTempsOnMissingDir(t *testing.T) {
+	SweepStaleTemps(filepath.Join(t.TempDir(), "absent"), "toktop.tmp")
 }

@@ -42,20 +42,38 @@ func TestScanTempsPrefersHwmonAndClassifiesGPU(t *testing.T) {
 		"class/hwmon/hwmon1/temp1_label":   "Package id 0\n",
 		"class/thermal/thermal_zone0/type": "x86_pkg_temp",
 		"class/thermal/thermal_zone0/temp": "99000", // ignored: hwmon exists
+		// A chip whose name is not a GPU, labelled by a sensor that is:
+		// the label needles are the only thing that can catch this one.
+		"class/hwmon/hwmon2/name":        "nouveau\n",
+		"class/hwmon/hwmon2/temp1_input": "31000\n",
+		"class/hwmon/hwmon2/temp1_label": "edge\n",
 	})
 
 	temps := scanTemps(
 		filepath.Join(sysroot, "class/hwmon"),
 		filepath.Join(sysroot, "class/thermal"),
 	)
-	if len(temps) != 3 {
-		t.Fatalf("temps = %d, want 3: %+v", len(temps), temps)
+	// GPU readings first, hottest within each group. A regression that
+	// marked every sensor a GPU, dropped a label, or lost the label-based
+	// classification shows up as a diff here.
+	want := []struct {
+		label string
+		milli int
+		gpu   bool
+	}{
+		{"junction", 85000, true},
+		{"edge", 67000, true},
+		{"edge", 31000, true},
+		{"package id 0", 52000, false},
 	}
-	if !temps[0].IsGPU || temps[0].MilliC != 85000 {
-		t.Errorf("hottest GPU should sort first, got %+v", temps[0])
+	if len(temps) != len(want) {
+		t.Fatalf("temps = %d, want %d: %+v", len(temps), len(want), temps)
 	}
-	if temps[2].IsGPU || temps[2].Label != "package id 0" {
-		t.Errorf("cpu reading wrong: %+v", temps[2])
+	for i, w := range want {
+		got := temps[i]
+		if got.Label != w.label || got.MilliC != w.milli || got.IsGPU != w.gpu {
+			t.Errorf("[%d] = %+v, want label %q at %d milliC, gpu %t", i, got, w.label, w.milli, w.gpu)
+		}
 	}
 }
 

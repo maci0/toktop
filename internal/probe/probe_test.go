@@ -1134,9 +1134,12 @@ func TestRunOllamaEvalDurationMicroseconds(t *testing.T) {
 		t.Fatalf("probe failed: %+v", s)
 	}
 	// 200000 as nanoseconds is 200us and would read ~30000 tok/s; read as
-	// microseconds it is 200ms, ~30 tok/s.
-	if s.TokPS > 1000 {
-		t.Errorf("tokps = %v, want the microsecond reading, not the nanosecond one", s.TokPS)
+	// microseconds it is 200ms, and 6 tokens over 200ms is 30 tok/s exactly.
+	// The rate comes from the reported duration, not the wall clock, so the
+	// band is tight: a ceiling alone would wave through a millisecond reading
+	// and a division by the whole exchange.
+	if s.TokPS < 25 || s.TokPS > 35 {
+		t.Errorf("tokps = %v, want ~30 from the microsecond reading, not %v", s.TokPS, 6.0/0.2)
 	}
 }
 
@@ -1198,8 +1201,10 @@ func TestRunOllamaRefusedEvalDurationUsesWallClock(t *testing.T) {
 	// so a runner that stretches the 200ms sleep stretches the rate with it:
 	// the floor scales with the elapsed time this call actually took, and
 	// the ceiling is what separates the measured window (200ms, ~30 tok/s)
-	// from the refused one.
-	if lo := float64(6) / elapsed.Seconds() / 2; s.TokPS < lo || s.TokPS > 200 {
+	// from the refused one. 100 is well under the refused reading's rate and
+	// well over the measured one, so a decode window measured from the wrong
+	// end of the exchange cannot hide inside the band.
+	if lo := max(float64(6)/elapsed.Seconds()/2, 20); s.TokPS < lo || s.TokPS > 100 {
 		t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip", s.TokPS, elapsed)
 	}
 }
@@ -1237,7 +1242,7 @@ func TestRunOllamaOutOfRangeEvalDurationUsesWallClock(t *testing.T) {
 			}
 			// Same bound as the refused-reading case: the rate has to come
 			// from the measured decode window, not from the wrapped value.
-			if lo := float64(6) / elapsed.Seconds() / 2; s.TokPS < lo || s.TokPS > 200 {
+			if lo := max(float64(6)/elapsed.Seconds()/2, 20); s.TokPS < lo || s.TokPS > 100 {
 				t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip", s.TokPS, elapsed)
 			}
 		})
