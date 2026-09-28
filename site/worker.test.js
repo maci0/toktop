@@ -36,6 +36,11 @@ const TIGHT_GAP_RE = /\.shot \+ h2, h2 \+ pre \+ h2 \{ margin-top: var\(--space-
 const RUNOUT_GAP_RE = /footer \{ margin-top: var\(--space-runout\);/;
 // A section gap written as a literal instead of one of the three steps above.
 const LITERAL_GAP_RE = /margin(?:-top)?: [^;]*\b(?:1\.5|2\.8)rem\b/;
+// Out of main, the footer carries the body column width itself.
+const FOOTER_MAXWIDTH_RE = /footer \{[^}]*max-width: 76rem/;
+// The role is the documented remedy for a list whose markers are removed.
+const GRID_LIST_RE = /<ul class="grid" role="list">/;
+const GRID_LIST_STYLE_RE = /\.grid \{[^}]*list-style: none/;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -746,7 +751,7 @@ test("the footer is the contentinfo landmark, outside main", () => {
   // Out of main, the footer is a body child, so it carries main's column width
   // itself. Without it the footer spans the padded body and the two no longer
   // line up on a wide screen.
-  expect(identityBody).toMatch(/footer \{[^}]*max-width: 76rem/);
+  expect(identityBody).toMatch(FOOTER_MAXWIDTH_RE);
 });
 
 // Safari drops the list semantics of any list whose markers are removed, so
@@ -755,8 +760,8 @@ test("the footer is the contentinfo landmark, outside main", () => {
 // remedy, and it is the only thing standing between the grid styling and that
 // regression, which is why it is pinned here.
 test("the feature grid keeps its list semantics under list-style: none", () => {
-  expect(identityBody).toMatch(/<ul class="grid" role="list">/);
-  expect(identityBody).toMatch(/\.grid \{[^}]*list-style: none/);
+  expect(identityBody).toMatch(GRID_LIST_RE);
+  expect(identityBody).toMatch(GRID_LIST_STYLE_RE);
 });
 
 // The second accent is cYellow in the terminal, where amber is pressure. On
