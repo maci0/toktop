@@ -123,7 +123,10 @@ type Collector struct {
 	// which reads now, with no collector lock held. Guarding only the write side
 	// would leave that read racing it, and reading now and started separately
 	// lets a SetNow land between them, so an uptime is measured from a
-	// different clock than the timestamp it is subtracted from.
+	// different clock than the timestamp it is subtracted from. It is held
+	// only long enough to copy the func value out: the clock itself is
+	// caller-supplied and is called with clockMu released, as instant
+	// documents.
 	clockMu sync.Mutex
 	now     func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
 }
@@ -194,26 +197,47 @@ func (c *Collector) SetNow(fn func() time.Time) {
 		fn = time.Now
 	}
 	sysmon.SetNow(fn)
+	// Stamped before the lock is taken, for the reason instant documents: the
+	// clock is caller-supplied, and calling it under clockMu is a
+	// self-deadlock the moment it reads the collector back. Both fields are
+	// then written under the one lock their readers take them under, so no
+	// reader can see the new clock beside the old origin.
+	started := fn()
 	c.clockMu.Lock()
-	defer c.clockMu.Unlock()
-	c.now = fn
-	c.started = fn()
+	c.now, c.started = fn, started
+	c.clockMu.Unlock()
 }
 
 // instant is the collector clock, so a SetNow override reaches every call
-// site. Never call it with clockMu held.
+// site. The field is read under clockMu and the clock is invoked with it
+// released, the way every other injected clock in this program is read: it is
+// caller-supplied, and a clock that re-enters the collector deadlocks against
+// the very lock that read it. Every goroutine the collector runs reads this
+// clock, from the poll loop through the ingest handlers to the UI's probe
+// wave, so holding clockMu across the call also makes one slow clock a
+// process-wide stall rather than one slow reader.
 func (c *Collector) instant() time.Time {
 	c.clockMu.Lock()
-	defer c.clockMu.Unlock()
-	return c.now()
+	fn := c.now
+	c.clockMu.Unlock()
+	if fn == nil {
+		return time.Now()
+	}
+	return fn()
 }
 
 // clock returns the current instant and the origin it is aged from as one
-// pair, for the snapshot header that subtracts one from the other.
+// pair, for the snapshot header that subtracts one from the other. Both are
+// read under one lock so a SetNow cannot land between them, and the clock is
+// invoked with that lock released, as instant documents.
 func (c *Collector) clock() (time.Time, time.Time) {
 	c.clockMu.Lock()
-	defer c.clockMu.Unlock()
-	return c.now(), c.started
+	fn, started := c.now, c.started
+	c.clockMu.Unlock()
+	if fn == nil {
+		return time.Now(), started
+	}
+	return fn(), started
 }
 
 // errRunInProgress is what a second concurrent Run is refused with. A

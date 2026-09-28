@@ -58,6 +58,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the other loop's samples. A run started after the previous one returned is
   unaffected.
 
+- The collector calls its injected clock with `clockMu` released, the way
+  every other injected clock in the program is read. `drainWindowRefusals`
+  reads it from under `c.mu`, and `SetNow` took the stamp under the same lock,
+  so a clock that reached back for either one deadlocked the poll loop rather
+  than producing a frame. Every goroutine the collector runs reads that clock,
+  from the poll loop through the ingest handlers to the UI's probe wave, so
+  holding the lock across the call also made one slow clock a process-wide
+  stall.
+
 - The working-directory note a macOS watcher builds strips the home directory
   across Unicode normalization, the way the log redactor already does. A home
   macOS stored decomposed and a working directory an agent recorded composed
