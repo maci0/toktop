@@ -504,6 +504,39 @@ func TestReadProcAuditsOutageOnceAndRecovery(t *testing.T) {
 	}
 }
 
+// down_for is a duration, and the clock that stamps it is a wall clock on a
+// real run. An NTP correction or a laptop resuming from sleep moves it
+// backwards between the failure and the recovery, and the raw subtraction then
+// audits "down_for=-2h0m0s": a negative outage, which reads as a broken clock
+// rather than as a file that was unreadable for the length it was.
+func TestReadProcOutageIsNotNegativeAfterAClockStep(t *testing.T) {
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	defer func() { audit = old }()
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	SetNow(func() time.Time { return now })
+	defer SetNow(nil)
+
+	missing := filepath.Join(t.TempDir(), "proc", "meminfo")
+	readProc(missing)
+	// The clock steps back two hours while the file stays unreadable.
+	now = now.Add(-2 * time.Hour)
+	if err := os.MkdirAll(filepath.Dir(missing), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(missing, []byte("1234.56 890.12\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lines.Reset()
+	readProc(missing)
+	if !strings.Contains(lines.String(), "down_for=0s") {
+		t.Fatalf("recovery after a backward step audited a negative down_for:\n%s", lines.String())
+	}
+}
+
 // A hwmon chip name is matched against the ASCII literals in gpuChips, so
 // it folds with core.FoldASCII. strings.ToLower also folds runes whose
 // lowercase form is ASCII: U+0130 (LATIN CAPITAL LETTER I WITH DOT ABOVE)

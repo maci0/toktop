@@ -189,6 +189,25 @@ func TestProbeEveryShorterThanInterval(t *testing.T) {
 	}
 }
 
+// Uptime is an elapsed duration on the source's own timeline, and --json
+// serializes it straight out. A frame stamped before the one that pinned the
+// origin would otherwise report a negative uptime, which the real collector
+// already refuses to build.
+func TestUptimeIsNeverNegative(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	s := NewSource(time.Second, 7)
+	s.SetOrigin(t0)
+	if got := s.stepAt(t0).Uptime; got != 0 {
+		t.Fatalf("first frame uptime = %v, want 0", got)
+	}
+	if got := s.stepAt(t0.Add(5 * time.Second)).Uptime; got != 5*time.Second {
+		t.Fatalf("uptime = %v, want 5s", got)
+	}
+	if got := s.stepAt(t0.Add(-time.Hour)).Uptime; got != 0 {
+		t.Fatalf("uptime on a stepped-back frame = %v, want 0", got)
+	}
+}
+
 // A timeline that already has stamped history cannot be moved under it, so
 // SetOrigin refuses rather than leaving the caller believing it took.
 func TestSetOriginAfterFirstFramePanics(t *testing.T) {

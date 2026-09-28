@@ -421,9 +421,12 @@ func (s *Source) snapshot(now time.Time) core.Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	sys := s.sysSample()
+	// Uptime is core.Age, like the real collector's snapshot stamp: a SetOrigin
+	// past the first frame's stamp, or a stepped clock, would otherwise
+	// serialize a negative uptime straight into --json.
 	snap := core.Snapshot{
 		At:     now,
-		Uptime: now.Sub(s.start),
+		Uptime: core.Age(now, s.start),
 		Sys:    &sys,
 		Agents: slices.Clone(s.agents),
 		Probes: slices.Clone(s.probes),

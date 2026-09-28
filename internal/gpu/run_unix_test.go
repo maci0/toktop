@@ -226,3 +226,32 @@ func TestOutageLatchIsKeyedByToolName(t *testing.T) {
 		t.Fatal("the latch cleared on a failure from a new path")
 	}
 }
+
+// down_for is a duration, and the clock that stamps it is a wall clock on a
+// real run. An NTP correction or a laptop resuming from sleep moves it
+// backwards between the failure and the recovery, and the raw subtraction then
+// audits "down_for=-2h0m0s": a negative outage, which reads as a broken clock
+// rather than as a tool that was down for the length it was down.
+func TestOutageDownForIsNotNegativeAfterAClockStep(t *testing.T) {
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	t.Cleanup(func() { audit = old })
+
+	now := time.Unix(1_700_000_000, 0).UTC()
+	SetNow(func() time.Time { return now })
+	t.Cleanup(func() { SetNow(nil) })
+
+	const tool = "toktop-vendor-cli-clock-step"
+	runState.Delete(tool)
+	noteRunFailure(tool, tool, errors.New("exec failed"))
+
+	// The clock steps back two hours while the tool stays down.
+	now = now.Add(-2 * time.Hour)
+	lines.Reset()
+	noteRunOK(tool, tool)
+	if !strings.Contains(lines.String(), "down_for=0s") {
+		t.Fatalf("recovery after a backward step audited a negative down_for:\n%s", lines.String())
+	}
+}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // syncBuffer is the bytes.Buffer the audit logger writes through, with the
@@ -122,6 +123,53 @@ func TestVitalsOutageIsAuditedOnceEachWay(t *testing.T) {
 	}
 	if !strings.Contains(recovered[0], "failed_polls=3") {
 		t.Errorf("recovery line does not carry the failure count: %q", recovered[0])
+	}
+}
+
+// The outage length is a duration, and the clock that measures it is a wall
+// clock on a real run. An NTP correction or a laptop resuming from sleep moves
+// it backwards while the host is dark, and the raw subtraction then recovers
+// with "outage=-2h0m0s": a negative outage, which reads as a broken clock
+// rather than as a host that was dark for the length it was dark.
+func TestVitalsOutageIsNotNegativeAfterAClockStep(t *testing.T) {
+	withKnownHosts(t)
+	logs := captureAudit(t)
+	srv := newTestSSHServer(t, "", 0)
+	defer srv.Close()
+
+	cli, err := Connect(t.Context(), testTarget(t, srv.Port()))
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	now := time.Unix(1_700_000_000, 0).UTC()
+	s := &Stats{Client: cli}
+	s.SetNow(func() time.Time { return now })
+	s.poll(t.Context())
+	if s.err != "" {
+		t.Fatalf("successful poll recorded a failure: %q", s.err)
+	}
+	logs.Reset() // the connect line is asserted elsewhere
+
+	cli.Close()
+	s.poll(t.Context())
+	if s.err == "" {
+		t.Fatal("failed poll recorded no reason")
+	}
+
+	// The clock steps back two hours while the host stays dark, then the
+	// recovery is observed over a connection that answers.
+	now = now.Add(-2 * time.Hour)
+	s.Client = cli2(t, srv)
+	s.poll(t.Context())
+	if s.err != "" {
+		t.Fatalf("poll over the new connection failed: %q", s.err)
+	}
+	recovered := linesWith(logs, "remote vitals poll recovered")
+	if len(recovered) != 1 {
+		t.Fatalf("recovery lines = %d, want 1: %v", len(recovered), recovered)
+	}
+	if !strings.Contains(recovered[0], "outage=0s") {
+		t.Errorf("recovery after a backward step audited a negative outage: %q", recovered[0])
 	}
 }
 

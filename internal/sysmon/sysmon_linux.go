@@ -77,7 +77,7 @@ func noteProcOK(path string) {
 		return
 	}
 	p.failed = false
-	downFor := instant().Sub(p.since)
+	downFor := core.Age(instant(), p.since)
 	p.mu.Unlock()
 	audit().Info("toktop: host vitals source readable again",
 		"source", logcfg.Field(path, 256),

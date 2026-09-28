@@ -213,7 +213,7 @@ func noteRunOK(name, path string) {
 		return
 	}
 	t.failed = false
-	downFor := instant().Sub(t.since)
+	downFor := core.Age(instant(), t.since)
 	t.mu.Unlock()
 	audit().Info("toktop: gpu vendor tool answering again",
 		"tool", logcfg.Field(name, 256),

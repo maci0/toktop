@@ -218,7 +218,7 @@ func (s *Stats) poll(ctx context.Context) {
 	if s.failedPolls > 0 {
 		recovered = true
 		failedPolls = s.failedPolls
-		outage = s.instant().Sub(s.failedSince).Round(time.Second)
+		outage = core.Age(s.instant(), s.failedSince).Round(time.Second)
 	}
 	s.failedPolls = 0
 	s.err = ""
