@@ -24,6 +24,12 @@ Binaries, checksums, and a CycloneDX SBOM are on
   none matches. A program defining an agent in Go had to write `.jsonl` out by
   hand, where `DefaultPollInterval` already carries its default.
 
+- `POST /v1/events` takes a `span_ms` field: how long the model spent on that
+  event's tokens, in milliseconds, capped at 86400000. It is the rate
+  denominator, so a sender that reports it beats the gap between events, which
+  is what every sender had to fall back to. Absent, `0` and out of bound all
+  mean the same thing: the gap between events.
+
 ### Breaking
 
 - `agentusage.Sample` and `agentusage.Delta` gained a `Span time.Duration`
@@ -34,6 +40,16 @@ Binaries, checksums, and a CycloneDX SBOM are on
   field; a caller that reads fields by name is unaffected.
 
 ### Changed
+
+- `POST /v1/events` clamps a `ts` that sits more than two minutes behind
+  arrival to the arrival instant, not only one that sits that far ahead. The
+  bound ran in one direction, so a lagging sender's stamp was stored as sent.
+  A stamp behind arrival sorts to the front of the retained feed, so a sender
+  whose clock runs hours behind (a host that has not been on the network since
+  boot, a restored VM snapshot) filled the retained window with its own events
+  and then had every later event refused as outside it: the `202` reported
+  `stored` below `accepted`, and the resend it asked for was refused again on
+  every attempt. Such a sender now has its stamps read as arrival.
 
 - The audit log names an `ssh://` target by host and port, without the
   account. A login names a person on the host, no redaction folds one out of
