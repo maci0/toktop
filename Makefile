@@ -241,9 +241,9 @@ RELEASE_REPO ?= $(shell $(GO) list -m)
 .DEFAULT_GOAL := help
 
 # Width of the target column in `make help`, one past the longest target
-# (check-ci-platforms). A narrower column pushes the longest names' descriptions
-# out of alignment, and alignment is the one thing a help listing has to get
-# right.
+# (check-release-source). A narrower column pushes the longest names'
+# descriptions out of alignment, and alignment is the one thing a help listing
+# has to get right.
 HELP_WIDTH := 21
 
 .PHONY: help
@@ -669,8 +669,28 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 		exit 1; \
 	fi
 
+# `make help` and the CONTRIBUTING.md target table both enumerate what a
+# contributor runs, and a target that reaches them through one and not the
+# other is the discovery gap: documented in the table but absent from the
+# listing everybody reads first, so the only way to learn it exists is to
+# read the table. One direction, table to help: every name the table
+# documents must carry the '## ' comment the help recipe greps for. The
+# reverse is not a gap, since help also lists the internal guards and the
+# release-only targets a contributor never runs by hand.
+.PHONY: check-help-docs
+check-help-docs: ## fail if a target in CONTRIBUTING.md's table is missing from make help
+	@documented=$$(awk -F'`' '/^\| `make / { for (i = 2; i < NF; i += 2) { t = $$i; if (t ~ /^make /) { sub(/^make /, "", t); split(t, w, /[ \/]/); print w[1] } } }' CONTRIBUTING.md | sort -u); \
+	described=$$(grep -E '^[a-zA-Z_-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{ print $$1 }' | sort -u); \
+	missing=$$(comm -23 <(printf '%s\n' "$$documented") <(printf '%s\n' "$$described")); \
+	if [ -n "$$missing" ]; then \
+		echo "make check-help-docs: these targets are in CONTRIBUTING.md's target table but carry no '## ' description, so 'make help' does not list them:" >&2; \
+		printf '  %s\n' $$missing >&2; \
+		echo "  add the '## ...' comment to the target in the Makefile, the same one the help recipe reads" >&2; \
+		exit 1; \
+	fi
+
 .PHONY: check-wrangler-doc
-check-wrangler-doc:
+check-wrangler-doc: ## fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the WRANGLER pin
 	@grep -Fq 'wrangler@$(WRANGLER) login' CONTRIBUTING.md || { \
 		echo "make: CONTRIBUTING.md does not name wrangler $(WRANGLER) in its login command; the pin and the documented command must move together" >&2; \
 		exit 1; \
@@ -774,9 +794,10 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 	$(SCRIPTS_BIN)/python scripts/screenshot.py $(CAPTURE) $(OUT) $(SCALE) $(COLS) $(ROWS)
 
 .PHONY: check
-check: ## verify go.mod, gofmt -s formatting, vet and staticcheck (CI parity)
+check: ## verify go.mod, gofmt -s formatting, vet, staticcheck and the doc guards (CI parity)
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-platforms
+	@$(MAKE) --no-print-directory check-help-docs
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
 			echo "needs gofmt (run 'make fmt'):" >&2; echo "$$unformatted" >&2; exit 1; \
