@@ -353,6 +353,19 @@ func dshRoots(dir string) []string {
 	return uniqueRoots(out)
 }
 
+// dshHostRoots is both session stores, not one project's directory. dsh web
+// writes into whichever project it was asked about; the server process's
+// own cwd is the harness, which is not one of those projects.
+func dshHostRoots(string) []string {
+	var out []string
+	for _, root := range []string{home(".dsh", "sessions"), home(".dsh-native", "sessions")} {
+		if root != "" {
+			out = append(out, root)
+		}
+	}
+	return out
+}
+
 // decodeZstdPrefix decompresses every complete frame at the front of src
 // and reports how many compressed bytes those frames occupied. An
 // incomplete tail is left unconsumed. A complete frame that fails to

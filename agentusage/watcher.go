@@ -121,6 +121,12 @@ type fileStamp struct {
 //		// no readable usage for this agent
 //	}
 func Watch(tool, dir string, since time.Time) *Watcher {
+	return openWatch(tool, dir, since, false)
+}
+
+// openWatch is Watch. allDirs is the dsh web case: the roots are both
+// session stores in full, and a session counts whichever project it names.
+func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 	tool = canonicalTool(tool)
 	if source, ok := sourceFor(tool); ok {
 		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since, now: time.Now}
@@ -138,6 +144,12 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 	ad, ok := adapterFor(tool)
 	if !ok {
 		return nil
+	}
+	if allDirs {
+		ad.roots = dshHostRoots
+		ad.sessionCwd = nil
+		ad.sessionCwdFile = nil
+		ad.rootOwns = false
 	}
 	w := &Watcher{
 		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now,

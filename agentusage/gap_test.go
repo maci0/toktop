@@ -47,6 +47,44 @@ func TestDshNativeSessionCountsOnlyThisProject(t *testing.T) {
 	}
 }
 
+func TestDshWebCountsEveryProjectItWrites(t *testing.T) {
+	if !dshHosts([]string{"bun", "dsh", "web"}) {
+		t.Fatal("bun dsh web was not recognized as the server")
+	}
+	if dshHosts([]string{"bun", "dsh"}) {
+		t.Fatal("a one-project dsh run was treated as the server")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	server := filepath.Join(home, "harness")
+	proj := filepath.Join(home, "proj")
+	// The server's cwd is the harness. The sessions it fills belong to
+	// other projects. A project watch must not see those; the server must.
+	wide := (Process{Tool: "dsh", Dir: server, AllDirs: true}).Watch(time.Now())
+	narrow := Watch("dsh", server, time.Now())
+	if wide == nil || narrow == nil {
+		t.Fatal("dsh watcher")
+	}
+	writeDshSession(t, home, proj, dshMessage(8, 1, 20))
+	writeDshSession(t, home, server, dshMessage(3, 0, 4))
+	if s := wide.Poll(); s.Output != 11 || s.Input != 24 || s.Thinking != 1 {
+		t.Fatalf("web sample = %+v, want output 11 input 24 thinking 1", s)
+	}
+	if s := narrow.Poll(); s.Output != 3 || s.Input != 4 || s.Thinking != 0 {
+		t.Fatalf("project sample = %+v, want output 3 input 4", s)
+	}
+}
+
+func writeDshSession(t *testing.T, home, dir, line string) {
+	t.Helper()
+	sess := filepath.Join(home, ".dsh", "sessions", dshDirName(dir), "sess")
+	if err := os.MkdirAll(sess, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	append_(t, filepath.Join(sess, "session.jsonl"), line)
+}
+
 func TestDshRootsNamesBothStores(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)

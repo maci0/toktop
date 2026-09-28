@@ -87,6 +87,9 @@ reads `~/.dsh-native/sessions`. pi, prime-agent, feynman, and omp count
 the working directory its header records.
 dsh's default log is concatenated zstd frames (`session.v<N>.jsonl.zstd`, or
 `session.jsonl.zstd` for generation zero); uncompressed JSONL is read too.
+`dsh web` writes every project's sessions from the harness directory, so
+that process is read from both session stores rather than from the harness
+directory alone.
 Agents that report nothing show no rate rather than a zero.
 
 Two agents keep databases instead of transcripts, and both need the `sqlite`

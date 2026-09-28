@@ -84,8 +84,9 @@ var adapters = map[string]adapter{
 	//
 	// The store is machine-wide, so ownership follows the session's recorded
 	// cwd, like opencode's directory column and every other adapter here. A
-	// `dsh web` server launched in one directory therefore reads the sessions
-	// of that directory, not the ones it hosts for other projects.
+	// `dsh web` server is the exception: that process writes every project's
+	// sessions, so its watcher reads both stores whole. A dsh run inside one
+	// project still reads only that project's directory.
 	// Both stores key a project as --<slug>--, where slug is the absolute
 	// path with separators turned into '-'. ~/.dsh/sessions is the harness
 	// default. ~/.dsh-native/sessions is the same log written without zstd,

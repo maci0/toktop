@@ -51,7 +51,7 @@ func Discover() []Process {
 		if dir == "" {
 			continue // exited, or another user's process
 		}
-		found = append(found, Process{PID: pid, Tool: tool, Dir: dir})
+		found = append(found, Process{PID: pid, Tool: tool, Dir: dir, AllDirs: tool == "dsh" && dshHosts(argv)})
 	}
 	return found
 }

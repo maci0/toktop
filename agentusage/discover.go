@@ -20,12 +20,30 @@ type Process struct {
 	// Started is when the process began, as far as the OS reports it; the
 	// zero time when the platform does not report it.
 	Started time.Time
+	// AllDirs is set for a process that writes sessions for every project,
+	// not only its own working directory. dsh web is one: the server's cwd
+	// is the harness tree, and the sessions it is filling belong to the
+	// projects it was asked to work in.
+	AllDirs bool
 }
 
 // Watch starts reading usage for this process, using its agent name and
-// working directory. Equivalent to [Watch](p.Tool, p.Dir, since).
+// working directory. A dsh process with AllDirs reads every session store,
+// because that is the work the server is doing.
 func (p Process) Watch(since time.Time) *Watcher {
-	return Watch(p.Tool, p.Dir, since)
+	return openWatch(p.Tool, p.Dir, since, p.AllDirs && canonicalTool(p.Tool) == "dsh")
+}
+
+// dshHosts reports whether this command line is the dsh server. It writes
+// every project's sessions; a watch of only the server's cwd sees none of
+// them.
+func dshHosts(argv []string) bool {
+	for _, a := range argv {
+		if a == "web" {
+			return true
+		}
+	}
+	return false
 }
 
 // Process discovery is implemented per GOOS: discover_linux.go walks /proc,

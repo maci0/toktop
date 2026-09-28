@@ -13,6 +13,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- `dsh web` shows up under `--agents`. The server's working directory is the
+  harness, and the sessions it writes belong to the projects it was asked to
+  work in, so a watch of only that directory saw no tokens. The server's
+  watcher reads both session stores. A dsh run inside one project still
+  reads only that project.
+
 ## [0.18.1] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on
