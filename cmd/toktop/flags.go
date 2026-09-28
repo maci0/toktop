@@ -59,9 +59,13 @@ func registerFlags() *cliFlags {
 		// usage string printed the default twice, in two spellings.
 		topFS.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (needs a build with -tags sqlite; --opencode-db=false skips it)")
 		topFS.BoolVar(&cli.once, "once", false, "render one frame and exit (non-interactive; use when piping)")
-		topFS.BoolVar(&cli.plain, "plain", false, "with --once: render a linear text report instead of the dashboard frame (screen-reader friendly)")
-		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once: print the final snapshot as JSON on stdout instead of a frame (for scripts)")
-		topFS.IntVar(&cli.frames, "frames", 2, fmt.Sprintf("with --once: snapshots to accumulate before rendering (max %d)", core.HistoryLen))
+		topFS.BoolVar(&cli.plain, "plain", false, "with --once: render a linear text report instead of the dashboard frame (screen-reader friendly; --json replaces it)")
+		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once: print the final snapshot as JSON on stdout instead of a frame (for scripts; replaces the text report)")
+		// The plain and JSON reports render the last snapshot alone, so a count
+		// above one buys only the wait before rendering. Stated here because
+		// warnIgnoredFlags says exactly that at run time, and a warning the help
+		// screen did not predict reads as a bug rather than as a limit.
+		topFS.IntVar(&cli.frames, "frames", 2, fmt.Sprintf("with --once: snapshots to accumulate before rendering (max %d); with --plain or --json only the wait before rendering changes", core.HistoryLen))
 		topFS.BoolVar(&cli.noReload, "no-hot-reload", false, "disable restart-on-rebuild (dev convenience)")
 		topFS.Int64Var(&cli.seed, "seed", 42, "demo RNG seed")
 		topFS.StringVar(&cli.origin, "origin", "", "with --demo: RFC3339 or Unix-seconds instant the simulated timeline starts at, so a seed replays byte for byte; unpinned, it starts at the wall clock")

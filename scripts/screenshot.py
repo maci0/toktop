@@ -6,6 +6,9 @@
 Usage: screenshot.py <capture.txt> <out.png> [scale] [cols] [rows]
        screenshot.py -h|--help
 
+scale defaults to 2; cols and rows default to 0, which measures the capture
+instead of taking the pane geometry from the caller.
+
 Dependencies are declared in scripts/requirements.txt (pyte, pillow).
 
 The capture must come from `tmux capture-pane -e -p` (one line per row,
@@ -13,6 +16,12 @@ escape sequences preserved). Rendering uses the same monospace family the
 dashboard targets (Meslo LG), on the toktop.ai dark base the TUI paints.
 Set TOKTOP_SCREENSHOT_FONT to a regular-weight .ttf when no Meslo build
 is installed where the script looks.
+
+Exit codes: 0 the image was written, 1 a runtime failure (unreadable
+capture, missing dependency, no usable font), 2 a usage error (unknown
+option, missing or extra argument, a value that is not a non-negative
+integer). The written path and its size go to stdout; everything else
+goes to stderr.
 """
 
 import os
@@ -64,6 +73,10 @@ OPTIONAL_ARGS: tuple[tuple[str, int], ...] = (
     ("rows", 0),
 )
 MAX_ARGS = MIN_ARGS + len(OPTIONAL_ARGS)
+
+# The two help spellings Go's flag package also accepts, so the two CLIs in
+# this repo answer 'script --help' the same way.
+HELP_FLAGS: frozenset[str] = frozenset({"-h", "--help"})
 
 # A truecolor SGR payload is #rrggbb.
 HEX_DIGITS = 6
@@ -157,19 +170,23 @@ def parse_optional(args: list[str]) -> tuple[int, int, int]:
 def main() -> None:
     """Validate the command line and render the capture."""
     args = sys.argv[1:]
-    if "-h" in args or "--help" in args:
-        usage(sys.stdout)
-        raise SystemExit(0)
-    # Options are named before the arity is judged: a lone mistyped flag is
-    # one argument, so the count check ran first and answered it with the
-    # whole usage screen, which says nothing about the flag that was wrong.
+    # Options are named before the help flag is answered and before the arity
+    # is judged: a lone mistyped flag is one argument, so the count check ran
+    # first and answered it with the whole usage screen, which says nothing
+    # about the flag that was wrong. The help spellings are exempt here and
+    # read below, so 'screenshot.py --help --bogus' still exits 2, the way
+    # 'toktop --help --bogus' does, instead of printing help and exiting 0
+    # over a flag the parser never looked at.
     for a in args:
-        if a.startswith("-"):
+        if a.startswith("-") and a not in HELP_FLAGS:
             print(
                 f"screenshot.py: unknown option {a!r} (see 'screenshot.py --help')",
                 file=sys.stderr,
             )
             raise SystemExit(2)
+    if any(a in HELP_FLAGS for a in args):
+        usage(sys.stdout)
+        raise SystemExit(0)
     if len(args) < MIN_ARGS:
         usage(sys.stderr)
         raise SystemExit(2)

@@ -59,6 +59,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   already printed an error and no stats row.
 - An engine's model name in the provider block is dim, so the engine and the
   model no longer render as one bold run.
+- `--help` now says what `--frames`, `--plain` and `--json` do together:
+  the two text reports render the last snapshot alone, so a count above one
+  only changes the wait. `toktop --help update` prints the update screen,
+  which the prose did not list among the ways to reach it.
+- `scripts/screenshot.py --help --bogus` exits 2 naming the flag. The help
+  flag answered before the options were looked at, so a mistyped flag next
+  to it exited 0 having printed help.
 - Grok's tok/s is the turn's own tokens over the time the model spent.
   The counts arrive once, when the turn ends. A rate taken from the gap
   since the previous turn never formed, and dividing by the whole turn
