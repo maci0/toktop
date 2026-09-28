@@ -13,6 +13,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-09-28
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.18.2).
+
 ### Fixed
 
 - `dsh web` shows up under `--agents`. The server's working directory is the
@@ -1791,7 +1796,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/maci0/toktop/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/maci0/toktop/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/maci0/toktop/compare/v0.17.1...v0.18.0
 [0.17.1]: https://github.com/maci0/toktop/compare/v0.17.0...v0.17.1
