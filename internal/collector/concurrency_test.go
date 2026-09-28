@@ -25,6 +25,7 @@ func TestConcurrentEmitRecordProbeClock(t *testing.T) {
 			}})
 	}
 	c := New(provs, time.Millisecond)
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.SetSysFn(func() core.SysSample { return core.SysSample{CPUModel: "x"} })
 	ctx, cancel := context.WithCancel(context.Background())
 	out := make(chan core.Snapshot, 4)
@@ -79,6 +80,7 @@ func freeNow(mu *sync.Mutex) bool {
 // rather than a stalled reader.
 func TestInjectedClockRunsWithNoCollectorLockHeld(t *testing.T) {
 	c := New(nil, time.Millisecond)
+	t.Cleanup(func() { c.SetNow(nil) })
 	base := time.Unix(1_700_000_000, 0).UTC()
 	var reads, held int
 	var reenter, underCMu bool

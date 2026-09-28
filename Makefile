@@ -51,7 +51,7 @@ CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
 	base=$$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null) || exit 0; \
 	if [ -z "$$base" ]; then echo "make: check-api found no released tag before HEAD^; nothing to compare the surface to" >&2; exit 0; fi; \
 	work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
-	git archive "$$base" | tar -x -C "$$work" || exit 1; \
+	git archive "$$base" | $(TAR) -xf - -C "$$work" || exit 1; \
 	awk=$$(pwd)/scripts/api-surface.awk; \
 	[ -f "$$awk" ] || awk="$$work/scripts/api-surface.awk"; \
 	fail=0; \

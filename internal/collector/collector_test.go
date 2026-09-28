@@ -2488,13 +2488,18 @@ func TestProbeAllCapsWaveWidthAndRotates(t *testing.T) {
 		defer mu.Unlock()
 		return len(probed)
 	}
-	wave := func() {
+	drain := func() {
 		t.Helper()
 		waitFor(t, func() bool {
 			c.probeMu.Lock()
 			defer c.probeMu.Unlock()
 			return len(c.probeInflight) == 0
 		}, "a wave never drained")
+	}
+	defer drain()
+	wave := func() {
+		t.Helper()
+		drain()
 		c.ProbeAll()
 	}
 
