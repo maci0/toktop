@@ -129,6 +129,12 @@ type Collector struct {
 	// documents.
 	clockMu sync.Mutex
 	now     func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
+	// pace paces the poll loop and the two host pollers. It is read and
+	// written under clockMu with now, because a run that steps its passes
+	// off a simulated timeline must stamp those passes from that timeline:
+	// one seeded by SetNow and the other by wall-clock time cannot replay.
+	// Always non-nil: New sets core.WallPacer, SetPacer normalizes nil.
+	pace core.Pacer
 }
 
 // New polls providers every interval. Host vitals come from sysmon; call
@@ -172,6 +178,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		probeBackoff:  map[string]time.Time{},
 		probeDown:     map[string]*probeDownState{},
 		now:           time.Now,
+		pace:          core.WallPacer,
 		started:       now,
 	}
 	// CPU tick deltas use this clock, not a second wall-clock read inside
@@ -240,6 +247,37 @@ func (c *Collector) clock() (time.Time, time.Time) {
 	return fn(), started
 }
 
+// SetPacer replaces what paces the poll loop and the two host pollers.
+// Production leaves it on core.WallPacer. A simulated run passes a
+// core.VirtualPacer and drives it: the poll that usually waits out a wall-
+// clock interval fires when the driver says so, and with SetNow holding the
+// clock, one seed reproduces the run's frames. A nil pacer restores the wall
+// clock.
+//
+// Safe to call before Run; a call during one reaches the next tick of each
+// loop rather than the pass in flight, which is why the three loops read it
+// through pacer.
+func (c *Collector) SetPacer(p core.Pacer) {
+	if p == nil {
+		p = core.WallPacer
+	}
+	c.clockMu.Lock()
+	c.pace = p
+	c.clockMu.Unlock()
+}
+
+// pacer reads the timing source under the same lock now is, so a run cannot
+// stamp its frames from one timeline and pace them from another.
+func (c *Collector) pacer() core.Pacer {
+	c.clockMu.Lock()
+	p := c.pace
+	c.clockMu.Unlock()
+	if p == nil {
+		return core.WallPacer
+	}
+	return p
+}
+
 // errRunInProgress is what a second concurrent Run is refused with. A
 // collector is built for one run: the pollers, the rate baselines and the
 // down/slow latches below all belong to that one.
@@ -277,7 +315,7 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) error {
 	// The emit loop is joined, not raced: Run must not return while a frame
 	// is still being written to out.
 	emit := func() { c.emit(ctx, out) }
-	<-core.Tick(ctx, c.interval, emit, emit)
+	<-core.TickWith(ctx, c.pacer(), c.interval, emit, emit)
 	return nil
 }
 

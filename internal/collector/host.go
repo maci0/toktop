@@ -29,7 +29,7 @@ func (c *Collector) SetSysFn(fn func() core.SysSample) {
 // on it (GPU vendor CLIs can take seconds and would stall every frame). Run
 // warms the cache before emitting, so this first pass is a cache hit.
 func (c *Collector) startSysPoller(ctx context.Context) <-chan struct{} {
-	return core.Tick(ctx, c.interval,
+	return core.TickWith(ctx, c.pacer(), c.interval,
 		func() { c.sampleSys(false) },
 		func() { c.sampleSys(true) })
 }
@@ -79,7 +79,7 @@ func (c *Collector) startProcPoller(ctx context.Context) <-chan struct{} {
 			c.procMu.Unlock()
 		}
 	}
-	return core.Tick(ctx, c.interval, refresh, refresh)
+	return core.TickWith(ctx, c.pacer(), c.interval, refresh, refresh)
 }
 
 // procSnapshot returns the latest cached engine processes, detached from the
