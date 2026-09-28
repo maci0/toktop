@@ -252,9 +252,14 @@ ENCODER_RECORD := site/encoders.txt
 export LC_ALL := C
 export TZ := UTC
 # gzip concatenates $GZIP with argv (a user's -9 would change the tarball);
-# GNU tar does the same with $TAR_OPTIONS.
+# GNU tar does the same with $TAR_OPTIONS. $TAPE names the device `tar -c`
+# writes to when no -f is given, and POSIXLY_CORRECT switches tar, sort, grep
+# and ls to their POSIX option parsing, which changes how every recipe above
+# and below reads its arguments.
 export GZIP :=
 export TAR_OPTIONS :=
+export TAPE :=
+export POSIXLY_CORRECT :=
 
 # One timestamp for archive metadata: SOURCE_DATE_EPOCH when the caller sets
 # it, otherwise this commit's time, so two builds of the same source agree.
@@ -782,7 +787,7 @@ check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not car
 CI_WORKFLOW := .github/workflows/ci.yml
 .PHONY: check-ci-platforms
 check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
-	@in_workflow=$$(sed -n 's/.*goos:[[:space:]]*\([a-z0-9]\{1,\}\)[^a-z0-9]*goarch:[[:space:]]*\([a-z0-9]\{1,\}\).*/\1\/\2/p' $(CI_WORKFLOW) | sort); \
+	@in_workflow=$$(sed -n -E 's/.*goos:[[:space:]]*([a-z0-9]+)[^a-z0-9]*goarch:[[:space:]]*([a-z0-9]+).*/\1\/\2/p' $(CI_WORKFLOW) | sort); \
 	in_make=$$(printf '%s\n' $(PLATFORMS) | sort); \
 	if [ "$$in_workflow" != "$$in_make" ]; then \
 		echo "make check-ci-platforms: the build matrix in $(CI_WORKFLOW) and PLATFORMS here are different platform sets, so CI vets and compiles a different set than the release builds and publishes:" >&2; \
@@ -1068,7 +1073,7 @@ checksums: sbom buildinfo ## checksum the dist/ binaries into a byte-reproducibl
 		else \
 			shasum -a 256 "$$@" > checksums.txt && shasum -a 256 -c checksums.txt; \
 		fi
-	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c checksums.txt | gzip -n -6 > toktop_$(VERSION)_checksums.tar.gz && rm checksums.txt
+	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > toktop_$(VERSION)_checksums.tar.gz && rm checksums.txt
 
 # Binaries of any earlier version are dropped first: leftovers would
 # otherwise ride the toktop_* glob into checksums.txt and the release.
@@ -1089,6 +1094,9 @@ test-dist: ## build every release platform without packaging
 # What produced the bytes, recorded next to them. A checksum list proves the
 # download arrived intact, not which toolchain made it; without the commit,
 # the toolchain, and the flags there is nothing faithful to rebuild against.
+# `tags` is the value that reached -tags, so the zone tag is in it: the bare
+# $(TAGS) named a build nobody made, and this file is what a rebuild is read
+# against. `driver_tags` keeps the sqlite gate separable on its own.
 # Named to match the toktop_* glob, so it lands in checksums.txt too.
 # dist-clean is a prerequisite, not a sibling: as a sibling it raced
 # test-dist under `make -j release`, deleting binaries while they were being
@@ -1105,7 +1113,8 @@ buildinfo: dist-clean test-dist ## record the toolchain, commit, and flags behin
 		echo "source_date_epoch: $(SOURCE_DATE_EPOCH)"; \
 		echo "go: $$($(GO) env GOVERSION)"; \
 		echo "gotoolchain: $(GOTOOLCHAIN)"; \
-		echo "tags: $(TAGS)"; \
+		echo "tags: $(strip $(TAGS) $(ZONE_TAG))"; \
+		echo "driver_tags: $(TAGS)"; \
 		echo "buildflags: $(GO_BUILDFLAGS)"; \
 		echo "ldflags: $(LDFLAGS)"; \
 		echo "cgo_enabled: $(CGO_ENABLED)"; \

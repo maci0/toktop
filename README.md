@@ -17,21 +17,25 @@ toktop ssh://user@box    # watch engines on another host
 ## Install
 
 ```
-CGO_ENABLED=0 go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
+CGO_ENABLED=0 go install -tags "sqlite timetzdata" github.com/maci0/toktop/cmd/toktop@latest
 ```
 
 On Windows the leading assignment is POSIX shell syntax and does not run in
 `cmd.exe`; PowerShell spells the same command:
 
 ```
-$env:CGO_ENABLED=0; go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest
+$env:CGO_ENABLED=0; go install -tags "sqlite timetzdata" github.com/maci0/toktop/cmd/toktop@latest
 ```
 
 Building from source needs Go 1.27, the version `go.mod` pins. A
 downloaded release binary needs nothing but the platform it was built for.
 
 `-tags sqlite` matches the GitHub binaries and `make build`: crush and
-opencode session databases cannot be read without it. `CGO_ENABLED=0`
+opencode session databases cannot be read without it. `timetzdata` is the
+other half of what those binaries carry: it embeds the IANA zone database,
+so the header clock, the feed timestamps and the text report render
+against the same zones a released binary does instead of falling back to
+UTC on a host with no zone files. `CGO_ENABLED=0`
 matches those artifacts too (pure-Go net resolver, no libc); a host with
 gcc would otherwise produce a cgo-linked binary. Or download a binary
 for linux, macOS, and Windows (amd64 + arm64) from the
