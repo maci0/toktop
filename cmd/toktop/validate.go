@@ -287,6 +287,12 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 	return nil
 }
 
+// unixSecondsDigits is the width of a Unix second in the years this binary
+// can run: 10 digits from 2001-09-09 to 2286. A shorter unsigned digit string
+// is a date, a longer one is a sub-second count in the wrong unit, and
+// neither is the instant --origin asks for.
+const unixSecondsDigits = 10
+
 // parseOrigin turns --origin into the instant the demo timeline starts at.
 // RFC3339 and bare Unix seconds are both accepted, so a replay can be written
 // either way; an empty value is the wall clock at launch (the source's own
@@ -295,14 +301,20 @@ func validateFlags(once bool, interval time.Duration, probeSecs, frames int) err
 // Rejection is loud: a mistyped instant would otherwise leave the run on the
 // wall clock, and the operator replaying a captured frame would get a second
 // run that differs only in timestamps, which is exactly the difference they
-// pinned the origin to remove.
+// pinned the origin to remove. The bare-integer branch is therefore bounded:
+// a digit string is a Unix second only if it is the length one, so a mistyped
+// date such as 20260928 is refused rather than read as an instant in 1970.
 func parseOrigin(s string) (time.Time, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return time.Time{}, nil
 	}
-	if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
-		return time.Unix(secs, 0).UTC(), nil
+	// A leading minus is a pre-epoch second and has no date spelling to be
+	// confused with, so the width bound is on the unsigned form only.
+	if s[0] == '-' || len(s) == unixSecondsDigits {
+		if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
+			return time.Unix(secs, 0).UTC(), nil
+		}
 	}
 	at, err := time.Parse(time.RFC3339, s)
 	if err != nil {

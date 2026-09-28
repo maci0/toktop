@@ -177,9 +177,12 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		return slices.Clone(s.cached)
 	}
 
+	// core.Age, like every other interval here: a backward step makes a raw
+	// subtraction negative, and the jiffies read in that frame are dropped
+	// rather than counted against a shorter interval.
 	var dt float64
 	if !s.lastSample.IsZero() {
-		dt = now.Sub(s.lastSample).Seconds()
+		dt = core.Age(now, s.lastSample).Seconds()
 	}
 	s.lastSample = now
 

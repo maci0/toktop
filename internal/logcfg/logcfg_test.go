@@ -79,9 +79,29 @@ func TestUtcLogTime(t *testing.T) {
 	if got.Value.Kind() != slog.KindString {
 		t.Fatalf("kind = %v, want string", got.Value.Kind())
 	}
-	want := tm.UTC().Format(time.RFC3339Nano)
-	if got.Value.String() != want {
+	if want := tm.UTC().Format(utcStamp); got.Value.String() != want {
 		t.Errorf("got %q, want %q", got.Value.String(), want)
+	}
+	// The stamp is UTC so lines from several machines sort against each
+	// other, which only holds if the field widths are fixed: a whole second
+	// and a fraction of the same second must compare as the digits say.
+	base := time.Date(2026, 3, 15, 10, 30, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		ns   int
+		want string
+	}{
+		{0, "2026-03-15T10:30:00.000000000Z"},
+		{500_000_000, "2026-03-15T10:30:00.500000000Z"},
+		{900_000_000, "2026-03-15T10:30:00.900000000Z"},
+		{1, "2026-03-15T10:30:00.000000001Z"},
+	} {
+		line := utcTime(nil, slog.Time(slog.TimeKey, base.Add(time.Duration(tc.ns)))).Value.String()
+		if line != tc.want {
+			t.Errorf("stamp = %q, want %q", line, tc.want)
+		}
+		if whole := base.UTC().Format(utcStamp); tc.ns > 0 && line <= whole {
+			t.Errorf("stamp %q does not sort after the whole second it shares (%q)", line, whole)
+		}
 	}
 	other := slog.String("other", "value")
 	if gotOther := utcTime(nil, other); gotOther.Key != other.Key || gotOther.Value.String() != other.Value.String() {

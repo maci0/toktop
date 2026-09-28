@@ -19,7 +19,6 @@ import (
 	"os"
 	"regexp"
 	"strings"
-	"time"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -64,6 +63,12 @@ func LogLevelName(l slog.Level) string {
 		return "error"
 	}
 }
+
+// utcStamp is RFC3339 with a fixed nine-digit fraction. RFC3339Nano strips
+// trailing zeros and drops the point entirely on a whole second, so
+// 12:00:00.9Z sorts before 12:00:00Z and every whole-second line lands at the
+// end of its own second, which is the one order a UTC stamp is chosen for.
+const utcStamp = "2006-01-02T15:04:05.000000000Z07:00"
 
 // Logger returns the process logger: a text handler on stderr at the floor
 // TOKTOP_LOG_LEVEL names, stamping every record in UTC so lines from several
@@ -142,7 +147,7 @@ func (h HomeHandler) WithGroup(name string) slog.Handler {
 
 func utcTime(_ []string, a slog.Attr) slog.Attr {
 	if a.Key == slog.TimeKey && a.Value.Kind() == slog.KindTime {
-		return slog.String(slog.TimeKey, a.Value.Time().UTC().Format(time.RFC3339Nano))
+		return slog.String(slog.TimeKey, a.Value.Time().UTC().Format(utcStamp))
 	}
 	return a
 }

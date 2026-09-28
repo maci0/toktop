@@ -55,6 +55,11 @@ const maxAgentSkews = 8 * core.AgentHistoryLen
 // that is dropped and read again off a fresh event costs nothing: the
 // difference between the two readings is the sender's clock drift since, not
 // a different clock.
+//
+// A row is removed from the index only when it is the row still in force for
+// that agent, named by agentSkewLive: a sender whose clock error is read the
+// same way twice produces two rows of equal skew, and dropping the older one
+// must not take the newer one's offset with it.
 func (c *Collector) forgetAgedAgentSkews(cutoff time.Time) {
 	for len(c.agentSkewOrder) > 0 {
 		front := c.agentSkewOrder[0]
@@ -64,8 +69,9 @@ func (c *Collector) forgetAgedAgentSkews(cutoff time.Time) {
 			return
 		}
 		c.agentSkewOrder = c.agentSkewOrder[1:]
-		if off, ok := c.agentSkews[front.agent]; ok && off == front.skew {
+		if live, ok := c.agentSkewLive[front.agent]; ok && live == front {
 			delete(c.agentSkews, front.agent)
+			delete(c.agentSkewLive, front.agent)
 		}
 	}
 }
@@ -125,19 +131,18 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	// AgentRateWindow so no total counts them. A minimum is the right estimate
 	// here: a lead below the sender's true offset is a clock reading under
 	//stating it (jitter, a late POST), and subtracting too little leaves the
-	// stamp ahead rather than behind, where the sender's own next event
-	// corrects it again.
+	// stamp ahead rather than behind. The offset is bounded by the ledger
+	// horizon, so a reading that understates the sender's clock is corrected
+	// by a fresh one rather than for as long as the agent keeps sending.
 	key := core.CanonicalAgent(ev.Agent)
+	// Swept before the lookup, like the id ledger: a reading taken from an
+	// offset the horizon has already retired caps the new estimate at a clock
+	// error that was measured up to agentIDHorizon ago, and the next event
+	// after a quiet spell is the only reading there is.
+	c.forgetAgedAgentSkews(now.Add(-agentIDHorizon))
 	lead := max(ev.At.Sub(now), 0)
 	offset, seen := c.agentSkews[key]
 	if !seen || lead < offset {
-		c.agentSkews[key] = lead
-		// A fresh order entry, not a rewrite of the old one: forgetAgedAgentSkews
-		// matches on agent and skew, so the superseded row ages out on its own
-		// without deleting the offset now in force, the same way a reused id
-		// leaves its older twin behind.
-		c.agentSkewOrder = append(c.agentSkewOrder, agentSkewEntry{agent: key, skew: lead, at: now})
-		c.forgetAgedAgentSkews(now.Add(-agentIDHorizon))
 		offset = lead
 	}
 	ev.At = ev.At.Add(-offset)
@@ -173,6 +178,25 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 		return false
 	}
 	c.agents = agents
+	// Only a retained event is a reading of the sender's clock. A replayed
+	// POST carries the stamp of the original send, so its lead reads zero, and
+	// a minimum estimator cannot climb back off a zero it was handed: one
+	// retry after a slow response would pin the correction off for every later
+	// event, leaving a fast sender's stamps in this machine's future, where
+	// they never age out.
+	if cur, ok := c.agentSkews[key]; !ok || lead < cur {
+		c.agentSkews[key] = lead
+		// A fresh order entry, not a rewrite of the old one: forgetAgedAgentSkews
+		// matches on agent and skew, so the superseded row ages out on its own
+		// without deleting the offset now in force, the same way a reused id
+		// leaves its older twin behind.
+		c.agentSkewOrder = append(c.agentSkewOrder, agentSkewEntry{agent: key, skew: lead, at: now})
+		c.agentSkewLive[key] = agentSkewEntry{agent: key, skew: lead, at: now}
+	}
+	// Swept above, on every call rather than only when a new minimum arrived:
+	// an agent that stops reporting has no later reading to trigger a sweep
+	// placed after the write, and its offset would stay in force for the life
+	// of the process.
 	if id != "" {
 		// The ledger is keyed on the recording instant, not the event's own
 		// timestamp: a replay carries the sender's clock, and a forged or

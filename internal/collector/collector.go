@@ -90,8 +90,12 @@ type Collector struct {
 	agentIDOrder []agentIDEntry       // the same ids in insertion order, oldest first
 	// agentSkews maps a canonical agent name to that sender's clock offset, so
 	// its events are stored on this machine's timeline; agentSkewOrder holds
-	// the same offsets in insertion order, oldest first.
+	// the same offsets in insertion order, oldest first. agentSkewLive names
+	// the row agentSkewOrder still has in force for an agent, so a superseded
+	// row ageing out cannot delete an offset that was read again at the same
+	// value: agent, skew and instant together identify one reading.
 	agentSkews     map[string]time.Duration
+	agentSkewLive  map[string]agentSkewEntry
 	agentSkewOrder []agentSkewEntry
 	probes         []core.ProbeSample
 	started        time.Time
@@ -162,6 +166,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		kvPct:         map[string]float64{},
 		agentIDs:      map[string]time.Time{},
 		agentSkews:    map[string]time.Duration{},
+		agentSkewLive: map[string]agentSkewEntry{},
 		down:          map[string]downState{},
 		slow:          map[string]time.Time{},
 		probeInflight: map[string]bool{},
@@ -474,7 +479,7 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		if was, ok := c.down[key]; ok {
 			delete(c.down, key)
 			changes = append(changes, healthChange{
-				p: p, kind: changeUp, reason: was.reason, since: was.since, heldFor: now.Sub(was.since),
+				p: p, kind: changeUp, reason: was.reason, since: was.since, heldFor: core.Age(now, was.since),
 			})
 		}
 		// A poll that answered inside the budget is also the end of a slow
@@ -485,7 +490,7 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		if r.took < slowPollThreshold {
 			if since, ok := c.slow[key]; ok {
 				delete(c.slow, key)
-				changes = append(changes, healthChange{p: p, kind: changeFast, since: since, heldFor: now.Sub(since)})
+				changes = append(changes, healthChange{p: p, kind: changeFast, since: since, heldFor: core.Age(now, since)})
 			}
 		} else if _, ok := c.slow[key]; !ok {
 			c.slow[key] = now

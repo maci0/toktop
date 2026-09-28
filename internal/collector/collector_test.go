@@ -2258,3 +2258,85 @@ func TestProviderErrorFoldMemoFollowsErrorAndHome(t *testing.T) {
 		t.Fatalf("error after the home moved = %q, want the new home folded", got)
 	}
 }
+
+// The offset estimator takes the smallest lead it is shown, and a lead of
+// zero is the one reading it can never recover from: a retried POST carries
+// the stamp of the original send, so it reads as an on-timeline clock. A
+// duplicate is refused before the ledger is written, so the retry that would
+// otherwise pin the correction off cannot touch it.
+func TestRecordAgentDuplicateDoesNotZeroTheOffset(t *testing.T) {
+	c := New(nil, time.Second)
+	base := time.Now()
+	now := base
+	c.SetNow(func() time.Time { return now })
+
+	const fast = 90 * time.Second
+	ev := core.AgentEvent{At: now.Add(fast), ID: "turn-1", Agent: "remote", OutputTokens: 40}
+	if !c.RecordAgent(ev) {
+		t.Fatal("the first event was not retained")
+	}
+	if got := c.agentSkews["remote"]; got != fast {
+		t.Fatalf("offset = %v, want %v", got, fast)
+	}
+
+	// The 202 was lost, so the sender replays the same event. It is refused
+	// as a duplicate, and the offset it would have read as zero is not taken.
+	now = base.Add(30 * time.Second)
+	if c.RecordAgent(ev) {
+		t.Fatal("the replay was reported as retained")
+	}
+	if got := c.agentSkews["remote"]; got != fast {
+		t.Fatalf("offset after a replay = %v, want the %v reading to survive", got, fast)
+	}
+
+	// The sender keeps sending, so the correction stays in force: the next
+	// event lands on this machine's timeline rather than 90s in its future.
+	if !c.RecordAgent(core.AgentEvent{At: now.Add(fast), ID: "turn-2", Agent: "remote", OutputTokens: 40}) {
+		t.Fatal("the follow-up event was not retained")
+	}
+	if last := c.agents[len(c.agents)-1].At; last.After(now) {
+		t.Fatalf("newest event = %v, in this machine's future", last)
+	}
+}
+
+// The offset ages out with the id ledger, whether or not a smaller lead
+// arrives. An agent that stops reporting produces no reading to trigger the
+// sweep, and an offset left in force for the life of the process subtracts a
+// clock error measured hours ago from every event since. Once it is gone a
+// later, larger lead is a fresh reading and reseeds the correction: the
+// estimator holds a minimum, and a minimum of nothing is nothing.
+func TestRecordAgentOffsetAgesOutWithTheHorizon(t *testing.T) {
+	c := New(nil, time.Second)
+	base := time.Now()
+	now := base
+	c.SetNow(func() time.Time { return now })
+
+	const fast = 60 * time.Second
+	c.RecordAgent(core.AgentEvent{At: now.Add(fast), Agent: "remote", OutputTokens: 40})
+	if got := c.agentSkews["remote"]; got != fast {
+		t.Fatalf("offset = %v, want %v", got, fast)
+	}
+
+	// One more event inside the horizon, so the sweep is driven by a reading
+	// rather than by the event after the quiet spell.
+	now = base.Add(time.Minute)
+	c.RecordAgent(core.AgentEvent{At: now.Add(fast), Agent: "remote", OutputTokens: 40})
+
+	// The host is quiet past the horizon, then returns with its clock error
+	// grown to 3 minutes, as a host that lost NTP for a while does. The
+	// aged-out offset must not cap the new reading at the old one.
+	now = base.Add(agentIDHorizon + time.Minute)
+	const worse = 3 * time.Minute
+	if !c.RecordAgent(core.AgentEvent{At: now.Add(worse), Agent: "remote", OutputTokens: 40}) {
+		t.Fatal("the event after the quiet spell was not retained")
+	}
+	if _, ok := c.agentSkews["remote"]; !ok {
+		t.Fatal("the offset aged out and no fresh reading replaced it")
+	}
+	if got := c.agentSkews["remote"]; got != worse {
+		t.Fatalf("offset after ageing = %v, want a fresh %v", got, worse)
+	}
+	if last := c.agents[len(c.agents)-1].At; last.After(now) {
+		t.Fatalf("newest event = %v, in this machine's future", last)
+	}
+}

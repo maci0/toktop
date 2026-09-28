@@ -232,3 +232,22 @@ func TestDemoSeedChangesTheRun(t *testing.T) {
 		t.Fatal("seeds 7 and 8 rendered the same report")
 	}
 }
+
+// A bare date is not a Unix second. parseOrigin has to refuse it, because the
+// alternative is a run pinned to a 1970 instant that looks like a replay of a
+// capture nobody took, with the difference showing only in the timestamps the
+// operator pinned the origin to hold still.
+func TestParseOriginRefusesAMistypedDate(t *testing.T) {
+	for _, s := range []string{"20260928", "2026-09-28", "20260928120000", "0.5"} {
+		if at, err := parseOrigin(s); err == nil {
+			t.Errorf("parseOrigin(%q) = %v, want a rejection", s, at)
+		}
+	}
+	// The width that a Unix second does have is still accepted, on both sides
+	// of the epoch.
+	for _, s := range []string{"1700000000", "-1000"} {
+		if _, err := parseOrigin(s); err != nil {
+			t.Errorf("parseOrigin(%q) = %v, want an instant", s, err)
+		}
+	}
+}
