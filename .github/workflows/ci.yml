@@ -129,12 +129,19 @@ jobs:
       # The other half, and the one that reads the diff rather than the file:
       # every changelog gate above asks whether the notes are well formed, so
       # a change to a surface a consumer reads can sit in the tree and ship
-      # under notes written for other commits. The gate compares the watched
-      # surfaces against the last release tag, so it needs the checkout this
-      # leg already has and nothing else.
+      # under notes written for other commits. The gate measures the watched
+      # surfaces against the last release tag and lets a checkout that has no
+      # tag past, and checkout's default fetch-depth: 1 carries neither the tag
+      # nor the HEAD^ commit the describe runs from, so the gate exited 0 on
+      # every pull request it was supposed to guard. The history and the tags
+      # are what it reads, so this step widens the shallow merge checkout
+      # before asking. Linux only: one Makefile recipe over one history, and the
+      # other two legs would fetch the same history to run a step they skip.
       - name: a watched surface carries a changelog entry (linux only)
         if: runner.os == 'Linux'
-        run: make check-changelog-covers
+        run: |
+          git fetch --unshallow --tags origin 2>/dev/null || git fetch --tags origin
+          make check-changelog-covers
       # yamllint over the workflows runs in the scripts job below, which
       # already has uv and the pinned tool env this target installs from. The
       # workflow file is the one thing in this repo no Go analyzer reads, and a

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 
 	"github.com/maci0/toktop/agentusage"
 	"testing"
@@ -72,6 +73,7 @@ func TestConcurrentRunsExactlyOneHoldsTheClaim(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	var wg sync.WaitGroup
 	errs := make([]error, 2)
+	var refusals atomic.Int32
 	start := make(chan struct{})
 	for i := range errs {
 		wg.Add(1)
@@ -79,14 +81,19 @@ func TestConcurrentRunsExactlyOneHoldsTheClaim(t *testing.T) {
 			defer wg.Done()
 			<-start
 			errs[i] = w.Run(ctx)
+			if errors.Is(errs[i], errRunInProgress) {
+				refusals.Add(1)
+			}
 		}()
 	}
 	close(start)
-	waitFor(t, time.Second, func() bool {
-		w.mu.Lock()
-		defer w.mu.Unlock()
-		return w.running
-	})
+	// Wait for the refusal rather than for the claim and then cancelling: the
+	// winner holds the claim until the cancel below, so waiting for the loser
+	// to be turned away cannot race the winner's return. Cancelling as soon as
+	// w.running reads true let the winner finish and release the claim before
+	// the second goroutine reached Run, which left both runs succeeding and
+	// failed the assertion on a guard that was never broken.
+	waitFor(t, time.Second, func() bool { return refusals.Load() == 1 })
 	cancel()
 	wg.Wait()
 

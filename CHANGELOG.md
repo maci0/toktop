@@ -13,47 +13,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
-### Fixed
-
-- Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
-  stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
-  the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting
-  what `clock_gettime` handed it posted a `400` on the line naming it. A stream
-  is refused at its first bad event, so every line after the leap second in that
-  POST body was lost with it. It now lands on the following second, the minute
-  the leap second occupies. A second past 60 stays a `400`.
-- A rename that could not be made durable no longer reports as a write that
-  succeeded. `core.SyncDir` returned nothing, so a failed directory flush on the
-  self-update install and on the `known_hosts` store was dropped on the floor:
-  `toktop update` printed "Installed" for a rename a crash could still undo,
-  leaving the previous binary, and a store write claimed pins a crash could
-  take back. Both now name the path and the reason. Windows is unaffected: a
-  directory handle there cannot be synced and the platform journals the rename
-  itself, so there is no durability left to buy.
-
-- A staging file that survives a *successful* write is now reported when it
-  cannot be removed, instead of only when the write failed. An install that
-  finds the release already installed returns without renaming, so the staged,
-  checksum-verified download is still sitting there, and a removal that failed
-  said nothing about it.
-
-- `toktop update` no longer renames the displaced binary over an installed one
-  it could not stat. A `Stat` that failed for any reason other than "not
-  there" read as "not missing", so a binary behind a permission or an immutable
-  entry was replaced by a copy nobody had inspected; the reason is reported
-  instead.
-
-- A health probe whose answer never reached the prober leaves a line. The body
-  write was unchecked, so a peer that stopped reading produced a clean
-  transition with no trace on either side. Latched to one line per episode,
-  like the saturation crossing beside it.
-
-- A crush store handle the kernel did not take back is now logged, on its own
-  latch. The handle is opened on the poll path and its `Close` error was
-  dropped, so a descriptor the kernel refused to reclaim leaked one per project
-  per poll for the life of the dashboard and surfaced much later as an `EMFILE`
-  refusal against some other store.
-
 ### Added
 
 - Every published release file now carries a SLSA provenance attestation
@@ -370,6 +329,45 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the connect cannot disagree, and `--help` now says the same of the variable.
 
 ### Fixed
+
+- Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
+  stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
+  the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting
+  what `clock_gettime` handed it posted a `400` on the line naming it. A stream
+  is refused at its first bad event, so every line after the leap second in that
+  POST body was lost with it. It now lands on the following second, the minute
+  the leap second occupies. A second past 60 stays a `400`.
+- A rename that could not be made durable no longer reports as a write that
+  succeeded. `core.SyncDir` returned nothing, so a failed directory flush on the
+  self-update install and on the `known_hosts` store was dropped on the floor:
+  `toktop update` printed "Installed" for a rename a crash could still undo,
+  leaving the previous binary, and a store write claimed pins a crash could
+  take back. Both now name the path and the reason. Windows is unaffected: a
+  directory handle there cannot be synced and the platform journals the rename
+  itself, so there is no durability left to buy.
+
+- A staging file that survives a *successful* write is now reported when it
+  cannot be removed, instead of only when the write failed. An install that
+  finds the release already installed returns without renaming, so the staged,
+  checksum-verified download is still sitting there, and a removal that failed
+  said nothing about it.
+
+- `toktop update` no longer renames the displaced binary over an installed one
+  it could not stat. A `Stat` that failed for any reason other than "not
+  there" read as "not missing", so a binary behind a permission or an immutable
+  entry was replaced by a copy nobody had inspected; the reason is reported
+  instead.
+
+- A health probe whose answer never reached the prober leaves a line. The body
+  write was unchecked, so a peer that stopped reading produced a clean
+  transition with no trace on either side. Latched to one line per episode,
+  like the saturation crossing beside it.
+
+- A crush store handle the kernel did not take back is now logged, on its own
+  latch. The handle is opened on the poll path and its `Close` error was
+  dropped, so a descriptor the kernel refused to reclaim leaked one per project
+  per poll for the life of the dashboard and surfaced much later as an `EMFILE`
+  refusal against some other store.
 
 - `agentusage.Delta.At` documented itself as the instant the current sample
   was read, "whether or not anything grew", which contradicts `Sample.At` on
