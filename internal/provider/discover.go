@@ -241,11 +241,18 @@ func probeContains(ctx context.Context, base, path string, needles ...string) bo
 // on its own in the body. A two-letter needle like "ok" otherwise matches
 // inside any larger word the engine happened to serve, and an engine identity
 // is a far worse answer than no answer.
+//
+// The needle is folded alongside the body, the same rule probeContains states
+// and follows. A needle left unfolded made the comparison case-sensitive on one
+// side only, so a needle spelled "OK" or "Ok" matched nothing in a body that
+// spells it "ok" and the engine went unidentified, which is the same failure
+// in the other direction as the U+0130 match probeContains refuses to make.
 func probeContainsWord(ctx context.Context, base, path, needle string) bool {
 	text, err := getText(ctx, scanClient, base+path)
 	if err != nil {
 		return false
 	}
+	needle = core.FoldASCII(needle)
 	lower := core.FoldASCII(text)
 	for at := 0; at < len(lower); {
 		i := strings.Index(lower[at:], needle)

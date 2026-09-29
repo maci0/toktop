@@ -79,12 +79,15 @@ func ChecksumListing(archive []byte) (string, error) {
 // ("<hex>  <name>", with an optional binary-mode asterisk).
 func ChecksumFor(listing, name string) (string, bool) {
 	for line := range strings.SplitSeq(listing, "\n") {
-		fields := strings.Fields(strings.TrimSpace(line))
-		if len(fields) != 2 {
+		// The line ending goes with the line. A listing written on Windows, or
+		// by any tool that emits CRLF, carries the carriage return as the last
+		// byte of the name, where it is part of no file the release ships and
+		// matches no asset.
+		sum, file, ok := checksumRecord(strings.TrimSuffix(line, "\r"))
+		if !ok {
 			continue
 		}
-		sum, file := fields[0], strings.TrimPrefix(fields[1], "*")
-		if filepath.Base(file) != name || len(sum) != 64 {
+		if filepath.Base(file) != name {
 			continue
 		}
 		if _, err := hex.DecodeString(sum); err != nil {
@@ -93,4 +96,55 @@ func ChecksumFor(listing, name string) (string, bool) {
 		return strings.ToLower(sum), true
 	}
 	return "", false
+}
+
+// checksumRecord reads the hash and the file name off one `sha256sum` line.
+//
+// The hash field is fixed at 64 characters and the separator that follows it
+// is part of the format, not whitespace between two words: `sha256sum` writes
+// the hash, one space, then either a second space (text mode) or an asterisk
+// (binary mode), then the name. Reading the fields by that shape is what lets
+// a name hold a space.
+//
+// Splitting the line on whitespace instead, as strings.Fields does, breaks on
+// every rune Unicode calls whitespace and treats the line as two fields either
+// way: a release asset called "toktop 1.2.3_linux_amd64.tar.gz" produced
+// three fields, the line was skipped, and ChecksumFor reported no hash for an
+// asset the listing names in full. The update was then refused as a checksum
+// mismatch against a hash that was sitting in the file. An asset name carrying
+// a no-break space or an ideographic space failed the same way.
+func checksumRecord(line string) (sum, file string, ok bool) {
+	const hexLen = 64
+	i := skipBlanks(line, 0)
+	start := i
+	for i < len(line) && !isBlank(line[i]) {
+		i++
+	}
+	sum = line[start:i]
+	if len(sum) != hexLen || i == len(line) {
+		return "", "", false
+	}
+	i++ // the one blank sha256sum writes after the hash, in both modes
+	switch {
+	case line[i] == '*': // binary mode
+		i++
+	case isBlank(line[i]): // text mode's second blank
+		i++
+	default:
+		return "", "", false // the hash is glued to the name; not a record
+	}
+	// The name is the rest of the line, so it keeps every blank inside it.
+	// Leading ones are dropped: a name that starts with a space is
+	// indistinguishable from the format's own separator, which is the one
+	// ambiguity sha256sum itself does not resolve either.
+	return sum, line[skipBlanks(line, i):], true
+}
+
+func isBlank(c byte) bool { return c == ' ' || c == '\t' || c == '\r' }
+
+func skipBlanks(s string, i int) int {
+	for i < len(s) && isBlank(s[i]) {
+		i++
+	}
+	return i
 }

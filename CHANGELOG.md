@@ -266,6 +266,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the compact strip, the setup card and the plain report all print. It read
   `(paused)`, so one state had two spellings and the title's was the only one
   without the glyph the rest of the dashboard uses for it.
+
+- `toktop update` verifies a release asset whose file name holds a space again.
+  The `checksums.txt` line was split into fields on whitespace, which includes
+  every rune Unicode calls whitespace, so an asset called `toktop
+  0.22_linux_amd64.tar.gz` and one carrying a no-break or an ideographic space
+  split into three fields instead of two, the line was skipped, and the hash
+  was reported missing. The update was then refused as a checksum mismatch
+  against a hash the listing carried in full. The line is now read by the
+  format's own shape: a 64-character hash, the single blank `sha256sum` always
+  writes, then either the second blank or the binary-mode asterisk, then the
+  name as the rest of the line. A carriage return left by a CRLF listing is no
+  longer read as part of the name either.
+- A discovery probe no longer misses an engine because of the case of its
+  needle. The body was folded to compare case-insensitively and the needle was
+  not, so a needle spelled `VLLM` matched nothing in a body spelling it `vllm`
+  and the engine went unidentified. The needle is folded the same way, and the
+  fold stays ASCII-only in both directions: U+0130 and U+212A still do not
+  answer for a needle their producer never wrote.
+
 - `docs/openapi.yaml` names the toktop release it describes in
   `info.version`, which is the field a client generator pins. It said `0.1.0`
   through every change to the answers `/healthz` gives, to the `X-Request-Id`

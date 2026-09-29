@@ -1080,6 +1080,16 @@ func TestProbeContainsWordTreatsForeignLettersAsWord(t *testing.T) {
 		{"vllm", "vllm", true},
 		{"2vllm", "vllm", false},
 		{"vllm2", "vllm", false},
+		// The body is folded, so the needle is too. A needle left unfolded
+		// compared case-sensitively against an already-folded body and matched
+		// nothing, which is the miss a discovery probe cannot recover from.
+		{"vllm ready", "VLLM", true},
+		{"vllm ready", "Vllm", true},
+		// The fold stays ASCII-only in both directions: U+0130 and U+212A are
+		// not letters the fold produces, so a needle spelled with either must
+		// not answer for the ASCII word beside it.
+		{"vllm ready", "vlİm", false},
+		{"vllm ready", "vllK", false},
 	}
 	for _, c := range cases {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

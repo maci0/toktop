@@ -138,6 +138,44 @@ func TestChecksumForRejectsNonHex(t *testing.T) {
 	}
 }
 
+// A file name is free to hold any rune a filesystem accepts, including the
+// ones Unicode calls whitespace. Splitting the line on those turned a listing
+// that names the asset in full into three fields, so the line was skipped and
+// the download was refused as a checksum mismatch against a hash the file
+// carried.
+func TestChecksumForNameHoldingUnicodeWhitespace(t *testing.T) {
+	okHex := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	for _, asset := range []string{
+		"toktop 1.2.3_linux_amd64.tar.gz",  // U+0020, an ordinary space
+		"toktop 1.2.3_linux_amd64.tar.gz", // U+00A0 no-break space
+		"toktop　1.2.3_linux_amd64.tar.gz", // U+3000 ideographic space
+		"toktop 1.2.3_linux_amd64.tar.gz",  // U+2028 line separator
+	} {
+		// The name a caller asks for is the release asset's own, so it carries
+		// the space too: filepath.Base of the listing field has to equal it.
+		if sum, ok := ChecksumFor(okHex+"  "+asset+"\n", asset); !ok || sum != okHex {
+			t.Errorf("asset %q: ChecksumFor = %q, %v; want the listed hash", asset, sum, ok)
+		}
+		if _, ok := ChecksumFor(okHex+" *"+asset+"\n", asset); !ok {
+			t.Errorf("asset %q: binary-mode marker form rejected", asset)
+		}
+		if _, ok := ChecksumFor(okHex+"  "+asset+"\r\n", asset); !ok {
+			t.Errorf("asset %q: CRLF listing rejected", asset)
+		}
+	}
+}
+
+// A name that begins with the binary-mode marker is one the format can carry
+// (`sha256sum` writes the asterisk and then the name, so the name's own is a
+// second one), and it is a name like any other.
+func TestChecksumForNameStartingWithAsterisk(t *testing.T) {
+	okHex := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	const asset = "*toktop_linux_amd64.tar.gz"
+	if sum, ok := ChecksumFor(okHex+" *"+asset+"\n", asset); !ok || sum != okHex {
+		t.Errorf("ChecksumFor = %q, %v; want the listed hash", sum, ok)
+	}
+}
+
 func TestCheckRejectsBadRepoWithoutNetwork(t *testing.T) {
 	// The contract is ValidateRepo refusing the string, not Check returning
 	// some error. Dropping the check lets the traversal reach the network and
