@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"sync/atomic"
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
@@ -45,14 +46,21 @@ func Raw(s string) string { return s }
 func With(lock, owner string, p Policy, redact func(string) string, fn func() error) (err error) {
 	deadline := time.Now().Add(p.Wait)
 	for {
+		// The token names this acquisition, and the release below removes the
+		// lock only while the file still carries it.
+		token := newToken()
 		f, cerr := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		if cerr == nil {
-			if err := f.Close(); err != nil {
+			_, werr := f.WriteString(token)
+			if closeErr := f.Close(); werr == nil {
+				werr = closeErr
+			}
+			if werr != nil {
 				// A lock file that survives the failed write makes every
 				// later caller report a lock held by no process, so the
 				// failure to clear it rides along with the failure that
 				// left it there.
-				lerr := fmt.Errorf("cannot write the lock %s: %w", redact(lock), err)
+				lerr := fmt.Errorf("cannot write the lock %s: %w", redact(lock), werr)
 				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
 					lerr = errors.Join(lerr,
 						fmt.Errorf("left a lock file at %s that must be deleted: %w", redact(lock), rerr))
@@ -60,6 +68,20 @@ func With(lock, owner string, p Policy, redact func(string) string, fn func() er
 				return lerr
 			}
 			defer func() {
+				// Only while the file is still this acquisition's. The break
+				// below hands the lock to a peer that is inside its own
+				// critical section by then, and an unconditional remove here
+				// deleted that peer's lock instead: the process that broke
+				// the stale lock was still running, so two holders were in
+				// the section at once and the third caller to arrive walked
+				// straight in beside both. That is the read-modify-write race
+				// the lock exists to close, and the host-key store and the
+				// install are both read-modify-writes. A lock whose token has
+				// moved on belongs to someone else and is left alone; the
+				// peer breaks it on its own stale policy.
+				if !lockIs(lock, token) {
+					return
+				}
 				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
 					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w", redact(lock), rerr))
 				}
@@ -101,4 +123,36 @@ func With(lock, owner string, p Policy, redact func(string) string, fn func() er
 		}
 		time.Sleep(p.Poll)
 	}
+}
+
+// newToken names one acquisition of the lock. The process id says which
+// process holds it, and the counter says which of its acquisitions, so a
+// process that takes the lock twice in a row never writes the same token
+// twice: a holder comparing its own token against the file cannot mistake a
+// re-acquisition for the one it is releasing.
+//
+// The value is diagnostic. Nothing parses it, and a lock whose file cannot be
+// read is treated as held by someone else rather than as free, so a token
+// nobody wrote costs a wait and a stale break, not a lost lock.
+func newToken() string {
+	return fmt.Sprintf("toktop-lock %d %d\n", os.Getpid(), nextToken.Add(1))
+}
+
+// nextToken numbers the acquisitions within one process, so two With calls
+// from the same process carry different tokens.
+var nextToken atomic.Uint64
+
+// lockIs reports whether the lock file at path still carries token, which is
+// how a holder tells its own lock from the one a stale break handed to a peer.
+//
+// A file that cannot be read answers false. That is the safe direction: the
+// release then leaves it alone, and the holder reports nothing while the
+// lock ages out and the next caller breaks it, rather than the release
+// unlinking a lock whose owner it cannot identify.
+func lockIs(path, token string) bool {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return false
+	}
+	return string(b) == token
 }
