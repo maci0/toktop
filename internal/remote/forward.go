@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/rand/v2"
 	"net"
 	"strconv"
 	"time"
@@ -141,12 +140,33 @@ func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, err
 // rebuild the pressure that failed them. The floor is a tenth of the wait,
 // which keeps the first retry close to forwardAcceptRetry, where the point is
 // only to keep a port answering as soon as its descriptors come back.
-func acceptBackoff(wait time.Duration) time.Duration {
+//
+// The offset within the range is mixed from the remote port and the failure
+// count rather than drawn from a random source, so a run that fails the same
+// way twice backs off the same way twice. A draw from a global generator made
+// every port's retry schedule unrepeatable: a run captured from one host
+// could not be replayed against another, because the gaps that decided when
+// each forward came back were not a function of anything the run recorded.
+// Two ports still land apart, since the port is half the mix's input.
+func acceptBackoff(wait time.Duration, rport, fails int) time.Duration {
 	lo := wait / 10
 	if lo <= 0 {
 		lo = 1
 	}
-	return lo + time.Duration(rand.Int64N(int64(wait-lo)+1))
+	key := uint64(uint32(rport))<<32 | uint64(uint32(fails))
+	return lo + time.Duration(mixJitter(key, uint64(wait-lo)+1))
+}
+
+// mixJitter is the SplitMix64 finalizer: a bijection on 64 bits in which every
+// input bit reaches the output, so two keys differing in one port or one
+// failure land far apart in the range. Unsigned arithmetic wraps by
+// definition, which is what makes the mix a fixed function of its input on
+// every platform.
+func mixJitter(key, span uint64) uint64 {
+	z := key + 0x9E3779B97F4A7C15
+	z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
+	z = (z ^ (z >> 27)) * 0x94D049BB133111EB
+	return (z ^ (z >> 31)) % span
 }
 
 func (c *Client) relay(l net.Listener, rport int) {
@@ -170,7 +190,7 @@ func (c *Client) relay(l net.Listener, rport int) {
 			}
 			fails++
 			c.auditForwardFailure(rport, err, fails)
-			time.Sleep(acceptBackoff(wait))
+			time.Sleep(acceptBackoff(wait, rport, fails))
 			wait = min(wait*2, forwardAcceptRetryMax)
 			continue
 		}

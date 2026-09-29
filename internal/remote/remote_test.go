@@ -1995,26 +1995,51 @@ func TestAcceptBackoffGrowsJittersAndStaysUnderTheCap(t *testing.T) {
 	// The first retry has to stay near forwardAcceptRetry: the case the pacing
 	// exists for is a descriptor exhaustion that clears on its own, and a port
 	// waiting seconds to answer again is the failure the gap was added to stop.
-	first := acceptBackoff(forwardAcceptRetry)
+	first := acceptBackoff(forwardAcceptRetry, 40000, 1)
 	if first <= 0 || first > forwardAcceptRetry {
 		t.Errorf("acceptBackoff(%v) = %v, want (0, %v]", forwardAcceptRetry, first, forwardAcceptRetry)
 	}
 
-	// Jitter has to actually move the value, or two ports failing on one
-	// system condition retry in lockstep and rebuild the pressure that failed
-	// them. A single draw proves nothing, so look at a run of them.
-	seen := make(map[time.Duration]bool)
-	for range 64 {
-		seen[acceptBackoff(forwardAcceptRetryMax)] = true
-	}
-	if len(seen) < 8 {
-		t.Errorf("acceptBackoff produced %d distinct values in 64 draws, want a spread", len(seen))
+	// The gap is a function of the port and the failure count, so the same
+	// failure twice backs off identically. A draw from a global generator made
+	// every port's retry schedule unrepeatable across runs.
+	if again := acceptBackoff(forwardAcceptRetry, 40000, 1); again != first {
+		t.Errorf("acceptBackoff(%v, 40000, 1) = %v then %v, want the same gap twice", forwardAcceptRetry, first, again)
 	}
 
-	// Every draw stays inside the cap, including at the top of the range where
+	// Jitter has to actually move the value, or two ports failing on one
+	// system condition retry in lockstep and rebuild the pressure that failed
+	// them. A single key proves nothing, so look at a run of ports.
+	seen := make(map[time.Duration]bool)
+	for port := range 64 {
+		seen[acceptBackoff(forwardAcceptRetryMax, 40000+port, 1)] = true
+	}
+	if len(seen) < 8 {
+		t.Errorf("acceptBackoff produced %d distinct values over 64 ports, want a spread", len(seen))
+	}
+
+	// The same run of ports has to produce the same run of gaps, which is the
+	// property the mix is there for.
+	for port := range 64 {
+		if a, b := acceptBackoff(forwardAcceptRetryMax, 40000+port, 1), acceptBackoff(forwardAcceptRetryMax, 40000+port, 1); a != b {
+			t.Fatalf("acceptBackoff(%v, %d, 1) = %v then %v, want the same gap twice", forwardAcceptRetryMax, 40000+port, a, b)
+		}
+	}
+
+	// Successive failures on one port move too, or a port that keeps failing
+	// retries on the same offset every time.
+	fails := make(map[time.Duration]bool)
+	for n := 1; n <= 16; n++ {
+		fails[acceptBackoff(forwardAcceptRetryMax, 40000, n)] = true
+	}
+	if len(fails) < 8 {
+		t.Errorf("acceptBackoff produced %d distinct values over 16 failure counts, want a spread", len(fails))
+	}
+
+	// Every gap stays inside the cap, including at the top of the range where
 	// an off-by-one would push past it.
-	for range 64 {
-		if got := acceptBackoff(forwardAcceptRetryMax); got > forwardAcceptRetryMax {
+	for port := range 64 {
+		if got := acceptBackoff(forwardAcceptRetryMax, 40000+port, 1); got > forwardAcceptRetryMax {
 			t.Fatalf("acceptBackoff(%v) = %v, over the cap", forwardAcceptRetryMax, got)
 		}
 	}
