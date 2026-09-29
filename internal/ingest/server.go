@@ -48,14 +48,38 @@ type Server struct {
 	// newServer; nil on a Server built as a literal, which skips the check.
 	hostGuard func(host string) bool
 	log       *slog.Logger
+	// Body bounds, fixed at construction. They were package vars so a test
+	// could shrink them, which put mutable state on the request path: every
+	// body read and every error string read them while a test wrote them, and
+	// the OpenAPI spec test wrote one against a live server. Per-server fields
+	// written before Serve leave the handler goroutines reading an immutable
+	// value, and a test that wants different bounds builds a different server.
+	// Absolute deadlines, so they stay on the wall clock and not on now.
+	idleTimeout          time.Duration
+	maxEventLifetime     time.Duration
+	bodyIdleTimeout      time.Duration
+	responseWriteTimeout time.Duration
 }
+
+// Body-bound defaults. Protocol limits rather than deployment tunables: a
+// peer that stalls mid-body would otherwise pin an fd and a goroutine until
+// the OS TCP timeout, and IdleTimeout does not apply mid-request. The absolute
+// deadline caps total lifetime; each successful read extends the deadline up
+// to that end, so slow-but-alive NDJSON streams keep working while silent ones
+// are reaped. Tests shrink these per server, not per process.
+const (
+	defaultIdleTimeout   = 2 * time.Minute
+	defaultMaxEventLife  = 10 * time.Minute
+	defaultBodyIdle      = time.Minute
+	defaultResponseWrite = 30 * time.Second
+)
 
 // idleTimeout reaps keep-alive connections that sit between requests. Without
 // it a vanished peer holds an fd and a goroutine for the life of the dashboard.
 // A peer that goes silent mid-body is a different bound: progressBody applies
 // bodyIdleTimeout per read and maxEventLifetime to the stream as a whole. The
 // endpoint is localhost-bound by default but can be exposed via --ingest.
-var idleTimeout = 2 * time.Minute
+const idleTimeout = 2 * time.Minute
 
 // readHeaderTimeout bounds a request's header read. A peer that opens a
 // connection and sends nothing would otherwise hold a goroutine until
@@ -90,6 +114,9 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 		lg = slog.New(slog.DiscardHandler)
 	}
 	s := &Server{rec: rec, now: time.Now, ln: ln, addr: ln.Addr().String(), log: lg}
+	s.maxEventLifetime = defaultMaxEventLife
+	s.bodyIdleTimeout = defaultBodyIdle
+	s.responseWriteTimeout = defaultResponseWrite
 	s.hostGuard = loopbackHostGuard(ln.Addr())
 	s.srv = http.Server{
 		Handler:           s.routes(),
@@ -546,21 +573,10 @@ const maxEventSkew = 2 * time.Minute
 const retryAfterSeconds = 1
 
 // maxEventLifetime and bodyIdleTimeout bound how long one POST may hold the
-// connection. The byte cap above limits volume, not time: a peer that sends
-// headers and then drips bytes (or goes silent mid-body) would otherwise pin
-// an fd and a goroutine apiece until it finishes, and IdleTimeout does not
-// apply mid-request. The absolute deadline caps total lifetime; each
-// successful read extends the deadline up to that end, so slow-but-alive
-// NDJSON streams keep working while silent ones are reaped. Both are vars so
-// tests can shrink them.
-var (
-	maxEventLifetime = 10 * time.Minute
-	bodyIdleTimeout  = time.Minute
-	// responseWriteTimeout bounds writing the status line and tiny JSON
-	// body after the request has been read. Without it a peer that stops
-	// reading pins the handler goroutine until the OS TCP timeout.
-	responseWriteTimeout = 30 * time.Second
-)
+// connection, and responseWriteTimeout how long the answer may take to go
+// out. The byte cap above limits volume, not time. All three are Server
+// fields, defaulted from the constants above at construction, for the reason
+// given there.
 
 // progressBody arms the read deadline before every read: no progress within
 // bodyIdleTimeout, or past the absolute end, surfaces as an i/o timeout from
@@ -571,6 +587,10 @@ type progressBody struct {
 	rc    *http.ResponseController
 	until time.Time
 	last  time.Time // the deadline the read that failed was armed with
+	// idle and life are this server's body bounds, carried in so a 408 names
+	// the ones in force rather than package-level ones that may not be.
+	idle time.Duration
+	life time.Duration
 	// armed records whether a deadline of ours was ever accepted. It is false
 	// on a ResponseWriter that does not support them, and then the i/o
 	// timeout that reaches the decoder is the server's own, not one of the
@@ -589,7 +609,7 @@ func (b *progressBody) arm(deadline time.Time) error {
 }
 
 func (b *progressBody) Read(p []byte) (int, error) {
-	next := time.Now().Add(bodyIdleTimeout)
+	next := time.Now().Add(b.idle)
 	if next.After(b.until) {
 		next = b.until
 	}
@@ -609,9 +629,9 @@ func (b *progressBody) stallReason() string {
 		return "request stalled: the server's read timeout fired, not this endpoint's body limits"
 	}
 	if b.last.Before(b.until) {
-		return fmt.Sprintf("request stalled: no body bytes for %s", bodyIdleTimeout)
+		return fmt.Sprintf("request stalled: no body bytes for %s", b.idle)
 	}
-	return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", maxEventLifetime)
+	return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", b.life)
 }
 
 // handleHealth answers the liveness probe. Plain text like every other
@@ -699,7 +719,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// the way progressBody.armed records whether a read deadline was accepted.
 	var writeArm []any
 	armWrite := func() {
-		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
+		if err := rc.SetWriteDeadline(time.Now().Add(s.responseWriteTimeout)); err != nil {
 			writeArm = []any{"write_deadline_unarmed", logcfg.RedactedField(err.Error(), 256)}
 		} else {
 			writeArm = nil
@@ -728,8 +748,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			append([]any{"in_flight", len(slots), "slot_cap", cap(slots)}, writeArm...)...)
 		return
 	}
-	until := time.Now().Add(maxEventLifetime)
-	progress := &progressBody{ReadCloser: r.Body, rc: rc, until: until}
+	until := time.Now().Add(s.maxEventLifetime)
+	progress := &progressBody{ReadCloser: r.Body, rc: rc, until: until, idle: s.bodyIdleTimeout, life: s.maxEventLifetime}
 	_ = progress.arm(until) // covers reads before the first progress extension
 	r.Body = http.MaxBytesReader(w, progress, maxEventBody)
 	br := bufio.NewReader(r.Body)

@@ -9,10 +9,10 @@ import (
 	"time"
 )
 
-// A panic inside the platform lister must not leave the in-flight sweep flag
-// set. Every later SnapshotAt short-circuits on that flag, so a flag stuck
-// true freezes the engine list at its last values for the life of the process,
-// and the frozen panel reports no error to explain itself.
+// A panic inside the platform lister must not leave the in-flight sweep claim
+// set. Every later SnapshotAt parks on that claim, so one stuck open freezes
+// the engine list at its last values for the life of the process, and the
+// frozen panel reports no error to explain itself.
 func TestPanicInListerReleasesTheSweep(t *testing.T) {
 	orig := platformList
 	t.Cleanup(func() { platformList = orig })
@@ -43,15 +43,15 @@ func TestPanicInListerReleasesTheSweep(t *testing.T) {
 	}()
 
 	// The window is set on the way in, so a second call inside it returns the
-	// cache whether or not the flag was released. Reading the flag says which
+	// cache whether or not the claim was released. Reading the claim says which
 	// of the two short-circuits applied; zeroing s.last then takes the window
 	// out of the way so the lister is reached for real.
 	s.mu.Lock()
-	stillSweeping := s.sweeping
+	stillSweeping := s.sweep != nil
 	s.last = time.Time{}
 	s.mu.Unlock()
 	if stillSweeping {
-		t.Fatal("sweep flag was not released by the panic")
+		t.Fatal("sweep claim was not released by the panic")
 	}
 
 	got := s.SnapshotAt(time.Now())

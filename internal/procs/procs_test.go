@@ -618,9 +618,14 @@ func TestSnapshotDoesNotSweepTwiceAtOnce(t *testing.T) {
 
 	// An hour later, so the refresh window cannot be what holds this caller
 	// off: the in-flight claim is the only thing standing between one sweep
-	// and two.
-	if got := s.SnapshotAt(base.Add(time.Hour)); len(got) != 0 {
-		t.Errorf("mid-sweep caller got %d entries, want the previous (empty) snapshot", len(got))
+	// and two. It waits for that sweep rather than starting its own, so it is
+	// still parked when the check below runs.
+	mid := make(chan []Info, 1)
+	go func() { mid <- s.SnapshotAt(base.Add(time.Hour)) }()
+	select {
+	case got := <-mid:
+		t.Fatalf("mid-sweep caller returned %d entries, want it parked on the claim", len(got))
+	case <-time.After(50 * time.Millisecond):
 	}
 	if n := calls.Load(); n != 1 {
 		t.Fatalf("platformList called %d times, want 1 while a sweep is in flight", n)
@@ -630,6 +635,11 @@ func TestSnapshotDoesNotSweepTwiceAtOnce(t *testing.T) {
 	list := <-done
 	if len(list) != 1 || list[0].Engine != "ollama" {
 		t.Fatalf("snapshot = %+v, want the one ollama process", list)
+	}
+	// The caller that parked on the claim is answered by the sweep it waited
+	// for, not by a snapshot taken a moment earlier.
+	if got := <-mid; len(got) != 1 || got[0].Engine != "ollama" {
+		t.Fatalf("mid-sweep caller got %+v, want the sweep it waited for", got)
 	}
 	// The claim is released on both the success and the error path, so the
 	// sampler keeps listing after a sweep that ran long.

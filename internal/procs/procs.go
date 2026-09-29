@@ -88,12 +88,13 @@ type Sampler struct {
 	prev       map[int]uint64
 	last       time.Time // last poll attempt (for refreshMin throttling)
 	lastSample time.Time // last successful poll (for CPU tick delta dt)
-	// sweeping is set for the duration of the unlocked listing. The refresh
-	// window alone cannot hold a second sweep off: a Windows CIM enumeration
-	// outlasts refreshMin, so every caller arriving past the window started
-	// its own sweep of one process table, and whichever finished last
-	// published the older listing and a lastSample stamped before a newer one.
-	sweeping bool
+	// sweep is non-nil for the duration of the unlocked listing, and closed
+	// when it lands. The refresh window alone cannot hold a second sweep off: a
+	// Windows CIM enumeration outlasts refreshMin, so every caller arriving past
+	// the window started its own sweep of one process table, and whichever
+	// finished last published the older listing and a lastSample stamped
+	// before a newer one.
+	sweep chan struct{}
 
 	// refreshMin throttles expensive OS tooling (PowerShell CIM on Windows
 	// takes seconds); within the window the previous snapshot is returned.
@@ -150,26 +151,53 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 	// on Windows CIM enumeration takes seconds, so holding s.mu across it
 	// pinned every other caller of this sampler for the whole sweep, the
 	// cached fast path included. The throttle is claimed under the lock
-	// instead, together with the in-flight flag, so a caller arriving
-	// mid-sweep gets the previous snapshot rather than a second sweep, and
-	// the tick math below still runs as one critical section.
+	// instead, together with the in-flight channel, so a caller arriving
+	// mid-sweep waits for that sweep rather than starting a second one over the
+	// same process table, and the tick math below still runs as one critical
+	// section. A caller that waited is answered by the sweep it waited for and
+	// does not re-decide: re-deciding would sweep again wherever the refresh
+	// window is zero, which is every platform but Windows.
 	s.mu.Lock()
-	if s.sweeping || (s.refreshMin > 0 && !s.last.IsZero() && core.Age(now, s.last) < s.refreshMin) {
+	if s.sweep != nil {
+		// The wait is bounded. A lister blocked in the kernel on a stalled mount
+		// cannot be cancelled from here, and an unbounded wait pins every caller
+		// of this sampler for as long as it stalls. A caller that gives up reads
+		// the cache the sweep has published so far, which is what a caller
+		// arriving mid-sweep read before, so the bound costs a stale frame
+		// rather than a stalled panel.
+		sweep := s.sweep
+		s.mu.Unlock()
+		timer := time.NewTimer(sweepWait)
+		select {
+		case <-sweep:
+			timer.Stop()
+		case <-timer.C:
+		}
+		s.mu.Lock()
+		out := slices.Clone(s.cached)
+		s.mu.Unlock()
+		return out
+	}
+	if s.refreshMin > 0 && !s.last.IsZero() && core.Age(now, s.last) < s.refreshMin {
 		out := slices.Clone(s.cached)
 		s.mu.Unlock()
 		return out
 	}
 	s.last = now
-	s.sweeping = true
+	done := make(chan struct{})
+	s.sweep = done
 	s.mu.Unlock()
-	// Cleared by defer, not on the normal path: the flag is what every later
-	// caller short-circuits on, so a panic inside the platform lister would
-	// otherwise leave it set and freeze the process panel for the life of the
-	// process, with nothing to say why.
+	// Released by defer, not on the normal path: the claim is what every later
+	// caller parks on, so a panic inside the platform lister would otherwise
+	// pin all of them for the life of the process, with nothing to say why.
+	// Registered before the s.mu defer below, so it runs after that unlock and
+	// can take the lock itself. The channel is closed with the lock released,
+	// so a woken caller never blocks acquiring it.
 	defer func() {
 		s.mu.Lock()
-		s.sweeping = false
+		s.sweep = nil
 		s.mu.Unlock()
+		close(done)
 	}()
 
 	list, err := platformList()
@@ -561,3 +589,9 @@ func MatchEngine(i Info) (engine string, defPort int, ok bool) {
 // defaultSamplerRefresh is set by platform files when OS tooling needs
 // throttling (windows). Zero means every Snapshot call re-lists.
 var defaultSamplerRefresh time.Duration
+
+// sweepWait bounds how long a caller parks on another caller's in-flight
+// listing. Long enough that a normal Windows CIM sweep is waited out rather
+// than duplicated, short enough that a lister wedged in the kernel does not
+// pin the panel.
+const sweepWait = 2 * time.Second

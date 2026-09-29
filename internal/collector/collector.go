@@ -112,8 +112,9 @@ type Collector struct {
 	errFold map[string]foldedErr
 
 	probeMu       sync.Mutex // guards the probe fan-out state below
-	lastProbeWave time.Time  // wave gate: see probeWaveGap
-	probeCursor   int        // rotation offset into the wave's targets: see probeWaveMax
+	probeWG       sync.WaitGroup
+	lastProbeWave time.Time // wave gate: see probeWaveGap
+	probeCursor   int       // rotation offset into the wave's targets: see probeWaveMax
 	probeInflight map[string]bool
 	probeBackoff  map[string]time.Time
 	probeDown     map[string]*probeDownState
@@ -304,6 +305,12 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) error {
 		return errRunInProgress
 	}
 	defer c.releaseRun()
+	// The probe fan-out is joined, not raced, for the same reason the emit loop
+	// is. A generation still in flight would otherwise record its sample and its
+	// audit line after Run returned and released the claim, into a collector a
+	// later run already owns. Cancellation bounds the wait: every generation
+	// reads baseCtx, so probe.Run returns as soon as ctx is done.
+	defer c.probeWG.Wait()
 	procDone := c.startProcPoller(ctx)
 	defer func() { <-procDone }()
 	// Warm the vitals cache before the first emit so that frame is a cache

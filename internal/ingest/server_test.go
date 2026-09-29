@@ -1424,11 +1424,15 @@ func TestIngestClampKeepsCharactersWhole(t *testing.T) {
 // Keep-alive connections idle between requests must be reaped; otherwise
 // vanished peers hold an fd and a goroutine each for the process lifetime.
 func TestIdleKeepAliveConnsReaped(t *testing.T) {
-	old := idleTimeout
-	idleTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { idleTimeout = old })
-
-	s := startIngest(t, &memRecorder{})
+	// net/http copies IdleTimeout into the server it serves on, so the bound
+	// has to be in place before Serve: another server, not a shorter window on
+	// a running one.
+	s, err := newServer("127.0.0.1:0", &memRecorder{}, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.srv.IdleTimeout = 50 * time.Millisecond
+	serveIngest(t, s)
 
 	conn, err := net.Dial("tcp", s.Addr())
 	if err != nil {
@@ -1658,11 +1662,7 @@ func readResponse(t *testing.T, conn net.Conn, within time.Duration) string {
 // A sender that stalls mid-body must not pin the connection: the idle
 // deadline reaps it with a 408 instead of holding fd and goroutine forever.
 func TestIngestReapsStalledBody(t *testing.T) {
-	oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
-	maxEventLifetime, bodyIdleTimeout = time.Minute, 150*time.Millisecond
-	t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
-
-	s := startIngest(t, &memRecorder{})
+	s := startIngestBody(t, &memRecorder{}, time.Minute, 150*time.Millisecond)
 
 	conn := startPost(t, s.Addr())
 	defer conn.Close()
@@ -1679,11 +1679,7 @@ func TestIngestReapsStalledBody(t *testing.T) {
 // guess which one its own client hit.
 func TestIngestStallNamesTheBoundThatBroke(t *testing.T) {
 	t.Run("idle window", func(t *testing.T) {
-		oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
-		maxEventLifetime, bodyIdleTimeout = time.Minute, 150*time.Millisecond
-		t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
-
-		s := startIngest(t, &memRecorder{})
+		s := startIngestBody(t, &memRecorder{}, time.Minute, 150*time.Millisecond)
 		conn := startPost(t, s.Addr())
 		defer conn.Close()
 		sendChunk(t, conn, `{"agent":"slow"`)
@@ -1697,11 +1693,7 @@ func TestIngestStallNamesTheBoundThatBroke(t *testing.T) {
 	})
 
 	t.Run("absolute lifetime", func(t *testing.T) {
-		oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
-		maxEventLifetime, bodyIdleTimeout = 150*time.Millisecond, time.Minute
-		t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
-
-		s := startIngest(t, &memRecorder{})
+		s := startIngestBody(t, &memRecorder{}, 150*time.Millisecond, time.Minute)
 		conn := startPost(t, s.Addr())
 		defer conn.Close()
 		sendChunk(t, conn, `{"agent":"slow"`)
@@ -1715,12 +1707,8 @@ func TestIngestStallNamesTheBoundThatBroke(t *testing.T) {
 // A slow but progressing NDJSON stream stays under the idle deadline and
 // must be accepted in full.
 func TestIngestAcceptsSlowProgressingStream(t *testing.T) {
-	oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
-	maxEventLifetime, bodyIdleTimeout = 30*time.Second, 500*time.Millisecond
-	t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
-
 	rec := &memRecorder{}
-	s := startIngest(t, rec)
+	s := startIngestBody(t, rec, 30*time.Second, 500*time.Millisecond)
 
 	conn := startPost(t, s.Addr())
 	defer conn.Close()
@@ -1742,11 +1730,7 @@ func TestIngestAcceptsSlowProgressingStream(t *testing.T) {
 // Progress alone must not extend a POST forever: past the absolute lifetime
 // the connection is cut even while bytes keep trickling in.
 func TestIngestCutsBodyPastAbsoluteLifetime(t *testing.T) {
-	oldLife, oldIdle := maxEventLifetime, bodyIdleTimeout
-	maxEventLifetime, bodyIdleTimeout = 300*time.Millisecond, time.Minute // idle longer than life
-	t.Cleanup(func() { maxEventLifetime, bodyIdleTimeout = oldLife, oldIdle })
-
-	s := startIngest(t, &memRecorder{})
+	s := startIngestBody(t, &memRecorder{}, 300*time.Millisecond, time.Minute) // idle longer than life
 
 	conn := startPost(t, s.Addr())
 	defer conn.Close()
@@ -1797,6 +1781,21 @@ func startIngestAt(t *testing.T, rec core.AgentRecorder, now time.Time) *Server 
 		t.Fatal(err)
 	}
 	s.SetNow(func() time.Time { return now })
+	return serveIngest(t, s)
+}
+
+// startIngestBody starts a server carrying the body bounds the test needs.
+// The bounds are Server fields fixed before Serve, so a test that shrinks
+// them builds its own server rather than mutating a value the handler
+// goroutines are already reading.
+func startIngestBody(t *testing.T, rec core.AgentRecorder, life, idle time.Duration) *Server {
+	t.Helper()
+	s, err := newServer("127.0.0.1:0", rec, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.maxEventLifetime = life
+	s.bodyIdleTimeout = idle
 	return serveIngest(t, s)
 }
 

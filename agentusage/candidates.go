@@ -247,10 +247,18 @@ func listTranscripts(root string, suffixes []string, cutoff, now time.Time, forc
 		// instant the walk started, not a second clock read, so the listing's age
 		// stays a function of the caller's clock alone.
 		var (
-			files []string
-			fresh = now
+			files  []string
+			fresh  = now
+			walked bool
 		)
 		defer func() {
+			// Only a walk that ran to completion publishes a fresh stamp. A panic
+			// in walkTranscripts arrives here with walked still false, and
+			// publishing then would install an empty listing dated now, which every
+			// other watcher on this root would serve for a whole rescan window.
+			if !walked {
+				fresh = time.Time{}
+			}
 			rootListMu.Lock()
 			rootLists[key] = rootListing{files: files, at: fresh}
 			close(done)
@@ -259,6 +267,7 @@ func listTranscripts(root string, suffixes []string, cutoff, now time.Time, forc
 
 		files, err := walkTranscripts(root, suffixes, cutoff)
 		complete := err == nil
+		walked = true
 		if err != nil {
 			// A walk that could not finish is not an empty store, and caching
 			// its partial result under a fresh stamp would read as one: every

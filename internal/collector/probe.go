@@ -197,7 +197,9 @@ func (c *Collector) ProbeAll() {
 	// wall clock (real I/O), but the sample's At must follow the collector
 	// clock or a frozen/seeded replay would carry a second timeline.
 	for _, t := range live {
+		c.probeWG.Add(1)
 		go func(t probeTarget) {
+			defer c.probeWG.Done()
 			defer func() {
 				c.probeMu.Lock()
 				delete(c.probeInflight, t.key)

@@ -128,15 +128,15 @@ func TestOpenAPIDocumentsEveryAnswerTheServerGives(t *testing.T) {
 	putResp.Body.Close()
 	note(postAnswers, putResp.StatusCode)
 
-	// A body that stops mid-stream: the idle bound reaps it with a 408.
-	oldIdle := bodyIdleTimeout
-	bodyIdleTimeout = 150 * time.Millisecond
-	t.Cleanup(func() { bodyIdleTimeout = oldIdle })
-	conn := startPost(t, s.Addr())
+	// A body that stops mid-stream: the idle bound reaps it with a 408. The
+	// bound is a field of the server that reaps it, so this needs its own
+	// server rather than a shorter window on the one the rest of this test
+	// drives.
+	stall := startIngestBody(t, &memRecorder{}, time.Minute, 150*time.Millisecond)
+	conn := startPost(t, stall.Addr())
 	sendChunk(t, conn, `{"agent":"slow"`)
 	stalled := readResponse(t, conn, 5*time.Second)
 	conn.Close()
-	bodyIdleTimeout = oldIdle
 	if !strings.HasPrefix(stalled, "HTTP/1.1 408") {
 		t.Fatalf("stalled body answer = %q, want 408", stalled)
 	}

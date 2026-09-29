@@ -142,11 +142,17 @@ func agyIndex(root string) (map[string]string, bool) {
 	lastPath := filepath.Join(root, agyLastDir, agyLastFile)
 	hs, ls := agyFileStamp(histPath), agyFileStamp(lastPath)
 	agyHistMu.Lock()
-	defer agyHistMu.Unlock()
 	c := agyHistCache
+	agyHistMu.Unlock()
 	if c.root == root && c.hist == hs && c.last == ls && c.ids != nil {
 		return c.ids, true
 	}
+	// The two loads below read up to agyIndexCap each and can block in the kernel
+	// on a stalled mount. They run with agyHistMu released, so one slow store
+	// cannot stall attribution for every other agy agent in the process. A
+	// concurrent miss on the same root re-reads rather than waits: the cache is
+	// single-entry, and a stamp that changed under us must not be served from a
+	// half-built map.
 	ids := map[string]string{}
 	failed := false
 	if hs.ok {
@@ -175,7 +181,11 @@ func agyIndex(root string) (map[string]string, bool) {
 		return nil, false
 	}
 	if !failed {
+		// ids is published whole and never mutated after this point, so a reader
+		// that takes it under the lock holds the same map forever.
+		agyHistMu.Lock()
 		agyHistCache = agyHist{root: root, hist: hs, last: ls, ids: ids}
+		agyHistMu.Unlock()
 	}
 	return ids, true
 }
