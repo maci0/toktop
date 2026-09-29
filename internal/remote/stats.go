@@ -449,18 +449,17 @@ func trimQuotes(s string) string {
 	return s
 }
 
-// vitalsFieldMax bounds a host-identity string the remote peer chooses. The
-// values come from the peer's /proc/cpuinfo, /etc/os-release and uname -r,
-// and firstLine bounds them by nothing but the line the peer sent: a 5 MB
-// PRETTY_NAME is a 5 MB field in the snapshot, re-sanitized by every renderer
-// on every frame and written whole into --json. ModelNameMax is the same
-// bound the rest of the tree puts on a server-chosen string.
-const vitalsFieldMax = core.ModelNameMax
-
 // vitalsField is the shape a peer-supplied host-identity string takes in this
-// program: one line, terminal-sanitized, and capped at vitalsFieldMax grapheme
-// clusters. The cap counts clusters, so an accented letter or an emoji in a
-// model name is never cut in half.
+// program: one line, terminal-sanitized, and capped at core.ModelNameMax
+// grapheme clusters, the same bound the rest of the tree puts on a
+// server-chosen string. The cap counts clusters, so an accented letter or an
+// emoji in a model name is never cut in half.
+//
+// The cap is load-bearing because firstLine bounds these values by nothing but
+// the line the peer sent: the values come from the peer's /proc/cpuinfo,
+// /etc/os-release and uname -r, and a 5 MB PRETTY_NAME would otherwise be a
+// 5 MB field in the snapshot, re-sanitized by every renderer on every frame
+// and written whole into --json.
 func vitalsField(s string) string {
-	return core.SingleLine(core.TruncateClusters(s, vitalsFieldMax))
+	return core.SingleLine(core.TruncateClusters(s, core.ModelNameMax))
 }

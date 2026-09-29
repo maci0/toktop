@@ -73,8 +73,8 @@ func FuzzProbeResponse(f *testing.F) {
 				return Run(ctx, Request{Kind: kind, Base: srv.URL, Model: "fuzz-model"})
 			}
 			s := run()
-			if n := uniseg.GraphemeClusterCount(s.Model); n > ModelNameMax {
-				t.Fatalf("%s: model id = %d characters, cap %d", kind, n, ModelNameMax)
+			if n := uniseg.GraphemeClusterCount(s.Model); n > core.ModelNameMax {
+				t.Fatalf("%s: model id = %d characters, cap %d", kind, n, core.ModelNameMax)
 			}
 			switch {
 			case s.OK:

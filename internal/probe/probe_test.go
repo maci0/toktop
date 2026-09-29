@@ -47,8 +47,8 @@ func TestSelectModel(t *testing.T) {
 		},
 		{
 			name:   "whole grapheme cap",
-			models: []core.ModelInfo{{Name: " " + strings.Repeat("e\u0301", ModelNameMax+1) + " "}},
-			want:   strings.Repeat("e\u0301", ModelNameMax),
+			models: []core.ModelInfo{{Name: " " + strings.Repeat("e\u0301", core.ModelNameMax+1) + " "}},
+			want:   strings.Repeat("e\u0301", core.ModelNameMax),
 		},
 	}
 	for _, tc := range cases {
@@ -385,11 +385,11 @@ func TestRunCapsModelName(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	huge := strings.Repeat("m", ModelNameMax+64)
+	huge := strings.Repeat("m", core.ModelNameMax+64)
 	Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: huge})
 	name, _ := got["model"].(string)
-	if name != strings.Repeat("m", ModelNameMax) {
-		t.Errorf("model id len = %d, want %d", len(name), ModelNameMax)
+	if name != strings.Repeat("m", core.ModelNameMax) {
+		t.Errorf("model id len = %d, want %d", len(name), core.ModelNameMax)
 	}
 }
 

@@ -590,17 +590,17 @@ func TestPollFailureNamesTheTarget(t *testing.T) {
 // The host-identity strings come off the peer, and firstLine bounds them by
 // nothing but the line the peer sent: a 5 MB PRETTY_NAME would sit in the
 // snapshot, be re-sanitized by every renderer on every frame and be written
-// whole into --json. Each field is capped at vitalsFieldMax clusters, and the
+// whole into --json. Each field is capped at core.ModelNameMax clusters, and the
 // cap counts clusters, so a multi-byte name is cut between characters and an
 // escape sequence cannot survive.
 func TestParseVitalsBoundsPeerSuppliedFields(t *testing.T) {
-	huge := strings.Repeat("z", vitalsFieldMax*3)
+	huge := strings.Repeat("z", core.ModelNameMax*3)
 	var s core.SysSample
 	parseVitals(vitalsDumpFrom(
 		"1.0 1.0 1.0", "", "",
 		huge+"\x1b[31m",
 		`"""`+huge+"\x1b]0;pwned\x07",
-		strings.Repeat("é", vitalsFieldMax)+huge,
+		strings.Repeat("é", core.ModelNameMax)+huge,
 	), &s)
 
 	for _, f := range []struct {
@@ -610,14 +610,14 @@ func TestParseVitalsBoundsPeerSuppliedFields(t *testing.T) {
 		{"OsName", s.OsName},
 		{"Kernel", s.Kernel},
 	} {
-		if n := len([]rune(f.got)); n > vitalsFieldMax {
-			t.Errorf("%s is %d characters, want at most %d", f.name, n, vitalsFieldMax)
+		if n := len([]rune(f.got)); n > core.ModelNameMax {
+			t.Errorf("%s is %d characters, want at most %d", f.name, n, core.ModelNameMax)
 		}
 		if strings.ContainsAny(f.got, "\n\x1b\x07") {
 			t.Errorf("%s kept a control byte: %q", f.name, f.got)
 		}
 	}
-	if s.CPUModel != strings.Repeat("z", vitalsFieldMax) {
-		t.Errorf("CPUModel = %d characters, want the cap %d", len([]rune(s.CPUModel)), vitalsFieldMax)
+	if s.CPUModel != strings.Repeat("z", core.ModelNameMax) {
+		t.Errorf("CPUModel = %d characters, want the cap %d", len([]rune(s.CPUModel)), core.ModelNameMax)
 	}
 }

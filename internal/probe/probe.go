@@ -85,12 +85,6 @@ const probeStreamMax = 128 << 10
 // held for the whole response.
 const probeBufInit = 4 << 10
 
-// ModelNameMax caps the engine-supplied model id interpolated into the
-// generation request. It is core.ModelNameMax, the bound the provider layer
-// already stored ids under, so a name that reached a snapshot is one this
-// request sends unchanged.
-const ModelNameMax = core.ModelNameMax
-
 const promptText = "Count from one to twenty as words."
 
 // retryAfterDefault is the floor for 429/503 backoff. A missing or tiny
@@ -438,9 +432,11 @@ func longest(values ...string) string {
 	return longest
 }
 
-// capModel trims and bounds an engine-supplied model id.
+// capModel trims and bounds an engine-supplied model id at core.ModelNameMax,
+// the bound the provider layer already stored ids under, so a name that
+// reached a snapshot is one the generation request sends unchanged.
 func capModel(name string) string {
-	return core.TruncateClusters(strings.TrimSpace(name), ModelNameMax)
+	return core.TruncateClusters(strings.TrimSpace(name), core.ModelNameMax)
 }
 
 // SelectModel picks the model a probe should measure from what an engine
