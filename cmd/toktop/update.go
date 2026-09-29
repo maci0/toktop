@@ -51,6 +51,35 @@ A failed check or install exits 1, a usage error exits 2, Ctrl+C exits 130.
 	return err
 }
 
+// updateOpts holds what `toktop update` parses, so the subcommand and the
+// generated completion scripts read one set of definitions rather than a list
+// spelled twice.
+type updateOpts struct {
+	check    bool
+	repo     string
+	showHelp bool
+	showVer  bool
+}
+
+// updateFlagSet builds the FlagSet `toktop update` parses.
+//
+// Defining -h/--help as real flags keeps the flag package from treating them
+// as a parse error, so they can land on stdout with exit 0 the way the
+// top-level command's --help does. --version matches the parent.
+func updateFlagSet() (*flag.FlagSet, *updateOpts) {
+	fs := flag.NewFlagSet("toktop update", flag.ContinueOnError)
+	opts := &updateOpts{}
+	fs.BoolVar(&opts.check, "check", false, "report the latest release without installing it")
+	fs.StringVar(&opts.repo, "repo", selfupdate.DefaultRepo, "GitHub repository to fetch releases from (owner/name)")
+	fs.BoolVar(&opts.showHelp, "help", false, "show help and exit")
+	fs.BoolVar(&opts.showHelp, "h", false, "show help and exit")
+	fs.BoolVar(&opts.showVer, "version", false, "print version and exit")
+	fs.BoolVar(&opts.showVer, "v", false, "print version and exit")
+	fs.Usage = func() {}
+	fs.SetOutput(io.Discard)
+	return fs, opts
+}
+
 // runUpdate implements `toktop update`, which replaces this binary with the
 // latest release after verifying its checksum.
 //
@@ -59,19 +88,7 @@ A failed check or install exits 1, a usage error exits 2, Ctrl+C exits 130.
 // in another terminal lands in the session already open. Windows cannot exec
 // over a running image, so the dashboard exits and asks you to start it again.
 func runUpdate(ctx context.Context, out io.Writer, args []string) int {
-	fs := flag.NewFlagSet("toktop update", flag.ContinueOnError)
-	check := fs.Bool("check", false, "report the latest release without installing it")
-	repo := fs.String("repo", selfupdate.DefaultRepo, "GitHub repository to fetch releases from (owner/name)")
-	var showHelp, showVer bool
-	fs.BoolVar(&showHelp, "help", false, "show help and exit")
-	fs.BoolVar(&showHelp, "h", false, "show help and exit")
-	fs.BoolVar(&showVer, "version", false, "print version and exit")
-	fs.BoolVar(&showVer, "v", false, "print version and exit")
-	// Defining -h/--help as real flags keeps the flag package from treating
-	// them as a parse error, so they can land on stdout with exit 0 the way
-	// the top-level command's --help does. --version matches the parent.
-	fs.Usage = func() {}
-	fs.SetOutput(io.Discard)
+	fs, opts := updateFlagSet()
 	if err := fs.Parse(args); err != nil {
 		// Reported here rather than by the package, so the message and the
 		// usage screen under it both use the long flag spelling the help
@@ -83,15 +100,15 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	if fs.NArg() > 0 {
 		return rejectExtra("toktop update", fs.Arg(0))
 	}
-	if showHelp {
+	if opts.showHelp {
 		return outputStatus(updateUsage(out, fs))
 	}
-	if showVer {
+	if opts.showVer {
 		_, err := fmt.Fprintln(out, "toktop", version)
 		return outputStatus(err)
 	}
 
-	if err := selfupdate.ValidateRepo(*repo); err != nil {
+	if err := selfupdate.ValidateRepo(opts.repo); err != nil {
 		// A bad --repo is a usage error, and every other one in this
 		// subcommand names its flag in long form and prints the usage screen
 		// under it. ValidateRepo writes the bare word "repo" because the
@@ -103,11 +120,11 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 
 	warnBlankGitHubToken()
 
-	rel, err := selfupdate.Check(ctx, *repo)
+	rel, err := selfupdate.Check(ctx, opts.repo)
 	if err != nil {
 		return updateErr("cannot check for updates", err)
 	}
-	code, newer := reportRelease(out, os.Stderr, rel, *check)
+	code, newer := reportRelease(out, os.Stderr, rel, opts.check)
 	if code != 0 || !newer {
 		return code
 	}

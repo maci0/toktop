@@ -10,10 +10,10 @@ import (
 )
 
 // The `toktop completion <shell>` subcommand: it prints a shell script that
-// completes toktop's flags, subcommands and ssh:// targets, so the shell and
-// the binary cannot drift apart. Nothing here writes to the filesystem, so
-// installing is the operator's own redirect, the three examples in the
-// subcommand's help are the whole of it.
+// completes toktop's flags and its subcommands, each subcommand with its own
+// flags, so the shell and the binary cannot drift apart. Nothing here writes
+// to the filesystem, so installing is the operator's own redirect, the three
+// examples in the subcommand's help are the whole of it.
 
 // completionShells are the shells a script is published for, in the order the
 // help screen lists them.
@@ -23,9 +23,49 @@ var completionShells = []string{"bash", "zsh", "fish"}
 // them before the first character of a flag is typed.
 var completionSubs = []string{"completion", "help", "update", "version"}
 
-// updateFlags are the flags `toktop update` owns. They live on the subcommand
-// rather than on the top-level FlagSet, so the top-level list cannot name them.
-var updateFlags = []string{"--check", "--help", "--repo", "--version"}
+// plainSubFlags are the flags every subcommand that parses no FlagSet of its
+// own accepts: completion, help and version answer --help and --version and
+// nothing else. Offering them to `update` as well was a usage error waiting
+// to be typed, and offering update's to these was one waiting to be
+// completed.
+var plainSubFlags = []string{"--help", "--version"}
+
+// plainSubFS declares the flags above so takesValue reads them off a real
+// FlagSet rather than a table that has to keep up with the shells.
+var plainSubFS = func() *flag.FlagSet {
+	fs := flag.NewFlagSet("toktop subcommand", flag.ContinueOnError)
+	fs.Bool("help", false, "")
+	fs.Bool("version", false, "")
+	return fs
+}()
+
+// updateFS and updateFlags are the FlagSet `toktop update` parses and the
+// flags on it, read rather than written out here, so a flag added in update.go
+// is completed the day it lands the way a top-level one is. A flag landing
+// only on the top-level list would leave the subcommand's half of the
+// completion stale, which is the drift the help screen rules out.
+var updateFS, _ = updateFlagSet()
+
+// updateFlags is updateFS read out, held beside it so a script does not
+// rebuild the set to name the flags on it.
+var updateFlags = flagNames(updateFS)
+
+// flagNames is every flag in a FlagSet, in its long spelling, in the order a
+// shell offers them. The -h and -v aliases are skipped: the FlagSet carries
+// them as flags of their own, so a flag that took them by name would offer
+// "--h", and a shell completing the prefix "--" does not offer a short
+// spelling anyway.
+func flagNames(fs *flag.FlagSet) []string {
+	var names []string
+	fs.VisitAll(func(f *flag.Flag) {
+		if isFlagAlias(f.Name) {
+			return
+		}
+		names = append(names, "--"+f.Name)
+	})
+	slices.Sort(names)
+	return names
+}
 
 // completionUsage prints the subcommand's help screen to w.
 func completionUsage(w io.Writer) error {
@@ -111,20 +151,25 @@ func completionScript(shell string, flags []string, fs *flag.FlagSet) (string, b
 }
 
 // topFlags is every top-level flag in its long spelling, minus the -h and -v
-// aliases a shell completes as part of their long flag anyway. The list is
-// read from the FlagSet rather than written out here, so a flag added to
-// flags.go is completed the day it lands.
+// aliases a shell does not offer on its own. The list is read from the
+// FlagSet rather than written out here, so a flag added to flags.go is
+// completed the day it lands.
 func topFlags() []string {
 	registerFlags()
-	var names []string
-	topFS.VisitAll(func(f *flag.Flag) {
-		if isFlagAlias(f.Name) {
-			return
-		}
-		names = append(names, "--"+f.Name)
-	})
-	slices.Sort(names)
-	return names
+	return flagNames(topFS)
+}
+
+// subFlags is the flag list for one subcommand, or nil for a word that is not
+// one. Each subcommand's own flags are offered under that subcommand alone, so
+// a completion is never a command line the binary rejects.
+func subFlags(sub string) []string {
+	switch sub {
+	case "update":
+		return updateFlags
+	case "completion", "help", "version":
+		return plainSubFlags
+	}
+	return nil
 }
 
 // pathFlags are the value flags whose value is a filesystem path, so the
@@ -148,23 +193,27 @@ func bashCompletion(fs *flag.FlagSet, flags []string) string {
 	return fmt.Sprintf(`# bash completion for toktop
 # shellcheck disable=SC2207  # compgen output must word-split into COMPREPLY
 _toktop() {
-    local cur prev i
+    local cur prev i subflags
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     local topflags="%s"
     local subs="%s"
+    local plainflags="%s"
     local upflags="%s"
+    subflags=""
     for ((i = 1; i < COMP_CWORD; i++)); do
         if [ "$i" -eq 1 ]; then
             case "${COMP_WORDS[i]}" in
-                completion|help|update|version)
-                    case "$cur" in
-                        -*) COMPREPLY=($(compgen -W "$upflags" -- "$cur")) ;;
-                        *) COMPREPLY=() ;;
-                    esac
-                    return 0
-                    ;;
+                completion|help|version) subflags="$plainflags" ;;
+                update) subflags="$upflags" ;;
             esac
+            if [ -n "$subflags" ]; then
+                case "$cur" in
+                    -*) COMPREPLY=($(compgen -W "$subflags" -- "$cur")) ;;
+                    *) COMPREPLY=() ;;
+                esac
+                return 0
+            fi
         fi
     done
     case "$prev" in
@@ -178,7 +227,8 @@ _toktop() {
 }
 complete -F _toktop toktop
 `, strings.Join(flags, " "), strings.Join(completionSubs, " "),
-		strings.Join(updateFlags, " "), fileCaseArm(fs, flags, "            COMPREPLY=($(compgen -f -- \"$cur\"))\n"))
+		strings.Join(plainSubFlags, " "), strings.Join(updateFlags, " "),
+		fileCaseArm(fs, flags, "            COMPREPLY=($(compgen -f -- \"$cur\"))\n"))
 }
 
 // fileCaseArm is the `case "$prev"` arm that hands a value to the shell's file
@@ -210,22 +260,26 @@ func zshCompletion(fs *flag.FlagSet, flags []string) string {
 	return fmt.Sprintf(`#compdef toktop
 # zsh completion for toktop
 _toktop() {
-    local -a topflags subs upflags
+    local -a topflags subs plainflags upflags subflags
     topflags=(%s)
     subs=(%s)
+    plainflags=(%s)
     upflags=(%s)
+    subflags=()
     # words[2] rather than CURRENT: a subcommand is only ever the second word,
     # and the flags that follow it are that subcommand's, whatever is being
     # completed. Testing CURRENT instead answered with the top-level flags
     # for every word past the subcommand.
     case ${words[2]} in
-        completion|help|update|version)
-            if [[ ${words[CURRENT]} == -* ]]; then
-                _describe -t flags 'flag' upflags
-            fi
-            return
-            ;;
+        completion|help|version) subflags=($plainflags) ;;
+        update) subflags=($upflags) ;;
     esac
+    if (( ${#subflags} )); then
+        if [[ ${words[CURRENT]} == -* ]]; then
+            _describe -t flags 'flag' subflags
+        fi
+        return
+    fi
     case ${words[CURRENT-1]} in
 %s    esac
     if [[ ${words[CURRENT]} == -* ]]; then
@@ -235,7 +289,7 @@ _toktop() {
     fi
 }
 compdef _toktop toktop
-`, zshList(flags), zshList(completionSubs), zshList(updateFlags), zshFileArm(fs, flags))
+`, zshList(flags), zshList(completionSubs), zshList(plainSubFlags), zshList(updateFlags), zshFileArm(fs, flags))
 }
 
 // zshFileArm is the `case ${words[CURRENT-1]}` arm for a flag whose value is a
@@ -260,25 +314,50 @@ func zshList(words []string) string {
 // fishCompletion uses fish's own `complete`: -r says the flag takes a value
 // and its absence says it takes none, -F that the value is a path, and -f that
 // it is not, which is what keeps fish from offering a file list for every
-// flag the completion defines.
+// flag the completion defines. A top-level flag carries -n __fish_use_subcommand
+// and a subcommand's flags carry -n __fish_seen_subcommand_from <sub>, so
+// `toktop update --<TAB>` offers update's flags and not the top-level ones.
 func fishCompletion(fs *flag.FlagSet, flags []string) string {
 	var b strings.Builder
 	b.WriteString("# fish completion for toktop\n")
 	for _, name := range flags {
-		long := strings.TrimPrefix(name, "--")
-		var spec string
-		switch {
-		case pathFlags[name]:
-			spec = "-l " + long + " -r -F"
-		case takesValue(fs, name):
-			spec = "-l " + long + " -r -f"
-		default:
-			spec = "-l " + long + " -f"
-		}
-		fmt.Fprintf(&b, "complete -c toktop %s\n", spec)
+		fmt.Fprintf(&b, "complete -c toktop %s -n \"__fish_use_subcommand\"\n", fishFlagSpec(fs, name))
 	}
 	for _, sub := range completionSubs {
 		fmt.Fprintf(&b, "complete -c toktop -f -n \"__fish_use_subcommand\" -a %s\n", sub)
 	}
+	for _, sub := range completionSubs {
+		for _, name := range subFlags(sub) {
+			fmt.Fprintf(&b, "complete -c toktop -n \"__fish_seen_subcommand_from %s\" %s\n",
+				sub, fishFlagSpec(subFlagSet(sub), name))
+		}
+	}
 	return b.String()
+}
+
+// fishFlagSpec is the `complete` specification for one flag: its long and short
+// spellings, whether it takes a value, and whether that value is a path.
+func fishFlagSpec(fs *flag.FlagSet, name string) string {
+	spec := ""
+	if long, ok := strings.CutPrefix(name, "--"); ok {
+		spec = "-l " + long
+	} else {
+		spec = "-s " + strings.TrimPrefix(name, "-")
+	}
+	if takesValue(fs, name) {
+		if pathFlags[name] {
+			return spec + " -r -F"
+		}
+		return spec + " -r -f"
+	}
+	return spec + " -f"
+}
+
+// subFlagSet is the FlagSet a subcommand's flags are read from, so a flag
+// that takes a value is completed as one.
+func subFlagSet(sub string) *flag.FlagSet {
+	if sub == "update" {
+		return updateFS
+	}
+	return plainSubFS
 }
