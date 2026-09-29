@@ -109,6 +109,10 @@ func (m Model) renderSystem() string {
 // given up if the count will not fit beside it: an unaccounted-for reading is
 // the worse of the two losses.
 //
+// The count carries the way out, in the spellings moreTitle uses for the same
+// overflow: the shed segments are shed for want of width, so a wider pane
+// reaches them, and a bare "+N more" reads as readings the tool cannot see.
+//
 // extraHidden counts readings that never became segments at all (the
 // temperature cap), which have to land in the same number as the ones the pack
 // shed, or the row carries two "+N more" a reader cannot tell apart.
@@ -119,15 +123,15 @@ func packSegs(segs []string, w int, extraHidden int) string {
 		return spreadRow(segs)
 	}
 	for kept > 0 {
-		if row := spreadRow(slices.Concat(segs[:kept], []string{
-			dim(fmt.Sprintf("+%d more", hidden)),
-		})); widthOf(row) <= w {
-			return row
+		for _, form := range moreForms(hidden) {
+			if row := spreadRow(slices.Concat(segs[:kept], []string{dim(form)})); widthOf(row) <= w {
+				return row
+			}
 		}
 		kept--
 		hidden++
 	}
-	return dim(fmt.Sprintf("+%d more", hidden))
+	return dim(moreForms(hidden)[1])
 }
 
 // spreadRow joins segs with the strip's separator, for the one place that has

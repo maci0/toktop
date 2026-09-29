@@ -316,7 +316,23 @@ func (m Model) probesBody(w, h int) string {
 		// ellipsis on every narrow dashboard, so the one instruction the empty
 		// panel has was the one thing that could not be read.
 		out.WriteString(dim("press ") + styleInfo.Render("p") + dim(" to probe") + "\n")
-		out.WriteString(dim("quit, --probe N"))
+		// The automatic route spelled as a sentence where the column has room
+		// for one, the way the empty setup card spells the same flags: "quit,
+		// --probe N" alone reads as two unrelated words on a column this narrow.
+		// Longest form first, the first that fits wins.
+		forms := []string{
+			"quit, re-run with --probe N",
+			"re-run with --probe N",
+			"quit, --probe N",
+		}
+		fit := forms[len(forms)-1]
+		for _, form := range forms {
+			if widthOf(form) <= w {
+				fit = form
+				break
+			}
+		}
+		out.WriteString(dim(shorten(fit, w)) + "\n")
 	}
 	return out.String()
 }

@@ -966,6 +966,37 @@ func TestSystemStripCountsShedSegments(t *testing.T) {
 	assertFitsPane(t, "100x40 sys strip", m.renderSystem(), m.w, m.h)
 }
 
+// The host strip drops readings for want of width, so its count names the way
+// out the same way the panel titles do, and sheds the sentence on a row too
+// narrow to carry it.
+func TestSystemStripOverflowNamesTheWayOut(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
+		Sys: &core.SysSample{
+			MemTotal: 32 << 30, MemUsed: 16 << 30,
+			GPUs: []core.GPUDevice{
+				{Vendor: "nvidia", Index: 0, MilliC: 70000, MemTotal: 80 << 30, MemUsed: 40 << 30, PowerW: 297},
+				{Vendor: "nvidia", Index: 1, MilliC: 71000, MemTotal: 80 << 30, MemUsed: 41 << 30, PowerW: 301},
+				{Vendor: "nvidia", Index: 2, MilliC: 72000, MemTotal: 80 << 30, MemUsed: 42 << 30, PowerW: 288},
+				{Vendor: "nvidia", Index: 3, MilliC: 73000, MemTotal: 80 << 30, MemUsed: 43 << 30, PowerW: 290},
+			},
+		},
+	}
+	m.w, m.h, m.ready = 120, 40, true
+	got := strip(m.renderSystem())
+	if !strings.Contains(got, "more (enlarge window)") {
+		t.Errorf("strip = %q, want the overflow count to name the way out", got)
+	}
+	if n := strings.Count(got, "more"); n != 1 {
+		t.Errorf("strip = %q, want one overflow count, got %d", got, n)
+	}
+	m.w = 62
+	if got := strip(m.renderSystem()); !strings.Contains(got, "more") {
+		t.Errorf("strip = %q, want the bare count the narrowest row has room for", got)
+	}
+}
+
 // The timescale toggle lives in the chart title; both modes must show the
 // current one plus a clearly delimited key, not a run-together "←t".
 func TestThroughputTitleAdvertisesTimescaleToggle(t *testing.T) {
@@ -1926,6 +1957,15 @@ func TestProbeEmptyHintsRerunForAuto(t *testing.T) {
 	}
 	if !strings.Contains(out, "quit") || !strings.Contains(out, "--probe") {
 		t.Errorf("empty probes must say --probe needs a re-run:\n%s", out)
+	}
+}
+
+// The same re-run hint as a sentence wherever the column holds one: "quit,
+// --probe N" beside a key hint reads as two unrelated words.
+func TestProbeEmptyHintSpellsTheRerunAsASentence(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	if got := strip(m.probesBody(40, 8)); !strings.Contains(got, "quit, re-run with --probe N") {
+		t.Errorf("empty probes on a 40-cell column = %q, want the full sentence", got)
 	}
 }
 

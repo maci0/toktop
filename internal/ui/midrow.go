@@ -53,13 +53,21 @@ func moreTitle(title string, w, hidden int) string {
 	if hidden <= 0 {
 		return title
 	}
-	for _, form := range []string{
-		fmt.Sprintf("+%d more (enlarge window)", hidden),
-		fmt.Sprintf("+%d more", hidden),
-	} {
+	for _, form := range moreForms(hidden) {
 		if lipgloss.Width(title)+lipgloss.Width(form)+2 <= w {
 			return title + "  " + dim(form)
 		}
 	}
 	return title
+}
+
+// moreForms is the overflow marker's spellings, longest first: the count with
+// the way out, then the count alone. Every row that drops readings takes the
+// first form that fits, so a truncated count names the same next step whether
+// it sits in a panel title or in the host strip.
+func moreForms(hidden int) []string {
+	return []string{
+		fmt.Sprintf("+%d more (enlarge window)", hidden),
+		fmt.Sprintf("+%d more", hidden),
+	}
 }

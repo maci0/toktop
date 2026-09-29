@@ -13,6 +13,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Changed
+
+- The host strip's overflow count now names the way out the panel titles
+  already name it: `+2 more (enlarge window)` where the row has the cells,
+  and the bare count where it does not. A count with no way to reach it
+  reads as readings the tool cannot see.
+- The empty PROBES panel spells the automatic probe route as a sentence
+  where its column has room for one (`quit, re-run with --probe N`),
+  keeping the short `quit, --probe N` for the narrowest dashboard.
+
 ## [0.21.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on
