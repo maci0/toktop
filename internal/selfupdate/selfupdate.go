@@ -262,9 +262,9 @@ func Check(ctx context.Context, repo string) (*Release, error) {
 		// change, and the fix is the one variable the update help screen
 		// already documents for it.
 		if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-			return nil, fmt.Errorf("github returned %s for %s (anonymous rate limit; set $GITHUB_TOKEN to authenticate)", resp.Status, latest)
+			return nil, fmt.Errorf("github returned %s for %s (anonymous rate limit; set $GITHUB_TOKEN to authenticate)", core.HTTPStatus(resp.Status), latest)
 		}
-		return nil, fmt.Errorf("github returned %s for %s", resp.Status, latest)
+		return nil, fmt.Errorf("github returned %s for %s", core.HTTPStatus(resp.Status), latest)
 	}
 	var rel Release
 	if err := json.NewDecoder(io.LimitReader(resp.Body, maxReleaseJSON)).Decode(&rel); err != nil {
@@ -273,6 +273,14 @@ func Check(ctx context.Context, repo string) (*Release, error) {
 	if rel.TagName == "" {
 		return nil, errors.New("release has no tag")
 	}
+	// The tag and the page URL reach the operator's terminal through the
+	// status lines and the --check capture, folded here at the wire so every
+	// consumer inherits it. GitHub's ref rules keep control characters out of
+	// a tag in practice, but the fold is the same one every other string off
+	// the network gets in this tree, and release data is the one that reaches
+	// a terminal least guarded.
+	rel.TagName = core.SingleLine(rel.TagName)
+	rel.HTMLURL = core.SingleLine(rel.HTMLURL)
 	return &rel, nil
 }
 

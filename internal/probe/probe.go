@@ -560,7 +560,7 @@ func postJSON(ctx context.Context, url string, body []byte) (*http.Response, err
 	if resp.StatusCode != http.StatusOK {
 		defer resp.Body.Close()
 		b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
-		msg := fmt.Sprintf("%s: http %s", url, resp.Status)
+		msg := fmt.Sprintf("%s: http %s", url, core.HTTPStatus(resp.Status))
 		if s := core.Snippet(b); s != "" {
 			msg += ": " + s
 		}

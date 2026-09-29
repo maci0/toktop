@@ -68,7 +68,7 @@ var httpClient = &http.Client{Timeout: PollTimeout, CheckRedirect: bearer.CheckR
 
 func httpStatus(url string, resp *http.Response) error {
 	b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
-	msg := fmt.Sprintf("%s: http %s", url, resp.Status)
+	msg := fmt.Sprintf("%s: http %s", url, core.HTTPStatus(resp.Status))
 	if s := core.Snippet(b); s != "" {
 		msg += ": " + s
 	}

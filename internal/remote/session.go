@@ -216,7 +216,12 @@ func stderrTail(s string) string {
 	if s == "" {
 		return ""
 	}
-	s = core.SanitizeText(s)
+	// SingleLine, not SanitizeText: a peer's stderr reaches the operator's
+	// terminal through the connection error, and the newlines it keeps would
+	// let a host the operator chose to watch forge lines that read as
+	// toktop's own. Folding to one line is the same collapse logcfg.Field
+	// applies to every audit line carrying the same text.
+	s = core.SingleLine(s)
 	if s == "" {
 		return ""
 	}

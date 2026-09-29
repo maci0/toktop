@@ -1258,6 +1258,22 @@ func TestStderrTailStripsTerminalInjection(t *testing.T) {
 	}
 }
 
+// A peer's stderr reaches the operator's terminal through the connection
+// error, so the newlines it carries let a host the operator chose to watch
+// forge lines that read as toktop's own. A traceback still has to arrive
+// whole: the fold collapses the line structure, it does not drop the text.
+func TestStderrTailFoldsToOneLine(t *testing.T) {
+	got := stderrTail("Traceback (most recent call last):\n  File \"x.py\", line 1\ntoktop: agent stopped\n")
+	if strings.ContainsAny(got, "\n\r") {
+		t.Errorf("stderrTail left a line break for a peer to forge with: %q", got)
+	}
+	for _, want := range []string{"Traceback", "File \"x.py\"", "toktop: agent stopped"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("stderrTail = %q, want it to keep %q", got, want)
+		}
+	}
+}
+
 // The kernel's ephemeral range overlaps the ports a remote host serves on, so
 // a forward must never hand out a local port that collides with another
 // forward's remote port or with an already-mapped local port.

@@ -533,7 +533,10 @@ func TestTOFUStoresDoNotBlockEachOther(t *testing.T) {
 	// does not have to be tuned to be decisive.
 	time.Sleep(200 * time.Millisecond)
 
-	const freeBudget = 2 * time.Second
+	// The budget is the blocked writer's own give-up, so the assertion stays
+	// the one that matters: a second store must not wait behind the first
+	// one's peer lock. A fixed small budget tested the scheduler rather than
+	// the mutex, and went red under a full-package run with -race.
 	done := make(chan error, 1)
 	go func() { done <- freeCB("free:22", nil, fakePublicKey("free")) }()
 	select {
@@ -541,8 +544,8 @@ func TestTOFUStoresDoNotBlockEachOther(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second store rejected: %v", err)
 		}
-	case <-time.After(freeBudget):
-		t.Fatalf("writing one store blocked a write to another for over %s", freeBudget)
+	case <-time.After(storeLockWait):
+		t.Fatalf("writing one store blocked a write to another for the whole %s peer-lock wait", storeLockWait)
 	}
 	// Release the peer so the parked writer finishes instead of running out
 	// the full storeLockWait after the test has already decided.
@@ -1159,11 +1162,13 @@ func TestReadKnownHostsRejectsDisplacedStoreWithNoRecords(t *testing.T) {
 	}
 }
 
-// Every write leaves a copy of the store beside it, so a store that is then
-// lost, emptied or overwritten by something else is read back from the copy
-// rather than read as "nothing pinned". Without it, one deleted file silently
-// re-trusts every host the operator had ever connected to, which is the one
-// outcome the store exists to prevent.
+// Every write leaves a copy of the store beside it, so a store that a write
+// then failed to put back is read from the copy rather than read as "nothing
+// pinned". Without it, one lost file silently re-trusts every host the
+// operator had ever connected to, which is the one outcome the store exists to
+// prevent. The copy only stands in when a write left its marks behind: an
+// operator who deletes the store on purpose is asking to re-pin, and handing
+// back the backup would undo that.
 func TestReadKnownHostsRecoversBackupStore(t *testing.T) {
 	withKnownHosts(t)
 	path := knownHostsPath()
@@ -1180,10 +1185,14 @@ func TestReadKnownHostsRecoversBackupStore(t *testing.T) {
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
+	// The staging file a write that died between CreateTemp and the rename
+	// leaves behind: the evidence that this store went missing mid-write
+	// rather than by hand.
+	stageInterrupted(t, path)
 
 	store, err := readKnownHosts(path)
 	if err != nil {
-		t.Fatalf("a lost store must be read back from its copy: %v", err)
+		t.Fatalf("a store lost to an interrupted write must be read back from its copy: %v", err)
 	}
 	if store["h:22"] == "" {
 		t.Fatalf("the copied pin was lost: %v", store)
@@ -1433,6 +1442,7 @@ func TestReadKnownHostsRejectsBackupWithNoRecords(t *testing.T) {
 	if err := os.WriteFile(backupPath(path), []byte("\n \n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	stageInterrupted(t, path)
 	_, err := readKnownHosts(path)
 	if err == nil {
 		t.Fatal("readKnownHosts accepted a store copy holding no host records")

@@ -526,9 +526,12 @@ configured. A path, query, or fragment on the URL is rejected rather than
 ignored. Host keys use trust-on-first-use, stored at
 `$XDG_CONFIG_HOME/toktop/known_hosts` (default `~/.config/toktop/known_hosts`);
 a changed key is refused loudly. Every write keeps a copy of the store at
-`known_hosts.bak` beside it, and a store that goes missing, is emptied, or is
-overwritten by something else is read back from that copy rather than re-pinned
-from scratch. `SSH_AUTH_SOCK` selects the
+`known_hosts.bak` beside it, and a store that a write failed to put back is
+read back from that copy rather than re-pinned from scratch. The copy only
+stands in where a write left its marks behind (a staging file, or the
+displaced copy `replaceFile` leaves on Windows), so deleting the store to
+un-pin a host whose key you have checked re-pins it on the next connect
+instead of silently handing the old key back. `SSH_AUTH_SOCK` selects the
 agent; on Windows the OpenSSH named pipe is used when that variable is unset.
 
 ## Keys

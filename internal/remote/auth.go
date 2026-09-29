@@ -75,10 +75,11 @@ func keyFileAuth(path string, required bool) (ssh.AuthMethod, error) {
 // it without asking twice, and remembers why no answer was produced so an
 // aborted prompt surfaces as its real cause instead of a generic auth failure.
 type passwordSource struct {
-	mu    sync.Mutex
-	pw    string
-	asked bool
-	err   error // set when asked but no password could be obtained
+	mu         sync.Mutex
+	pw         string
+	asked      bool
+	challenges int   // keyboard-interactive prompts answered on this connection
+	err        error // set when asked but no password could be obtained
 }
 
 var interactivePassword = func(t Target) (string, error) {
@@ -151,15 +152,42 @@ func (p *passwordSource) get(t Target) (string, error) {
 	return v, nil
 }
 
+// maxKeyboardInteractiveChallenges bounds how many keyboard-interactive
+// prompts one connection may answer. The per-challenge shape is already
+// refused (one non-echoing question), but a host that never satisfies the
+// check can ask that same single question again and again, drawing the cached
+// password from the source on every one of them. Two covers a password plus
+// an OTP; the third is room for a factor the operator has not met yet before
+// the chain stops.
+const maxKeyboardInteractiveChallenges = 3
+
 // authCallbacks turns a passwordSource into the two standard mechanisms so
 // servers preferring either password or keyboard-interactive both work.
 func (p *passwordSource) authCallbacks(t Target) []ssh.AuthMethod {
 	get := func() (string, error) { return p.get(t) }
 	pw := ssh.PasswordCallback(get)
 	ki := ssh.KeyboardInteractive(func(_ string, _ string, questions []string, echos []bool) ([]string, error) {
+		if err := p.claimChallenge(); err != nil {
+			return nil, err
+		}
 		return answerPasswordPrompt(questions, echos, get)
 	})
 	return []ssh.AuthMethod{pw, ki}
+}
+
+// claimChallenge counts one keyboard-interactive prompt against the
+// connection's budget, refusing the one past the cap. Counting separately
+// from the per-challenge shape check is what closes the repeat: a host that
+// asks a single question forever passes every one of them.
+func (p *passwordSource) claimChallenge() error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.challenges >= maxKeyboardInteractiveChallenges {
+		return fmt.Errorf("keyboard-interactive: refusing prompt %d on this connection, at the cap of %d",
+			p.challenges+1, maxKeyboardInteractiveChallenges)
+	}
+	p.challenges++
+	return nil
 }
 
 // agentDialTimeout bounds the wait for the ssh-agent to answer a dial. It is

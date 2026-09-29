@@ -259,13 +259,23 @@ func tofu() (ssh.HostKeyCallback, error) {
 }
 
 // readKnownHosts returns the pins the store holds, reading the store itself
-// and, when it is not there, the two copies written beside it in turn:
+// and, when it is not there *because a write was interrupted*, the two copies
+// written beside it in turn:
 //
 //   - the backup copy, which every write refreshes, so a store lost, emptied
 //     or overwritten by something else is read back rather than read as
 //     "nothing pinned";
 //   - the displaced copy, which replaceFile leaves when a kill lands between
 //     the two renames it makes on Windows.
+//
+// The copies are consulted only where interruptedWrite finds the marks of a
+// write that did not finish. A store that is simply gone is a different state:
+// deleting it is how an operator re-pins a host on purpose, after a key change
+// they have checked, and handing back the backup would silently undo that and
+// pin them to the very key they just rejected. The backup exists on every
+// write, so its presence alone proves nothing; a leftover staging file or a
+// displaced copy is the evidence that this store went missing mid-write rather
+// than by hand.
 //
 // The two copies are read freshest first (copiesByRecency), so a store
 // recovered from whichever one was written last does not lose the pins the
@@ -307,7 +317,11 @@ func tofu() (ssh.HostKeyCallback, error) {
 // one loss the operator repairs by copying a file back, and naming the
 // unbroken one is what turns the refusal into a repair.
 func readKnownHosts(path string) (map[string]string, error) {
-	for _, candidate := range append([]string{path}, copiesByRecency(path)...) {
+	candidates := []string{path}
+	if interruptedWrite(path) {
+		candidates = append(candidates, copiesByRecency(path)...)
+	}
+	for _, candidate := range candidates {
 		b, err := os.ReadFile(candidate)
 		if os.IsNotExist(err) {
 			continue
@@ -512,11 +526,36 @@ func writeKnownHosts(path string, store map[string]string) error {
 	return nil
 }
 
-// restoreStore rewrites a store that is only present under one of the copies
-// beside it. It does nothing when the store is where it belongs, and it takes
-// the cross-process lock rather than the bare in-process mutex, because a peer
-// toktop may be mid-write: a restore that raced one would undo the pin that
-// write had just recorded.
+// interruptedWrite reports whether the store is missing because a write did
+// not finish, which is the only state where the copies beside it stand in for
+// it. A leftover staging file is a write that died between creating the
+// temporary and renaming it over the store; a leftover displaced copy is a
+// Windows replaceFile that died between its two renames. Either one is
+// evidence, and neither can be produced by an operator removing the file, so
+// a store deleted on purpose reads as empty and re-pins on the next connect.
+func interruptedWrite(path string) bool {
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		return false
+	}
+	displaced := filepath.Base(displacedPath(path))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), knownHostsTempPrefix) || e.Name() == displaced {
+			return true
+		}
+	}
+	return false
+}
+
+// restoreStore rewrites a store that an interrupted write left present only
+// under one of the copies beside it. It does nothing when the store is where it
+// belongs, when its absence is deliberate, or when a write left no staging
+// marks (interruptedWrite), and it takes the cross-process lock rather than
+// the bare in-process mutex, because a peer toktop may be mid-write: a restore
+// that raced one would undo the pin that write had just recorded.
 func restoreStore(path string) {
 	// Only a store that is actually gone is worth a lock. Taking one on every
 	// connect would make a dashboard pay a peer's full storeLockWait to learn
@@ -525,8 +564,16 @@ func restoreStore(path string) {
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		return
 	}
+	// A store an operator deleted is a re-pin request, not a loss to repair:
+	// writing the backup back here would re-pin the key they just rejected.
+	if !interruptedWrite(path) {
+		return
+	}
 	err := lockStore(path, func() error {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			return nil
+		}
+		if !interruptedWrite(path) {
 			return nil
 		}
 		mu := storeMutex(path)

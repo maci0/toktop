@@ -105,6 +105,17 @@ func ModelName(s string) string {
 	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
 }
 
+// HTTPStatus folds an http.Response.Status line into text a single cell can
+// carry. The status line is the one part of a hostile engine's answer that
+// reaches a message unfolded: Go reads the reason phrase off the wire and only
+// trims the leading space, so a listener squatting a discovered port can put a
+// tab or a second line in it, and widthOf counts a tab as one cell while the
+// terminal runs it to the next stop. The same fold a body gets through Snippet
+// is what keeps the reason phrase one cell and one row.
+func HTTPStatus(status string) string {
+	return SingleLine(Snippet([]byte(status)))
+}
+
 // Snippet collapses raw bytes to at most SnippetCap characters (grapheme
 // clusters) on one line, cutting between characters so a trailing emoji or
 // accented letter from an engine's body is never sliced in half.
