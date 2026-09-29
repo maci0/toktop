@@ -4,6 +4,7 @@
 package provider
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -172,5 +173,62 @@ func TestFailingPollsReuseConnections(t *testing.T) {
 	}
 	if n := cc.count(); n != 1 {
 		t.Errorf("failing polls opened %d connections, want 1 reused connection", n)
+	}
+}
+
+// TestGetJSONStopsAtCap pins the same bound on the poll path: getJSON decodes
+// one JSON value and then drains, so an engine that answers and keeps the body
+// open must cost the cap, not the caller's timeout.
+func TestGetJSONStopsAtCap(t *testing.T) {
+	done := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"ready":true}`))
+		w.(http.Flusher).Flush()
+		for {
+			select {
+			case <-done:
+				return
+			case <-r.Context().Done():
+				return
+			default:
+			}
+			// As fast as the socket takes it, which is the shape the cap
+			// bounds: an engine answering correctly behind something that
+			// never ends the body.
+			_, _ = w.Write(bytes.Repeat([]byte("x"), 8<<10))
+			w.(http.Flusher).Flush()
+		}
+	}))
+	t.Cleanup(func() {
+		close(done)
+		srv.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var out struct {
+		Ready bool `json:"ready"`
+	}
+	got := make(chan error, 1)
+	start := time.Now()
+	go func() { got <- getJSON(ctx, srv.URL, &out) }()
+	select {
+	case err := <-got:
+		if err != nil {
+			t.Fatalf("getJSON: %v", err)
+		}
+		if !out.Ready {
+			t.Error("getJSON decoded ready=false from the served value")
+		}
+		// The unbounded copy is not a hang: the shared client's timeout ends
+		// it. It is that whole timeout added to every poll of an engine that
+		// answers correctly, so the bound is on the elapsed time and not just
+		// on the call returning.
+		if elapsed := time.Since(start); elapsed > time.Second {
+			t.Errorf("getJSON took %s to drain a tail the cap covers, want the cap not the client timeout", elapsed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("getJSON drained an endless body to the caller's timeout, not the cap")
 	}
 }

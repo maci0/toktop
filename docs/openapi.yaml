@@ -389,7 +389,7 @@ components:
           description: |
             The caller's own key for this event, at most 128 characters. A
             repeat of a key recorded within the last 15 minutes is ignored,
-            while the ledger still holds fewer than 4096 ids. An id past the
+            while the ledger still holds fewer than 7200 ids. An id past the
             cap, or one that is nothing printable, is a 400 naming the field
             rather than a truncated key, because two keys clamped onto one
             stored id would drop the second event as a duplicate. Omitted, a

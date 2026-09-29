@@ -111,8 +111,9 @@ func get(ctx context.Context, c *http.Client, url string) (*http.Response, error
 	return resp, nil
 }
 
-// drainCap bounds the tail drainAndClose throws away so a connection can be
-// reused. The bytes go to io.Discard, so this bounds time rather than memory:
+// drainCap bounds the tail drainAndClose and getJSON throw away so a
+// connection can be reused. The bytes go to io.Discard, so this bounds time
+// rather than memory:
 // an endpoint streaming an endless body would otherwise hold the call on a read
 // that answers nothing. Past the cap the connection is simply not reused, which
 // is what closing an undrained body did anyway.
@@ -145,8 +146,11 @@ func getJSON(ctx context.Context, url string, out any) error {
 	// Decode stops at the end of the JSON value, not at EOF, and net/http
 	// only returns a connection to the idle pool when the body is closed at
 	// EOF. Without the drain every poll pays a fresh dial and leaves a
-	// socket in TIME_WAIT.
-	_, _ = io.Copy(io.Discard, io.MultiReader(dec.Buffered(), resp.Body))
+	// socket in TIME_WAIT. Bounded by the same cap as the discovery drain, and
+	// for the same reason: this copy runs on the poll path, so an engine that
+	// answers and then keeps the body open would otherwise cost every poll
+	// the full client timeout instead of the cap.
+	_, _ = io.Copy(io.Discard, io.LimitReader(io.MultiReader(dec.Buffered(), resp.Body), drainCap))
 	return nil
 }
 

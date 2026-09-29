@@ -351,6 +351,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "t", "T":
+			if m.cfg.Plain {
+				m.setNotice("t: the text report has no chart")
+				return m, nil
+			}
 			if len(m.snap.Providers) == 0 && len(m.snap.Agents) == 0 {
 				m.setNotice("t: no throughput to plot yet")
 				return m, nil
@@ -373,6 +377,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// A focus left on agents stays undoable: the footer names the
 			// engine side while engines remain, and the key keeps working
 			// after they drop, so a can always get back out of a swap.
+			if m.cfg.Plain {
+				m.setNotice("a: the text report shows engines and agents together")
+				return m, nil
+			}
 			if len(m.snap.Providers) == 0 && !m.focusAgents {
 				m.setNotice("a: already on agents; no engines to swap back to")
 				return m, nil

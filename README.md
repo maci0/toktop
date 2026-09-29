@@ -387,14 +387,14 @@ Event fields are all optional; anything omitted gets the default:
 One POST answers `202` with `{"accepted":N,"stored":M}` once every event in
 the stream is decoded, where `accepted` is what the wire carried and
 `stored` is what the retained feed took. A replayed event (an id already
-recorded within the last 15 minutes, and still among the 4096 ids the ledger
+recorded within the last 15 minutes, and still among the 7200 ids the ledger
 holds) decodes fine and stores nothing, so the
 two counts differ
 on a retry after a lost 202. So does an event stamped behind the whole
 retained window: the feed holds the newest 512 events, and one older than all
-of them would be dropped before any consumer read it. `ts` is not clamped
-backwards, so a sender whose clock runs behind sees the gap on the same
-count. The same pair is on the POST's log line.
+of them would be dropped before any consumer read it. A sender whose clock
+runs behind sees the gap on the same count, and the clamp to the arrival
+instant keeps the event in the window rather than refused by it. The same pair is on the POST's log line.
 Other statuses: `400` for malformed JSON, a bad `ts`, a token count outside the
 64-bit range, or an `id` that cannot be stored whole, `408` when a stream
 stalls mid-body (the body names which bound broke: no bytes for a minute, or

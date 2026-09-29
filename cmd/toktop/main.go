@@ -610,8 +610,18 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 	// consumes.
 	w, h := frameColumnsDefault, frameLinesDefault
 	if !plain && !jsonOut {
-		if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil && tw >= frameColumnsMin && th >= frameLinesMin {
-			w, h = min(tw, frameColumnsMax), min(th, frameLinesMax)
+		if tw, th, err := term.GetSize(int(os.Stdout.Fd())); err == nil {
+			// Per dimension, against its own floor: the help promises the
+			// terminal as the default for each of the two, and a window too
+			// short to lay out is no reason to stop reading its width and
+			// render 120 cells into a narrower terminal, where every row
+			// wraps.
+			if tw >= frameColumnsMin {
+				w = min(tw, frameColumnsMax)
+			}
+			if th >= frameLinesMin {
+				h = min(th, frameLinesMax)
+			}
 		}
 		if v, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax); err == nil && set {
 			w = v

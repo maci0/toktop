@@ -25,15 +25,23 @@ func (m Model) canProbe() bool {
 }
 
 // canTimescale: t only changes the throughput chart; the empty setup card has
-// none.
+// none, and the text report is not a chart in any layout.
 func (m Model) canTimescale() bool {
+	if m.cfg.Plain {
+		return false
+	}
 	return len(m.snap.Providers) > 0 || len(m.snap.Agents) > 0
 }
 
 // canSwapFocus: a swaps which side gets the panel estate. Advertised only
 // where it changes something: without engines the agents view is already the
-// view, and the key stays live so a focus left on agents can be undone.
+// view, and the key stays live so a focus left on agents can be undone. The
+// text report carries both halves in one linear document, so there is no
+// estate to swap and the key is not advertised there.
 func (m Model) canSwapFocus() bool {
+	if m.cfg.Plain {
+		return false
+	}
 	return len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents)
 }
 

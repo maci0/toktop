@@ -56,6 +56,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   A section reachable only by scrolling past everything else is a section the
   bar does not describe. The phone view already wrapped the link list to a
   second row, so the sixth label costs no extra line there.
+- A poll of an engine that answers and then keeps its body open no longer
+  costs the full client timeout. The tail drain after a JSON decode was
+  uncapped on the poll path, unlike the discovery drain, so an endpoint that
+  never ends its body turned every poll into a 1.5s request, past the
+  threshold that latches an engine as slow.
+- `toktop --once` in a terminal too short to lay the frame out now reads its
+  width. One short dimension used to discard the terminal size entirely and
+  render the 120-cell fallback into it, wrapping every row, where the help
+  promises the terminal as the default for each of the two.
+- The live `--plain` report no longer advertises the `t` and `a` keys. The
+  text report has no chart to retime and no panels to swap, so both changed
+  nothing on screen, and `a` quietly disarmed `esc` while doing it. Pressing
+  either now says so.
+- The `/v1/events` id ledger holds 7200 keys, which is 15 minutes at the 8 a
+  second the cap is sized for. The README and `docs/openapi.yaml` said 4096
+  in two places, so a sender sizing its retries from the spec was answered
+  with the wrong bound.
 
 ### Security
 
