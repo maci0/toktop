@@ -22,6 +22,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - The empty PROBES panel spells the automatic probe route as a sentence
   where its column has room for one (`quit, re-run with --probe N`),
   keeping the short `quit, --probe N` for the narrowest dashboard.
+- A set-but-blank `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` is named as
+  ignored, rather than as leaving the `--add` endpoints unauthenticated,
+  on the runs where another source (the sibling variable or `--bearer`)
+  supplies the token in force.
 
 ### Fixed
 

@@ -773,8 +773,9 @@ legitimate setup, but it is named at startup: the endpoint authenticates
 nothing, so every reachable peer can post events. Unknown `TOKTOP_*` variables
 are reported at startup, so a typo fails loudly instead of doing nothing
 (`TOKTOP_SCREENSHOT_FONT` is recognized so a developer export is not reported
-as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without `--add` (or set to
-a blank value, which is named as sending no token at all),
+as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without `--add` (or set to a
+blank value, which is named as ignored where another source supplies the
+token and as sending no token at all where none does),
 `$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and `$TOKTOP_LOG_LEVEL` with
 `--demo --no-ingest` (and no `--agents`) are named as unused, matching the flag
 warnings, as is a `GAUNTLET_HOME` that is not an absolute path under `--agents`

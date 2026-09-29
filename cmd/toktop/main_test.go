@@ -2077,6 +2077,8 @@ func TestResolveBearerTrimsBlankValues(t *testing.T) {
 
 // A set-but-blank bearer variable is named where it can take effect: a --add
 // endpoint attached and no --demo, which is the only run that sends a token.
+// The wording follows the token actually in force, so a blank variable another
+// source covered is not reported as leaving the run unauthenticated.
 func TestWarnBlankBearer(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -2086,15 +2088,23 @@ func TestWarnBlankBearer(t *testing.T) {
 		setToktop  bool
 		nAdd       int
 		demo       bool
+		inForce    bool
 		wantStderr []string
+		wantAbsent []string
 	}{
 		{name: "unset passes", nAdd: 1},
-		{name: "a token is silent", omni: "sk", setOmni: true, nAdd: 1},
+		{name: "a token is silent", omni: "sk", setOmni: true, nAdd: 1, inForce: true},
 		{name: "no add endpoint passes", setToktop: true, nAdd: 0},
 		{name: "demo passes", setToktop: true, nAdd: 1, demo: true},
-		{name: "empty is named", setToktop: true, nAdd: 1, wantStderr: []string{"$TOKTOP_BEARER"}},
-		{name: "whitespace is named", omni: " \n", setOmni: true, nAdd: 1, wantStderr: []string{"$OMNIROUTE_API_KEY"}},
-		{name: "both blank are named", setOmni: true, nAdd: 1, setToktop: true, wantStderr: []string{"$OMNIROUTE_API_KEY", "$TOKTOP_BEARER"}},
+		{name: "empty is named", setToktop: true, nAdd: 1, wantStderr: []string{"$TOKTOP_BEARER", "without a token"}},
+		{name: "whitespace is named", omni: " \n", setOmni: true, nAdd: 1, wantStderr: []string{"$OMNIROUTE_API_KEY", "without a token"}},
+		{name: "both blank are named", setOmni: true, nAdd: 1, setToktop: true, wantStderr: []string{"$OMNIROUTE_API_KEY", "TOKTOP_BEARER", "without a token"}},
+		// The two sources the resolver falls through to: the sibling variable
+		// and an explicit --bearer. Both leave the run authenticated, so
+		// claiming it is not would send the operator after a 401 this run
+		// never produces.
+		{name: "blank source under a token from the next one", setOmni: true, nAdd: 1, inForce: true, wantStderr: []string{"$OMNIROUTE_API_KEY", "ignored"}, wantAbsent: []string{"without a token"}},
+		{name: "blank source under a flag token", setToktop: true, nAdd: 1, inForce: true, wantStderr: []string{"$TOKTOP_BEARER", "another source"}, wantAbsent: []string{"without a token"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -2111,10 +2121,15 @@ func TestWarnBlankBearer(t *testing.T) {
 				}
 				t.Setenv(name, map[string]string{"OMNIROUTE_API_KEY": tt.omni, "TOKTOP_BEARER": tt.toktop}[name])
 			}
-			got := captureStderr(t, func() { warnBlankBearer(tt.nAdd, tt.demo) })
+			got := captureStderr(t, func() { warnBlankBearer(tt.nAdd, tt.demo, tt.inForce) })
 			for _, want := range tt.wantStderr {
 				if !strings.Contains(got, want) {
 					t.Errorf("warnBlankBearer() printed %q, want mention of %q", got, want)
+				}
+			}
+			for _, unwanted := range tt.wantAbsent {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("warnBlankBearer() printed %q, want no mention of %q", got, unwanted)
 				}
 			}
 			if len(tt.wantStderr) == 0 && got != "" {

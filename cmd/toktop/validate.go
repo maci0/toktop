@@ -462,13 +462,24 @@ func resolveBearer(flagVal string, flagSet bool) string {
 // the run is authenticated. Blank values are read in precedence order and do
 // not win it: the token falls through to the next source, which is the right
 // resolution, but the variable that was set to nothing is still the mistake.
-func warnBlankBearer(nAdd int, demo bool) {
+//
+// inForce says whether a token is actually installed, so the two cases read
+// differently. A blank variable that another source covered changes nothing
+// about the run, and telling the operator the endpoints are queried without a
+// token sends them after an authentication problem this run does not have. A
+// blank variable that left the run with no token is the mistake, and the 401s
+// it explains arrive with nothing naming the cause.
+func warnBlankBearer(nAdd int, demo, inForce bool) {
 	if demo || nAdd == 0 {
 		return
 	}
 	for _, name := range bearerEnvVars {
 		v, set := os.LookupEnv(name)
 		if !set || strings.TrimSpace(v) != "" {
+			continue
+		}
+		if inForce {
+			fmt.Fprintf(os.Stderr, "toktop: $%s is set but blank; it is ignored, and the token in force comes from another source\n", name)
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "toktop: $%s is set but blank; the --add endpoints are queried without a token\n", name)

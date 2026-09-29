@@ -225,10 +225,15 @@ func runMain() int {
 	// Bearer token for gateways that require API keys (OmniRoute et al).
 	// An explicit --bearer, even empty, wins so "not set" and "set to empty"
 	// stay distinct; otherwise OMNIROUTE_API_KEY then TOKTOP_BEARER.
+	// inForce records whether a token was actually installed, since a token
+	// Set refuses crosses no request and the blank-variable warning below
+	// reports against what the run sends rather than what was offered.
+	inForce := false
 	if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
 		if err := bearer.Set(tok); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v; the engine will be queried unauthenticated\n", err)
 		} else {
+			inForce = true
 			// Only when a token is in force: the cleartext warning is about
 			// the token crossing the network, and a refused one crosses
 			// nothing. Warning anyway trains the operator to read this line
@@ -237,7 +242,7 @@ func runMain() int {
 		}
 	}
 	warnBearerFlag(explicit["bearer"], f.bearer)
-	warnBlankBearer(len(f.adds), f.demo)
+	warnBlankBearer(len(f.adds), f.demo, inForce)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
