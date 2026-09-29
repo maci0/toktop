@@ -61,6 +61,30 @@ connection with an error instead of doing that silently. Deleting the file is
 how you ask for that on purpose, and it must then be verified out of band, as
 any first contact is.
 
+## Reading it back, changing it, deleting it
+
+There is no account and no store to export from, so the three requests a data
+protection law asks for are answered by the same fact rather than by a
+feature:
+
+- **Access.** Everything toktop holds is on the screen or in the report you
+  asked for: `--json` and `--plain` print the whole feed, and the audit log on
+  stderr has every line it wrote. Quitting takes all of it with the process.
+- **Correction.** Nothing a sender posts is read back from a file, so there is
+  no stored copy to correct. A sender whose event names the wrong thing posts
+  the right one; the endpoint keeps a bounded ring, so the wrong one leaves on
+  its own.
+- **Erasure.** The feed, the histories and the counters are in memory and are
+  gone when the process exits. The one file on disk, `known_hosts`, holds ssh
+  public host keys, which identify a machine rather than a person; deleting the
+  file (and its `.bak` and `.displaced` copies beside it) removes them, and
+  `toktop` has no other copy.
+
+A client that pushed events to a dashboard it no longer wants them in has no
+way to take them back out: the endpoint answers no query about what it stored.
+Asking the operator to quit is the erasure, and until then the events are on
+that operator's screen, not on a service's.
+
 ## What is sent, and to whom
 
 - **The endpoints you name.** Requests carry the engine bearer token
@@ -87,7 +111,10 @@ any first contact is.
   note and the `X-Request-Id` among them: a client that names the session file
   or the directory
   it reports on would otherwise put the account that owns the home into
-  whichever field it chose. A note that
+  whichever field it chose. The fold covers both homes a client can name, the
+  one this process runs under and the one the client itself runs under, since
+  every peer posting an event names a path under an account that is not the
+  dashboard's. A note that
   is nothing but a directory gets the same two components a locally
   watched working directory does, with the home folded to `~`; a note
   carrying any other text is stored as sent, with the home folded to `~`.
@@ -138,8 +165,12 @@ with the account, such as
 ## The website
 
 [toktop.ai](../site/worker.js) is one static page. It sets no cookies, runs
-no scripts, loads nothing third-party, and stores nothing. Its server logs
-whatever Cloudflare logs, which is outside this repository.
+no scripts, loads nothing third-party, and stores nothing. The Worker runs with
+Cloudflare's invocation logs off, so no request is recorded with a visitor's IP
+address or user agent; the console lines it writes about its own failures
+carry a ray, a method and a path instead, never the client. That setting is in
+[site/wrangler.jsonc](../site/wrangler.jsonc), and Cloudflare keeps whatever
+its own edge logs, which is outside this repository.
 
 ## Reporting a problem
 

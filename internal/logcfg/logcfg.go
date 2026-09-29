@@ -130,8 +130,9 @@ func (s *SwapLogger) Set(fn func() *slog.Logger) {
 // Only the top level is folded. A group attribute's members are not walked:
 // nothing in this tree logs one, and a fold that missed a nested value would
 // be worse than one documented as covering the top level. Attributes bound
-// with WithAttrs before the wrap are likewise not reached, since the inner
-// handler owns them by then.
+// with WithAttrs are folded as they are bound, which is the only point that
+// reaches them: the inner handler owns them from then on and Handle never sees
+// them.
 type HomeHandler struct {
 	slog.Handler
 }
@@ -159,12 +160,9 @@ func (h HomeHandler) Handle(ctx context.Context, r slog.Record) error {
 	// Every attribute is collected, not only the ones from the first fold on:
 	// the rebuilt record is all the inner handler ever sees, and an attribute
 	// left out of it is dropped rather than passed through.
-	folded := make([]slog.Attr, 0, 8)
+	attrs := make([]slog.Attr, 0, 8)
 	r.Attrs(func(a slog.Attr) bool {
-		if a.Value.Kind() == slog.KindString {
-			a.Value = slog.StringValue(core.RedactHome(a.Value.String()))
-		}
-		folded = append(folded, a)
+		attrs = append(attrs, a)
 		return true
 	})
 	// slog.Record hands out its attributes one at a time and offers no way to
@@ -172,13 +170,33 @@ func (h HomeHandler) Handle(ctx context.Context, r slog.Record) error {
 	// message, the time, the level and the call site all carry over, and the
 	// inner handler never sees the home directory.
 	out := slog.NewRecord(r.Time, r.Level, msg, r.PC)
-	out.AddAttrs(folded...)
+	out.AddAttrs(foldHomeAttrs(attrs)...)
 	return h.Handler.Handle(ctx, out)
 }
 
-// WithAttrs implements slog.Handler.
+// foldHomeAttrs rewrites the home directory in the string attributes of a
+// record or of a WithAttrs call, and copies the slice it is given so a
+// caller's own attributes are never written through. A non-string attribute is
+// carried over untouched: a group is the one value this does not walk, and a
+// number, a duration or a time hold no path.
+func foldHomeAttrs(attrs []slog.Attr) []slog.Attr {
+	folded := make([]slog.Attr, len(attrs))
+	for i, a := range attrs {
+		if a.Value.Kind() == slog.KindString {
+			a.Value = slog.StringValue(core.RedactHome(a.Value.String()))
+		}
+		folded[i] = a
+	}
+	return folded
+}
+
+// WithAttrs implements slog.Handler. The attributes are folded before the
+// inner handler takes them, because that is the last point at which this one
+// still sees them: a logger built by Logger().With("path", ...) writes that
+// value into every line it logs, and an unfolded one names the account for as
+// long as the log is kept.
 func (h HomeHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
-	return HomeHandler{Handler: h.Handler.WithAttrs(attrs)}
+	return HomeHandler{Handler: h.Handler.WithAttrs(foldHomeAttrs(attrs))}
 }
 
 // WithGroup implements slog.Handler.

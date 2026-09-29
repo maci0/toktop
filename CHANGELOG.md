@@ -106,6 +106,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Security
 
+- Every free-form field on `POST /v1/events` now folds the home of whichever
+  account a path names, not only the one this process runs as. The fold the
+  ingest endpoint already did covers `$HOME`, which is the client's account
+  only when the client is this process: a peer posting an event reports on a
+  path under a home of its own, and the note, the id, the model and the engine
+  were keeping that account in the feed, the dashboard and the `--json` report.
+  A `/home/<user>`, `/Users/<user>`, `/var/home/<user>`, `/export/home/<user>`,
+  `/nfs/home/<user>`, `/srv/homes/<user>` or `<drive>:\Users\<user>` component
+  in any of them becomes `~` on the way in, in any case. An audit line for a
+  recovered panic is folded the same way, and an attribute bound with
+  `slog.Logger.With` is folded when it is bound, which the audit handler could
+  not do afterwards.
+
 - A release download now refuses a port other than https's own. The GitHub
   host allowlist matched the host alone, and `Hostname()` drops the port, so a
   `browser_download_url` naming `https://github.com:8443/...` passed a check

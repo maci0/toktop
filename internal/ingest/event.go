@@ -61,9 +61,9 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// session file it is reporting on writes the account that owns $HOME into
 	// whichever field it chose. They reach the feed, the live dashboard and
 	// the --once --plain report exactly as the note does.
-	ev.Agent = core.AgentNameField(core.RedactHome(ev.Agent))
-	ev.Model = core.ClampField(core.SingleLine(core.RedactHome(ev.Model)), core.AgentModelMax)
-	ev.ViaEngine = core.ClampField(core.SingleLine(core.RedactHome(ev.ViaEngine)), core.AgentViaMax)
+	ev.Agent = core.AgentNameField(foldSenderHome(ev.Agent))
+	ev.Model = core.ClampField(core.SingleLine(foldSenderHome(ev.Model)), core.AgentModelMax)
+	ev.ViaEngine = core.ClampField(core.SingleLine(foldSenderHome(ev.ViaEngine)), core.AgentViaMax)
 	// Free-form fields are capped so one giant event cannot dominate the
 	// retained feed, and the note gets the same treatment a locally watched
 	// working directory gets (core.ShortDir): a note naming a working
@@ -80,7 +80,7 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// passes over a megabyte and the endpoint is unauthenticated. The retained
 	// value is the same either way: a path is shortened to two components,
 	// well under AgentNoteMax.
-	ev.Note = shortNote(core.ClampField(core.RedactHome(core.SingleLine(ev.Note)), core.AgentNoteMax))
+	ev.Note = shortNote(core.ClampField(foldSenderHome(core.SingleLine(ev.Note)), core.AgentNoteMax))
 	// Token counts are unsigned quantities; negative or absurd values
 	// are junk from a misbehaving sender and must not enter the
 	// retained feed (summing MaxInt64 across events wraps the totals).
@@ -100,12 +100,28 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 		// three fields above: an unrecognized kind is sender-shaped text, and
 		// a sender that spells one with a path would otherwise store the
 		// account that owns $HOME in the column the feed renders it in.
-		ev.Kind = core.ClampField(core.SingleLine(core.FoldASCII(core.RedactHome(ev.Kind))), core.AgentKindMax)
+		ev.Kind = core.ClampField(core.SingleLine(core.FoldASCII(foldSenderHome(ev.Kind))), core.AgentKindMax)
 	}
 	if ev.Kind == "" {
 		ev.Kind = core.AgentKindTurn
 	}
 	return ev, nil
+}
+
+// foldSenderHome folds every home directory a sender-shaped string can carry:
+// the one this process runs under, and the one the sender that wrote it runs
+// under. core.RedactHome alone reaches only the first, and the second is the
+// one that names a person whenever the client posting an event is another
+// host or another account, which is the normal case for the peers this
+// endpoint exists to aggregate. The local fold runs first because it is exact
+// and cheap; the account read off the path is what is left over after it.
+//
+// Every free-form field that reaches the feed, the dashboard or a report goes
+// through here, and so does the request id echoed in an answer header and the
+// panic payload logged on the way out: all of them carry sender text, and all
+// of them outlive the request.
+func foldSenderHome(s string) string {
+	return core.RedactAnyUserHome(core.RedactHome(s))
 }
 
 // shortNote reduces a note that is nothing but a working directory to the
@@ -160,7 +176,7 @@ func wireEventID(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	line := core.RedactHome(core.SingleLine(raw))
+	line := foldSenderHome(core.SingleLine(raw))
 	// Clusters, not bytes or runes: the cap is a display cap the feed applies
 	// in clusters, so an id of 129 flags is over it and an id of 129 bytes of
 	// a two-byte rune is not.

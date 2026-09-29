@@ -128,6 +128,109 @@ func RedactUserHome(user, msg string) string {
 	return scan
 }
 
+// RedactAnyUserHome rewrites every home directory in msg to "~", whichever
+// account owns it. RedactHome folds the account toktop runs as and
+// RedactUserHome folds one account the caller already knows the name of, and
+// neither reaches the text here: a field a client posts carries the account
+// the client runs as, which is this one only when the client is this process.
+// That text reaches the feed, the live dashboard and the --json report, which
+// are redirected into files and pasted into issues, with the account name in
+// whichever field the sender chose.
+//
+// The account is read off the path rather than supplied, so a home the local
+// account's is not a prefix of still folds. Case and Unicode normalization
+// fold for the same reason RedactUserHome folds them: the platform the path
+// was written on is not knowable from here.
+func RedactAnyUserHome(msg string) string {
+	if msg == "" {
+		return msg
+	}
+	scan := normalizeSpelling(msg)
+	for _, prefix := range userHomePrefixes {
+		scan = foldAnyHomePrefix(scan, prefix)
+	}
+	return scan
+}
+
+// maxAccountNameLen is the longest name read as an account. POSIX caps a
+// login name at 32 characters and no system toktop runs on exceeds a hundred,
+// so a longer run is a file name in a directory that happens to be spelled
+// "home", and folding it would replace a readable path with a bare "~".
+const maxAccountNameLen = 100
+
+// foldAnyHomePrefix rewrites every home in msg that one prefix introduces to
+// "~", the account being the single component that follows the prefix. The
+// prefix alone does not fold: what follows it decides whether the text names
+// an account (a name, folded) or a file in a directory that happens to be
+// spelled "home" (no name, or a hidden one, copied through).
+func foldAnyHomePrefix(msg, prefix string) string {
+	var b strings.Builder
+	for {
+		at, n, ok := indexFold(msg, prefix)
+		if !ok {
+			b.WriteString(msg)
+			return b.String()
+		}
+		name, boundary := "", false
+		if homeNameStartsAt(msg, at) {
+			name, boundary = accountName(msg[at+n:])
+		}
+		if !boundary {
+			// Not a home: "x/home/me" is a file called "me" in a directory
+			// called "x", and "/home/README" is a file. Copy the matched
+			// bytes rather than the pattern, which folds to them, and resume
+			// after them so the same text is not matched again.
+			b.WriteString(msg[:at+n])
+			msg = msg[at+n:]
+			continue
+		}
+		b.WriteString(msg[:volumeStart(msg, at)])
+		b.WriteByte('~')
+		msg = msg[at+n+len(name):]
+	}
+}
+
+// homeNameStartsAt reports whether the text before the matched prefix ends it,
+// so a prefix is read as a directory boundary only where a path or a sentence
+// puts one. A letter, digit, dot, dash or underscore ahead of it means the
+// prefix is the tail of a longer name.
+func homeNameStartsAt(msg string, at int) bool {
+	if at == 0 {
+		return true
+	}
+	r, _ := utf8.DecodeLastRuneInString(msg[:at])
+	return !(r == '.' || r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r))
+}
+
+// accountName returns the one path component msg begins with, when it is
+// spelled like a login name, and whether there was one. A name carrying a
+// separator is a prefix's worth of text this cannot judge; a name starting
+// with a dot is a hidden directory, which no account is; a name with a space
+// or any other character outside the set a login name is built from is a file.
+//
+// A file sitting directly in such a directory is spelled like a login name and
+// folds with it: "/home/README.md" and "/home/asmith" are the same text to a
+// reader that cannot see the file system, and the account is the one that must
+// not survive.
+func accountName(msg string) (name string, ok bool) {
+	end := 0
+	for end < len(msg) {
+		r, w := utf8.DecodeRuneInString(msg[end:])
+		if r == '/' || r == '\\' {
+			break
+		}
+		if r != '.' && r != '-' && r != '_' && !unicode.IsLetter(r) && !unicode.IsDigit(r) {
+			return "", false
+		}
+		end += w
+	}
+	name = msg[:end]
+	if name == "" || name[0] == '.' || len(name) > maxAccountNameLen {
+		return "", false
+	}
+	return name, true
+}
+
 // foldUserHomePrefix rewrites every occurrence of home in msg that the
 // account ends, leaving the ones it only starts: "/home/me" hides
 // "/home/mem" and "/home/me-too", which are other accounts.

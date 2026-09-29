@@ -125,10 +125,13 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			// a panic raised while holding one carries whatever the sender
 			// wrote, and a stack frame names the file and line it unwound
 			// through. Folding both is what keeps an account name out of a log
-			// line that a bug report would carry with it.
+			// line that a bug report would carry with it. The fold is the
+			// sender's, not the local one: a frame is a path on the machine
+			// that built the binary, and the recovered value is whatever
+			// account the poster named.
 			s.logRequest(r, state.id, http.StatusInternalServerError, state.accepted, state.stored, time.Since(start),
-				core.RedactHome(core.Snippet([]byte(fmt.Sprintf("panic: %v", recov)))),
-				"stack", logcfg.Field(core.RedactHome(string(debug.Stack())), 2048))
+				foldSenderHome(core.Snippet([]byte(fmt.Sprintf("panic: %v", recov)))),
+				"stack", logcfg.Field(foldSenderHome(string(debug.Stack())), 2048))
 			http.Error(w, "internal error", http.StatusInternalServerError)
 		}()
 
@@ -185,7 +188,7 @@ func (s *Server) incomingRequestID(r *http.Request) string {
 	// header and written to the audit line, which outlives the run. The
 	// event id from the same sender is folded for the same reason
 	// (eventFromWire).
-	if v := logcfg.Field(core.RedactHome(r.Header.Get("X-Request-Id")), maxRequestID); v != "" {
+	if v := logcfg.Field(foldSenderHome(r.Header.Get("X-Request-Id")), maxRequestID); v != "" {
 		return v
 	}
 	return fmt.Sprintf("toktop-%012d", s.reqSeq.Add(1))

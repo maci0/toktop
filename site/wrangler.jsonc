@@ -20,5 +20,15 @@
     { "pattern": "toktop.ai", "custom_domain": true },
     { "pattern": "www.toktop.ai", "custom_domain": true }
   ],
-  "observability": { "enabled": true }
+  // Invocation logs off. With them on, Workers Logs records every request
+  // with the visitor's IP address and user agent, which is the only personal
+  // data this project collects and the one line the site never needed: the
+  // Worker reports nothing back, so a request log says only that a request
+  // worked. The console lines the Worker writes about its own failures stay,
+  // and they carry a ray, a method and a path rather than the client. This is
+  // what docs/PRIVACY.md and site/README.md describe.
+  "observability": {
+    "enabled": true,
+    "logs": { "enabled": true, "invocation_logs": false }
+  }
 }

@@ -205,8 +205,11 @@ has to be added to the page to collect it.
 
 ## Logs
 
-`wrangler.jsonc` turns on Cloudflare Workers observability, so `console.error`
-lands in Workers Logs. The Worker writes one JSON object per line there, and
+`wrangler.jsonc` turns on Cloudflare Workers observability with invocation
+logs off, so `console.error` lands in Workers Logs and a request does not: an
+invocation log records every request with the visitor's IP address and user
+agent, and the site never needed one. The Worker writes one JSON object per
+line there, and
 nothing else: a served page, its 304s and its images are the steady state, and
 a line per visit would bury the few that name a broken deploy.
 

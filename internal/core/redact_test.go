@@ -218,6 +218,49 @@ func TestRedactUserHomeFoldsEveryOccurrence(t *testing.T) {
 	}
 }
 
+// The account is read off the path, so a home naming any login folds without
+// the caller knowing the name, and a path that names no account is left alone.
+// The home is the one a client posts, never the one toktop runs as, so none of
+// these cases set the local home.
+func TestRedactAnyUserHomeFoldsAnyAccount(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"/home/asmith/.bashrc: No such file", "~/.bashrc: No such file"},
+		{"failed in /var/home/bchen/proj", "failed in ~/proj"},
+		{"read /nfs/home/rpatel/x, write /srv/homes/rmora/y", "read ~/x, write ~/y"},
+		{`/Users/dana/bin: access denied`, `~/bin: access denied`},
+		{`C:\Users\eli\bin: access denied`, `~\bin: access denied`},
+		// The peer's platform is not the local one, so the fold does not
+		// depend on the local file system's case rules.
+		{"/home/ASMITH/.bashrc", "~/.bashrc"},
+		{"/export/home/jo/.config/x", "~/.config/x"},
+		{"/srv/engines/model: truncated", "/srv/engines/model: truncated"},
+		{"checksum mismatch", "checksum mismatch"},
+		// A directory that happens to be spelled "home" is not one, and
+		// neither is a file in it: only a component spelled like a login name
+		// is an account.
+		{"x/home/me", "x/home/me"},
+		{"/home/README.md", "~"},
+		{"/home/.config/toktop/x", "/home/.config/toktop/x"},
+		{"/home/my files/x", "/home/my files/x"},
+		{"/home/", "/home/"},
+		// A name longer than any login a system toktop runs on grants is a
+		// file, not an account.
+		{"/home/" + strings.Repeat("n", maxAccountNameLen+1) + ".x", "/home/" + strings.Repeat("n", maxAccountNameLen+1) + ".x"},
+	}
+	for _, c := range cases {
+		if got := RedactAnyUserHome(c.in); got != c.want {
+			t.Errorf("RedactAnyUserHome(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestRedactAnyUserHomeFoldsEveryOccurrence(t *testing.T) {
+	msg := "read /home/asmith/.bashrc, write /home/asmith/.profile"
+	if got := RedactAnyUserHome(msg); strings.Contains(got, "asmith") {
+		t.Errorf("RedactAnyUserHome(%q) = %q, want every occurrence folded", msg, got)
+	}
+}
+
 // absPath builds an absolute path under a fake root, spelled the way this
 // platform spells one. Windows paths need a volume, so "\home\private-user" is
 // drive-relative there and RedactHome rightly leaves it alone; a test that

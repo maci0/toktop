@@ -1654,6 +1654,41 @@ func TestIngestFoldsHomeOutOfEveryFreeTextField(t *testing.T) {
 	}
 }
 
+// The local fold above covers the account this process runs as. A client on
+// another host, or another account on this one, posts paths under a home the
+// local one is not a prefix of, and that account is the one the retained feed,
+// the dashboard and the --json report would otherwise carry. The prefix is
+// spelled forward-slashed on purpose: a sender on any platform writes it that
+// way, and folding it must not depend on the receiver's separator.
+func TestIngestFoldsAnotherAccountsHomeOutOfFreeTextFields(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	body := `{"id":"/home/asmith/.claude/app.jsonl","agent":"coder",` +
+		`"model":"/var/home/bchen/models/qwen","note":"failed in /home/asmith/proj"}`
+	resp := post(t, "http://"+s.Addr()+"/v1/events", body)
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 1)
+	ev := rec.evs[0]
+	for name, got := range map[string]string{
+		"id":    ev.ID,
+		"model": ev.Model,
+		"note":  ev.Note,
+	} {
+		if strings.Contains(got, "asmith") || strings.Contains(got, "bchen") {
+			t.Errorf("%s = %q names the account", name, got)
+		}
+	}
+	if want := "failed in ~/proj"; ev.Note != want {
+		t.Errorf("note = %q, want %q", ev.Note, want)
+	}
+}
+
 // A note that is nothing but a working directory is shortened the way a
 // locally watched one is. Everything above the checkout is where a client's
 // name and a project index sit, and the feed only needs the checkout.

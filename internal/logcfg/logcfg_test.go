@@ -344,6 +344,30 @@ func TestHomeHandlerKeepsAttrsBeforeTheFold(t *testing.T) {
 	}
 }
 
+// An attribute bound with With is written into every line that logger writes,
+// and the inner handler owns it before Handle ever sees it, so the fold has to
+// run where the attribute is bound or the account reaches the audit log
+// verbatim.
+func TestHomeHandlerFoldsHomeInWithAttrs(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // windows
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)}).
+		With("path", filepath.Join(home, "toktop"))
+	lg.Warn("engine not answering", "engine", "ollama")
+	got := buf.String()
+	if strings.Contains(got, home) {
+		t.Fatalf("line kept the home directory: %s", got)
+	}
+	if want := "path=~" + string(filepath.Separator) + "toktop"; !strings.Contains(got, want) {
+		t.Errorf("line lost %q: %s", want, got)
+	}
+	if !strings.Contains(got, "engine=ollama") {
+		t.Errorf("line lost the record's own attribute: %s", got)
+	}
+}
+
 // A record whose attributes carry no path keeps every other value as it was:
 // the fold rewrites a home directory and nothing else.
 func TestHomeHandlerLeavesOtherValuesAlone(t *testing.T) {
