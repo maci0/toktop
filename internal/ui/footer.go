@@ -353,6 +353,12 @@ func (m Model) renderMinimal() string {
 	if m.notice != "" {
 		lines = append(lines, clip(styleWarn.Render(m.notice), m.w))
 	}
+	// The agent feed degrades under this layout too, and there is no AGENT
+	// FEED panel here to carry the reason: the strip is the only place it can
+	// live, and on stderr it is hidden under the alternate screen.
+	if m.feedDown != "" {
+		lines = append(lines, clip(styleBad.Render(shorten(core.SingleLine(m.feedDown), m.w)), m.w))
+	}
 	rates := m.agentRates()
 	if len(m.snap.Providers) == 0 {
 		if len(rates) == 0 {

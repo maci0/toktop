@@ -313,11 +313,20 @@ const HTML = htmlForWire(`<!doctype html>
   section { scroll-margin-top: 4rem; }
   /* A phone is one screen wide, so only the wordmark drops a step: the
      section titles stay where the scale puts them, because they are read
-     one at a time and every one of them fits a 360px column at 1.3rem. */
+     one at a time and every one of them fits a 360px column at 1.3rem.
+     The section list wraps there rather than scrolling sideways: at the
+     micro step the five labels need about 285px beside a 71px wordmark,
+     which is more than a 360px phone has, so an overflow-x scroller put
+     the last link past the edge with no scrollbar on a phone to reveal
+     it. A second row of links costs the reader one line of the screen;
+     a section that cannot be reached from the bar costs the whole
+     section. */
   @media (max-width: 640px) {
     body { padding: 0 .85rem 4rem; }
-    .bar { margin: 0 -.85rem; padding-inline: .85rem; gap: .8rem; }
-    nav { gap: .8rem; font-size: var(--fs-micro); overflow-x: auto; }
+    .bar { margin: 0 -.85rem; padding-inline: .85rem; gap: .8rem; row-gap: .25rem;
+      flex-wrap: wrap; }
+    nav { gap: .8rem; row-gap: .15rem; font-size: var(--fs-micro);
+      flex-wrap: wrap; justify-content: flex-end; }
     h1 { font-size: 2rem; }
     .hero { padding-top: 2rem; }
     .grid { grid-template-columns: 1fr; }

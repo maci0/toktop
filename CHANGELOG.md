@@ -34,6 +34,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   fields, so a server built with tighter bounds still held a stalled body for
   the full minute idle window and the full 10 minute stream lifetime, and the
   `408` it finally wrote named those bounds rather than the ones in force.
+- A degraded agent feed names its reason on a frame that still has feed rows.
+  The `✗ feed error` badge said the condition and nothing else, and the reason
+  that says which subsystem to fix exists only on stderr, under the alternate
+  screen. The empty feed and the agents view both printed it; the fleet
+  dashboard and the compact strip now do too.
 - The host-key pin store is no longer left with no copy beside it. A
   `known_hosts.bak` write that failed was warned about once, at the write,
   and a run that never connected again left the store the only record of

@@ -24,8 +24,28 @@ func (m Model) renderFeed() string {
 		statsN = min(len(rows), max(feedIn/2, 1))
 	}
 	var lines []string
+	// The title badge names the condition; this names the subsystem to fix,
+	// and it is otherwise only on stderr, hidden under the alternate screen.
+	// The empty feed and the agents view both print it (feedEmptyLines), and
+	// a fleet frame whose feed is still producing rows printed the badge with
+	// no reason anywhere on screen.
+	if m.feedDown != "" {
+		// SingleLine, as feedEmptyLines renders it: the reason arrives as its
+		// producer's error text, and a newline left in it is a row the
+		// dashboard reads as its own output.
+		lines = append(lines, styleBad.Render(clip(shorten(core.SingleLine(m.feedDown), w), w)))
+	}
+	// The stats take what the reason left and never the last row, so the feed
+	// below them keeps at least one line. statsN is the number actually drawn:
+	// the title counts against it, and a count it was not given is a "+N more"
+	// that names rows nobody can see.
 	if statsN > 0 {
-		lines = append(lines, rows[:statsN]...)
+		if room := feedIn - len(lines); room > 0 {
+			statsN = min(statsN, room)
+			lines = append(lines, rows[:statsN]...)
+		} else {
+			statsN = 0
+		}
 	}
 	rest := feedIn - len(lines)
 	lines = append(lines, feedLines(m.snap.Agents, rest, w)...)

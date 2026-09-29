@@ -1187,6 +1187,44 @@ func TestFeedEmptyStateGuidesByMode(t *testing.T) {
 	}
 }
 
+// A feed that degrades while it still has rows to print used to leave the
+// reader the title badge and nothing else: the reason, which names the
+// subsystem to fix, exists only on stderr under the alternate screen.
+func TestFeedDownNamesItsReasonWhileTheFeedHasRows(t *testing.T) {
+	for _, sz := range [][2]int{{62, 30}, {110, 36}} {
+		w, h := sz[0], sz[1]
+		m := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420"}, nil)
+		m.w, m.h, m.ready, m.clock = w, h, true, time.Now()
+		nm, _ := m.Update(snapMsg(busySnap()))
+		m = nm.(Model)
+		nm, _ = m.Update(feedDownMsg("agent watch: dial 127.0.0.1:9999: refused"))
+		m = nm.(Model)
+		out := strip(m.View())
+		for _, want := range []string{"feed error", "agent watch: dial 127.0.0.1:9999: refused"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%dx%d: degraded feed missing %q:\n%s", w, h, want, out)
+			}
+		}
+		if strings.Contains(out, "POST http://127.0.0.1:8420") {
+			t.Errorf("%dx%d: dead endpoint still advertised:\n%s", w, h, out)
+		}
+		assertFitsPane(t, fmt.Sprintf("%dx%d degraded feed", w, h), m.View(), w, h)
+	}
+	// The compact strip has no feed panel, so the reason has nowhere else to
+	// live on a pane too small for one.
+	m := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420"}, nil)
+	m.w, m.h, m.ready, m.clock = 50, 24, true, time.Now()
+	nm, _ := m.Update(snapMsg(busySnap()))
+	m = nm.(Model)
+	nm, _ = m.Update(feedDownMsg("ingest stopped: http: Server closed"))
+	m = nm.(Model)
+	out := strip(m.View())
+	if !strings.Contains(out, "ingest stopped: http: Server closed") {
+		t.Errorf("compact strip hides the degraded feed reason:\n%s", out)
+	}
+	assertFitsPane(t, "50x24 compact degraded feed", m.View(), 50, 24)
+}
+
 func TestStaticFrameEmptyState(t *testing.T) {
 	out := StaticFrame(Config{Version: "t"}, core.Snapshot{}, 90, 30)
 	plain := strip(out)

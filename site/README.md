@@ -263,10 +263,10 @@ re-captures; the hour bounds how long a returning browser keeps showing the
 previous screenshot, and costs one conditional request on a visit that is
 already past `max-age`.
 Measured
-against the current source with Bun 1.4.2: 13,024 bytes identity / 4,486 gzip /
-3,801 brotli for the HTML, still inside the
-~14 KB initial congestion window. A phone's whole visit is those 3,801 bytes
-plus the 10,577-byte 768w capture, 14,378 bytes in two requests; that pair has
+against the current source with Bun 1.4.2: 13,113 bytes identity / 4,514 gzip /
+3,817 brotli for the HTML, still inside the
+~14 KB initial congestion window. A phone's whole visit is those 3,817 bytes
+plus the 10,577-byte 768w capture, 14,394 bytes in two requests; that pair has
 a ceiling of its own in the same test, next to the per-asset ones, because
 each half can pass its own limit while the visit still gets heavy. The PNG
 original is the one download no
