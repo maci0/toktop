@@ -199,12 +199,11 @@ func (m Model) sectionHeights() (outH, midIn, feedIn int) {
 	feedIn = min(max(int(float64(f)*0.22), 2), 12)
 	midIn = f - outH - feedIn
 	if midIn < 5 { // mid-row panels need room for three detail lines
+		// Only f == 10 lands here (outH 4, feedIn 2, midIn 4), so the
+		// shortfall is one row and outH lands on its own floor of 3: the
+		// feed cannot give up more than it was given.
 		outH -= 5 - midIn
 		midIn = 5
-		if outH < 3 { // charts bottomed out: take the rest from the feed
-			feedIn -= 3 - outH
-			outH = 3
-		}
 	}
 	return outH, midIn, feedIn
 }

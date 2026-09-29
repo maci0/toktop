@@ -200,6 +200,9 @@ const ioAccelRefresh = 2 * time.Second
 // multi-GPU Mac Pros would need device matching that ioreg output does not
 // expose portably, so they keep zeros rather than wrong ones.
 func applyIOAccelStats(ctx context.Context, devs []core.GPUDevice) {
+	if len(devs) == 0 {
+		return
+	}
 	ioAccelMu.Lock()
 	defer ioAccelMu.Unlock()
 	if core.Age(instant(), ioAccelAt) >= ioAccelRefresh {

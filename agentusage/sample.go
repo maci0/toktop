@@ -233,15 +233,29 @@ const (
 // maxSaneTokens bounds one counter a transcript line may contribute. Real
 // usage never approaches it; anything larger is corruption or hostility, and
 // reporting nothing beats displaying a lie (or overflowing the totals).
-const maxSaneTokens = 1 << 40
+const maxSaneTokens int64 = 1 << 40
+
+// maxSaneTokensInt is maxSaneTokens as an int. The ceiling does not fit a 32-bit
+// int, so a 32-bit build saturates at the largest counter its int can hold
+// rather than at a magnitude it cannot express. The bound is compared as a
+// constant and only then converted, since converting the constant itself is
+// the overflow a 32-bit build rejects at compile time.
+func maxSaneTokensInt() int {
+	if maxSaneTokens > math.MaxInt {
+		return math.MaxInt
+	}
+	ceil := maxSaneTokens
+	return int(ceil)
+}
 
 // counter coerces a decoded transcript counter to its contribution: negative
 // or absurd magnitudes read as absent, the same judgment asInt makes for the
 // generic walker. It is generic over the two widths counters arrive in, so
 // both an int from a transcript and an int64 from a database column are
-// checked before any conversion narrows them.
+// checked before any conversion narrows them. The comparison widens to int64
+// rather than converting the ceiling to T, which a 32-bit int cannot hold.
 func counter[T int | int64](n T) T {
-	if n < 0 || n > maxSaneTokens {
+	if n < 0 || int64(n) > maxSaneTokens {
 		return 0
 	}
 	return n
@@ -252,7 +266,7 @@ func counter[T int | int64](n T) T {
 // conversion rather than wrapping.
 func counter64(n int64) int {
 	c := counter(n)
-	if c > math.MaxInt {
+	if c > int64(maxSaneTokensInt()) {
 		return 0
 	}
 	return int(c)
@@ -265,8 +279,8 @@ func counter64(n int64) int {
 // parse back.
 func satAdd(a, b int) int {
 	s := a + b
-	if s < 0 || s > maxSaneTokens {
-		return maxSaneTokens
+	if s < 0 || int64(s) > maxSaneTokens {
+		return maxSaneTokensInt()
 	}
 	return s
 }

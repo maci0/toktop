@@ -229,9 +229,11 @@ func hostInfoLinux(s *core.SysSample) {
 
 // prettyOSName reads PRETTY_NAME from /etc/os-release. The value is unquoted
 // with strconv.Unquote, not strings.Trim(v, `"`): a cutset trim eats every
-// leading and trailing quote, so PRETTY_NAME=""" reads as no name at all. The
-// remote reader of the same file (internal/remote/stats.go trimQuotes) uses
-// the same call, so one file answers the same both ways.
+// leading and trailing quote, so PRETTY_NAME=""" reads as no name at all. A
+// value that is not a Go string literal is returned verbatim rather than
+// half-unwrapped, and the remote reader of the same file
+// (internal/remote/stats.go trimQuotes) applies the same rule, so one file
+// answers the same both ways.
 //
 // The bytes are a distribution's own text, written by its build rather than
 // the kernel, so they cross kernelText like every other vendor-written string

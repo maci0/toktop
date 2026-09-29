@@ -469,18 +469,18 @@ func splitSections(out string) map[string]string {
 }
 
 // trimQuotes strips one layer of matching quotes (PRETTY_NAME style) with
-// strconv.Unquote, and falls back to one quote off each end when the value is
-// not a Go string literal. The local producer of the same field,
-// /etc/os-release's PRETTY_NAME, makes the same call
-// (internal/sysmon/sysmon_linux.go prettyOSName); the two readers are separate
-// because the remote one runs on a value a shell sent and the local one reads
-// the file itself, and neither package may import the other.
+// strconv.Unquote, and returns the value verbatim when it is not a Go string
+// literal. The local reader of the same field, /etc/os-release's PRETTY_NAME
+// (internal/sysmon/sysmon_linux.go parseOSRelease), applies exactly that rule,
+// and a value that is not a Go string literal is the case where a second rule
+// would show the same file two different names: stripping one quote off each
+// end turns PRETTY_NAME=""" into ", where the local panel shows """.
+// The two readers are separate because the remote one runs on a value a shell
+// sent and the local one reads the file itself, and neither package may import
+// the other.
 func trimQuotes(s string) string {
 	if u, err := strconv.Unquote(s); err == nil {
 		return u
-	}
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
 	}
 	return s
 }

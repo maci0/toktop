@@ -163,11 +163,12 @@ func TestSatAddSaturates(t *testing.T) {
 	}
 	// The ceiling is the same one counter enforces on a single record, so a
 	// running total never reports a magnitude this package would reject.
-	if got := satAdd(maxSaneTokens, 4); got != maxSaneTokens {
-		t.Fatalf("satAdd past maxSaneTokens = %d, want %d", got, maxSaneTokens)
+	ceil := maxSaneTokensInt()
+	if got := satAdd(ceil, 4); got != ceil {
+		t.Fatalf("satAdd past maxSaneTokens = %d, want %d", got, ceil)
 	}
-	if got := satAdd(math.MaxInt-1, 2); got != maxSaneTokens {
-		t.Fatalf("satAdd overflow = %d, want %d", got, maxSaneTokens)
+	if got := satAdd(math.MaxInt-1, 2); got != ceil {
+		t.Fatalf("satAdd overflow = %d, want %d", got, ceil)
 	}
 }
 
