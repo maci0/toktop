@@ -64,6 +64,112 @@ func TestJSONReportPublishesEveryListAsAnArray(t *testing.T) {
 	}
 }
 
+// The engines list is the only part of the report a script reads to know what
+// is being measured at all, and the array check above reaches it only on a
+// snapshot with nothing in it, so nothing pinned the fields inside. Every
+// field jsonEngineOf reads has to survive the round trip at its own unit, and
+// the units are where a copy of this map goes wrong: bytes become MiB, and the
+// rates, the KV percentage and the TTFT are passed through unscaled while the
+// memory is not.
+func TestJSONEngineCarriesEveryFieldItReads(t *testing.T) {
+	doc := decodeReport(t, core.Snapshot{
+		At: time.Now(),
+		Providers: []core.ProviderSnapshot{{
+			Label:    "sglang",
+			Kind:     "sglang",
+			Addr:     "127.0.0.1:30000",
+			OK:       true,
+			Version:  "0.4.6",
+			PID:      4242,
+			ProcRSS:  512 << 20, // 512 MiB
+			ProcCPU:  37.5,
+			Models:   []core.ModelInfo{{Name: "qwen3-32b", SizeVRAM: 32 << 30, CtxMax: 40960}},
+			OutTokPS: 12.5,
+			InTokPS:  340.25,
+			Running:  3,
+			Waiting:  1,
+			KVPct:    42.5,
+			TTFTms:   88,
+		}},
+	})
+
+	engines, _ := doc["engines"].([]any)
+	if len(engines) != 1 {
+		t.Fatalf("report carried %d engines, want 1: %v", len(engines), doc)
+	}
+	e := engines[0].(map[string]any)
+	for _, key := range []string{
+		"label", "kind", "addr", "ok", "version", "pid", "proc_cpu_pct",
+		"out_tok_per_s", "in_tok_per_s", "running", "waiting", "kv_cache_pct", "ttft_ms",
+	} {
+		if _, ok := e[key]; !ok {
+			t.Errorf("engine has no %q: %v", key, e)
+		}
+	}
+	// proc_rss_mib is the one scaled field, so a copy of the map that forgets
+	// the division publishes 536870912 where a consumer reads MiB.
+	if got := e["proc_rss_mib"]; got != float64(512) {
+		t.Errorf("proc_rss_mib = %v, want 512", got)
+	}
+	for key, want := range map[string]float64{
+		"proc_cpu_pct": 37.5, "out_tok_per_s": 12.5, "in_tok_per_s": 340.25,
+		"running": 3, "waiting": 1, "kv_cache_pct": 42.5, "ttft_ms": 88, "pid": 4242,
+	} {
+		if got := e[key]; got != want {
+			t.Errorf("%s = %v, want %v", key, got, want)
+		}
+	}
+
+	models, _ := e["models"].([]any)
+	if len(models) != 1 {
+		t.Fatalf("engine carried %d models, want 1: %v", len(models), e)
+	}
+	m := models[0].(map[string]any)
+	if m["name"] != "qwen3-32b" || m["size_vram_bytes"] != float64(32<<30) || m["context_max"] != float64(40960) {
+		t.Errorf("model = %v, want qwen3-32b at 32GiB with a 40960 context", m)
+	}
+}
+
+// A report whose engine rows come off the wire has to be as safe to print as
+// the terminal rendering next to it: the version, the model name, the label
+// and the error string all come from whatever answered on the port, and the
+// escape sequences in them are what a consumer's terminal executes when it
+// cats the report. Sanitizing one and not another is invisible until the one
+// left in does.
+func TestJSONEngineSanitizesAttackerControlledText(t *testing.T) {
+	const esc = "\x1b[31m"
+	doc := decodeReport(t, core.Snapshot{
+		At: time.Now(),
+		Providers: []core.ProviderSnapshot{{
+			Label:   "engine" + esc + "1m",
+			Kind:    "openai",
+			Addr:    "127.0.0.1:1",
+			OK:      false,
+			Err:     "connect failed\n" + esc + "2J" + "\x07",
+			Version: esc + "0.1",
+			Models:  []core.ModelInfo{{Name: "llama\x003"}},
+		}},
+	})
+	e := doc["engines"].([]any)[0].(map[string]any)
+
+	for key, want := range map[string]string{
+		"label":   "engine1m",
+		"kind":    "openai",
+		"addr":    "127.0.0.1:1",
+		"error":   "connect failed\n2J",
+		"version": "0.1",
+	} {
+		got, _ := e[key].(string)
+		if got != want {
+			t.Errorf("%s = %q, want %q", key, got, want)
+		}
+	}
+	model := e["models"].([]any)[0].(map[string]any)
+	if got, _ := model["name"].(string); got != "llama3" {
+		t.Errorf("models[0].name = %q, want llama3", got)
+	}
+}
+
 func TestJSONAgentCarriesTheSpanItsRateUses(t *testing.T) {
 	now := time.Now()
 	snap := core.Snapshot{

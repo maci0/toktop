@@ -1342,6 +1342,96 @@ func TestWaitForFrames(t *testing.T) {
 	})
 }
 
+// The failure feed is what a running dashboard says about a subsystem that
+// stopped, so two things have to hold: the message names the subsystem and
+// reaches the feed, and the goroutine reporting the death never blocks on a
+// dashboard that is not drawing yet. Both halves are pinned here, because the
+// drop is silent and a send that started blocking would wedge the watcher
+// rather than fail a test.
+func TestFeedFailureDeliversAndDropsRatherThanBlocking(t *testing.T) {
+	t.Run("a free feed carries the message and its cause", func(t *testing.T) {
+		feed := make(chan string, 1)
+		feedFailure(feed, "gpu sampler stopped", errors.New("nvidia-smi exited 9"))
+		select {
+		case got := <-feed:
+			if want := "gpu sampler stopped: nvidia-smi exited 9"; got != want {
+				t.Errorf("feed carried %q, want %q", got, want)
+			}
+		default:
+			t.Fatal("the message was not delivered to a free feed")
+		}
+	})
+
+	t.Run("a full feed drops the message instead of blocking", func(t *testing.T) {
+		// A buffer of one already holds a line, so the next send has to take
+		// the default branch. The watchdog calling this must return, and the
+		// oldest message must survive: the newest death is the one the
+		// dashboard has not shown yet.
+		feed := make(chan string, 1)
+		feed <- "earlier"
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			feedFailure(feed, "ingest listener stopped", errors.New("address in use"))
+		}()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("feedFailure blocked on a full feed")
+		}
+		if got := <-feed; got != "earlier" {
+			t.Errorf("feed holds %q, want the message that was already there", got)
+		}
+	})
+}
+
+// reportFailure is feedFailure plus the audit line, and the two halves fail
+// differently: the feed goes to whoever is drawing, and the audit line is the
+// only record of a subsystem's death once the dashboard is up. The level is
+// the caller's, so a line written at info when the operator asked for warnings
+// is a line nobody reads, and the message is prefixed so a toktop line is
+// greppable in a log several processes share.
+//
+// The cause is a path from the host, and the feed has no handler folding it,
+// so redaction there is this call's own to do. It is deliberately not
+// asserted for the audit line: logcfg.HomeHandler folds every record, so an
+// assertion there would pass no matter what this function did with the cause,
+// and a test that cannot fail on the code it names is worse than none.
+func TestReportFailureAuditsAtTheCallersLevelAndStillFeeds(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil || !filepath.IsAbs(home) {
+		t.Skipf("no absolute home directory to fold: %v", err)
+	}
+	leak := filepath.Join(home, ".kimi-code", "sessions", "abc", "wire.jsonl")
+	feed := make(chan string, 1)
+
+	// The logger reads the floor from the environment when it is built, so
+	// the test asks for one that admits a warning rather than trusting the
+	// caller's TOKTOP_LOG_LEVEL to already be low enough.
+	t.Setenv(logcfg.LevelEnv, "debug")
+	audit := captureStderr(t, func() {
+		reportFailure(feed, slog.LevelWarn, "kimi watcher stopped", errors.New("cannot read "+leak))
+	})
+
+	for _, want := range []string{"level=WARN", "toktop: kimi watcher stopped", "kimi watcher stopped"} {
+		if !strings.Contains(audit, want) {
+			t.Errorf("audit line is missing %q: %q", want, audit)
+		}
+	}
+
+	select {
+	case got := <-feed:
+		if strings.Contains(got, home) {
+			t.Errorf("feed message names the account: %q", got)
+		}
+		if !strings.Contains(got, "~"+string(filepath.Separator)+".kimi-code") {
+			t.Errorf("feed message did not fold the home directory: %q", got)
+		}
+	default:
+		t.Fatal("reportFailure delivered nothing to a free feed")
+	}
+}
+
 func TestWarnIgnoredFrameEnv(t *testing.T) {
 	tests := []struct {
 		name    string
