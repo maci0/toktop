@@ -59,27 +59,6 @@ const maxEventSkew = 2 * time.Minute
 // says and ignores the other retries faster than the slots free.
 const retryAfterSeconds = 1
 
-// bodyBounds returns the per-read idle window, the whole-POST lifetime and
-// the response-write bound, each falling back to its default. The fields are
-// the server's own (see Server), read once per request, so a request path
-// never sees a value another goroutine is writing and a test that wants other
-// bounds builds a different server. A Server built as a literal rather than
-// through newServer carries none of them, and a zero lifetime would put the
-// first read's deadline in the past and answer every POST with a 408.
-func (s *Server) bodyBounds() (idle, life, write time.Duration) {
-	idle, life, write = s.bodyIdleTimeout, s.maxEventLifetime, s.responseWriteTimeout
-	if idle <= 0 {
-		idle = defaultBodyIdle
-	}
-	if life <= 0 {
-		life = defaultMaxEventLife
-	}
-	if write <= 0 {
-		write = defaultResponseWrite
-	}
-	return
-}
-
 // progressBody arms the read deadline before every read: no progress within
 // idle, or past the absolute end, surfaces as an i/o timeout from Decode.
 // The bounds travel with the body, read from the server that is handling the
@@ -183,7 +162,6 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// would never come back. Same reason handleHealth binds it, to read len and
 	// cap of one channel.
 	slots := eventSlots
-	idle, life, write := s.bodyBounds()
 	reqID := s.requestID(r)
 	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
 	// keyAttrs is the request's replay key on the audit line, hashed into the
@@ -221,6 +199,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// TCP timeout, and the audit line would still read a clean 202. The
 	// refusal rides the request's own audit line rather than being dropped,
 	// the way progressBody.armed records whether a read deadline was accepted.
+	life, idle, write := s.bodyBounds()
 	var writeArm []any
 	armWrite := func() {
 		if err := rc.SetWriteDeadline(time.Now().Add(write)); err != nil {

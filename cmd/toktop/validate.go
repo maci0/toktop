@@ -358,6 +358,9 @@ func parseOrigin(s string) (time.Time, error) {
 // leading minus is a pre-epoch second and has no date spelling to be confused
 // with, so the width bound is on the unsigned form only.
 func bareUnixSeconds(s string) (int64, bool) {
+	if s == "" {
+		return 0, false
+	}
 	if s[0] == '-' {
 		if secs, err := strconv.ParseInt(s, 10, 64); err == nil {
 			return secs, true

@@ -73,6 +73,25 @@ const (
 	defaultResponseWrite = 30 * time.Second
 )
 
+// bodyBounds are the stream and answer deadlines a request runs under, with
+// the defaults standing in for a Server built as a literal rather than
+// through newServer. A zero here is a deadline already in the past, which
+// would time out the first read and the first write before the peer had sent
+// anything.
+func (s *Server) bodyBounds() (life, idle, write time.Duration) {
+	life, idle, write = s.maxEventLifetime, s.bodyIdleTimeout, s.responseWriteTimeout
+	if life == 0 {
+		life = defaultMaxEventLife
+	}
+	if idle == 0 {
+		idle = defaultBodyIdle
+	}
+	if write == 0 {
+		write = defaultResponseWrite
+	}
+	return life, idle, write
+}
+
 // idleTimeout reaps keep-alive connections that sit between requests. Without
 // it a vanished peer holds an fd and a goroutine for the life of the dashboard.
 // A peer that goes silent mid-body is a different bound: progressBody applies
