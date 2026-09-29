@@ -181,15 +181,17 @@ const HTML = htmlForWire(`<!doctype html>
     top: .7rem; outline: 2px solid var(--accent); outline-offset: 2px;
   }
   main { max-width: 76rem; margin: 0 auto; }
-  /* main is the skip link's target, so it takes focus from the keyboard and
-     has to say so: with the outline removed, a keyboard user who activated
-     the skip link had no way to tell where focus landed (WCAG 2.4.7). It only
-     ever holds focus right after that key press, so the ring is a landing
-     marker rather than a frame around the page. */
-  /* Anchor bar: brand + section jumps, sticky. */
+  /* Anchor bar: brand + section jumps, sticky. The rule is the bar's only
+     edge: its background is --bg, the same token the page scrolls under it
+     on, so no color separates the bar from the section passing behind. At
+     --line that edge sits at 1.3:1, under the 3:1 that identifies a
+     component's boundary (WCAG 1.4.11), and a reader scrolling could not
+     see the content entering or leaving the bar. Same call the keycaps make
+     below, for the same reason: --fg names a boundary, --line divides the
+     page. */
   .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 1.25rem;
     align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
-    background: var(--bg); border-bottom: 1px solid var(--line); }
+    background: var(--bg); border-bottom: 1px solid var(--fg); }
   .brand { font-weight: 700; font-size: var(--fs-lead); text-decoration: none; color: var(--fg);
     white-space: nowrap; }
   .brand .cursor { color: var(--accent); }
@@ -220,12 +222,23 @@ const HTML = htmlForWire(`<!doctype html>
   h2 { font-size: var(--fs-h2); color: var(--fg); font-weight: 600;
        margin: var(--space-section) 0 .7rem; }
   .shot + h2, h2 + pre + h2 { margin-top: var(--space-tight); }
+  /* A code block is a focusable scroller (tabindex and role="region" below),
+     and its border is the only cue that it scrolls: --panel against --bg is
+     itself under 1.5:1, and a scrollbar is absent until it is hovered or
+     dragged. A reader who tabbed in and found the rule at 1.3:1 had no way
+     to tell the block from a clipped one. --fg names the edge, for the same
+     reason the keycaps below do. */
   pre {
-    background: var(--panel); border: 1px solid var(--line);
+    background: var(--panel); border: 1px solid var(--fg);
     padding: 1rem 1.15rem; overflow-x: auto; margin: 0 0 1rem; font-size: var(--fs-small);
   }
   /* Narrow viewports clip code lines into a scroll container; a mouse-only
-     scrollbar would lock keyboard users out (WCAG 2.1.1). */
+     scrollbar would lock keyboard users out (WCAG 2.1.1). The ring is the
+     focus-visible default for everything, main included: main is the skip
+     link's target and takes focus from the keyboard, so it needs the same
+     landing marker every other focus stop gets (WCAG 2.4.7). It only ever
+     holds focus right after that one key press, so the ring marks where
+     focus landed rather than framing the page. */
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   code { color: inherit; }
   .dim { color: var(--dim); }
@@ -268,7 +281,8 @@ const HTML = htmlForWire(`<!doctype html>
      --line sits at 1.3:1 on the page background, under the 3:1 that
      identifies a component's edges (WCAG 1.4.11). The border takes --fg so
      the key reads as a key; the box-drawing --line stays on the rules that
-     divide the page rather than name a control. */
+     divide the page rather than name a control. The sticky bar and the code
+     blocks take --fg for that same reason, each at the point that needs it. */
   kbd { border: 1px solid var(--fg); border-radius: 4px;
     padding: 0 .4rem; font-family: inherit; font-size: var(--fs-micro); background: var(--bg); }
   /* Links must not be identified by color alone (WCAG 1.4.1): underline at

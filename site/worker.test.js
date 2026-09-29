@@ -35,6 +35,8 @@ const thousandsStripped = (value) => Number(value.replaceAll(",", ""));
 const FOCUS_KILLED_RE = /main\s*:\s*focus[^{]*\{\s*outline:\s*none/;
 const SHELL_PROMPT_RE = /<figcaption><span class="dim" aria-hidden="true">\$<\/span>/;
 const KBD_RULE_RE = /kbd\s*\{[^}]*\}/;
+const BAR_RULE_RE = /\.bar \{[^}]*\}/;
+const PRE_RULE_RE = /pre \{[^}]*\}/;
 const paletteVarRE = (name) => new RegExp(`--dark-${name}: (#[0-9a-f]{6});`, "i");
 
 // WCAG 2.x relative contrast between two #rrggbb values, the measure the
@@ -1068,6 +1070,25 @@ test("a keycap's boundary meets the 3:1 non-text contrast floor in both schemes"
   expect(relContrast(token("line"), token("bg"))).toBeCloseTo(1.32, 2);
 });
 
+// The same 3:1 floor, on the two boundaries that name something rather than
+// divide the page. The sticky bar is --bg, the token the page scrolls under
+// it on, so its rule is the only edge between the bar and the section passing
+// behind. A code block is a focusable scroller whose scrollbar does not appear
+// until it is hovered, and --panel against --bg is itself under 1.5:1, so its
+// rule is the only cue that it scrolls at all. Both schemes are measured, the
+// way the keycap above is.
+test("the sticky bar and the code block meet the 3:1 boundary floor", () => {
+  const token = (name) => identityBody.match(paletteVarRE(name))?.[1];
+  for (const rule of [BAR_RULE_RE, PRE_RULE_RE]) {
+    const body = identityBody.match(rule)?.[0] ?? "";
+    expect(body, `${rule} matched no rule`).toContain("solid var(--fg)");
+    expect(body, `${rule} still draws its edge with --line`).not.toContain("solid var(--line)");
+  }
+  for (const bg of [token("bg"), token("panel")]) {
+    expect(relContrast(token("fg"), bg)).toBeGreaterThanOrEqual(3);
+  }
+});
+
 // RFC 6928 initcwnd: ten ~1460-byte segments (~14 KB). Identity bytes plus
 // inline CSS are everything there is, so staying under this keeps first paint
 // at one round trip. The identity size is the record: a copy change that
@@ -1081,9 +1102,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13184);
+  expect(identity).toBe(13180);
   expect(gzipped).toBe(4528);
-  expect(brotli).toBe(3829);
+  expect(brotli).toBe(3838);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1114,7 +1135,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_406);
+  expect(visit[0][1]).toBe(14_415);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
@@ -1167,7 +1188,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_406);
+  expect(visit).toBe(14_415);
   expect(visit).toBeLessThan(25_000);
 });
 
