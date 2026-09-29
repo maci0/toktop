@@ -42,6 +42,12 @@ type Server struct {
 	// newServer; nil on a Server built as a literal, which skips the check.
 	hostGuard func(host string) bool
 	log       *slog.Logger
+	// healthMu guards healthDegraded, the latch that keeps a probe running
+	// every second from writing an audit line per check while the endpoint
+	// refuses every event. A transition into saturation and the one back out
+	// are logged; the steady state either way is not. Zero value is ready.
+	healthMu       sync.Mutex
+	healthDegraded bool
 	// Body bounds, fixed at construction. They were package vars the request
 	// path read directly, which put mutable state on that path: every body
 	// read and every error string read them while a test wrote them, and the

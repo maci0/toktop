@@ -445,10 +445,15 @@ Every POST is logged to stderr as one structured line (`req`, `method`,
 prefix its derived event ids start with, so a request can be matched against
 the rows it minted.
 Wrong-method and unknown-path requests log the same way, so a harness
-posting to `/events` is not silent. `GET /healthz` is not logged. It answers
-`503` with `Retry-After: 1` and a one-line reason while all 64 event slots are
-held, because the endpoint is refusing every POST then and `ok` would describe
-a service that accepts nothing. A refused POST audits `in_flight` and
+posting to `/events` is not silent. A healthy `GET /healthz` is not logged. It
+answers `503` with `Retry-After: 1` and a one-line reason while all 64 event
+slots are held, because the endpoint is refusing every POST then and `ok` would
+describe a service that accepts nothing. Crossing into that state logs one
+WARN line and crossing back logs one INFO line, each carrying the same fields
+a POST line does plus `in_flight` and `slot_cap`; the crossings are logged
+rather than the state, so a probe on its usual interval stays free. On a box
+whose senders have all stopped posting that pair of lines is the only report
+the saturation gets. A refused POST audits `in_flight` and
 `slot_cap` beside the reason, so a run of them says how close the cap is, not
 just that it was hit. Event
 bodies are not logged. A handler panic is one ERROR

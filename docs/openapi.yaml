@@ -179,8 +179,10 @@ paths:
         Answers `ok`. While every event slot is held the endpoint is refusing
         every POST, so the probe reports `degraded` with 503 and the
         in-flight count rather than a status describing a service that
-        accepts nothing. The probe is not logged: it runs continuously and
-        would drown the event log.
+        accepts nothing. A healthy probe is not logged: it runs continuously
+        and would drown the event log. The crossings are, one WARN line into
+        saturation and one INFO line out of it, because on a box whose senders
+        have stopped posting they are the only report the refusals get.
       operationId: health
       parameters:
         - $ref: "#/components/parameters/RequestId"

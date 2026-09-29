@@ -2359,6 +2359,8 @@ func TestIngestRequestIDStaysOneLogLine(t *testing.T) {
 	}
 }
 
+// A healthy probe runs every few seconds, so its silence is the point:
+// TestHealthzAuditsSaturationCrossings covers the one state that is logged.
 func TestHealthzIsNotLogged(t *testing.T) {
 	lg, buf := captureLogger()
 	s := startIngestLog(t, &memRecorder{}, lg)
@@ -2390,6 +2392,65 @@ func TestHealthzIsNotLogged(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Errorf("healthz must not log, got %q", buf.String())
+	}
+}
+
+// A degraded probe is the only report a saturated endpoint makes on a box
+// whose senders have all stopped posting, so the crossing is audited even
+// though a healthy probe is not. The latch is what keeps it affordable: one
+// line into saturation and one back out, whatever the probe interval is.
+func TestHealthzAuditsSaturationCrossings(t *testing.T) {
+	lg, buf := captureLogger()
+	s := startIngestLog(t, &memRecorder{}, lg)
+	probe := func() int {
+		t.Helper()
+		resp, err := http.Get("http://" + s.Addr() + "/healthz")
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := probe(); code != http.StatusOK {
+		t.Fatalf("healthz = %d, want 200", code)
+	}
+	if buf.Len() != 0 {
+		t.Fatalf("a healthy probe logged: %q", buf.String())
+	}
+
+	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
+	eventSlots <- struct{}{}
+	if code := probe(); code != http.StatusServiceUnavailable {
+		t.Fatalf("healthz = %d while every slot is held, want 503", code)
+	}
+	// Still saturated, and a second probe is the case the latch exists for.
+	if code := probe(); code != http.StatusServiceUnavailable {
+		t.Fatalf("healthz = %d, want 503", code)
+	}
+	degraded := buf.String()
+	if countLogLines(degraded) != 1 {
+		t.Fatalf("saturation logged %d lines, want one: %q", countLogLines(degraded), degraded)
+	}
+	for _, want := range []string{
+		"level=WARN", "toktop: ingest refusing events", "status=503",
+		"in_flight=1", "slot_cap=1", `path=/healthz`,
+	} {
+		if !strings.Contains(degraded, want) {
+			t.Errorf("degraded line missing %q: %s", want, degraded)
+		}
+	}
+
+	<-eventSlots
+	if code := probe(); code != http.StatusOK {
+		t.Fatalf("healthz = %d after a slot freed, want 200", code)
+	}
+	recovered := buf.String()[len(degraded):]
+	if countLogLines(recovered) != 1 {
+		t.Fatalf("recovery logged %d lines, want one: %q", countLogLines(recovered), recovered)
+	}
+	if !strings.Contains(recovered, "level=INFO") || !strings.Contains(recovered, "toktop: ingest accepting events again") {
+		t.Errorf("recovery line = %q, want an INFO naming the recovery", recovered)
 	}
 }
 
