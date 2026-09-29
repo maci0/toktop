@@ -1290,8 +1290,11 @@ func TestRunOllamaTerminalFrameKeepsEngineCounts(t *testing.T) {
 	if s.Tokens != 9 {
 		t.Errorf("tokens = %d, want the engine's eval_count 9", s.Tokens)
 	}
-	if s.TokPS <= 0 {
-		t.Errorf("tok/s = %v, want a rate from the engine's eval_duration", s.TokPS)
+	// 900000000 nanoseconds is a 900ms decode of 9 tokens, so the engine's own
+	// number is 10 tok/s. A ceiling alone would wave through a sample that
+	// never derived a rate at all.
+	if s.TokPS < 9 || s.TokPS > 11 {
+		t.Errorf("tok/s = %v, want ~10 from the engine's 9 tokens over its 900ms eval_duration", s.TokPS)
 	}
 }
 
@@ -1324,11 +1327,13 @@ func TestRunOllamaRefusedEvalDurationUsesWallClock(t *testing.T) {
 	}
 	// The ceiling is what separates the measured window (200ms, ~30 tok/s)
 	// from the 1ms the refused reading would have claimed (6 tok/s over 1ms is
-	// 6000 tok/s). A floor would have to scale with the elapsed time of a
-	// loaded runner and adds nothing: any rate under the ceiling already
-	// separates the two readings.
-	if s.TokPS > 100 {
-		t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip, not one from the refused 1ms reading", s.TokPS, elapsed)
+	// 6000 tok/s). The floor is the other half of the same pair: the rate is
+	// 6 tokens over a decode window no longer than the whole call, so
+	// 6/elapsed is a bound no wall-clock rate can fall under, and a sample
+	// that never derived a rate at all fails it.
+	lo := 6.0 / elapsed.Seconds()
+	if s.TokPS < lo || s.TokPS > 100 {
+		t.Errorf("tokps = %v over a %v call, want between %v (6 tokens over the call) and 100, not one from the refused 1ms reading", s.TokPS, elapsed, lo)
 	}
 }
 
@@ -1363,10 +1368,12 @@ func TestRunOllamaOutOfRangeEvalDurationUsesWallClock(t *testing.T) {
 			if !s.OK {
 				t.Fatalf("probe failed: %+v", s)
 			}
-			// Same ceiling as the refused-reading case: it separates the
-			// measured decode window (~30 tok/s) from the wrapped value's.
-			if s.TokPS > 100 {
-				t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip, not one from the wrapped reading", s.TokPS, elapsed)
+			// Same pair as the refused-reading case: the floor rules out a
+			// sample with no derived rate, the ceiling separates the measured
+			// decode window (~30 tok/s) from the wrapped value's.
+			lo := 6.0 / elapsed.Seconds()
+			if s.TokPS < lo || s.TokPS > 100 {
+				t.Errorf("tokps = %v over a %v call, want between %v and 100, not one from the wrapped reading", s.TokPS, elapsed, lo)
 			}
 		})
 	}

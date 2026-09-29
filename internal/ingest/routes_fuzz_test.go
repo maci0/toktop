@@ -127,8 +127,8 @@ func FuzzRoute(f *testing.F) {
 					t.Fatalf("404 for %q lists %s as %q, want %q", path, e.path, methods, e.allow())
 				}
 			}
-			if len(rec.evs) != 0 {
-				t.Fatalf("404 recorded %d events", len(rec.evs))
+			if rec.count() != 0 {
+				t.Fatalf("404 recorded %d events", rec.count())
 			}
 		case http.StatusMethodNotAllowed:
 			e, known := lookupEndpoint(path)
@@ -141,8 +141,8 @@ func FuzzRoute(f *testing.F) {
 			if !strings.Contains(respBody, e.path) {
 				t.Errorf("405 for %q omits the path it serves: %q", path, respBody)
 			}
-			if len(rec.evs) != 0 {
-				t.Fatalf("405 recorded %d events", len(rec.evs))
+			if rec.count() != 0 {
+				t.Fatalf("405 recorded %d events", rec.count())
 			}
 		case http.StatusForbidden:
 			// Only the Origin guard answers 403, and only for a POST: the
@@ -150,8 +150,8 @@ func FuzzRoute(f *testing.F) {
 			if path != eventsPath || method != http.MethodPost {
 				t.Fatalf("403 for %s %q without an Origin header", method, path)
 			}
-			if len(rec.evs) != 0 {
-				t.Fatalf("403 recorded %d events", len(rec.evs))
+			if rec.count() != 0 {
+				t.Fatalf("403 recorded %d events", rec.count())
 			}
 		case http.StatusOK:
 			if path != healthPath {
@@ -176,12 +176,12 @@ func FuzzRoute(f *testing.F) {
 			if path != eventsPath || method != http.MethodPost {
 				t.Fatalf("202 for %s %q", method, path)
 			}
-			if len(rec.evs) == 0 {
+			if rec.count() == 0 {
 				t.Fatal("202 accepted but no event recorded")
 			}
 			var ack, stored int
-			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 || ack != len(rec.evs) || stored != len(rec.evs) {
-				t.Fatalf("ack %q vs %d recorded events", respBody, len(rec.evs))
+			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 || ack != rec.count() || stored != rec.count() {
+				t.Fatalf("ack %q vs %d recorded events", respBody, rec.count())
 			}
 		case http.StatusBadRequest, http.StatusRequestEntityTooLarge, http.StatusRequestTimeout, http.StatusServiceUnavailable:
 			// A rejection keeps the events decoded before it; each one still

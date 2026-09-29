@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -27,11 +28,71 @@ import (
 	"github.com/maci0/toktop/internal/logcfg"
 )
 
-type memRecorder struct{ evs []core.AgentEvent }
+// memRecorder collects the events the handler records. RecordAgent runs on
+// the serving goroutine, so the append and the signal that releases the test
+// are one ordered pair: a test that receives the signal sees every event
+// appended before it, and reading rec.evs directly after that is not a race.
+// Spinning on rec.count() from the test goroutine was both the race and a
+// one-second wall-clock budget that could expire on a loaded runner.
+type memRecorder struct {
+	mu   sync.Mutex
+	evs  []core.AgentEvent
+	seen chan struct{}
+}
 
 func (m *memRecorder) RecordAgent(ev core.AgentEvent) bool {
+	m.mu.Lock()
+	if m.seen == nil {
+		m.seen = make(chan struct{}, 1)
+	}
 	m.evs = append(m.evs, ev)
+	m.mu.Unlock()
+	select {
+	case m.seen <- struct{}{}:
+	default: // a pending signal already covers this append
+	}
 	return true
+}
+
+// count reports how many events have been recorded.
+func (m *memRecorder) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.evs)
+}
+
+// wait blocks until n events have been recorded or the budget runs out, and
+// reports whether the count was reached.
+func (m *memRecorder) wait(n int, budget time.Duration) bool {
+	m.mu.Lock()
+	if m.seen == nil {
+		m.seen = make(chan struct{}, 1)
+	}
+	seen := m.seen
+	reached := len(m.evs) >= n
+	m.mu.Unlock()
+	if reached {
+		return true
+	}
+	deadline := time.After(budget)
+	for {
+		select {
+		case <-seen:
+		case <-deadline:
+			return m.count() >= n
+		}
+		if m.count() >= n {
+			return true
+		}
+	}
+}
+
+// snapshot returns a copy of the recorded events, for a test that reads the
+// slice without having waited on a signal.
+func (m *memRecorder) snapshot() []core.AgentEvent {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]core.AgentEvent(nil), m.evs...)
 }
 
 // post sends body and returns the status code, draining the response so
@@ -74,15 +135,12 @@ func startIngest(t *testing.T, rec core.AgentRecorder) *Server {
 }
 
 // awaitEvents waits up to a second for rec to hold n events, failing if they
-// never arrive.
+// never arrive. The wait rides a signal the recorder sends after each append,
+// so it is neither a race against the serving goroutine nor a spin.
 func awaitEvents(t *testing.T, rec *memRecorder, n int) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for len(rec.evs) < n && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(rec.evs) != n {
-		t.Fatalf("events = %d, want %d", len(rec.evs), n)
+	if !rec.wait(n, time.Second) {
+		t.Fatalf("events = %d, want %d", rec.count(), n)
 	}
 }
 
@@ -142,6 +200,10 @@ func (m *onceRecorder) RecordAgent(ev core.AgentEvent) bool {
 	return true
 }
 
+// count reports how many events this recorder kept. Every test using it waits
+// on the POST response before reading, so no lock is needed here.
+func (m *onceRecorder) count() int { return len(m.evs) }
+
 func postWithHeader(t *testing.T, url, body, header, value string) int {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
@@ -176,8 +238,8 @@ func TestIngestIdempotencyKeyFillsMissingID(t *testing.T) {
 	if code := postWithHeader(t, url, body, "Idempotency-Key", "harness-batch-7"); code != http.StatusAccepted {
 		t.Fatalf("retry status = %d", code)
 	}
-	if len(rec.evs) != 2 {
-		t.Fatalf("events = %d, want 2 (one per line, retry ignored)", len(rec.evs))
+	if rec.count() != 2 {
+		t.Fatalf("events = %d, want 2 (one per line, retry ignored)", rec.count())
 	}
 	// The derived id is the hashed key plus the line number, so the two
 	// lines of one POST share a prefix and that prefix is the key's hash.
@@ -204,8 +266,8 @@ func TestIngestIdempotencyKeyFillsMissingID(t *testing.T) {
 	if code := postWithHeader(t, url, body, "Idempotency-Key", "harness-batch-8"); code != http.StatusAccepted {
 		t.Fatalf("other key status = %d", code)
 	}
-	if len(rec.evs) != 4 {
-		t.Fatalf("events after a new key = %d, want 4", len(rec.evs))
+	if rec.count() != 4 {
+		t.Fatalf("events after a new key = %d, want 4", rec.count())
 	}
 }
 
@@ -274,8 +336,8 @@ func TestIngestDistinctIdempotencyKeys(t *testing.T) {
 						t.Fatalf("attempt %d status = %d", attempt, w.Code)
 					}
 				}
-				if len(rec.evs) != 2 {
-					t.Fatalf("attempt %d events = %d, want 2", attempt, len(rec.evs))
+				if rec.count() != 2 {
+					t.Fatalf("attempt %d events = %d, want 2", attempt, rec.count())
 				}
 			}
 		})
@@ -378,7 +440,7 @@ func TestIngestRejectsGarbageTimestamp(t *testing.T) {
 	if code != http.StatusBadRequest {
 		t.Fatalf("garbage ts status = %d, want 400", code)
 	}
-	if len(rec.evs) != 0 {
+	if rec.count() != 0 {
 		t.Fatal("garbage-timestamped event recorded")
 	}
 	if !strings.Contains(body, "ts") || strings.Contains(body, "2006-01-02") {
@@ -776,7 +838,7 @@ func TestIngestPartialStreamReportsRecordedCount(t *testing.T) {
 	if !strings.Contains(body, "; 1 earlier event in this stream was recorded") {
 		t.Errorf("error should state the recorded count, got %q", body)
 	}
-	if len(rec.evs) != 1 || rec.evs[0].Agent != "kept" {
+	if rec.count() != 1 || rec.evs[0].Agent != "kept" {
 		t.Fatalf("events = %+v, want only the first line kept", rec.evs)
 	}
 }
@@ -815,8 +877,8 @@ func TestIngestOversizedAfterEventsReportsRecordedCount(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "; 1 earlier event in this stream was recorded") {
 		t.Errorf("error should state the recorded count, got %q", w.Body.String())
 	}
-	if len(rec.evs) != 1 {
-		t.Fatalf("events = %d, want 1", len(rec.evs))
+	if rec.count() != 1 {
+		t.Fatalf("events = %d, want 1", rec.count())
 	}
 }
 
@@ -841,7 +903,7 @@ func TestIngestRejectsOversizedBody(t *testing.T) {
 	if !strings.Contains(w.Body.String(), "exceeds") {
 		t.Errorf("body should state the cap, got %q", w.Body.String())
 	}
-	if len(rec.evs) != 0 {
+	if rec.count() != 0 {
 		t.Fatal("event from oversized body recorded")
 	}
 }
@@ -868,8 +930,8 @@ func TestIngestRejectsBrowserOriginatedPost(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", resp.StatusCode)
 	}
-	if len(rec.evs) != 0 {
-		t.Fatalf("events = %d, want none from a browser-originated post", len(rec.evs))
+	if rec.count() != 0 {
+		t.Fatalf("events = %d, want none from a browser-originated post", rec.count())
 	}
 }
 
@@ -899,8 +961,8 @@ func TestIngestRejectsReboundHost(t *testing.T) {
 			t.Errorf("Host %q: status = %d, want 403", host, resp.StatusCode)
 		}
 	}
-	if len(rec.evs) != 0 {
-		t.Fatalf("events = %d, want none from a rebound request", len(rec.evs))
+	if rec.count() != 0 {
+		t.Fatalf("events = %d, want none from a rebound request", rec.count())
 	}
 }
 
@@ -1423,8 +1485,8 @@ func TestIngestRefusesUnstorableId(t *testing.T) {
 			}
 		})
 	}
-	if len(rec.evs) != 0 {
-		t.Fatalf("stored %d events, want 0", len(rec.evs))
+	if rec.count() != 0 {
+		t.Fatalf("stored %d events, want 0", rec.count())
 	}
 }
 
@@ -1474,7 +1536,7 @@ func TestIngestClampKeepsCharactersWhole(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			agent := strings.Repeat("\U0001F1E9\U0001F1EA", tc.agents)
 			note := strings.Repeat("\U0001F469\u200d\U0001F4BB", tc.notes)
-			before := len(rec.evs)
+			before := rec.count()
 			body := fmt.Sprintf(`{"agent":%q,"note":%q}`, agent, note)
 			resp := post(t, "http://"+s.Addr()+"/v1/events", body)
 			if resp != http.StatusAccepted {
@@ -2190,8 +2252,8 @@ func TestKeyedStreamFailureAsksForReplayNotResume(t *testing.T) {
 	if code != http.StatusAccepted || !strings.Contains(got, `"accepted":2,"stored":1`) {
 		t.Fatalf("replay: status = %d, body = %q", code, got)
 	}
-	if len(rec.evs) != 2 {
-		t.Fatalf("events = %d, want 2", len(rec.evs))
+	if rec.count() != 2 {
+		t.Fatalf("events = %d, want 2", rec.count())
 	}
 	if rec.evs[1].PromptTokens != 7 {
 		t.Errorf("second event = %+v, want the corrected line", rec.evs[1])
@@ -2213,8 +2275,8 @@ func TestKeyedStreamResumeCollidesWithKeptLines(t *testing.T) {
 	if code, _ := postKeyed(t, url, stream, key); code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400", code)
 	}
-	if len(rec.evs) != 2 {
-		t.Fatalf("events kept before the failure = %d, want 2", len(rec.evs))
+	if rec.count() != 2 {
+		t.Fatalf("events kept before the failure = %d, want 2", rec.count())
 	}
 
 	// The remaining line, resent on its own under the same key: it numbers
@@ -2223,15 +2285,15 @@ func TestKeyedStreamResumeCollidesWithKeptLines(t *testing.T) {
 	if code != http.StatusAccepted || !strings.Contains(got, `"stored":0`) {
 		t.Fatalf("resume: status = %d, body = %q", code, got)
 	}
-	if len(rec.evs) != 2 {
-		t.Fatalf("a resumed keyed line must not displace a kept one: %d events", len(rec.evs))
+	if rec.count() != 2 {
+		t.Fatalf("a resumed keyed line must not displace a kept one: %d events", rec.count())
 	}
 
 	// A fresh key is a new logical operation, so the same line is kept.
 	if code, _ := postKeyed(t, url, `{"agent":"coder","output_tokens":9}`+"\n", "batch-44"); code != http.StatusAccepted {
 		t.Fatalf("status = %d", code)
 	}
-	if len(rec.evs) != 3 || rec.evs[2].OutputTokens != 9 {
+	if rec.count() != 3 || rec.evs[2].OutputTokens != 9 {
 		t.Fatalf("events = %+v, want the new line kept", rec.evs)
 	}
 }
@@ -2363,8 +2425,8 @@ func TestIngestReadErrorOmitsPeerAddress(t *testing.T) {
 					t.Errorf("missing partial acceptance: %s", w.Body.String())
 				}
 			}
-			if len(rec.evs) != accepted {
-				t.Errorf("events = %d, want %d", len(rec.evs), accepted)
+			if rec.count() != accepted {
+				t.Errorf("events = %d, want %d", rec.count(), accepted)
 			}
 			for _, field := range []string{"level=WARN", "status=400", "req=read-error-test", fmt.Sprintf("accepted=%d", accepted)} {
 				if !strings.Contains(buf.String(), field) {
@@ -2712,8 +2774,8 @@ func TestIngestPanicLogsPartialProgress(t *testing.T) {
 	w := httptest.NewRecorder()
 	s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(w, r)
 
-	if w.Code != http.StatusInternalServerError || len(rec.evs) != 1 {
-		t.Fatalf("status = %d, recorded = %d; want 500, 1", w.Code, len(rec.evs))
+	if w.Code != http.StatusInternalServerError || rec.count() != 1 {
+		t.Fatalf("status = %d, recorded = %d; want 500, 1", w.Code, rec.count())
 	}
 	got := buf.String()
 	if countLogLines(got) != 1 {
@@ -2815,8 +2877,8 @@ func TestIngestLogsRejectedResponseWriteFailure(t *testing.T) {
 			r.Header.Set("Origin", tc.origin)
 			w := httptest.NewRecorder()
 			s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(failWriter{w}, r)
-			if w.Code != tc.status || len(rec.evs) != tc.accepted {
-				t.Fatalf("status = %d, recorded = %d; want %d, %d", w.Code, len(rec.evs), tc.status, tc.accepted)
+			if w.Code != tc.status || rec.count() != tc.accepted {
+				t.Fatalf("status = %d, recorded = %d; want %d, %d", w.Code, rec.count(), tc.status, tc.accepted)
 			}
 			got := buf.String()
 			if countLogLines(got) != 1 {
@@ -2881,8 +2943,8 @@ func TestIngestResponseWriteErrorsRedactPeerAddresses(t *testing.T) {
 				r.Header.Set("X-Request-Id", "write-failure")
 				w := httptest.NewRecorder()
 				s.wrap(http.HandlerFunc(s.handlePost)).ServeHTTP(networkErrorWriter{w, writeErr}, r)
-				if w.Code != tc.status || len(rec.evs) != tc.accepted {
-					t.Fatalf("status = %d, recorded = %d; want %d, %d", w.Code, len(rec.evs), tc.status, tc.accepted)
+				if w.Code != tc.status || rec.count() != tc.accepted {
+					t.Fatalf("status = %d, recorded = %d; want %d, %d", w.Code, rec.count(), tc.status, tc.accepted)
 				}
 				got := buf.String()
 				if countLogLines(got) != 1 || strings.Contains(got, addr.IP.String()) {

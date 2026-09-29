@@ -73,13 +73,13 @@ func FuzzHandlePost(f *testing.F) {
 		}
 		switch w.Code {
 		case http.StatusAccepted:
-			if len(rec.evs) == 0 {
+			if rec.count() == 0 {
 				t.Fatal("202 accepted but no event recorded")
 			}
 			// Events written to the wire must match those actually recorded.
 			var ack, stored int
-			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 || ack != len(rec.evs) || stored != len(rec.evs) {
-				t.Fatalf("ack %q vs %d recorded events", respBody, len(rec.evs))
+			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 || ack != rec.count() || stored != rec.count() {
+				t.Fatalf("ack %q vs %d recorded events", respBody, rec.count())
 			}
 		case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 			// A mid-stream failure keeps the events decoded before it; each

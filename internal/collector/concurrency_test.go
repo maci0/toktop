@@ -35,6 +35,17 @@ func TestConcurrentEmitRecordProbeClock(t *testing.T) {
 	out := make(chan core.Snapshot, 4)
 	done := make(chan struct{})
 	go func() { defer close(done); c.Run(ctx, out) }()
+	// The drainer runs from the start, not after the writers, so the count is
+	// the frames the emit loop actually produced. Without it the test is a
+	// deadlock detector: every call below could be a no-op and it would still
+	// pass, because nothing here asserts that the collector did any work.
+	// Run does not close out, so the counter is read, not waited on.
+	var frames atomic.Int64
+	go func() {
+		for range out {
+			frames.Add(1)
+		}
+	}()
 
 	var wg sync.WaitGroup
 	for w := range 8 {
@@ -55,11 +66,10 @@ func TestConcurrentEmitRecordProbeClock(t *testing.T) {
 	}
 	wg.Wait()
 	cancel()
-	go func() {
-		for range out {
-		}
-	}()
 	<-done
+	if frames.Load() == 0 {
+		t.Fatal("the emit loop produced no frame: the concurrent calls above shared no state with the run they were racing")
+	}
 }
 
 // freeNow reports whether mu can be taken right now, taking and releasing it

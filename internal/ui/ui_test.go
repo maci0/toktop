@@ -2988,13 +2988,21 @@ func TestProbeEmptyHintsFitTheNarrowestProbesColumn(t *testing.T) {
 	m := New(Config{Version: "t", Prober: func() {}}, nil)
 	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
 	inner := minDashW - minDashW*38/100 - minDashW*31/100 - 4
-	for _, line := range strings.Split(strip(m.probesBody(inner, 8)), "\n") {
+	lines := strings.Split(strip(m.probesBody(inner, 8)), "\n")
+	hints := 0
+	for _, line := range lines {
 		if line == "" {
 			continue
 		}
+		hints++
 		if w := lipgloss.Width(line); w > inner {
 			t.Errorf("probe hint is %d cells in a %d-cell column: %q", w, inner, line)
 		}
+	}
+	// Without a floor the loop above is a pass on an empty panel: the fit it
+	// checks is the fit of the hints the empty state is required to print.
+	if hints == 0 {
+		t.Error("the empty PROBES panel drew no hint to fit")
 	}
 }
 

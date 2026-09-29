@@ -554,16 +554,18 @@ func TestTOFUStoresDoNotBlockEachOther(t *testing.T) {
 		_ = blockedCB("blocked:22", nil, fakePublicKey("blocked"))
 	}()
 	<-started
-	// Let the writer reach the peer-lock wait before the second store's
-	// writer runs, or the test proves nothing. Head start is short and the
-	// budget below is far under storeLockWait, so the gap between the two
-	// does not have to be tuned to be decisive.
+	// Give the writer time to reach the peer-lock wait before the second
+	// store's writer runs, or the test proves nothing. The signal above only
+	// says the goroutine was scheduled, so this head start is the whole of the
+	// synchronization; the budget below leaves seconds either side of it.
 	time.Sleep(200 * time.Millisecond)
 
-	// The budget is the blocked writer's own give-up, so the assertion stays
-	// the one that matters: a second store must not wait behind the first
-	// one's peer lock. A fixed small budget tested the scheduler rather than
-	// the mutex, and went red under a full-package run with -race.
+	// The budget is the blocked writer's own give-up less two poll intervals,
+	// so a pass can only come from the free store: at storeLockWait the
+	// blocked writer stops waiting itself and the test would prove nothing. It
+	// is still seconds of slack, so a descheduled free writer under -race is
+	// not what turns this red.
+	budget := storeLockWait - 2*storeLockPoll
 	done := make(chan error, 1)
 	go func() { done <- freeCB("free:22", nil, fakePublicKey("free")) }()
 	select {
@@ -571,8 +573,8 @@ func TestTOFUStoresDoNotBlockEachOther(t *testing.T) {
 		if err != nil {
 			t.Fatalf("second store rejected: %v", err)
 		}
-	case <-time.After(storeLockWait):
-		t.Fatalf("writing one store blocked a write to another for the whole %s peer-lock wait", storeLockWait)
+	case <-time.After(budget):
+		t.Fatalf("writing one store blocked a write to another for %s, close to its own %s peer-lock wait", budget, storeLockWait)
 	}
 	// Release the peer so the parked writer finishes instead of running out
 	// the full storeLockWait after the test has already decided.

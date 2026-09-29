@@ -33,9 +33,14 @@ func TestHTTPStatusKeepsTheReasonText(t *testing.T) {
 }
 
 // A peer that writes a megabyte of reason phrase must not put a megabyte into
-// a status line the operator reads.
+// a status line the operator reads, and the cap has to cut the tail rather
+// than the status itself: a line with no code in it is not a status line.
 func TestHTTPStatusCapsLength(t *testing.T) {
-	if got := HTTPStatus("500 " + strings.Repeat("x", 10*SnippetCap)); len([]rune(got)) > SnippetCap {
+	got := HTTPStatus("500 " + strings.Repeat("x", 10*SnippetCap))
+	if len([]rune(got)) > SnippetCap {
 		t.Errorf("HTTPStatus kept %d characters, want at most %d", len([]rune(got)), SnippetCap)
+	}
+	if !strings.HasPrefix(got, "500") {
+		t.Errorf("HTTPStatus = %q, want it to keep the status code it capped", got)
 	}
 }

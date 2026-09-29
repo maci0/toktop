@@ -98,13 +98,16 @@ func FuzzConsumeZstdRecordWalk(f *testing.F) {
 		// cannot truncate the file.
 		old := zstdTailBytes.Load()
 		zstdTailBytes.Store(1 << 30)
+		// Registered before the first read, which can t.Fatal: a fuzz
+		// iteration that dies here would otherwise leave the process-wide
+		// window at 1 GiB for every test that runs after it.
+		t.Cleanup(func() { zstdTailBytes.Store(old) })
 		want := fold(mustReadZstd(t, path, 0))
 		// The poller's own window, sized to the widest frame in the stream so
 		// every window holds at least one whole frame. A window narrower than
 		// the frames it has to read would never advance the offset, which is
 		// the cap doing its job and not the walk making progress.
 		zstdTailBytes.Store(int64(widestFrame(stream)))
-		t.Cleanup(func() { zstdTailBytes.Store(old) })
 
 		// Drain the way a poller does: resume at each committed offset until
 		// one window commits nothing more.

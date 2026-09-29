@@ -334,11 +334,8 @@ func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	var lines bytes.Buffer
 	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
 	defer restore()
-	t.Cleanup(func() {
-		rootListMu.Lock()
-		rootLists = map[string]rootListing{}
-		rootListMu.Unlock()
-	})
+	restoreLists := swapRootLists(t, map[string]rootListing{})
+	defer restoreLists()
 
 	now := time.Now()
 	// A root that exists but is not a directory is a walk that does not finish.
@@ -565,11 +562,8 @@ func TestFailedWalkIsNotStampedAsTheWatchersListing(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Cleanup(func() {
-		rootListMu.Lock()
-		rootLists = map[string]rootListing{}
-		rootListMu.Unlock()
-	})
+	restoreLists := swapRootLists(t, map[string]rootListing{})
+	defer restoreLists()
 
 	// A root that exists but is not a directory is a walk that does not finish.
 	// A path that is simply absent is an empty store, which is a whole answer.
