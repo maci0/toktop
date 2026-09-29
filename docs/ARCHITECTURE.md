@@ -14,7 +14,7 @@ omission. This document is the map; the test is the enforcement.
 |------|----------|-----------------|
 | 0 | `internal/core` | the data model every other package speaks in, plus the string helpers (sanitize, truncate, fold, redact, clamp) that have no dependency of their own |
 | 1 | `internal/logcfg` | how the audit log is written: level from the environment, `$HOME` and address redaction, capped fields |
-| 2 | `internal/bearer`, `internal/procs`, `internal/selfreload`, `agentusage` | one job each, no peers: the bearer token, local engine discovery from process tables, executable watching, agent token usage |
+| 2 | `internal/bearer`, `internal/lockfile`, `internal/procs`, `internal/selfreload`, `agentusage` | one job each, no peers: the bearer token, the cross-process lock file, local engine discovery from process tables, executable watching, agent token usage |
 | 3 | `internal/gpu`, `internal/probe`, `internal/provider`, `internal/demo`, `internal/selfupdate`, `internal/ui` | the work that has a shape specific to its subject: accelerator telemetry, streaming probe requests, engine scraping, the simulated fleet, release install, the dashboard |
 | 4 | `internal/sysmon`, `internal/ingest`, `internal/agentwatch` | collection and event intake: host vitals, the localhost events endpoint, the bridge from `agentusage` watchers to the dashboard |
 | 5 | `internal/remote`, `internal/collector` | the two fan-ins: the ssh client and host-relayed stats, and the poller every engine-side package reports into |
@@ -73,6 +73,10 @@ alongside them would be a layer importing sideways into itself.
   `core.AgentEvent`.
 - `internal/logcfg`: the audit-log vocabulary every other package that logs
   builds its logger from.
+- `internal/lockfile`: the exclusive-create lock a process takes before it
+  rewrites a file another process may be reading, with the stale break and the
+  wait it applies. `internal/remote` takes it over the host-key pin store and
+  `internal/selfupdate` over the installed binary.
 - `internal/probe`: small streaming generations at backends, to measure
   throughput rather than read a counter. One concern per file: `probe.go` the
   request, the budgets that bound a generation and the HTTP handling both

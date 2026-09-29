@@ -55,15 +55,8 @@ func (r *records) snapshot() []string {
 func captureAudit(t *testing.T) *records {
 	t.Helper()
 	r := &records{}
-	auditMu.Lock()
-	saved := auditFn
-	auditFn = func() *slog.Logger { return slog.New(r) }
-	auditMu.Unlock()
-	t.Cleanup(func() {
-		auditMu.Lock()
-		auditFn = saved
-		auditMu.Unlock()
-	})
+	auditLog.Set(func() *slog.Logger { return slog.New(r) })
+	t.Cleanup(func() { auditLog.Set(nil) })
 	return r
 }
 

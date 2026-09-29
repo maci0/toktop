@@ -6,8 +6,6 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
-	"io"
-	"os"
 	"path/filepath"
 	"strings"
 )
@@ -112,21 +110,11 @@ func geminiSessionCwd(path string) (string, bool) {
 }
 
 func readGeminiRoot(dir string) (string, bool) {
-	r, err := os.OpenRoot(dir)
-	if err != nil {
+	b, ok := readRootedCapped(dir, geminiProjectFile, geminiRootCap)
+	if !ok {
 		return "", false
 	}
-	defer r.Close()
-	f, err := r.Open(geminiProjectFile)
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, geminiRootCap+1))
-	if err != nil || len(b) > geminiRootCap {
-		return "", false
-	}
-	cwd := strings.TrimSpace(string(bytes.TrimPrefix(b, utf8BOM)))
+	cwd := strings.TrimSpace(string(b))
 	if cwd == "" {
 		return "", false
 	}

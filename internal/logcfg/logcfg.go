@@ -19,6 +19,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -83,6 +84,39 @@ func Logger() *slog.Logger {
 		Level:       lvl,
 		ReplaceAttr: utcTime,
 	})})
+}
+
+// A SwapLogger is the logger a package's audit lines go to, with the
+// replacement a test installs so it can read what was written. The swap and
+// the read take the same lock: a Go func value is two words, so a goroutine
+// left over from an earlier test would otherwise call a new code pointer
+// against the closure word the old one carried.
+type SwapLogger struct {
+	mu sync.Mutex
+	fn func() *slog.Logger
+}
+
+// NewSwapLogger returns a SwapLogger that starts at fn.
+func NewSwapLogger(fn func() *slog.Logger) *SwapLogger {
+	return &SwapLogger{fn: fn}
+}
+
+// Logger returns the logger to write the next line to.
+func (s *SwapLogger) Logger() *slog.Logger {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.fn()
+}
+
+// Set sends the lines from here on to the logger fn returns. A nil restores
+// the process logger.
+func (s *SwapLogger) Set(fn func() *slog.Logger) {
+	if fn == nil {
+		fn = Logger
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.fn = fn
 }
 
 // HomeHandler rewrites the home directory to "~" in the message and in every

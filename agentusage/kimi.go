@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -174,24 +173,14 @@ const kimiStateCap = 1 << 20
 
 // readKimiState reads the cwd state.json records in dir.
 func readKimiState(dir string) (string, bool) {
-	r, err := os.OpenRoot(dir)
-	if err != nil {
-		return "", false
-	}
-	defer r.Close()
-	f, err := r.Open("state.json")
-	if err != nil {
-		return "", false
-	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, kimiStateCap+1))
-	if err != nil || len(b) > kimiStateCap {
+	b, ok := readRootedCapped(dir, "state.json", kimiStateCap)
+	if !ok {
 		return "", false
 	}
 	var st struct {
 		Cwd string `json:"cwd"`
 	}
-	if err := json.Unmarshal(bytes.TrimPrefix(b, utf8BOM), &st); err != nil || st.Cwd == "" {
+	if err := json.Unmarshal(b, &st); err != nil || st.Cwd == "" {
 		return "", false
 	}
 	return st.Cwd, true

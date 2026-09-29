@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/lockfile"
 )
 
 // Apply downloads, verifies, and installs the release over the running
@@ -199,67 +200,14 @@ const (
 // check then breaks. Var so tests can shrink it.
 var installLockWait = 5 * time.Second
 
-// lockInstall runs fn with an exclusive lock beside the installed binary. A
-// lock that cannot be released is reported rather than dropped: the next
-// update spends installLockWait on it before breaking it as stale, and an
-// operator who never learns why has no way to act. The result is named so the
-// deferred release can fold its own failure into whatever fn returned.
-func lockInstall(self string, fn func() error) (err error) {
-	lock := self + installLockSuffix
-	deadline := time.Now().Add(installLockWait)
-	for {
-		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			if cerr := f.Close(); cerr != nil {
-				lerr := fmt.Errorf("cannot write %s: %w", core.RedactHome(lock), cerr)
-				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-					lerr = errors.Join(lerr, fmt.Errorf("left a lock file at %s that must be deleted: %w",
-						core.RedactHome(lock), rerr))
-				}
-				return lerr
-			}
-			defer func() {
-				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w",
-						core.RedactHome(lock), rerr))
-				}
-			}()
-			return fn()
-		}
-		if !os.IsExist(err) {
-			// The directory is unwritable, or the filesystem has no exclusive
-			// create. The install itself fails on its own with a clearer
-			// error, so run it rather than reporting a lock error the operator
-			// cannot act on. This is the same rule lockStore follows.
-			return fn()
-		}
-		// A stale lock is only retried once the break actually took. A lock
-		// that cannot be unlinked would otherwise keep the stale arm true and
-		// spin here with no deadline check. The reason the break failed rides
-		// the give-up message: without it an unremovable lock is reported as
-		// one another toktop holds, which is not true and leaves the operator
-		// with nothing to act on.
-		var breakErr error
-		// core.Age, not time.Since: the mtime carries no monotonic reading,
-		// so this ages a wall clock, and a backward step (an NTP correction, a
-		// resumed laptop) makes the age negative. A negative age is not
-		// "older than installLockStale", so the lock from a killed update is
-		// never broken and the give-up below names a peer that is not running.
-		if info, serr := os.Stat(lock); serr == nil && core.Age(time.Now(), info.ModTime()) > installLockStale {
-			if breakErr = os.Remove(lock); breakErr == nil {
-				continue
-			}
-		}
-		if time.Now().After(deadline) {
-			if breakErr != nil {
-				return fmt.Errorf("%s is locked by another toktop; the stale lock at %s could not be removed: %w",
-					core.RedactHome(self), core.RedactHome(lock), breakErr)
-			}
-			return fmt.Errorf("%s is locked by another toktop; giving up after %s",
-				core.RedactHome(self), installLockWait)
-		}
-		time.Sleep(installLockPoll)
-	}
+// lockInstall runs fn with the cross-process lock held beside the installed
+// binary, so a peer does not replace it mid-replace.
+func lockInstall(self string, fn func() error) error {
+	return lockfile.With(self+installLockSuffix, self, lockfile.Policy{
+		Wait:  installLockWait,
+		Poll:  installLockPoll,
+		Stale: installLockStale,
+	}, core.RedactHome, fn)
 }
 
 // installIfChanged puts the staged binary in place unless the installed one

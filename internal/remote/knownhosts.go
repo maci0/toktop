@@ -3,9 +3,7 @@ package remote
 import (
 	"crypto/sha256"
 	"encoding/base64"
-	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
 	"net"
 	"os"
@@ -18,6 +16,7 @@ import (
 	"golang.org/x/crypto/ssh"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/lockfile"
 	"github.com/maci0/toktop/internal/logcfg"
 )
 
@@ -99,86 +98,27 @@ const (
 	storeLockStale = time.Minute
 )
 
-// lockStore takes the cross-process store lock, runs fn, and releases it. The
-// lock is a file created exclusively and removed on release: creation is
-// atomic on every filesystem toktop runs on, which a flock over the store
-// itself is not on Windows. A lock left by a dead process is broken once it
-// is older than storeLockStale, so the store cannot wedge.
-// lockStore runs fn with an exclusive lock beside path. A lock that cannot
-// be released is reported rather than dropped: the next connect spends
-// storeLockWait on it before breaking it as stale, and an operator who never
-// learns why has no way to act. The result is named so the deferred release
-// can fold its own failure into whatever fn returned.
-func lockStore(path string, fn func() error) (err error) {
+// lockStore runs fn with the cross-process lock held beside path, so a peer
+// process cannot take the store away mid read-modify-write. A lock left by a
+// dead process is broken once it is older than storeLockStale, so the store
+// cannot wedge.
+func lockStore(path string, fn func() error) error {
 	lock := path + storeLockSuffix
 	// The lock lives beside the store, and the store's directory is created by
 	// the write inside fn. On a first remote connect the directory does not
 	// exist yet, the exclusive create fails with ENOENT rather than EEXIST, and
-	// the fallback below would run the read-modify-write with no lock at all:
-	// two first contacts racing on a fresh install, the loser renaming away
-	// the winner's pin, and the next connect re-trusting that host silently.
+	// lockfile.With would run the read-modify-write with no lock at all: two
+	// first contacts racing on a fresh install, the loser renaming away the
+	// winner's pin, and the next connect re-trusting that host silently.
 	// Create the directory first so the lock is always real.
 	if err := os.MkdirAll(filepath.Dir(lock), 0o700); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(storeLockWait)
-	for {
-		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
-		if err == nil {
-			if cerr := f.Close(); cerr != nil {
-				// A lock file that survives the failed write makes every
-				// later connect report a lock held by no process, so the
-				// failure to clear it rides along with the failure that
-				// left it there.
-				lerr := fmt.Errorf("%s: cannot write the lock: %w", lock, cerr)
-				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-					lerr = errors.Join(lerr,
-						fmt.Errorf("left a lock file at %s that must be deleted: %w", lock, rerr))
-				}
-				return lerr
-			}
-			defer func() {
-				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w", lock, rerr))
-				}
-			}()
-			return fn()
-		}
-		if !os.IsExist(err) {
-			// The directory is unwritable, or the filesystem has no exclusive
-			// create. The write inside fn fails on its own with a clearer
-			// error, so report that rather than a lock error the operator
-			// cannot act on.
-			return fn()
-		}
-		// A stale lock is only retried once the break actually took. A lock
-		// that cannot be unlinked (read-only config dir, a peer recreating
-		// it between the Stat and the Remove) would otherwise keep the stale
-		// arm true and spin here with no sleep and no deadline check. The
-		// reason the break failed is carried to the give-up message: without
-		// it an unremovable lock is reported as one another toktop holds,
-		// which is not true and leaves the operator with nothing to act on.
-		var breakErr error
-		// core.Age, not time.Since: the mtime carries no monotonic reading,
-		// so this ages a wall clock, and a backward step (an NTP correction, a
-		// resumed laptop) makes the age negative. A negative age is not
-		// "older than storeLockStale", so the lock from a killed toktop is
-		// never broken and the give-up below names a peer that is not
-		// running.
-		if info, serr := os.Stat(lock); serr == nil && core.Age(time.Now(), info.ModTime()) > storeLockStale {
-			if breakErr = os.Remove(lock); breakErr == nil {
-				continue
-			}
-		}
-		if time.Now().After(deadline) {
-			if breakErr != nil {
-				return fmt.Errorf("%s is locked by another toktop; the stale lock at %s could not be removed: %w",
-					path, lock, breakErr)
-			}
-			return fmt.Errorf("%s is locked by another toktop; giving up after %s", path, storeLockWait)
-		}
-		time.Sleep(storeLockPoll)
-	}
+	return lockfile.With(lock, path, lockfile.Policy{
+		Wait:  storeLockWait,
+		Poll:  storeLockPoll,
+		Stale: storeLockStale,
+	}, lockfile.Raw, fn)
 }
 
 // tofu returns a HostKeyCallback implementing trust-on-first-use against a

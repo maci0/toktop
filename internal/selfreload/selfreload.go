@@ -8,7 +8,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"sync"
 	"time"
 
 	"github.com/maci0/toktop/internal/logcfg"
@@ -71,20 +70,11 @@ func Watch(ctx context.Context, exePath string, interval time.Duration, onChange
 	}
 }
 
-// audit builds the logger these lines go to. A test swaps auditFn for a
-// handler it can read; the swap and the read take the same lock, so a poll
-// goroutine from an earlier test cannot reach the next test's handler.
-var (
-	auditMu sync.Mutex
-	auditFn = logcfg.Logger
-)
+// auditLog is the logger these lines go to; a test swaps it for a handler it
+// can read.
+var auditLog = logcfg.NewSwapLogger(logcfg.Logger)
 
-func audit() *slog.Logger {
-	auditMu.Lock()
-	fn := auditFn
-	auditMu.Unlock()
-	return fn()
-}
+func audit() *slog.Logger { return auditLog.Logger() }
 
 func statIdentity(path string) (identity, error) {
 	fi, err := os.Stat(path)

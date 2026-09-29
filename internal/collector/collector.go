@@ -29,21 +29,11 @@ import (
 // time.NewTicker panic on the first Run.
 const defaultInterval = time.Second
 
-// auditFn builds the process logger for the engine health lines. A test
-// swaps it for a handler it can read. The swap and the read take the same
-// lock: a probe goroutine from an earlier test still calls audit after the
-// next test has installed its own logger.
-var (
-	auditMu sync.Mutex
-	auditFn = logcfg.Logger
-)
+// auditLog is the process logger for the engine health lines; a test swaps
+// it for a handler it can read.
+var auditLog = logcfg.NewSwapLogger(logcfg.Logger)
 
-func audit() *slog.Logger {
-	auditMu.Lock()
-	fn := auditFn
-	auditMu.Unlock()
-	return fn()
-}
+func audit() *slog.Logger { return auditLog.Logger() }
 
 // Collector polls every configured engine and the host on one interval and
 // hands the result to consumers as a core.Snapshot. It owns the probe ring,

@@ -203,7 +203,7 @@ func TestDependencyTableMatchesManifest(t *testing.T) {
 //
 //	0  core              the types and helpers everything is written in terms of
 //	1  logcfg            the audit-log vocabulary, below every package that logs
-//	2  bearer, procs, selfreload, agentusage
+//	2  bearer, lockfile, procs, selfreload, agentusage
 //	3  gpu, probe, provider, demo, selfupdate, ui
 //	4  sysmon, ingest, agentwatch
 //	5  remote, collector  the ssh client and the fan-in, over every engine-side package
@@ -217,7 +217,7 @@ func TestDependencyTableMatchesManifest(t *testing.T) {
 var tiers = [][]string{
 	{"internal/core"},
 	{"internal/logcfg"},
-	{"internal/bearer", "internal/procs", "internal/selfreload", "agentusage"},
+	{"internal/bearer", "internal/lockfile", "internal/procs", "internal/selfreload", "agentusage"},
 	{"internal/gpu", "internal/probe", "internal/provider", "internal/demo", "internal/selfupdate", "internal/ui"},
 	{"internal/sysmon", "internal/ingest", "internal/agentwatch"},
 	{"internal/remote", "internal/collector"},
