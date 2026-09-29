@@ -30,11 +30,15 @@ jobs:
     # GOEXPERIMENT, a GOPRIVATE that skips the checksum database, or a go.work
     # above the checkout would move
     # the bytes this job publishes without moving anything in the repository.
+    # GOTOOLCHAIN names the compiler go.mod pins: setup-go installs it, but
+    # without this key a `go` line outside make keeps the runner image's own
+    # toolchain and its GOEXPERIMENT defaults.
     # `make check-ci-env` (run by ci.yml on every PR) fails when this block and
     # the Makefile's exports disagree on a name or a value.
     env:
       LC_ALL: C
       TZ: UTC
+      GOTOOLCHAIN: "go1.27.0"
       GOAMD64: v1
       GOARM64: v8.0
       GOFIPS140: "off"

@@ -13,7 +13,10 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Match the Makefile: locale/timezone must not follow the runner into
-# formatting, glob order, or timestamps. Instruction-set baselines, the
+# formatting, glob order, or timestamps. GOTOOLCHAIN names the compiler
+# go.mod pins, so a `go` line here analyzes and tests with the same toolchain
+# the released artifacts carry rather than whatever the runner image ships.
+# Instruction-set baselines, the
 # non-FIPS crypto module and CGO_ENABLED=0 match the released artifacts;
 # race-test steps turn cgo on. Empty GOFLAGS/GOEXPERIMENT/GODEBUG so a
 # runner-level extra flag cannot change compile or test results relative to
@@ -26,6 +29,7 @@ concurrency:
 env:
   LC_ALL: C
   TZ: UTC
+  GOTOOLCHAIN: "go1.27.0"
   GOAMD64: v1
   GOARM64: v8.0
   GOFIPS140: "off"
@@ -245,9 +249,11 @@ jobs:
         run: make scripts-check
 
   # The Makefile promises byte-identical artifacts from identical source. Two
-  # builds of each shipped platform under different paths, build caches,
-  # locales, and timezones are the only way to find out whether the promise
-  # still holds. A representative pair keeps this under the job budget; the
+  # builds of each shipped platform, from different absolute source paths and
+  # from separate cold build caches, are the only way to find out whether the
+  # promise still holds. Locale and timezone are not varied here because the
+  # Makefile pins LC_ALL and TZ for every recipe: varying them would not reach
+  # the compiler. A representative pair keeps this under the job budget; the
   # local `make repro-check` covers all of PLATFORMS.
   repro:
     runs-on: ubuntu-24.04

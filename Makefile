@@ -1090,8 +1090,17 @@ CI_WORKFLOW := .github/workflows/ci.yml
 # inherited GOPRIVATE sets them, and then a platform compiles differently from
 # the one the release path ships. Names AND values, so a rename and a re-pin
 # both fail.
+#
+# GOTOOLCHAIN is here for the reason the export above exists: its default is
+# auto, which keeps whatever compiler the runner image carries rather than the
+# one go.mod pins, along with that toolchain's GOEXPERIMENT defaults. A setup-go
+# step installs the pinned version but does not select it for later commands, so
+# every `go` line in a workflow outside make read the runner's toolchain. The
+# value is spelled from $(GO_VERSION), so a go.mod bump fails here until the
+# workflows are updated with it, the same rule as the rest of the list.
 CI_ENV_REQUIRED := \
 	LC_ALL=C TZ=UTC \
+	GOTOOLCHAIN=go$(GO_VERSION) \
 	GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off CGO_ENABLED=0 \
 	GOFLAGS= GOEXPERIMENT= GODEBUG= GOENV=off GOWORK=off \
 	GOPRIVATE= GONOSUMDB= GOINSECURE=
