@@ -23,6 +23,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   where its column has room for one (`quit, re-run with --probe N`),
   keeping the short `quit, --probe N` for the narrowest dashboard.
 
+### Fixed
+
+- The system panel decoded kernel and firmware strings (uname release and
+  sysname, the `/proc/device-tree/model` board string, the NVIDIA driver
+  version, `/sys/module/*/version`) as UTF-8 without checking. A board or
+  build written in another encoding reached the panel as bytes the terminal
+  could not render, and the letter they belonged to was dropped rather than
+  marked. Each ill-formed byte now becomes U+FFFD at the boundary, so the
+  panel shows that the string is unreadable there instead of a name the
+  hardware never reported.
+
 ## [0.21.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

@@ -231,7 +231,7 @@ func readHostStatic() hostStatic {
 		}
 	}
 	if b, err := os.ReadFile("/proc/driver/nvidia/version"); err == nil {
-		h.nvidiaDrv, h.cuda = parseNvidiaVersion(string(b))
+		h.nvidiaDrv, h.cuda = parseNvidiaVersion(kernelText(b))
 	}
 	h.amdgpu = sysModuleVersion("amdgpu")
 	h.npus = scanAccelDrivers("/sys/class/accel")
@@ -326,7 +326,7 @@ func sysModuleVersion(module string) string {
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(b))
+	return strings.TrimSpace(kernelText(b))
 }
 
 // scanAccelDrivers enumerates the accelerator class (/sys/class/accel):
@@ -381,9 +381,11 @@ func cpuModelLinux() string {
 		}
 	}
 	// ARM and Apple Silicon often omit "model name"; the board string is
-	// in the device tree, NUL-terminated.
+	// in the device tree, NUL-terminated. Firmware writes it, so it is
+	// kernelText's boundary too: the encoding is whatever the board's
+	// build used, and the system panel measures the result as text.
 	if b, err := os.ReadFile("/proc/device-tree/model"); err == nil {
-		return strings.TrimRight(string(b), "\x00\n\r\t ")
+		return strings.TrimRight(kernelText(b), "\x00\n\r\t ")
 	}
 	return ""
 }
