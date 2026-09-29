@@ -58,7 +58,7 @@ drifts, on a one-off hex in a rule, and on a violet anywhere in the three.
 The type is the same idea: the `--fs-*` steps in `:root` are the only place
 the page writes a size, one per level from `--fs-micro` to `--fs-h1`, and
 `bun test site/` checks the steps descend and that no rule sizes text in
-its own rems (the wordmark's bare `2rem` inside the `max-width: 640px` query
+its own rems (the h1's bare `2rem` inside the `max-width: 640px` query
 is the one exemption it allows). The page has no uppercase, no tracking and
 no color change on a level, so size is what marks one; a step out of order or
 a size written in a rule is a heading the eye can no longer find. The h1 is

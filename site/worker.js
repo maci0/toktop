@@ -339,9 +339,10 @@ const HTML = htmlForWire(`<!doctype html>
   }
   .shot img { display: block; width: 100%; height: auto; }
   section { scroll-margin-top: 4rem; }
-  /* A phone is one screen wide, so only the wordmark drops a step: the
-     section titles stay where the scale puts them, because they are read
-     one at a time and every one of them fits a 360px column at 1.3rem.
+  /* A phone is one screen wide, so only the h1 drops a step, to the 2rem
+     the type test exempts by name: the sticky wordmark keeps --fs-lead,
+     and the section titles stay where the scale puts them, because they are
+     read one at a time and every one of them fits a 360px column at 1.3rem.
      The section list wraps to a second row here rather than scrolling
      sideways: at the micro step the six labels need about 320px beside a
      71px wordmark, which is more than a 360px phone has, so an overflow-x

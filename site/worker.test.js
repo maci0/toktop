@@ -15,6 +15,11 @@ const ORIGIN = "https://toktop.ai";
 const METHOD_RE = /^(GET|HEAD)$/;
 const FONT_SIZE_RE = /font-size:\s*([^;}]+)/g;
 const FONT_STEP_RE = /^var\(--fs-([\w-]+)\)$/;
+// The selector opening the rule a bare font-size sits in, and the media block
+// closing on a line of its own: the two ends of the phone query, which is
+// where the one size written outside the scale is allowed to live.
+const RULE_OPEN_RE = /([^{};]+)\{\s*$/;
+const BLOCK_CLOSE_RE = /^\s*\}$/m;
 const PALETTE_ENTRY_RE = /\d+/g;
 const ANSI16_BLOCK_RE = /^ANSI16: dict\[int, RGB\] = \{([\s\S]*?)^\}/m;
 const ANSI16_ENTRY_RE = /^\s*(\d+): (\(\d+, \d+, \d+\))/gm;
@@ -804,17 +809,29 @@ test("the type scale is named, ordered, and the one place a size is written", ()
   expect(steps.get("lead")).toBeGreaterThan(steps.get("body"));
   expect(steps.get("body")).toBeGreaterThan(steps.get("small"));
   expect(steps.get("small")).toBeGreaterThan(steps.get("micro"));
-  // Every font-size in the page is one of those steps, or the wordmark at
-  // 2rem inside the max-width: 640px query.
   for (const [, value] of identityBody.matchAll(FONT_SIZE_RE)) {
     const token = FONT_STEP_RE.exec(value.trim());
-    if (token) {
-      expect(steps.has(token[1]), `${token[1]} is not a step on the scale`).toBe(true);
-      continue;
-    }
-    const size = Number.parseFloat(value);
-    expect(size * (value.trim().endsWith("rem") ? 16 : 1)).toBe(32);
+    if (token) expect(steps.has(token[1]), `${token[1]} is not a step on the scale`).toBe(true);
   }
+  // Every font-size in the page is one of the steps above, with exactly one
+  // named exception: the h1 at a bare 2rem inside the max-width: 640px query,
+  // the phone step. Checking only the value would let a second bare size
+  // appear on any rule and still pass, and that the scale is the one place a
+  // size is written is the whole thing this test holds.
+  const bare = [...identityBody.matchAll(FONT_SIZE_RE)]
+    .filter(([, value]) => !FONT_STEP_RE.test(value.trim()))
+    .map((match) => ({ value: match[1].trim(), index: match.index }));
+  expect(bare).toHaveLength(1);
+  expect(bare[0].value).toBe("2rem");
+  const phoneQuery = identityBody.indexOf("@media (max-width: 640px)");
+  expect(phoneQuery).toBeGreaterThan(-1);
+  const selector = identityBody.slice(0, bare[0].index).match(RULE_OPEN_RE);
+  expect(selector[1].trim()).toBe("h1");
+  // The rule sits inside that query rather than after it: the media block
+  // closes on a line holding only its brace, so an exemption that drifted
+  // out to the base rules would show one here.
+  const inside = identityBody.slice(phoneQuery, bare[0].index);
+  expect(inside).not.toMatch(BLOCK_CLOSE_RE);
 });
 
 // The order test above reads px and rem as the same 16px root, so a scale that
