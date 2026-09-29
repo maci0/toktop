@@ -73,6 +73,52 @@ func TestInterruptedWriteRecoversTheStoreFromItsCopy(t *testing.T) {
 	}
 }
 
+// The evidence a restore acted on is spent once the store is back. Left
+// sitting, it outlasts the recovery it justified, and the next delete is not
+// the operator's re-pin gesture any more: the marks beside the store say a
+// write was interrupted, so the backup is handed back and the operator is
+// pinned to the key they had just rejected, for as long as the mark survives.
+func TestRestoringTheStoreClearsTheEvidenceItActedOn(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "known_hosts")
+	line := "h:22 " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey("repin"))))
+	if err := writeKnownHosts(path, map[string]string{"h:22": line}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	// Both marks a write that did not finish leaves: the staging file it
+	// never renamed, and the store it never put back after moving it aside.
+	stageInterrupted(t, path)
+	if err := os.WriteFile(displacedPath(path), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !interruptedWrite(path) {
+		t.Fatal("the setup left no evidence, so this test would mean nothing")
+	}
+
+	restoreStore(path)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("an interrupted write must leave the store back in place: %v", err)
+	}
+	if interruptedWrite(path) {
+		t.Errorf("the marks a restore acted on are still beside the store, so a later delete reads as a loss instead of a re-pin")
+	}
+
+	// The re-pin gesture, run after the recovery: it has to re-pin.
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	store, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatalf("a store deleted after a restore must read as empty, not fail: %v", err)
+	}
+	if len(store) != 0 {
+		t.Fatalf("store = %v, want empty: evidence the repair had already happened re-pinned the host the operator un-pinned", store)
+	}
+}
+
 // stageInterrupted leaves the mark a write that died between creating its
 // staging file and renaming it over the store would leave, so a test can set
 // up the one absence the copies are allowed to stand in for.

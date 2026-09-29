@@ -530,14 +530,52 @@ func interruptedWrite(path string) bool {
 	}
 	displaced := filepath.Base(displacedPath(path))
 	for _, e := range entries {
-		if e.IsDir() {
-			continue
-		}
-		if strings.HasPrefix(e.Name(), knownHostsTempPrefix) || e.Name() == displaced {
+		if !e.IsDir() && interruptedMark(e.Name(), displaced) {
 			return true
 		}
 	}
 	return false
+}
+
+// interruptedMark reports whether a file beside the store is one of the marks
+// a write that did not finish leaves. It is the one definition of the set, so
+// the marks clearInterruptedWrite removes cannot drift from the ones that
+// make a copy stand in for the store: a mark the check ignores and the clear
+// removes leaves a loss nothing will ever read, and a mark the clear leaves
+// and the check counts outlives the recovery that spent it.
+func interruptedMark(name, displaced string) bool {
+	return strings.HasPrefix(name, knownHostsTempPrefix) || name == displaced
+}
+
+// clearInterruptedWrite removes the marks a killed write left beside a store
+// that has just been recovered: the staging files it created and never
+// renamed, and the copy replaceFile moved aside and never replaced.
+//
+// The evidence is spent by the restore that acted on it. The store is back and
+// carries every pin, and writeKnownHosts has left a refreshed copy beside it,
+// so nothing here is the last record of anything. Left in place, a mark keeps
+// answering for a loss already repaired, and the re-pin gesture stops being
+// one: deleting the store to accept a host's new key finds a mark beside it,
+// and the copy is handed back with the rejected key in it. A mark outlives
+// its repair until the next write sweeps it, which is StaleTempAge away at the
+// earliest.
+//
+// Callers hold the store lock, which no writer of the store can be inside, so
+// every mark found here belongs to a write that is already dead.
+func clearInterruptedWrite(path string) {
+	dir := filepath.Dir(path)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	displaced := filepath.Base(displacedPath(path))
+	for _, e := range entries {
+		if e.IsDir() || !interruptedMark(e.Name(), displaced) {
+			continue
+		}
+		_ = os.Remove(filepath.Join(dir, e.Name()))
+	}
+	core.SyncDir(dir)
 }
 
 // restoreStore rewrites a store that an interrupted write left present only
@@ -546,6 +584,10 @@ func interruptedWrite(path string) bool {
 // marks (interruptedWrite), and it takes the cross-process lock rather than
 // the bare in-process mutex, because a peer toktop may be mid-write: a restore
 // that raced one would undo the pin that write had just recorded.
+//
+// A restore spends the marks that justified it (clearInterruptedWrite): once
+// the store is back, they are the evidence of a loss that no longer happened,
+// and leaving them would turn the next deletion into a second, unwanted one.
 func restoreStore(path string) {
 	// Only a store that is actually gone is worth a lock. Taking one on every
 	// connect would make a dashboard pay a peer's full storeLockWait to learn
@@ -583,7 +625,11 @@ func restoreStore(path string) {
 		}
 		audit().Warn("toktop: host key store was missing, pins recovered from its backup",
 			"path", logcfg.RedactedField(core.RedactHome(path), 256))
-		return writeKnownHosts(path, store)
+		if err := writeKnownHosts(path, store); err != nil {
+			return err
+		}
+		clearInterruptedWrite(path)
+		return nil
 	})
 	if err != nil {
 		audit().Warn("toktop: host key store not restored from its backup",

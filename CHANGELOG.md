@@ -27,6 +27,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   printed `1.0k tok/s`, the same spelling as 1000. The k starts at a whole
   thousand, the way a count's does, so the two scales agree on where the unit
   changes.
+- A recovered host-key store no longer keeps the marks that said it was
+  recovered. The staging file or displaced copy a killed write leaves is what
+  tells an interrupted write apart from a store an operator deleted to re-pin
+  a host whose key they had checked, and a restore that recovered the store
+  left those marks beside it. The next `rm` was therefore not the re-pin it
+  is: toktop read the copy back and pinned the key the operator had just
+  rejected, for as long as the mark survived, which is a day at the earliest.
+  A restore now spends the marks it acted on, so a new killed write is the
+  only thing that recovers a store again, on its own evidence.
 - The site's `unhandled` line carries the stack behind the throw, folded onto
   the one JSON object Workers Logs reads. A throw that reached the top of
   `fetch` is the one failure on the site nobody can reproduce: the request

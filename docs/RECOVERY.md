@@ -15,12 +15,12 @@ somebody else's data.
 | --- | --- | --- |
 | ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts`; a config directory that is itself unusable names no store, and the run fails at connect (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
 | a copy of the store, refreshed by every write, and rewritten from the store by the next connect that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
-| the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`) | `replaceFile` |
+| the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
 | the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
 | a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/install.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
 | the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/install.go`, `installDisplacing`) | `installDisplacing` |
 | the installed binary | the running executable's own path | `install` |
-| the store a killed write staged, and never renamed | a `.known_hosts-*` file beside the store (`internal/remote/knownhosts.go`, `knownHostsTempPrefix`), removed by the rename or by the failure that reports it | `atomicWriteFile` |
+| the store a killed write staged, and never renamed | a `.known_hosts-*` file beside the store (`internal/remote/knownhosts.go`, `knownHostsTempPrefix`), removed by the rename, by the failure that reports it, or by the restore that recovered the store it belonged to (`clearInterruptedWrite`) | `atomicWriteFile` |
 | a store staging file older than 24 hours | the same directory, removed by prefix and age on the next store write (`internal/core/fs.go`, `SweepStaleTemps`, `StaleTempAge`) | `writeKnownHosts` |
 
 The two files beside the binary hold no state worth recovering: both are
@@ -53,11 +53,14 @@ installed binary with it:
 - `known_hosts.displaced` is cleared before `replaceFile` moves a store aside,
   and a copy that could not be cleared fails the write by name, so the
   operator learns which file has to be deleted by hand. One that survives a
-  replacement that did land is reported the same way.
+  replacement that did land is reported the same way, and one a restore has
+  already read the store back from is removed by that restore
+  (`clearInterruptedWrite`).
 - `known_hosts.lock` is removed on release and broken as stale after a minute
   (`lockStore`). It is the only file toktop creates and deletes in one write.
 - `.known_hosts-*` and `.toktop-update-*` are removed by the rename that
-  supersedes them, by the failure that reports where one was left, and by
+  supersedes them, by the failure that reports where one was left, by the
+  restore that recovered the store the staging file belonged to, and by
   `SweepStaleTemps` once they are older than `StaleTempAge` (24 hours). A
   staging file younger than that belongs to a write in progress, and the age
   gate is what keeps the sweep from taking it.
@@ -72,7 +75,7 @@ installed binary with it:
 | RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next connect: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
-| RPO for a bad release | the installed binary, and only the binary: it is the one file an update replaces. The pin store is a file beside it, not a record inside it, so no pin is lost with a bad release. |
+| RPO for a bad release | the installed binary, and only the binary: it is the one file an update replaces. The pin store is a file beside it, not a record inside it, so no pin is lost with a bad release. The release page is the other copy, and it is not the only one: the tag rebuilds the same bytes ([Rebuilding a release instead of downloading it](#rebuilding-a-release-instead-of-downloading-it)). |
 | What a lost pin store actually costs | a forced re-trust, not a dashboard outage, and that happens whenever the store is gone, because deleting it is how a host is re-pinned on purpose. The copies beside it are read back only where a write did not finish: a leftover staging file or a displaced copy beside the store is the evidence (`interruptedWrite`), and without one the store is treated as holding no pins, so the next connect accepts whatever key that host presents. Losing the store mid-write therefore costs nothing, while a store removed by hand drops the protection against a key change as well as against a first-contact interception, and that is the price of the re-pin gesture. It is also why the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
 
 ## Restoring the pin store
@@ -105,6 +108,14 @@ was interrupted: a staging file or the displaced copy has to be sitting beside
 the store for the copies to be read at all (`interruptedWrite`). A store you
 removed yourself is the re-pin gesture, so the run after an `rm` re-pins
 rather than reading a copy back.
+
+A restore spends the marks that justified it (`clearInterruptedWrite`). The
+store is back and carries every pin, so the marks are the evidence of a loss
+that has already been repaired, and a mark left in place would keep the next
+`rm` from being a re-pin: for as long as it survived, deleting the store to
+accept a host's new key would read as another interrupted write and hand the
+rejected key back. A new killed write leaves new marks, so a later loss is
+still recovered, on its own evidence.
 
 One `cp`, because the store is a text file, one record per line, in the
 `host key-type base64` form OpenSSH uses. `ssh-keygen -l -f` reads it, and
@@ -182,6 +193,15 @@ rewritten from the store, logged, and not reported again once it is current;
 `TestCheckStoreCopyLeavesACurrentCopyAlone` pins that a backed-up store costs
 a connect nothing. A copy that is silently gone is therefore a state the next
 run repairs, not one that has to be noticed.
+
+The two halves of the re-pin rule are pinned together in
+`internal/remote/knownhosts_repin_test.go`, because one is only true while the
+other is:
+`TestDeletingTheStoreRepinsRatherThanRecoveringTheBackup` holds that a store
+removed by hand re-pins, and
+`TestRestoringTheStoreClearsTheEvidenceItActedOn` holds that a restore clears
+the marks it acted on, so the re-pin works again on the very next run instead
+of a later one.
 
 Every write to the store is atomic (staged, fsynced, renamed, with the
 directory entry flushed afterwards) and cross-process serialized by a lock
@@ -265,6 +285,42 @@ release, so this only applies while that release is the broken one; the
 project does not support a downgrade as a channel (see
 [../CHANGELOG.md](../CHANGELOG.md)).
 
+## Rebuilding a release instead of downloading it
+
+The release page is where to get the bytes from, and it is not the only place
+they exist: the tag builds them. Every input to the bytes is in the
+repository, so a release whose assets are gone (deleted, or unreachable
+because the network is what is broken) is rebuilt from its own tag:
+
+```sh
+git clone https://github.com/maci0/toktop && cd toktop
+git checkout v<version>
+make test-dist VERSION=<version>
+install -m 0755 "dist/toktop_<version>_<goos>_<goarch>" "$(command -v toktop)"
+```
+
+`make test-dist` builds the six release platforms with the release flags and
+nothing else, so it needs no token, no `gh` and no network beyond the Go
+toolchain and module cache `go.mod` names. The binary it writes is the
+published one, byte for byte, which is a property the build is arranged to
+have rather than one to hope for: `-trimpath -buildvcs=false -buildid=`
+(`GO_BUILDFLAGS`, `LDFLAGS` in the Makefile) leave no source path, checkout
+or build id in the output, `GOTOOLCHAIN` pins the compiler to the `go` line
+of `go.mod`, and `repro-check` builds every release platform twice from two
+different source paths with two cold build caches and fails on any diff. That
+gate runs in CI on every PR (`repro-check-pair`, and `make pr` locally), so a
+release that shipped is one that gate passed.
+
+Comparing the rebuilt file against the published digest is what makes it the
+release rather than a build from the same tree: the line
+`toktop_<version>_checksums.tar.gz` lists for it is the digest to compare
+against, and `make release-verify VERSION=<version>` fetches every published
+asset and re-verifies all of them. A release page that cannot be reached
+costs that comparison, not the binary. A rebuilt binary with no published
+digest to compare against is one no installed host would accept either, since
+`toktop update` refuses a download it cannot check; keep the file to compare
+against once the page is back.
+
 ## Rolling the site back
 
 `make site-rollback` calls `wrangler rollback` with no version, which puts
@@ -306,3 +362,10 @@ deployment has to be made from a checkout rather than from a note.
   account, which is why `site/worker.js` and `site/public` live in git: the
   checkout is the copy that survives the account, and it is the only one
   there is.
+- A published release's only copy is the release page on one repository, and a
+  credential holding that repository can delete the assets as well as the tag.
+  The bytes do not depend on the page, though: the build is reproducible and
+  gated on it, so the tag rebuilds them and the checkout that holds the tag is
+  the copy that survives the page, in the same way `site/` survives the
+  deployment list. What the page alone holds is the published digest, and that
+  is what the rebuild is checked against.

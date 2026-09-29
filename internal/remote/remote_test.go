@@ -1251,17 +1251,27 @@ func TestReadKnownHostsRecoversBackupStore(t *testing.T) {
 		t.Fatalf("the recovered pin was not honored: %v", err)
 	}
 
-	// Connecting again puts the store back where it belongs, so the copy is a
-	// backup once more rather than where the store now lives. The connect
-	// above rewrites it; this is the path a second run takes.
+	// The connect above put the store back where it belongs, and it spends the
+	// marks that said the store was lost, so the copy is a backup once more
+	// rather than where the store now lives. A later loss is recovered from
+	// that copy on its own evidence: the marks a new killed write leaves.
+	// A store deleted with nothing beside it is the re-pin gesture, and is
+	// covered by TestDeletingTheStoreRepinsRatherThanRecoveringTheBackup.
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("a recovered store was not written back to its own path: %v", err)
+	}
+	if interruptedWrite(path) {
+		t.Error("the restore left the marks of a loss that has been repaired")
+	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}
+	stageInterrupted(t, path)
 	if _, err := tofu(); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("a recovered store was not written back to its own path: %v", err)
+		t.Fatalf("a second interrupted write was not recovered from the copy: %v", err)
 	}
 	again, err := readKnownHosts(path)
 	if err != nil {
