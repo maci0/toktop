@@ -116,7 +116,8 @@ func (m Model) renderPlain() string {
 	// plain view is indistinguishable from a feed that stalled. The drawn
 	// dashboard carries the same badge for the same reason. It is printed
 	// unstyled, as the rest of this frame is: a screen reader reads an SGR run
-	// as nothing, and a light terminal shows cYellow at 1.95:1 (WCAG 1.4.3).
+	// as nothing, and the drawn frame meets the contrast half of that by
+	// painting cBase behind itself.
 	if m.paused {
 		body += "\n‖ PAUSED"
 	}
@@ -243,7 +244,14 @@ func writeEnginesPlain(b *strings.Builder, s core.Snapshot) {
 		stats = append(stats,
 			"out "+fmtRate(p.OutTokPS)+" tok/s",
 			"in "+fmtRate(p.InTokPS)+" tok/s",
-			fmt.Sprintf("kv cache %.0f%%", clamp01(p.KVPct/100)*100))
+			// The KV meter draws its pressure as a colored bar, and this
+			// report is the text alternative for it (WCAG 1.1.1). The bar's
+			// length survives a monochrome terminal but its band does not,
+			// and 60% and 95% are one number to a reader who is not told
+			// where the ramp breaks, so the word rides the percentage the
+			// way it already does for memory and temperature (WCAG 1.4.1).
+			fmt.Sprintf("kv cache %.0f%%%s", clamp01(p.KVPct/100)*100,
+				severityWord(kvBand(p.KVPct))))
 		stats = append(stats,
 			fmt.Sprintf("running %d", p.Running),
 			fmt.Sprintf("waiting %d", p.Waiting))

@@ -184,7 +184,9 @@ func fitSeg(s string, n int) string {
 // plain drops the styling. The plain report is the screen-reader frame and
 // carries no ANSI at all, and these segments were the last thing in it that
 // did: the identity line came out carrying a foreground run a reader announces
-// as nothing and a light terminal shows at 1.96:1 (WCAG 1.4.3).
+// as nothing. The drawn frame no longer needs the contrast half of that
+// argument: it paints cBase behind itself, so cInfo measures 9.67:1 there
+// whatever profile the terminal is on (theme.go, backdropStyle).
 func hostSegments(sy *core.SysSample, lim hostSegmentLimits, plain bool) []string {
 	label := func(s string) string {
 		if plain {
@@ -292,16 +294,25 @@ func sysCPUTemps(sy *core.SysSample) []core.TempReading {
 	return sy.Temps
 }
 
-// tempBand and memBand are the ramps these readings are classified on, and
-// the color each one draws with. A bare reading (a temperature, a swap
+// tempBand, memBand and kvBand are the ramps these readings are classified on,
+// and the color each one draws with. A bare reading (a temperature, a swap
 // percentage) is prefixed with its band's mark, so its severity survives a
 // monochrome terminal and a colorblind reader; the gauge meters carry a bar
-// and a number already and are left alone.
+// and a number already and are left alone. The band is also what the plain
+// report spells out in words, so a reading the meter drew and a reading the
+// report prints are classified by one function (WCAG 1.4.1, 1.1.1).
 func tempBand(celsius float64) band { return bandOf(celsius, tempWarnC, tempCritC) }
 
 func memBand(v float64) band { return bandOf(v, memWarnPct, memCritPct) }
 
 func memHeat(v float64) lipgloss.Color { return memBand(v).color() }
+
+func kvBand(pct float64) band { return bandOf(pct, kvWarnPct, kvCritPct) }
+
+// kvHeat colors the KV-cache meter. It is a gauge, so it carries a bar and a
+// percentage beside the color and needs no mark of its own; the bar and the
+// number are the channel a reader who cannot see the hue reads instead.
+func kvHeat(v float64) lipgloss.Color { return kvBand(v).color() }
 
 func fmtTempC(milliC int) string {
 	return fmt.Sprintf("%.0f°", float64(milliC)/1000)

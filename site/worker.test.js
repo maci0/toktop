@@ -90,6 +90,9 @@ const GRID_LIST_STYLE_RE = /\.grid \{[^}]*list-style: none/;
 // The terminal frame re-points the scheme it paints in; every scheme token its
 // text can name has to be in that list.
 const SHOT_FRAME_RE = /\.shot \{[^}]*\}/;
+// The sticky bar's height, named once on :root and raised by the phone
+// breakpoint, and the scrollport offset that has to read it.
+const BAR_H_TOKEN_RE = /--bar-h:\s*([\d.]+)rem;/g;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -330,7 +333,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4506);
+    expect(bytes.byteLength).toBe(4518);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1093,6 +1096,28 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
   expect(identityBody.includes('<html lang="en">')).toBe(true);
 });
 
+// The bar is sticky over the page, so the scroll offset has to clear it, and it
+// has to be the offset the scrollport uses rather than one written onto a
+// section: a per-element margin covers an anchor jump and nothing else, so the
+// browser bringing a focus stop into view on Tab still put the ring under the
+// bar, and a keyboard user tabbing the bar's own links watched it disappear
+// (WCAG 2.4.11 Focus Not Obscured, 2.4.7 Focus Visible). The offset is read
+// from a token so the phone breakpoint's taller bar cannot drift from it.
+test("the scroll offset clears the sticky bar for every way the page scrolls", () => {
+  const heights = [...identityBody.matchAll(BAR_H_TOKEN_RE)].map((match) => Number(match[1]));
+  expect(heights, "the bar height is not named once on :root and once on the phone").toHaveLength(
+    2,
+  );
+  expect(
+    heights[1],
+    "the phone bar wraps to two rows and is the taller of the two",
+  ).toBeGreaterThan(heights[0]);
+  expect(identityBody).toContain("html { scroll-padding-top: var(--bar-h); }");
+  // No element-level offset left behind: two spellings of the same clearance is
+  // one of them going stale.
+  expect(identityBody).not.toContain("scroll-margin-top");
+});
+
 // The blink has to stop, not just be skippable by preference. A user who
 // never set prefers-reduced-motion faces a page that blinks for as long as
 // they read it, with nothing on the page to stop it, which 2.2.2 does not
@@ -1225,9 +1250,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13093);
-  expect(gzipped).toBe(4506);
-  expect(brotli).toBe(3814);
+  expect(identity).toBe(13114);
+  expect(gzipped).toBe(4518);
+  expect(brotli).toBe(3826);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1258,7 +1283,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_391);
+  expect(visit[0][1]).toBe(14_403);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
@@ -1311,7 +1336,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_391);
+  expect(visit).toBe(14_403);
   expect(visit).toBeLessThan(25_000);
 });
 

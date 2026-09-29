@@ -91,13 +91,19 @@ func TestPlainFrameCarriesTheData(t *testing.T) {
 }
 
 // The plain report has no color to spend on a reading, so a reading over a
-// ramp's warn or crit threshold has to say so in words. Both steps, on both
-// a temperature and a percentage, and an OK-band reading says nothing: a
-// healthy machine reads the same as it always did.
+// ramp's warn or crit threshold has to say so in words. Both steps, on a
+// temperature, a memory percentage and the KV-cache meter the dashboard draws
+// as a colored gauge, and an OK-band reading says nothing: a healthy machine
+// reads the same as it always did.
 func TestPlainFrameNamesSeverityInWords(t *testing.T) {
 	snap := core.Snapshot{
-		At:        time.Now(),
-		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
+		At: time.Now(),
+		Providers: []core.ProviderSnapshot{
+			{Label: "x", Kind: core.KindOllama, OK: true},
+			{Label: "kv-ok", Kind: core.KindOllama, OK: true, KVPct: 40},
+			{Label: "kv-warn", Kind: core.KindOllama, OK: true, KVPct: 70},
+			{Label: "kv-crit", Kind: core.KindOllama, OK: true, KVPct: 95},
+		},
 		Sys: &core.SysSample{
 			MemTotal: 1000, MemUsed: 500, SwapTotal: 1000, SwapUsed: 800,
 			Temps: []core.TempReading{
@@ -115,6 +121,12 @@ func TestPlainFrameNamesSeverityInWords(t *testing.T) {
 		"temp hot 95° critical",
 		"swap 80% high",
 		"gpu nv0 85° critical",
+		// The gauge's band is the one reading the report used to drop: the
+		// drawn meter spends it on a bar color, and a bar's length reads the
+		// same to a monochrome terminal at 95% as at 40%.
+		"kv-ok (ollama)\n       out 0.0 tok/s · in 0.0 tok/s · kv cache 40% · running 0",
+		"kv cache 70% high",
+		"kv cache 95% critical",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("plain frame missing %q in:\n%s", want, out)

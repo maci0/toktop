@@ -599,10 +599,6 @@ func (m Model) lastProbe() (core.ProbeSample, bool) {
 	return core.ProbeSample{}, false
 }
 
-// kvHeat colors the KV-cache meter. It is a gauge, so it carries a bar and a
-// percentage beside the color and needs no mark of its own.
-func kvHeat(v float64) lipgloss.Color { return bandOf(v, kvWarnPct, kvCritPct).color() }
-
 // snapNow is the instant rate windows and idle spans use: the snapshot's
 // own stamp when the collector filled one in, otherwise the header clock.
 // The header clock itself stays on ticks so it still advances for the

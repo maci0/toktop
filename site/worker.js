@@ -155,6 +155,12 @@ const HTML = htmlForWire(`<!doctype html>
        happens to be smaller, and --space-runout is the last one before the
        footer. */
     --space-tight: 1.5rem; --space-section: 2.8rem; --space-runout: 4rem;
+    /* The height the sticky bar occupies, which is the one thing on the page
+       that can sit on top of content. It is named rather than written into
+       the scroll offset below because the two have to agree: an offset that
+       under-reads the bar is the bar covering the thing it was meant to
+       clear. The phone breakpoint raises it, the bar wrapping to two rows. */
+    --bar-h: 4rem;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -164,6 +170,15 @@ const HTML = htmlForWire(`<!doctype html>
     }
   }
   * { box-sizing: border-box; }
+  /* The bar is sticky at z-index 10, so anything the browser scrolls to can
+     land underneath it. scroll-padding-top on the scrollport is the offset for
+     every way the page is scrolled: an anchor jump, the skip link landing on
+     main, and the browser bringing a focus stop into view on Tab, which no
+     per-element margin covers. Without it a keyboard user tabbing through the
+     bar's own row of links watched the focus ring slide under the bar and
+     vanish, and the section each nav link names opened behind it (WCAG 2.4.11
+     Focus Not Obscured, 2.4.7 Focus Visible). */
+  html { scroll-padding-top: var(--bar-h); }
   @media (prefers-reduced-motion: no-preference) {
     html { scroll-behavior: smooth; }
   }
@@ -338,7 +353,6 @@ const HTML = htmlForWire(`<!doctype html>
     color: var(--dim); background: var(--panel); border-bottom: 1px solid var(--line);
   }
   .shot img { display: block; width: 100%; height: auto; }
-  section { scroll-margin-top: 4rem; }
   /* A phone is one screen wide, so only the h1 drops a step, to the 2rem
      the type test exempts by name: the sticky wordmark keeps --fs-lead,
      and the section titles stay where the scale puts them, because they are
@@ -364,8 +378,10 @@ const HTML = htmlForWire(`<!doctype html>
        the desktop rule clears: an anchor jump landed the section heading
        under the bar it was meant to clear, and on a phone the heading was
        the only thing naming the section. Two rows of .7rem padding over the
-       brand line and the micro-step nav come to about 4.6rem. */
-    section { scroll-margin-top: 6rem; }
+       brand line and the micro-step nav come to about 4.6rem. Raising the
+       token is all it takes: the scroll offset above reads it, so no rule
+       spells the height a second time. */
+    :root { --bar-h: 6rem; }
   }
 </style>
 </head>

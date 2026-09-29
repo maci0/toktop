@@ -119,9 +119,9 @@ func (m Model) renderFooter() string {
 
 // footKey, footLabel and footNotice style the footer row, and return their
 // argument unstyled for the plain report. That report is the non-visual frame:
-// a screen reader reads an SGR run as nothing, and a low-vision reader on a
-// light terminal reads cDim at 3.60:1 and cCyan at 1.96:1 (WCAG 1.4.3). The
-// words already carry what the colors were carrying.
+// a screen reader reads an SGR run as nothing (WCAG 1.4.3, which the drawn
+// frame meets instead by painting cBase behind itself). The words already
+// carry what the colors were carrying.
 func (m Model) footKey(s string) string {
 	if m.cfg.Plain {
 		return s
