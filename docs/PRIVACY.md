@@ -34,7 +34,10 @@ directory, so a username in the path is not rendered.
 
 Nothing about usage, agents or engines. The only files toktop writes are:
 
-- `$XDG_CONFIG_HOME/toktop/known_hosts` (mode 0600): ssh host keys, trust on
+- `$XDG_CONFIG_HOME/toktop/known_hosts` when that variable holds an absolute
+  path, otherwise `toktop/known_hosts` under the platform's user config
+  directory (`~/.config` on Linux, `~/Library/Application Support` on macOS,
+  `%AppData%` on Windows) (mode 0600): ssh host keys, trust on
   first use, for `ssh://` targets only. `known_hosts.lock` sits beside it
   while a host key is being added and is removed when the write finishes.
   Each write goes to a short-lived `.known_hosts-*` staging file that is

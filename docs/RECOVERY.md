@@ -83,7 +83,8 @@ that write added. `store` below is the store's own directory, which is not
 always the default: an absolute `XDG_CONFIG_HOME` puts the store under
 `$XDG_CONFIG_HOME/toktop`, and every error, warning and `first use` line
 toktop prints names the path in force, so read it off the last run rather than
-assuming `~/.config`.
+assuming `~/.config` (macOS `~/Library/Application Support/toktop`, Windows
+`%AppData%\toktop`).
 
 ```sh
 store=~/.config/toktop        # or $XDG_CONFIG_HOME/toktop
@@ -218,7 +219,8 @@ toktop --version
 
 The file is the previous release, verified the way `toktop update` verified
 it, so the fingerprint is not in question; what is missing is the name, and
-that is what the `mv` restores.
+that is what the `mv` restores. In PowerShell the same move is
+`Move-Item toktop.exe.old toktop.exe`.
 
 On those platforms the previous release is installed by hand and verified the
 way `toktop update` verifies. A release publishes the asset
@@ -229,10 +231,32 @@ is `sha256sum` output). Download both from the tag's release page, then:
 
 ```sh
 tar -xzf toktop_<version>_checksums.tar.gz checksums.txt
-sha256sum -c checksums.txt --ignore-missing   # the line naming the binary
+# The two digests have to be the same line. `sha256sum FILE` is GNU coreutils
+# and `shasum -a 256 FILE` is the same digest under the name macOS ships, so
+# both spellings are shown rather than one that is missing on the host.
+sha256sum toktop_<version>_<goos>_<goarch>        # shasum -a 256 on macOS
+grep ' toktop_<version>_<goos>_<goarch>$' checksums.txt
 install -m 0755 toktop_<version>_<goos>_<goarch> "$(command -v toktop)"
 toktop --version
 ```
+
+The listing holds an entry for all six platform binaries and the other five
+are not on this host, which is why the digest is computed for the one file
+rather than checked with `sha256sum -c`.
+
+On Windows, the same steps in PowerShell (`tar` is bsdtar and ships with
+Windows 10 and later, and no host has either digest tool by that name):
+
+```powershell
+tar -xzf toktop_<version>_checksums.tar.gz checksums.txt
+Get-Content checksums.txt | Select-String "toktop_<version>_windows_<goarch>\.exe"
+(Get-FileHash toktop_<version>_windows_<goarch>.exe -Algorithm SHA256).Hash.ToLower()
+Copy-Item toktop_<version>_windows_<goarch>.exe (Get-Command toktop).Source -Force
+toktop --version
+```
+
+The hash `Get-FileHash` prints has to equal the one on the line `Select-String`
+picked out; the file stays where it is until it does.
 
 The last line is the check that the replacement took: a binary that will not
 run cannot report its own version, so a dashboard that starts again is the

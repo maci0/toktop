@@ -526,7 +526,10 @@ keys, ssh-agent, and finally a password prompt when stdin is a terminal
 is rejected: the password would sit in argv, and is not how auth is
 configured. A path, query, or fragment on the URL is rejected rather than
 ignored. Host keys use trust-on-first-use, stored at
-`$XDG_CONFIG_HOME/toktop/known_hosts` (default `~/.config/toktop/known_hosts`);
+`$XDG_CONFIG_HOME/toktop/known_hosts` when that is an absolute path, and
+otherwise at `toktop/known_hosts` under the platform's user config directory
+(`~/.config` on Linux, `~/Library/Application Support` on macOS,
+`%AppData%` on Windows);
 a changed key is refused loudly. Every write keeps a copy of the store at
 `known_hosts.bak` beside it, and a store that a write failed to put back is
 read back from that copy rather than re-pinned from scratch. The copy only
@@ -761,7 +764,7 @@ where a flag takes a path (`--ssh-key`).
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header, and a set-but-blank value is named before the request, since the rate-limit error it produces otherwise advises setting a variable that is already set |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows, and so is an absolute one with no `agents.json` under it |
 | `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
-| `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default `~/.config`); a relative value is ignored rather than placing the store under the working directory, and is named at startup with a non-demo `ssh://` target; a run on Linux with one fails at connect |
+| `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default is the platform user config directory, `~/.config` on Linux, `~/Library/Application Support` on macOS, `%AppData%` on Windows); a relative value is ignored rather than placing the store under the working directory, and is named at startup with a non-demo `ssh://` target; a run on Linux with one fails at connect |
 | `KIMI_CODE_HOME` | with `--agents`: directory under which kimi's `sessions` are read (default `~/.kimi-code`); a relative value is ignored and named at startup, and so is an absolute one with no `sessions` directory under it |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset. Surrounding whitespace and a trailing newline (from `$(...)`) are stripped, the rule the other secret variables follow, since a socket named with one does not exist and the run would fall back to keys and then to a password prompt |
 | `NO_COLOR` | strips terminal styling when set to a non-empty value (honored by the terminal renderer, as usual) |

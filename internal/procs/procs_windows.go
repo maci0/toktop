@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
-	"strings"
 	"sync"
 	"time"
 
@@ -94,33 +93,6 @@ func listWindows() ([]raw, error) {
 		list = append(list, r)
 	}
 	return list, nil
-}
-
-// splitWindowsArgs does a light quote-aware split of a Windows command line.
-func splitWindowsArgs(cmd string) []string {
-	var (
-		args []string
-		cur  strings.Builder
-		inQ  bool
-	)
-	flush := func() {
-		if cur.Len() > 0 {
-			args = append(args, cur.String())
-			cur.Reset()
-		}
-	}
-	for _, r := range cmd {
-		switch {
-		case r == '"':
-			inQ = !inQ
-		case r == ' ' && !inQ:
-			flush()
-		default:
-			cur.WriteRune(r)
-		}
-	}
-	flush()
-	return args
 }
 
 var errBadJSON = jsonError{}
