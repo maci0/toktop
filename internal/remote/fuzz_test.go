@@ -161,7 +161,7 @@ func FuzzParseTarget(f *testing.F) {
 	defer func() { sshConfigPath, configReader = oldPath, oldRead }()
 	sshConfigPath = func() string { return "/test/config" }
 	configReader = func(path string) ([]byte, error) {
-		return []byte("Host gpu\n  hostname 192.168.0.212\n  user maci\n  port 2022\n  identityfile ~/.ssh/gpu_key\nHost *.lab\n  user labadmin\nHost *\n  user fallback\n"), nil
+		return []byte("Host gpu\n  hostname 192.168.0.212\n  user dev\n  port 2022\n  identityfile ~/.ssh/gpu_key\nHost *.lab\n  user labadmin\nHost *\n  user fallback\n"), nil
 	}
 
 	f.Fuzz(func(t *testing.T, raw string) {
@@ -204,7 +204,7 @@ func FuzzParseSSHConfig(f *testing.F) {
 			cfg: `
 Host gpu
   hostname 192.168.0.212
-  user maci
+  user dev
   port 2022
   identityfile ~/.ssh/gpu_key
 

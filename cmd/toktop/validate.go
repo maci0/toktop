@@ -217,7 +217,7 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 			continue
 		}
 		if !filepath.IsAbs(v) {
-			fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q\n", e.name, v)
+			fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q\n", e.name, core.RedactHome(v))
 			// The consequence differs per variable, and naming the wrong one
 			// sends the operator after a fallback that does not exist. A store
 			// with a default to fall back to says so; the ssh host-key store
@@ -631,7 +631,12 @@ const maxReportedName = 64
 // cutting between grapheme clusters so a name ending in an emoji or a
 // decomposed accent is never sliced mid-character.
 func reportedField(s string) string {
-	return core.TruncateClusters(core.SingleLine(s), maxReportedName)
+	// The home fold rides with the sanitizer: the names come from an
+	// operator's agents.json and from the environment, and a definitions key
+	// that is path-shaped (a shared or synced config) would otherwise put
+	// the account into the first line the run prints. The path printed
+	// beside it is folded for the same reason.
+	return core.TruncateClusters(core.SingleLine(core.RedactHome(s)), maxReportedName)
 }
 
 // loadAgentDefs pulls in ~/.gauntlet/agents.json so --agents can follow

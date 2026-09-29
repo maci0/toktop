@@ -113,7 +113,10 @@ func ParseTargets(raws []string) (targets, duplicates []Target, err error) {
 
 func parseURLTarget(raw string) (Target, error) {
 	if !strings.HasPrefix(raw, "ssh://") {
-		return Target{}, fmt.Errorf("target %q must start with ssh://", raw)
+		// The shape is named, not the value: a bare user@host (the form a
+		// ~/.ssh/config Host or a default login suggests) is a person, and
+		// this line is the first thing the run prints.
+		return Target{}, fmt.Errorf("target must start with ssh:// (got %q)", targetWithoutUser(raw))
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
@@ -458,4 +461,17 @@ func ResolveKeyFile(file string) (string, error) {
 		return "", fmt.Errorf("%s is not a regular file", core.RedactHome(file))
 	}
 	return file, nil
+}
+
+// targetWithoutUser drops the userinfo from a target spelled the way a bare
+// host is ("user@host"), for the messages that name a mistyped argument. The
+// account is dropped before the value is echoed, not after: a value printed
+// whole reaches the operator's terminal and whatever captures it.
+func targetWithoutUser(raw string) string {
+	at := strings.Index(raw, "@")
+	slash := strings.IndexAny(raw, `/\`)
+	if at < 0 || (slash >= 0 && slash < at) {
+		return raw
+	}
+	return raw[at+1:]
 }

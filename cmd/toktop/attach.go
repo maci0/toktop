@@ -174,7 +174,12 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 		case <-ctx.Done():
 		case <-cli.Done():
 			if ctx.Err() == nil {
-				fmt.Fprintf(os.Stderr, "toktop: ssh connection to %s lost (%v)\n", tgt.Host, cli.Err())
+				// The transport error names the peer's address and the login
+				// (read tcp 10.0.0.5:52001->203.0.113.9:22), both of which
+				// the audit twin for this drop already drops. A user's
+				// terminal is not the one place the account may stand.
+				fmt.Fprintf(os.Stderr, "toktop: ssh connection to %s lost (%s)\n", tgt.Host,
+					logcfg.RedactedField(tgt.RedactUser(core.RedactHome(cli.Err().Error())), 256))
 			}
 		}
 		// Close on both paths: watchClose reclaims listeners after a drop,

@@ -206,9 +206,9 @@ func (w *Watcher) consumeZstd(path string, f *os.File, off int64) (recs []values
 		// read again. Nothing downstream can tell that from an idle session,
 		// so the frame is named.
 		auditLogger().Warn("agent transcript frame failed to decode",
-			"path", core.RedactHome(path),
+			"path", redactStorePath(path),
 			"offset", off+int64(n),
-			"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+			"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 	}
 	head := w.zstdCarry[path]
 	w.zstdCarry[path] = nil
@@ -286,9 +286,9 @@ func (w *Watcher) ownsZstd(path string, f *os.File) (mine, decided bool) {
 		// the answer is reported as not mine rather than as unknown, and the
 		// frame is named so the reason is not invisible.
 		auditLogger().Warn("agent transcript frame failed to decode",
-			"path", core.RedactHome(path),
+			"path", redactStorePath(path),
 			"offset", consumed,
-			"error", core.RedactHome(core.Snippet([]byte(derr.Error()))))
+			"error", redactStorePath(core.Snippet([]byte(derr.Error()))))
 	}
 	if consumed == 0 {
 		if derr != nil {

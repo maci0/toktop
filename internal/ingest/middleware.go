@@ -180,7 +180,12 @@ const maxRequestID = 64
 // only when the sender supplied nothing to correlate against. The toktop-
 // prefix marks an id this run minted rather than one the sender echoed.
 func (s *Server) incomingRequestID(r *http.Request) string {
-	if v := logcfg.Field(r.Header.Get("X-Request-Id"), maxRequestID); v != "" {
+	// The home fold, not the audit handler's: a sender on another host
+	// names a path under its own $HOME, and the id is echoed in the response
+	// header and written to the audit line, which outlives the run. The
+	// event id from the same sender is folded for the same reason
+	// (eventFromWire).
+	if v := logcfg.Field(core.RedactHome(r.Header.Get("X-Request-Id")), maxRequestID); v != "" {
 		return v
 	}
 	return fmt.Sprintf("toktop-%012d", s.reqSeq.Add(1))

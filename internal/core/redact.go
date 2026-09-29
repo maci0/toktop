@@ -78,7 +78,15 @@ func RedactHome(msg string) string {
 // userHomePrefixes are the directories a home sits under on the systems a
 // remote login can land on. Which one applies is not knowable from here, so
 // each is tried: a path that does not exist on the peer costs nothing.
-var userHomePrefixes = []string{"/home/", "/Users/", `\Users\`}
+// The enterprise layouts are here for the same reason as the desktop ones:
+// RHEL and Fedora Silverblue put a home under /var/home, SUSE under
+// /export/home, and an HPC or NAS peer commonly mounts one under /nfs/home
+// or /srv/homes. A peer that spells its home under one of those leaves the
+// account in the text this exists to remove.
+var userHomePrefixes = []string{
+	"/home/", "/Users/", `\Users\`,
+	"/var/home/", "/export/home/", "/nfs/home/", "/srv/homes/",
+}
 
 // RedactUserHome rewrites the home directory of the named account in msg to
 // "~". RedactHome only folds the home of the account toktop runs as, and the

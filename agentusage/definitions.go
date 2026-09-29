@@ -18,8 +18,6 @@ import (
 	"sync/atomic"
 
 	"golang.org/x/text/unicode/norm"
-
-	"github.com/maci0/toktop/internal/core"
 )
 
 // knownAgents are the CLIs this package recognizes by name.
@@ -452,7 +450,7 @@ func (e redactedError) Unwrap() error { return e.cause }
 // contract LoadDefinitions documents for ErrInvalidDefinitions.
 func defsErr(causes []error, format string, args ...any) error {
 	return redactedError{
-		msg:   core.RedactHome(fmt.Sprintf(format, args...)),
+		msg:   redactStorePath(fmt.Sprintf(format, args...)),
 		cause: errors.Join(causes...),
 	}
 }

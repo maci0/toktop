@@ -126,8 +126,8 @@ func rootListKey(root string, suffixes []string) string {
 // installs its own logger (SetLogger) has no fold of its own to catch it.
 func auditWalkFailure(root string, err error) {
 	auditLogger().Warn("agent transcript walk failed",
-		"root", core.RedactHome(root),
-		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+		"root", redactStorePath(root),
+		"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 }
 
 // pruneRootListsLocked drops listings older than maxAge. A clanker (or a

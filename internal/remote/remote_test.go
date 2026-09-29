@@ -204,7 +204,7 @@ func TestParseTargetSSHConfig(t *testing.T) {
 # comment
 Host gpu
   hostname 192.168.0.212
-  user maci
+  user dev
   port 2022
   identityfile ~/.ssh/gpu_key
 
@@ -219,7 +219,7 @@ Host *
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := Target{User: "maci", Host: "192.168.0.212", Port: 2022}
+	want := Target{User: "dev", Host: "192.168.0.212", Port: 2022}
 	if tgt.User != want.User || tgt.Host != want.Host || tgt.Port != want.Port {
 		t.Errorf("resolved = %+v, want %+v", tgt, want)
 	}
@@ -418,7 +418,7 @@ func TestCutConfigField(t *testing.T) {
 		{`IdentityFile "~/my key" # personal`, "IdentityFile", "~/my key", true},
 		{"HostName 10.0.0.5 # the gpu box", "HostName", "10.0.0.5", true},
 		{"Port 2222 # lab port", "Port", "2222", true},
-		{"User maci # me", "User", "maci", true},
+		{"User dev # me", "User", "dev", true},
 		{"IdentityFile ~/keys/a#b", "IdentityFile", "~/keys/a#b", true},
 		{`Host "build box"`, "Host", "build box", true},
 		{"#comment", "", "", false},

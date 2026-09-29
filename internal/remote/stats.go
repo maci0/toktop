@@ -15,6 +15,11 @@ import (
 	"github.com/maci0/toktop/internal/sysmon"
 )
 
+// remoteErrMax caps the remote's own failure text wherever it is written:
+// the stored sample error the frame and both reports render, and the audit
+// attribute beside it.
+const remoteErrMax = 256
+
 // Stats samples host vitals from a remote every few seconds and merges them
 // into snapshots, tagged with the host so the UI can show origin. Load and
 // memory come from /proc and stay empty on non-Linux remotes; CPU model, OS
@@ -229,7 +234,11 @@ func (s *Stats) poll(ctx context.Context) {
 		// one the audit log already applies, so a remote whose error names a
 		// path under the operator's home does not put that account name into
 		// a dashboard or a report the operator is told to paste into issues.
-		s.err = core.RedactHome(core.Snippet([]byte(err.Error())))
+		// The login and the peer address are dropped here rather than at the
+		// audit line below, because this copy is the one the frame, the
+		// --plain report and --json publish: a peer's stderr can name either
+		// without naming a path, which the home fold does not reach.
+		s.err = logcfg.RedactedField(s.Client.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), remoteErrMax)
 		s.failedPolls++
 		// The UI shows the reason on the frame it happens to be drawn on and
 		// the frame is replaced a second later. The audit log gets the start of
@@ -242,8 +251,8 @@ func (s *Stats) poll(ctx context.Context) {
 		s.mu.Unlock()
 		if failedFirst {
 			audit().Warn("toktop: remote vitals poll failed",
-				"target", logcfg.RedactedField(s.Client.Target.LogHost(), 256),
-				"error", logcfg.RedactedField(s.Client.Target.RedactUser(err.Error()), 256))
+				"target", logcfg.RedactedField(s.Client.Target.LogHost(), remoteErrMax),
+				"error", logcfg.RedactedField(s.Client.Target.RedactUser(err.Error()), remoteErrMax))
 		}
 		return
 	}
@@ -260,7 +269,7 @@ func (s *Stats) poll(ctx context.Context) {
 	s.mu.Unlock()
 	if recovered {
 		audit().Info("toktop: remote vitals poll recovered",
-			"target", logcfg.RedactedField(s.Client.Target.LogHost(), 256),
+			"target", logcfg.RedactedField(s.Client.Target.LogHost(), remoteErrMax),
 			"failed_polls", failedPolls,
 			"outage", outage)
 	}

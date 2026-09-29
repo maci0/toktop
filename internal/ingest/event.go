@@ -96,7 +96,11 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 		// under a kind the sender never wrote, so the feed's kind column
 		// (core.AgentKindError drives a red row) reads as something the
 		// wire did not say.
-		ev.Kind = core.ClampField(core.SingleLine(core.FoldASCII(ev.Kind)), core.AgentKindMax)
+		// The home fold rides along here for the same reason it rides on the
+		// three fields above: an unrecognized kind is sender-shaped text, and
+		// a sender that spells one with a path would otherwise store the
+		// account that owns $HOME in the column the feed renders it in.
+		ev.Kind = core.ClampField(core.SingleLine(core.FoldASCII(core.RedactHome(ev.Kind))), core.AgentKindMax)
 	}
 	if ev.Kind == "" {
 		ev.Kind = core.AgentKindTurn

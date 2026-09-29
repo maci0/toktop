@@ -84,7 +84,8 @@ any first contact is.
   a free-form note, all
   of which are stored in memory and rendered on your terminal. Every
   free-form field has the home directory folded to `~` on the way in, the
-  note among them: a client that names the session file or the directory
+  note and the `X-Request-Id` among them: a client that names the session file
+  or the directory
   it reports on would otherwise put the account that owns the home into
   whichever field it chose. A note that
   is nothing but a directory gets the same two components a locally
@@ -105,6 +106,12 @@ message and in every attribute, so a request path or an error text carrying a
 path under `$HOME` cannot name the account: a logger built outside `logcfg` is
 the only way to write a line that has not been through that fold.
 
+Agent stores name a working directory with the path's separators turned into
+`-` (`/home/<user>/Desktop/vllm` becomes `home-<user>-Desktop-vllm`), so a
+transcript path under one is not a path any prefix fold can see. The
+transcript read, walk, decode and attribution lines fold that spelling to `~`
+as well, and print the project directory it belongs to.
+
 Diagnostics name the file that failed, but the home directory is rewritten to
 `~` first: an absolute path under `$HOME` names the account, and these lines
 are what gets pasted into issues. An `ssh://` target is named in the audit log
@@ -119,8 +126,13 @@ account: a vitals script that fails in the peer's login shell reports the
 path of the account it ran as, and that text rides the stderr tail into the
 frame, the `--json` report and the audit log. The account named in the target
 is the one toktop logs about, so a home spelling that account (`/home/<user>`,
-`/Users/<user>`, `<drive>:\Users\<user>`, in any case) becomes `~` before the
-line is built. A longer name that merely starts with the account, such as
+`/Users/<user>`, `<drive>:\Users\<user>`, `/var/home/<user>`,
+`/export/home/<user>`, `/nfs/home/<user>` or `/srv/homes/<user>`, in any
+case) becomes `~` before the
+line is built. The ssh login and the peer address are dropped from the same
+text before it is stored, not only where it is logged, so the copy the frame
+and both reports publish is the folded one. A longer name that merely starts
+with the account, such as
 `/home/<user>-old`, is a different home and is left alone.
 
 ## The website

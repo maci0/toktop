@@ -59,7 +59,7 @@ func linuxPeersByPID(pids []int) map[int][]netip.AddrPort {
 			// nothing while showing it as talking to the engine directly.
 			auditLogger().Warn("agent usage: kernel TCP table unreadable; agent peers are unknown",
 				"path", table,
-				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+				"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 		}
 	}
 	for pid, inodes := range pidInodes {

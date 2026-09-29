@@ -145,7 +145,10 @@ func runMain() int {
 	// "stdout is not a terminal" when the run is piped or redirected.
 	targets, dupTargets, err := remote.ParseTargets(remoteTargets)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "toktop:", err)
+		// The fold, like every other startup diagnostic here: an unreadable
+		// ~/.ssh/config is reported by the os error, which carries the path
+		// it tried and so the account.
+		fmt.Fprintln(os.Stderr, "toktop:", core.RedactHome(err.Error()))
 		return 2
 	}
 	for _, dup := range dupTargets {
@@ -475,7 +478,7 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, now fun
 	)
 	if hotReload {
 		if selfErr != nil {
-			fmt.Fprintf(os.Stderr, "toktop: hot reload disabled (%v)\n", selfErr)
+			fmt.Fprintf(os.Stderr, "toktop: hot reload disabled (%s)\n", core.RedactHome(selfErr.Error()))
 		} else {
 			wctx, cancel := context.WithCancel(ctx)
 			defer cancel()

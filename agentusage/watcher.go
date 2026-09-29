@@ -466,8 +466,8 @@ func (w *Watcher) auditRead(path string, err error) {
 	}
 	w.readFailed[path] = true
 	auditLogger().Warn("agent usage transcript read failed; its usage is not counted until it reads again",
-		"path", core.RedactHome(path),
-		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+		"path", redactStorePath(path),
+		"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 }
 
 // auditOwns records a transcript whose attribution could not be decided. An
@@ -485,8 +485,8 @@ func (w *Watcher) auditOwns(path string, err error) {
 	}
 	w.ownsFailed[path] = true
 	auditLogger().Warn("agent usage transcript could not be attributed to a directory; its usage is not counted",
-		"path", core.RedactHome(path),
-		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+		"path", redactStorePath(path),
+		"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 }
 
 // auditBaseline records a seed that did not commit, naming the transcript
@@ -498,8 +498,8 @@ func auditBaseline(path string, err error) {
 		return
 	}
 	auditLogger().Warn("agent usage baseline could not be read; totals for this session will include its whole history",
-		"path", core.RedactHome(path),
-		"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+		"path", redactStorePath(path),
+		"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 }
 
 // baselineTailBytes bounds the seed read. Cumulative values only grow, so the
