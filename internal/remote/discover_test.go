@@ -1,6 +1,7 @@
 package remote
 
 import (
+	"os/exec"
 	"reflect"
 	"strconv"
 	"strings"
@@ -158,5 +159,38 @@ func TestProcScanScriptCapsCmdline(t *testing.T) {
 	infos := parseProcScan("42 " + strings.Repeat("x", procs.CmdlinePrefix+1))
 	if len(infos) != 1 || len(infos[0].Args) == 0 {
 		t.Fatalf("parseProcScan of a clipped line = %+v", infos)
+	}
+}
+
+// The sweep script ends in `true` so a host with no /proc/net/tcp6 still exits
+// 0, which means its exit status says nothing about whether the sweep worked.
+// The marker line is what carries that: without it a hardened kernel that
+// hides /proc/net/tcp from unprivileged readers yields empty output and
+// success, the caller logs nothing, and a host full of engines is reported as
+// a host with none listening.
+func TestNetTCPScriptMarksAnUnreadableProcNetTCP(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	run := func(tcp, tcp6 string) string {
+		t.Helper()
+		out, err := exec.Command("sh", "-c", netTCPScriptFor(tcp, tcp6)).Output()
+		if err != nil {
+			t.Fatalf("sweep script (%s, %s): %v", tcp, tcp6, err)
+		}
+		return string(out)
+	}
+
+	const hidden = "/proc/toktop-does-not-exist/tcp"
+	if out := run(hidden, hidden+"-6"); !strings.Contains(out, noProcNetTCPMarker) {
+		t.Fatalf("an unreadable /proc/net/tcp printed no marker:\n%s", out)
+	} else if got := parseNetTCP(out); len(got) != 0 {
+		t.Errorf("parseNetTCP = %v, want none from an unreadable sweep", got)
+	}
+
+	// A host whose tcp table reads but whose tcp6 table is absent is a normal
+	// IPv4-only host, not an unreadable sweep, so the marker must stay off.
+	if out := run("/proc/net/tcp", "/proc/toktop-does-not-exist/tcp6"); strings.Contains(out, noProcNetTCPMarker) {
+		t.Fatalf("a missing /proc/net/tcp6 was reported as an unreadable sweep:\n%s", out)
 	}
 }

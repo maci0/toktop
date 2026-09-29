@@ -198,7 +198,10 @@ func applyIOAccelStats(ctx context.Context, devs []core.GPUDevice) {
 		// run() caps the spawn so a hung ioreg cannot pin ioAccelMu and stall
 		// every later Sample. The caller's budget (sysmon gpuBudget) is the
 		// parent, so a cancelled Sample does not wait out runTimeout.
-		out, ok := run(ctx, "ioreg", "ioreg", "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
+		// No decode: ioreg answers exit 0 with an empty match on a Mac with
+		// no accelerator, and that is a host with no GPU rather than a tool
+		// this build cannot read, so the empty answer is left to stand.
+		out, ok := run(ctx, "ioreg", "ioreg", nil, "-r", "-d", "1", "-w", "0", "-c", "IOAccelerator")
 		noteIOAccel(ok, out)
 	}
 	devs[0].MemUsed = ioAccelMemUsed

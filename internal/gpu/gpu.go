@@ -15,6 +15,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -132,7 +133,15 @@ func lookup(name string) (string, bool) {
 // whose GPU device vanished all blank the GPU row, and a machine with no GPU
 // at all looks identical on screen. Without a line naming the tool and its
 // reason, an operator debugging a missing GPU readout has nothing to read.
-func run(ctx context.Context, name, path string, args ...string) ([]byte, bool) {
+//
+// decode judges whether the output is usable and returns why it is not. It
+// runs before noteRunOK, because a tool that exits 0 with output this build
+// cannot read is not a tool that came back: clearing the outage first would
+// log "answering again" for a tool that is producing nothing, and the GPU row
+// would stay blank for the rest of the session with no line naming the cause.
+// A nil decode means the exit status is the whole signal, for a tool whose
+// empty answer is a valid answer.
+func run(ctx context.Context, name, path string, decode func([]byte) error, args ...string) ([]byte, bool) {
 	c, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
 	cmd := exec.CommandContext(c, path, args...)
@@ -151,8 +160,45 @@ func run(ctx context.Context, name, path string, args ...string) ([]byte, bool) 
 		noteRunFailure(name, path, err)
 		return nil, false
 	}
+	b := out.buf.Bytes()
+	if decode != nil {
+		if err := decode(b); err != nil {
+			noteRunFailure(name, path, err)
+			return nil, false
+		}
+	}
 	noteRunOK(name, path)
-	return out.buf.Bytes(), true
+	return b, true
+}
+
+// nvidiaUsable reports output this build cannot read as nvidia-smi's
+// headerless CSV. A driver upgrade that changes the column set, or a tool
+// that cannot reach the driver, answers with rows that yield no device or
+// none at all: both leave the GPU row blank while the tool looks healthy.
+func nvidiaUsable(b []byte) error {
+	if len(ParseNvidiaSMI(b)) == 0 {
+		return errors.New("no device rows in nvidia-smi CSV output")
+	}
+	return nil
+}
+
+// rocmUsable is nvidiaUsable for rocm-smi, whose output is JSON keyed by card.
+func rocmUsable(b []byte) error {
+	if len(ParseRocmSMI(b)) == 0 {
+		return errors.New("no cards in rocm-smi JSON output")
+	}
+	return nil
+}
+
+// xpuUsable checks that xpu-smi answered in the JSON its -j flag promises. An
+// empty device list is a legitimate answer (a host with no Intel device), so
+// this judges the encoding and not the emptiness: a banner, an error string,
+// or a driver that changed the shape all fail here while a quiet tool passes.
+func xpuUsable(b []byte) error {
+	if !json.Valid(b) {
+		return errors.New("output is not JSON")
+	}
+	return nil
 }
 
 // audit builds the logger for the vendor-CLI lines. A var so a test can point
@@ -263,7 +309,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 	wg.Go(func() {
 		if p, ok := lookup("nvidia-smi"); ok {
-			if out, ok2 := run(ctx, "nvidia-smi", p, NvidiaQuery, NvidiaFormat); ok2 {
+			if out, ok2 := run(ctx, "nvidia-smi", p, nvidiaUsable, NvidiaQuery, NvidiaFormat); ok2 {
 				add(ParseNvidiaSMI(out))
 			}
 		}
@@ -289,7 +335,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 func sampleAMD(ctx context.Context) []core.GPUDevice {
 	if p, ok := lookup("rocm-smi"); ok {
-		if out, ok2 := run(ctx, "rocm-smi", p, RocmArgs()...); ok2 {
+		if out, ok2 := run(ctx, "rocm-smi", p, rocmUsable, RocmArgs()...); ok2 {
 			if devs := ParseRocmSMI(out); len(devs) > 0 {
 				return devs
 			}
@@ -302,7 +348,7 @@ func sampleAMD(ctx context.Context) []core.GPUDevice {
 }
 
 func sampleXPU(ctx context.Context, name, xpu string) []core.GPUDevice {
-	out, ok := run(ctx, name, xpu, "discovery", "-j")
+	out, ok := run(ctx, name, xpu, xpuUsable, "discovery", "-j")
 	if !ok {
 		return nil
 	}
@@ -318,15 +364,23 @@ func sampleXPU(ctx context.Context, name, xpu string) []core.GPUDevice {
 	var wg sync.WaitGroup
 	for i, d := range discs {
 		wg.Go(func() {
-			mo, ok := run(ctx, name, xpu, "metrics", "-d", strconv.Itoa(d.ID), "-j")
+			// The decode runs inside run so a metrics payload this build
+			// cannot read is audited against the tool rather than silently
+			// leaving the device without a row.
+			var dev core.GPUDevice
+			_, ok := run(ctx, name, xpu, func(b []byte) error {
+				var pok bool
+				if dev, pok = parseXpuMetrics(b, d.ID); !pok {
+					return fmt.Errorf("metrics for device %d are not readable xpu-smi JSON", d.ID)
+				}
+				return nil
+			}, "metrics", "-d", strconv.Itoa(d.ID), "-j")
 			if !ok {
 				return
 			}
-			if dev, ok := parseXpuMetrics(mo, d.ID); ok {
-				dev.Vendor = "intel"
-				dev.Name = d.Name
-				devs[i] = &dev
-			}
+			dev.Vendor = "intel"
+			dev.Name = d.Name
+			devs[i] = &dev
 		})
 	}
 	wg.Wait()

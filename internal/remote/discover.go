@@ -29,13 +29,19 @@ type Discovery struct {
 func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, error) {
 	d := &Discovery{}
 
-	// A failing /proc/net/tcp read is not fatal: hardened kernels hide it
-	// from unprivileged readers and the active probe below covers the gap.
-	// The reason is still logged: without it, a sweep that never read a
+	// A sweep that could not read /proc/net/tcp is not fatal: hardened kernels
+	// hide it from unprivileged readers and the active probe below covers the
+	// gap. The reason is still logged: without it, a sweep that never read a
 	// listening port is indistinguishable from a host that has none.
+	//
+	// The script ends in `true` so a host with no /proc/net/tcp6 still exits
+	// 0, which means its exit status cannot report the failure this line
+	// exists to name. The script marks the unreadable case on stdout instead.
 	if out, err := c.Run(ctx, netTCPScript); err != nil {
 		audit().Warn("toktop: remote listening-port sweep failed, falling back to an active probe",
 			"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+	} else if strings.Contains(out, noProcNetTCPMarker) {
+		audit().Warn("toktop: remote listening-port sweep could not read /proc/net/tcp, falling back to an active probe")
 	} else {
 		d.Listening = parseNetTCP(out)
 	}
@@ -93,7 +99,23 @@ func (d *Discovery) ForwardSet(wellKnown []int) []int {
 	return out
 }
 
-const netTCPScript = "(cat /proc/net/tcp 2>/dev/null; cat /proc/net/tcp6 2>/dev/null; true)"
+// noProcNetTCPMarker is printed by netTCPScript when /proc/net/tcp could not
+// be read at all. A line of its own, so parseNetTCP skips it: it is neither a
+// header nor a socket row.
+const noProcNetTCPMarker = "__no_proc_net_tcp__"
+
+// netTCPScriptFor dumps the kernel's TCP tables at the given paths. It ends in
+// `true` so a host with no /proc/net/tcp6 (or with one this account may not
+// read) still exits 0 and the sibling sweep is not lost with it, so the exit
+// status carries no information about whether the sweep worked at all. The
+// marker carries it instead: without it, a hardened kernel that hides
+// /proc/net/tcp from unprivileged readers produces empty output and a success,
+// and the run continues as if the host had no listening port.
+func netTCPScriptFor(tcp, tcp6 string) string {
+	return `(r=0; cat ` + tcp + ` 2>/dev/null || r=1; cat ` + tcp6 + ` 2>/dev/null; [ "$r" = 1 ] && echo ` + noProcNetTCPMarker + `; true)`
+}
+
+var netTCPScript = netTCPScriptFor("/proc/net/tcp", "/proc/net/tcp6")
 
 // parseNetTCP extracts listening ports (state 0A) from /proc/net/tcp text.
 // The local address column is hex like 0100007F:2CA6. Ports are parsed as

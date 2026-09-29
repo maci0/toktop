@@ -35,6 +35,11 @@ import (
 func (w *Watcher) readNew(path string) {
 	fi, err := os.Stat(path)
 	if err != nil {
+		// Audited like every other failure on this file: a stat that cannot
+		// reach the transcript (permissions on a parent, EMFILE under load)
+		// leaves the session reporting no tokens at all, and a transcript that
+		// is simply gone is the one case the audit passes over.
+		w.auditRead(path, err)
 		return
 	}
 	stamp := fileStamp{mtimeNanos: fi.ModTime().UnixNano(), size: fi.Size()}

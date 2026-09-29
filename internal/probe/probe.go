@@ -262,8 +262,13 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 			EvalDuration int64  `json:"eval_duration"`
 			Error        string `json:"error"`
 		}
-		if json.Unmarshal(line, &chunk) != nil {
-			continue
+		// A frame the probe cannot decode is not a frame to skip: the tokens
+		// it carried are gone, and the frames after it are counted as if they
+		// were the whole generation, so the sample would report a short,
+		// plausible measurement with OK set. The OpenAI path below refuses
+		// the same input for the same reason.
+		if err := json.Unmarshal(line, &chunk); err != nil {
+			return 0, 0, ttft, fmt.Errorf("decode stream frame: %w", err)
 		}
 		// Ollama streams failures as {"error":…} lines with HTTP 200; decoding
 		// them as content would report a green probe with invented throughput.

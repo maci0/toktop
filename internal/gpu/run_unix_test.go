@@ -29,14 +29,14 @@ func TestRunReclaimsPipesHeldByGrandchild(t *testing.T) {
 	// A control run first. Without it a sh that cannot execute at all would
 	// make the timed run below return instantly and pass, measuring an exec
 	// failure rather than the pipe reclaim.
-	if out, ok := run(context.Background(), "sh", "sh", "-c", "echo hello"); !ok || !strings.Contains(string(out), "hello") {
+	if out, ok := run(context.Background(), "sh", "sh", nil, "-c", "echo hello"); !ok || !strings.Contains(string(out), "hello") {
 		t.Fatalf("control run = %q, %v; want hello, true", out, ok)
 	}
 	start := time.Now()
 	const deadline = 200 * time.Millisecond
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
-	run(ctx, "sh", "sh", "-c", "sleep 5 & echo hello")
+	run(ctx, "sh", "sh", nil, "-c", "sleep 5 & echo hello")
 	elapsed := time.Since(start)
 	if elapsed < deadline {
 		t.Fatalf("run returned after %s: the command was not run to its deadline", elapsed)
@@ -70,7 +70,7 @@ func TestRunKillsGrandchildOnDeadline(t *testing.T) {
 	const runDeadline = 2 * time.Second
 	ctx, cancel := context.WithTimeout(context.Background(), runDeadline)
 	defer cancel()
-	run(ctx, "sh", "sh", "-c", "sleep 30 & echo $! > "+pidFile+"; sleep 30")
+	run(ctx, "sh", "sh", nil, "-c", "sleep 30 & echo $! > "+pidFile+"; sleep 30")
 	pid, err := readPIDFile(pidFile)
 	if err != nil {
 		// sh was found and the script always writes the pid before it
@@ -116,7 +116,7 @@ func TestRunCapsUnboundedVendorOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	start := time.Now()
-	out, ok := run(ctx, "sh", "sh", "-c", "yes x | head -c 8000000")
+	out, ok := run(ctx, "sh", "sh", nil, "-c", "yes x | head -c 8000000")
 	if ok {
 		t.Fatalf("run accepted %d bytes of unbounded vendor output, want a miss", len(out))
 	}
@@ -136,7 +136,7 @@ func TestRunReturnsOutputUnderTheCap(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	out, ok := run(ctx, "sh", "sh", "-c", "head -c 1024 /dev/zero | tr '\\0' 'x'")
+	out, ok := run(ctx, "sh", "sh", nil, "-c", "head -c 1024 /dev/zero | tr '\\0' 'x'")
 	if !ok {
 		t.Fatal("run reported a miss for 1 KiB of vendor output")
 	}
@@ -165,7 +165,7 @@ func TestRunAuditsOutageOnceAndRecovery(t *testing.T) {
 
 	const tool = "/nonexistent/vendor-cli"
 	for range 3 {
-		if _, ok := run(ctx, tool, tool, "--query"); ok {
+		if _, ok := run(ctx, tool, tool, nil, "--query"); ok {
 			t.Fatalf("run reported success for a tool that does not exist")
 		}
 	}
@@ -184,7 +184,7 @@ func TestRunAuditsOutageOnceAndRecovery(t *testing.T) {
 	// A recovery clears the latch, so a tool that breaks again is reported
 	// afresh instead of being silenced by the outage it just recovered from.
 	lines.Reset()
-	if _, ok := run(ctx, tool, tool, "--query"); ok {
+	if _, ok := run(ctx, tool, tool, nil, "--query"); ok {
 		t.Fatal("run reported success for a tool that does not exist")
 	}
 	if !strings.Contains(lines.String(), "gpu vendor tool failed") {
@@ -209,10 +209,10 @@ func TestOutageLatchIsKeyedByToolName(t *testing.T) {
 	defer cancel()
 
 	const tool = "toktop-vendor-cli-name-latch"
-	if _, ok := run(ctx, tool, "/nonexistent/vendor-cli-one", "--query"); ok {
+	if _, ok := run(ctx, tool, "/nonexistent/vendor-cli-one", nil, "--query"); ok {
 		t.Fatal("run reported success for a tool that does not exist")
 	}
-	if _, ok := run(ctx, tool, "/nonexistent/vendor-cli-two", "--query"); ok {
+	if _, ok := run(ctx, tool, "/nonexistent/vendor-cli-two", nil, "--query"); ok {
 		t.Fatal("run reported success for a tool that does not exist")
 	}
 	if n := strings.Count(lines.String(), "gpu vendor tool failed"); n != 1 {
@@ -253,5 +253,67 @@ func TestOutageDownForIsNotNegativeAfterAClockStep(t *testing.T) {
 	noteRunOK(tool, tool)
 	if !strings.Contains(lines.String(), "down_for=0s") {
 		t.Fatalf("recovery after a backward step audited a negative down_for:\n%s", lines.String())
+	}
+}
+
+// A driver upgrade can change a vendor CLI's output shape without making it
+// fail: nvidia-smi exits 0 with rows this build cannot split, xpu-smi exits 0
+// with something that is not JSON. The GPU row then goes blank and stays
+// blank for the rest of the session, which on screen is indistinguishable from
+// a host with no GPU of that kind. run must judge the output and audit the
+// tool as failing, so a blank row has a line naming the reason behind it.
+func TestRunAuditsUnreadableOutput(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("sh unavailable")
+	}
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	defer func() { audit = old }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cases := []struct {
+		tool   string
+		shout  string
+		decode func([]byte) error
+	}{
+		{"toktop-vendor-cli-nvidia", "echo 'not,a,device,row,at,all'", nvidiaUsable},
+		{"toktop-vendor-cli-rocm", "echo '<not json>'", rocmUsable},
+		{"toktop-vendor-cli-xpu", "echo '<not json>'", xpuUsable},
+	}
+	for _, c := range cases {
+		lines.Reset()
+		runState.Delete(c.tool)
+		out, ok := run(ctx, c.tool, "sh", c.decode, "-c", c.shout)
+		if ok {
+			t.Fatalf("%s: run reported success for output it cannot read: %q", c.tool, out)
+		}
+		if !strings.Contains(lines.String(), "gpu vendor tool failed") {
+			t.Fatalf("%s: unreadable output wrote no outage line:\n%s", c.tool, lines.String())
+		}
+		if s, stored := runState.Load(c.tool); !stored || !s.(*toolRun).failed {
+			t.Fatalf("%s: unreadable output left the tool latched healthy", c.tool)
+		}
+	}
+
+	// Output the build can read clears nothing and reports no outage, so the
+	// gate does not latch a working tool.
+	lines.Reset()
+	const good = "toktop-vendor-cli-good"
+	runState.Delete(good)
+	if out, ok := run(ctx, good, "sh", nvidiaUsable, "-c", "echo '0,NVIDIA A,40,1,8192,10,50,550.00'"); !ok {
+		t.Fatalf("run rejected readable nvidia-smi output: %q", out)
+	}
+	if strings.Contains(lines.String(), "gpu vendor tool failed") {
+		t.Fatalf("readable output wrote an outage line:\n%s", lines.String())
+	}
+
+	// xpu-smi discovery legitimately reports no devices, so the check judges
+	// the encoding and not the emptiness.
+	if _, ok := run(ctx, good, "sh", xpuUsable, "-c", "echo '[]'"); !ok {
+		t.Fatal("xpu-smi was audited as failing for an empty device list")
 	}
 }

@@ -53,6 +53,27 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   are now decoded as written and range-checked once they reach a recognized
   field.
 
+- A vendor GPU tool that exits 0 with output this build cannot read is now
+  audited instead of being marked healthy. A driver upgrade that changes
+  `nvidia-smi`, `rocm-smi`, or `xpu-smi` output left the GPU row permanently
+  blank with no line naming the cause, and the audit log could even say the
+  tool was "answering again". The outage latch now clears only once the
+  output parses.
+
+- The Ollama stream probe no longer skips a frame it cannot decode. The
+  tokens that frame carried were gone, and the frames after it were counted
+  as if they were the whole generation, so the sample reported a short,
+  plausible measurement with OK set. The OpenAI path already refused this.
+
+- A stat failure on an agent transcript is audited. Every other failure on
+  that file was reported; this one left the session reporting no tokens at
+  all with nothing in the log.
+
+- Remote discovery logs when it could not read `/proc/net/tcp`. The sweep
+  script ends in `true`, so its exit status never reported the failure the
+  warning was written for, and a hardened kernel hiding the table produced a
+  silent empty sweep that read as a host with no listening ports.
+
 ## [0.21.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on
