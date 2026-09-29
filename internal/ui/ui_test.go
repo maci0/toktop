@@ -2765,6 +2765,76 @@ func TestInertKeysExplainThemselves(t *testing.T) {
 	})
 }
 
+// A notice describes the state the press that raised it found. The next press
+// changes that state, so a notice left standing contradicts the frame: "enlarge
+// window" beside the chart the wider pane just made, "no engines to probe"
+// beside a pause. The press that still has nothing to act on re-arms it.
+func TestNoticeIsDismissedByTheNextKeypress(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready = 110, 36, true
+
+	nm, _ := m.Update(keyMsg("p")) // nothing to probe
+	m = nm.(Model)
+	if m.notice == "" {
+		t.Fatal("p with nothing to act on set no notice")
+	}
+
+	nm, _ = m.Update(keyMsg(" ")) // pauses: the notice's claim is now stale
+	m = nm.(Model)
+	if !m.paused {
+		t.Fatal("space did not pause")
+	}
+	if m.notice != "" {
+		t.Errorf("notice %q outlived the press that made it stale", m.notice)
+	}
+	if got := strip(m.renderFooter()); strings.Contains(got, "probe") && strings.Contains(got, "no engines") {
+		t.Errorf("paused footer still shows the old notice:\n%s", got)
+	}
+
+	// A press with nothing to act on answers for itself again.
+	nm, _ = m.Update(keyMsg("p"))
+	m = nm.(Model)
+	if m.notice == "" {
+		t.Error("p with nothing to act on set no notice after the first one cleared")
+	}
+
+	// Help is a replacement screen: a notice left on the dashboard would
+	// reappear when the box closes, out of step with what was read.
+	nm, _ = m.Update(keyMsg("?"))
+	m = nm.(Model)
+	if !m.help {
+		t.Fatal("? did not open help")
+	}
+	if m.notice != "" {
+		t.Errorf("notice %q survived into the help screen", m.notice)
+	}
+}
+
+// The compact strip and the agents view carry the probe outcome on one line, and
+// neither has a PROBES row to print the reason on, so a failure there has to
+// name it or the reader is left with a bare "probe failed" and nowhere to go.
+func TestProbeReadoutNamesTheFailure(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.w, m.h, m.ready = 50, 24, true
+	m.snap = core.Snapshot{
+		Probes: []core.ProbeSample{{Model: "m", Err: "connection refused"}},
+	}
+	got := strip(m.probeReadout())
+	if !strings.Contains(got, "probe failed") || !strings.Contains(got, "connection refused") {
+		t.Errorf("probe readout = %q, want the failure and its reason", got)
+	}
+
+	// A sample that failed without a reason still reads as a failure, and
+	// never as a trailing space beside the badge.
+	if bare := strip(New(Config{Version: "t"}, nil).probeReadout()); bare != "" {
+		t.Errorf("probe readout with no probe = %q, want empty", bare)
+	}
+	m.snap.Probes = []core.ProbeSample{{Model: "m", Err: "   "}}
+	if got := strip(m.probeReadout()); got != "probe failed" {
+		t.Errorf("probe readout with a blank reason = %q, want %q", got, "probe failed")
+	}
+}
+
 // The same explanation has to fit where the compact view prints it: the foot
 // there is one clipped line wide, so the notice goes in the body.
 func TestInertKeyNoticeInCompactStrip(t *testing.T) {

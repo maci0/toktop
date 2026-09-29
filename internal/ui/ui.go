@@ -353,8 +353,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		key := msg.String()
 		if m.help {
+			// Opening help replaces the frame the notice was drawn on, so the
+			// explanation would outlive its own screen and reappear on the
+			// dashboard when the box closes.
+			m.notice, m.noticeAt = "", time.Time{}
 			return m.updateHelpKey(key), nil
 		}
+		// A notice describes the state the previous press found. The next
+		// press changes that state, and a notice left standing says the
+		// opposite of what is on screen: "enlarge window" beside a chart that
+		// just toggled, "no engines to probe" beside a probe that ran. The
+		// handlers below re-arm it when the press they take has nothing to
+		// act on, so the explanation still answers the key it belongs to.
+		m.notice, m.noticeAt = "", time.Time{}
 		switch key {
 		case "q", "Q", "ctrl+c":
 			return m, tea.Quit

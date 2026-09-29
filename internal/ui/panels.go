@@ -243,7 +243,16 @@ func (m Model) probeReadout() string {
 		return ""
 	}
 	if !last.OK {
-		return styleBad.Render("probe failed")
+		// The reason, where it fits: the PROBES panel prints it on a failed
+		// row, and these two views have no such row, so a failure here was a
+		// bare "probe failed" with no way to learn why. The compact strip
+		// clips the line, and the AGENTS title drops the whole part if it does
+		// not fit, so a narrow pane keeps the badge alone.
+		out := styleBad.Render("probe failed")
+		if msg := strings.TrimSpace(core.SingleLine(last.Err)); msg != "" {
+			out += " " + dim(shorten(msg, 24))
+		}
+		return out
 	}
 	return dim("probe") + " " + fmtMs(last.TTFTms) + " " + styleOK.Render(fmtRate(last.TokPS)+" tok/s")
 }
