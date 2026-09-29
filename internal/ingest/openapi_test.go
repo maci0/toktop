@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -320,6 +321,48 @@ func TestEveryAnswerCarriesTheRequestId(t *testing.T) {
 	}
 }
 
+// An operation that declares the X-Request-Id answer header has to accept the
+// header as a request parameter too, or a client generated from the spec is
+// told its id comes back and given no way to send one. The wrap chain reads
+// the header ahead of routing, so the probe and its rejections take one on
+// every path; the POST declared it and the probe did not.
+func TestRequestIDIsAcceptedWhereItIsEchoed(t *testing.T) {
+	for _, e := range ingestEndpoints {
+		section := openapiSection(t, e.path)
+		for _, op := range splitAllOperations(t, section) {
+			if !strings.Contains(op, `X-Request-Id:`) {
+				continue
+			}
+			if !strings.Contains(op, `#/components/parameters/RequestId`) {
+				t.Errorf("%s declares the X-Request-Id answer but not the request parameter", opName(e.path, op))
+			}
+		}
+	}
+}
+
+// The other half of the same pair, driven rather than read: a sender's own id
+// comes back on the probe the way it already comes back on the POST. A probe
+// that dropped it would break correlation for the one request a client makes
+// continuously, and the spec above promises the echo on both.
+func TestProbeEchoesTheRequestID(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		req, err := http.NewRequest(method, "http://"+s.Addr()+healthPath, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("X-Request-Id", "probe-7")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if got := resp.Header.Get("X-Request-Id"); got != "probe-7" {
+			t.Errorf("%s /healthz answered X-Request-Id %q, want the request's own", method, got)
+		}
+	}
+}
+
 func containsCode(codes []string, code int) bool {
 	for _, c := range codes {
 		if c == strconv.Itoa(code) {
@@ -349,6 +392,46 @@ func rebound(t *testing.T, method, url string) int {
 		t.Fatalf("%s %s with a foreign Host answered %d, want 403", method, url, resp.StatusCode)
 	}
 	return resp.StatusCode
+}
+
+// splitAllOperations cuts a path block into one string per operation, by the
+// method keys the block declares, so a check can run over every operation
+// rather than the GET/HEAD pair one path happens to serve.
+func splitAllOperations(t *testing.T, section string) []string {
+	t.Helper()
+	lines := strings.Split(section, "\n")
+	start := map[string]int{}
+	for i, l := range lines {
+		if m := openapiMethodRE.FindStringSubmatch(l); m != nil {
+			start[m[1]] = i
+		}
+	}
+	if len(start) == 0 {
+		t.Fatalf("no operation found in the section")
+	}
+	keys := make([]string, 0, len(start))
+	for k := range start {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	ops := make([]string, 0, len(keys))
+	for n, key := range keys {
+		end := len(lines)
+		if n+1 < len(keys) {
+			end = start[keys[n+1]]
+		}
+		ops = append(ops, strings.Join(lines[start[key]:end], "\n"))
+	}
+	return ops
+}
+
+// opName names one operation for a failure message, by the path it was cut
+// from and the method heading it starts with.
+func opName(path, op string) string {
+	if m := openapiMethodRE.FindStringSubmatch(op); m != nil {
+		return path + " " + strings.ToUpper(m[1])
+	}
+	return path
 }
 
 // splitOperations cuts a path block into its GET and HEAD operations, by the

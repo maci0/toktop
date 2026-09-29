@@ -467,6 +467,34 @@ test("every error answer states its length, and a HEAD states the GET's", async 
   expect((await unreadableHead.arrayBuffer()).byteLength).toBe(0);
 });
 
+test("every failure is a whole line, the way /health answers", async () => {
+  const answers = [
+    ["method not allowed", await call({}, { method: "POST", env: staticAssets() })],
+    ["assets unbound", await call({}, { path: "/dashboard.png", env: {} })],
+    [
+      "asset store error",
+      await call(
+        {},
+        {
+          path: "/dashboard.png",
+          env: { ASSETS: { fetch: () => Promise.resolve(new Response("", { status: 502 })) } },
+        },
+      ),
+    ],
+    ["not acceptable", await call({ "accept-encoding": "identity;q=0" })],
+  ];
+  for (const [what, res] of answers) {
+    const body = await res.text();
+    expect(res.status, what).toBeGreaterThanOrEqual(400);
+    expect(res.headers.get("content-type"), what).toBe("text/plain; charset=utf-8");
+    expect(body.endsWith("\n"), `${what}: ${JSON.stringify(body)}`).toBe(true);
+    expect(body.slice(0, -1).includes("\n"), `${what}: ${JSON.stringify(body)}`).toBe(false);
+    expect(res.headers.get("content-length"), what).toBe(
+      String(new TextEncoder().encode(body).byteLength),
+    );
+  }
+});
+
 test("/health reports degraded while the asset binding is missing", async () => {
   const logs = captureLogs();
   try {
@@ -1515,7 +1543,7 @@ test("an unhandled throw answers 500 and logs the request that caused it", async
       env,
     );
     expect(res.status).toBe(500);
-    expect(await res.text()).toBe("internal error");
+    expect(await res.text()).toBe("internal error\n");
     expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     expect(res.headers.get("cache-control")).toBe("no-store");
     for (const name of SECURITY_HEADER_NAMES) {

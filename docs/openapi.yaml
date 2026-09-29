@@ -182,6 +182,8 @@ paths:
         accepts nothing. The probe is not logged: it runs continuously and
         would drown the event log.
       operationId: health
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
       responses:
         "200":
           description: The endpoint is accepting events.
@@ -258,6 +260,8 @@ paths:
         Carries the GET's status and headers and no body, `Content-Length`
         included, so a probe reads the same answer either way.
       operationId: healthHead
+      parameters:
+        - $ref: "#/components/parameters/RequestId"
       responses:
         "200":
           description: The endpoint is accepting events.

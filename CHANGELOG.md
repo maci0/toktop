@@ -45,6 +45,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   name twice. The label and the kind badge are compared in both normalization
   forms, so "café" spelled NFD and spelled NFC are one word, matching how the
   model name is composed at its own boundary.
+- The site's failure bodies are whole lines again. A `405`, a `406` and a `500`
+  answered a bare reason with no newline while an asset `404` and `502` ended
+  one, so a client reading a failure the way it reads `/health` got a truncated
+  reason on one status and a whole one on another. Every one of them ends in a
+  newline now, the shape `ok` is answered in.
+- `docs/openapi.yaml` accepts `X-Request-Id` on `/healthz`. The server has
+  echoed a caller's id on the probe and on every rejection since the header
+  landed, but only the POST declared it as a request parameter, so a client
+  generated from the spec had no way to send one to the path it polls.
 
 - A downed engine no longer sizes the collector's memory. The fold that keeps
   one poll error from being re-folded every interval remembered the error

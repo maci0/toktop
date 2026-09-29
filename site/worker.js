@@ -688,8 +688,14 @@ const ERROR_HEADERS = {
 // not the length of the answer the client would have got. Every answer on this
 // surface states its length, so a client sizing a body reads one across all of
 // them, and the HEAD rule sits in one place rather than at every call site.
+// The newline is added here so every failure is a whole line. Three of them
+// ended one already and the rest did not, so a client reading failures the way
+// it reads /health, a line at a time, got a truncated reason on a 405 and a
+// whole one on an asset 404. /health answers "ok\n" and the ingest server's
+// reasons are lines too, so one trailing newline is what a caller can rely on
+// across both surfaces.
 function errorResponse(request, started, status, body, extraHeaders = {}) {
-  const bytes = new TextEncoder().encode(body);
+  const bytes = new TextEncoder().encode(body.endsWith("\n") ? body : `${body}\n`);
   return new Response(request.method === "HEAD" ? null : bytes, {
     status,
     headers: {

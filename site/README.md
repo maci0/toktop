@@ -124,7 +124,11 @@ without an asset binding, and 404/5xx from the asset store, are `no-store`
 so a missing file is not cached as a day-long success. Error bodies are
 `text/plain`, matching `/health`: a failure the asset store reports is
 rewritten into that envelope, status kept, rather than passing the store's
-own HTML error page through at an image path. A `HEAD` that fails answers with
+own HTML error page through at an image path. Every one of them is a single
+line ending in a newline, the shape `/health` answers `ok` in, so a client
+reading a failure the way it reads the probe gets a whole reason whichever
+status it was given; the newline and the `Content-Length` beside it are
+computed from the same bytes. A `HEAD` that fails answers with
 those same headers and no body, as a served `HEAD` does, and reports the
 length the body it withheld would have had, as `/health` and the page already
 do.
