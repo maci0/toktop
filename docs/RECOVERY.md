@@ -73,7 +73,7 @@ installed binary with it:
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
 | RPO for a bad release | the installed binary, and only the binary: it is the one file an update replaces. The pin store is a file beside it, not a record inside it, so no pin is lost with a bad release. |
-| What a lost pin store actually costs | a forced re-trust, not a dashboard outage, but only once the copies are gone too. A store that is missing is read back from whichever copy beside it is the fresher, `known_hosts.bak` or the `.displaced` copy, and rewritten on the next connect, so a rogue `rm` of the store alone still refuses a changed key. Losing the store *and* the directory it sits in leaves the next connect accepting whatever key that host presents, which removes the protection against a first-contact interception. That is the reason the copies exist, and the reason the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
+| What a lost pin store actually costs | a forced re-trust, not a dashboard outage, and that happens whenever the store is gone, because deleting it is how a host is re-pinned on purpose. The copies beside it are read back only where a write did not finish: a leftover staging file or a displaced copy beside the store is the evidence (`interruptedWrite`), and without one the store is treated as holding no pins, so the next connect accepts whatever key that host presents. Losing the store mid-write therefore costs nothing, while a store removed by hand drops the protection against a key change as well as against a first-contact interception, and that is the price of the re-pin gesture. It is also why the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
 
 ## Restoring the pin store
 
@@ -98,9 +98,12 @@ Windows write moved aside, so it holds the store as it was *before* that write.
 The exception is a write whose backup could not be written, which leaves
 `known_hosts.bak` a whole write behind; the warning toktop prints then, naming
 the path and the error, is the signal to read the `.displaced` copy instead.
-`readKnownHosts` makes the same choice on its own (freshest copy first,
-`internal/remote/knownhosts.go`, `copiesByRecency`), so a run that follows a
-`rm` of the store needs no `cp` at all.
+`readKnownHosts` makes the same choice on its own, freshest copy first
+(`copiesByRecency`, `internal/remote/knownhosts.go`), but only where a write
+was interrupted: a staging file or the displaced copy has to be sitting beside
+the store for the copies to be read at all (`interruptedWrite`). A store you
+removed yourself is the re-pin gesture, so the run after an `rm` re-pins
+rather than reading a copy back.
 
 One `cp`, because the store is a text file, one record per line, in the
 `host key-type base64` form OpenSSH uses. `ssh-keygen -l -f` reads it, and
@@ -110,16 +113,18 @@ to get one: toktop matches the host field literally, so a hashed host
 for, and the pins it appears to hold are pins on names nothing will ever
 present.
 
-If `known_hosts.bak` is gone too, and the store is missing, the pins are
-not recoverable from this machine. Re-pin each host by connecting to it
+A store that is missing with no interrupted-write marks beside it reads as an
+empty one, so its pins are not recoverable from this machine, whether or not
+`known_hosts.bak` is still there. Re-pin each host by connecting to it
 once and judging the fingerprint printed at first use, or restore the
 directory from whatever backs it up. Deleting the store is a deliberate
-way to do exactly that: a missing store with no copy beside it reads as an
-empty one, so the next connect pins each host again and says so on stderr.
+way to do exactly that, and the next connect pins each host again and says
+so on stderr.
 
 ## Restoring a store that is present but damaged
 
-A missing store is read back from a copy on its own, so it needs no `cp`. A
+A store that an interrupted write left missing is read back from a copy on its
+own, so that case needs no `cp`. A
 store that is *there* and does not parse is the other case, and toktop refuses
 it rather than reading a copy in its place: a copy predating the last write is
 missing pins, and standing those in silently re-trusts every host they
