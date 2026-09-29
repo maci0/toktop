@@ -63,6 +63,19 @@ func assertFitsPane(t *testing.T, label, out string, w, h int) {
 	}
 }
 
+// assertQuits fails unless cmd is the program quit command. A key that only
+// has to return some command passes on a command that quits for the wrong
+// reason, or does not quit at all.
+func assertQuits(t *testing.T, label string, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		t.Fatalf("%s returned no command, want the quit command", label)
+	}
+	if msg := cmd(); msg != (tea.QuitMsg{}) {
+		t.Errorf("%s produced %#v, want tea.QuitMsg", label, msg)
+	}
+}
+
 func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case " ":
@@ -90,9 +103,7 @@ func TestUpdateKeyMap(t *testing.T) {
 		m = nm.(Model)
 	}
 
-	if key("q") == nil {
-		t.Error("q must return a quit command")
-	}
+	assertQuits(t, "q", key("q"))
 
 	key("?")
 	if !m.help {
@@ -1906,6 +1917,14 @@ func TestStaticFrameReplayIgnoresWallClock(t *testing.T) {
 			}
 			cfg := Config{Version: "t"}
 			first := StaticFrame(cfg, snap, 110, 36)
+			// The comparison below is first == replay, which a constant or
+			// empty render satisfies. Pin the panel heading and the engine
+			// this snapshot carries, so the frame is a frame before its
+			// repeatability means anything.
+			panel := strip(first)
+			if !strings.Contains(panel, "ENGINES") || !strings.Contains(panel, "engine") {
+				t.Fatalf("static frame for At=%v is missing its engines panel:\n%s", at, first)
+			}
 			time.Sleep(time.Minute)
 			if replay := StaticFrame(cfg, snap, 110, 36); replay != first {
 				t.Fatalf("static frame changed with wall time for At=%v:\nfirst:\n%s\nreplay:\n%s", at, first, replay)
@@ -2017,8 +2036,8 @@ func TestSuccessfulProbeUsesTokPerSec(t *testing.T) {
 func TestProbeEmptyHintsRerunForAuto(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	out := strip(m.probesBody(40, 8))
-	if !strings.Contains(out, "press") || !strings.Contains(out, "p") {
-		t.Errorf("empty probes lost the p hint:\n%s", out)
+	if !strings.Contains(out, "press p to probe") {
+		t.Errorf("empty probes = %q, want the full p hint \"press p to probe\"", out)
 	}
 	if !strings.Contains(out, "quit") || !strings.Contains(out, "--probe") {
 		t.Errorf("empty probes must say --probe needs a re-run:\n%s", out)
@@ -2376,9 +2395,7 @@ func TestKeyMapCaseInsensitiveAndDismiss(t *testing.T) {
 	key := func(s string) tea.Cmd { return pressKey(&m, s) }
 
 	// Upper-case Q quits
-	if cmd := key("Q"); cmd == nil {
-		t.Error("Q must quit")
-	}
+	assertQuits(t, "Q", key("Q"))
 
 	// Upper-case H opens help
 	key("H")

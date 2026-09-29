@@ -384,7 +384,9 @@ func TestRunEmptyModelDoesNotPost(t *testing.T) {
 func TestRunCapsModelName(t *testing.T) {
 	var got map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&got)
+		if err := json.NewDecoder(r.Body).Decode(&got); err != nil {
+			t.Errorf("decode probe request: %v", err)
+		}
 		w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer srv.Close()
@@ -400,7 +402,9 @@ func TestRunCapsModelName(t *testing.T) {
 func TestRunRequestsBoundedGeneration(t *testing.T) {
 	var gotOpenAI map[string]any
 	openai := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotOpenAI)
+		if err := json.NewDecoder(r.Body).Decode(&gotOpenAI); err != nil {
+			t.Errorf("decode probe request: %v", err)
+		}
 		w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer openai.Close()
@@ -417,12 +421,17 @@ func TestRunRequestsBoundedGeneration(t *testing.T) {
 
 	var gotOllama map[string]any
 	ollama := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewDecoder(r.Body).Decode(&gotOllama)
+		if err := json.NewDecoder(r.Body).Decode(&gotOllama); err != nil {
+			t.Errorf("decode probe request: %v", err)
+		}
 		w.Write([]byte(`{"response":"","done":true}` + "\n"))
 	}))
 	defer ollama.Close()
 	Run(context.Background(), Request{Kind: core.KindOllama, Base: ollama.URL, Model: "m"})
-	opts := gotOllama["options"].(map[string]any)
+	opts, ok := gotOllama["options"].(map[string]any)
+	if !ok {
+		t.Fatalf("ollama options = %#v, want an object carrying num_predict", gotOllama["options"])
+	}
 	if n := opts["num_predict"]; n != float64(probeTokens) {
 		t.Errorf("ollama num_predict = %v, want %d", n, probeTokens)
 	}
@@ -819,7 +828,9 @@ func TestRunOpenAIRetriesWithoutLegacyCapField(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n++
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode probe request: %v", err)
+		}
 		if _, ok := body["max_tokens"]; ok {
 			w.WriteHeader(http.StatusBadRequest)
 			fmt.Fprint(w, `{"error":"unsupported parameter: max_tokens"}`)
@@ -856,7 +867,9 @@ func TestRunOpenAIRetriesWithoutExtraFields(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n++
 		var body map[string]any
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode probe request: %v", err)
+		}
 		if n == 1 {
 			if _, ok := body["stream_options"]; !ok {
 				t.Error("first request missing stream_options")
@@ -909,6 +922,9 @@ func TestRunOpenAIGivesUpAfterRefusingEveryShape(t *testing.T) {
 	}
 	if s.OK {
 		t.Errorf("refused probe reported ok: %+v", s)
+	}
+	if !strings.Contains(s.Err, "no such model") {
+		t.Errorf("err = %q, want the engine's own refusal", s.Err)
 	}
 }
 
@@ -1262,16 +1278,13 @@ func TestRunOllamaRefusedEvalDurationUsesWallClock(t *testing.T) {
 	if math.IsInf(s.TokPS, 0) || math.IsNaN(s.TokPS) {
 		t.Fatalf("tokps = %v, want the wall-clock rate", s.TokPS)
 	}
-	// 6 tokens over the measured decode window, not the 1ms the refused
-	// reading would have claimed. The window is a subset of the whole call,
-	// so a runner that stretches the 200ms sleep stretches the rate with it:
-	// the floor scales with the elapsed time this call actually took, and
-	// the ceiling is what separates the measured window (200ms, ~30 tok/s)
-	// from the refused one. 100 is well under the refused reading's rate and
-	// well over the measured one, so a decode window measured from the wrong
-	// end of the exchange cannot hide inside the band.
-	if lo := max(float64(6)/elapsed.Seconds()/2, 20); s.TokPS < lo || s.TokPS > 100 {
-		t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip", s.TokPS, elapsed)
+	// The ceiling is what separates the measured window (200ms, ~30 tok/s)
+	// from the 1ms the refused reading would have claimed (6 tok/s over 1ms is
+	// 6000 tok/s). A floor would have to scale with the elapsed time of a
+	// loaded runner and adds nothing: any rate under the ceiling already
+	// separates the two readings.
+	if s.TokPS > 100 {
+		t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip, not one from the refused 1ms reading", s.TokPS, elapsed)
 	}
 }
 
@@ -1306,10 +1319,10 @@ func TestRunOllamaOutOfRangeEvalDurationUsesWallClock(t *testing.T) {
 			if !s.OK {
 				t.Fatalf("probe failed: %+v", s)
 			}
-			// Same bound as the refused-reading case: the rate has to come
-			// from the measured decode window, not from the wrapped value.
-			if lo := max(float64(6)/elapsed.Seconds()/2, 20); s.TokPS < lo || s.TokPS > 100 {
-				t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip", s.TokPS, elapsed)
+			// Same ceiling as the refused-reading case: it separates the
+			// measured decode window (~30 tok/s) from the wrapped value's.
+			if s.TokPS > 100 {
+				t.Errorf("tokps = %v over a %v call, want a rate from the measured round trip, not one from the wrapped reading", s.TokPS, elapsed)
 			}
 		})
 	}
@@ -1323,10 +1336,14 @@ func TestRunOpenAINonStreamReasoningOnly(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		body string
+		want int
 	}{
-		{"reasoning_content", `{"choices":[{"message":{"reasoning_content":"one two three"}}],"usage":{"completion_tokens":3}}`},
-		{"reasoning", `{"choices":[{"message":{"reasoning":"one two three"}}],"usage":{"completion_tokens":3}}`},
-		{"delta reasoning", `{"choices":[{"delta":{"reasoning_content":"one two three"}}]}`},
+		// The first two report a usage count the frames outnumber nothing by:
+		// one choice generated three tokens, so usage is the sample's number.
+		{"reasoning_content", `{"choices":[{"message":{"reasoning_content":"one two three"}}],"usage":{"completion_tokens":3}}`, 3},
+		{"reasoning", `{"choices":[{"message":{"reasoning":"one two three"}}],"usage":{"completion_tokens":3}}`, 3},
+		// No usage here, so the one generated choice is the count.
+		{"delta reasoning", `{"choices":[{"delta":{"reasoning_content":"one two three"}}]}`, 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -1339,8 +1356,8 @@ func TestRunOpenAINonStreamReasoningOnly(t *testing.T) {
 			if !s.OK {
 				t.Fatalf("reasoning-only completion = %+v, want a timed sample", s)
 			}
-			if s.Tokens == 0 {
-				t.Fatalf("reasoning-only completion reported %d tokens, want the generated frames", s.Tokens)
+			if s.Tokens != tc.want {
+				t.Fatalf("reasoning-only completion reported %d tokens, want %d", s.Tokens, tc.want)
 			}
 		})
 	}

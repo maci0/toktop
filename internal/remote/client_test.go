@@ -13,6 +13,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -251,6 +252,20 @@ func TestCurrentUserRejectsUnusableEnvValue(t *testing.T) {
 	}
 	if err := validTargetField(got); err != nil {
 		t.Errorf("currentUser = %q, which the ssh transport would reject: %v", got, err)
+	}
+	// Both checks above hold for an empty result, so the fallback is pinned:
+	// with the environment values refused, the login name from the passwd
+	// database is what the connection is opened as.
+	u, err := user.Current()
+	if err != nil {
+		t.Skipf("no current user to fall back to: %v", err)
+	}
+	want := basenameLogin(u.Username)
+	if err := validTargetField(want); err != nil {
+		t.Skipf("login name %q is not a usable ssh user name, so the fallback is not observable here", want)
+	}
+	if got != want {
+		t.Errorf("currentUser = %q, want the login name %q", got, want)
 	}
 }
 

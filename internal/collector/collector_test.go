@@ -627,6 +627,17 @@ func TestEmitDeterministicUnderSameClock(t *testing.T) {
 	frozenCollector(t, frozen, []provider.Provider{fp.asProvider()}).emit(context.Background(), chA)
 	frozenCollector(t, frozen, []provider.Provider{fp.asProvider()}).emit(context.Background(), chB)
 	sa, sb := <-chA, <-chB
+	// Pin the content before the comparison: two empty snapshots are equal, so
+	// the equality below on its own holds for an emit that publishes nothing.
+	if !sa.At.Equal(frozen) {
+		t.Fatalf("At = %v, want the injected %v", sa.At, frozen)
+	}
+	if len(sa.Providers) != 1 {
+		t.Fatalf("providers = %d, want 1", len(sa.Providers))
+	}
+	if p := sa.Providers[0]; p.Label != "ollama" || p.Running != 1 || !p.OK {
+		t.Fatalf("provider = %+v, want ollama ok running=1", p)
+	}
 	if !reflect.DeepEqual(sa, sb) {
 		t.Fatalf("same clock, same providers diverged:\n%+v\n%+v", sa, sb)
 	}
@@ -906,12 +917,32 @@ func TestProbeRingCap(t *testing.T) {
 	}
 }
 
+// The negative only means something next to a positive: a ProbeAll that
+// probed nothing ever passes it.
 func TestProbeAllSkipsWhenNoModelKnown(t *testing.T) {
-	c := New([]provider.Provider{(&fakeProvider{label: "x"}).asProvider()}, time.Second)
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		io.WriteString(w, "{\"response\":\"one\",\"done\":true,\"eval_count\":1,\"eval_duration\":1000000}\n")
+	}))
+	defer srv.Close()
+
+	oldGap := probeWaveGap
+	probeWaveGap = 0
+	defer func() { probeWaveGap = oldGap }()
+
+	fp := &fakeProvider{label: "x", addr: srv.URL, m: &provider.Metrics{}}
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	c.ProbeAll() // must not panic or block; no model known yet
-	if len(c.probes) != 0 {
-		t.Fatalf("unexpected probes: %d", len(c.probes))
+	if len(c.probes) != 0 || hits.Load() != 0 {
+		t.Fatalf("no model known yet: probes = %d, POSTs = %d, want 0 and 0", len(c.probes), hits.Load())
 	}
+
+	fp.m = &provider.Metrics{Models: []core.ModelInfo{{Name: "m"}}}
+	emitOnce(t, c)
+	c.ProbeAll()
+	waitFor(t, func() bool { return hits.Load() == 1 },
+		"the same wave never reached the engine once a model was known, so the negative above proved nothing")
 }
 
 // Probes complete concurrently and can finish out of launch order; the

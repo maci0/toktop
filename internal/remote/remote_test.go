@@ -192,6 +192,12 @@ func TestParseTargetUnparseableNamesTheShape(t *testing.T) {
 }
 
 func TestParseTargetSSHConfig(t *testing.T) {
+	// The tilde in IdentityFile resolves against the home directory, so it is
+	// redirected at a temp dir: a suffix check would be satisfied by the
+	// developer's own ~/.ssh/gpu_key too.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
 	useSSHConfig(t, `
 # comment
 Host gpu
@@ -215,9 +221,8 @@ Host *
 	if tgt.User != want.User || tgt.Host != want.Host || tgt.Port != want.Port {
 		t.Errorf("resolved = %+v, want %+v", tgt, want)
 	}
-	// expandTilde resolves to $HOME, not the temp dir; verify the suffix only.
-	if !strings.HasSuffix(tgt.KeyFile, "gpu_key") {
-		t.Errorf("keyfile = %q", tgt.KeyFile)
+	if got, want := tgt.KeyFile, filepath.Join(home, ".ssh", "gpu_key"); got != want {
+		t.Errorf("keyfile = %q, want %q", got, want)
 	}
 
 	tgt, _ = ParseTarget("ssh://box.lab")
@@ -883,20 +888,43 @@ func TestPasswordSourceHeadlessFailureCached(t *testing.T) {
 	}
 }
 
+// countingGetter wraps the password getter so a test can see how often the
+// auth chain reached for the secret: once for the whole connection, and not at
+// all for a challenge the chain refuses to answer.
+func countingGetter(secret string) (get func() (string, error), calls func() int) {
+	n := 0
+	return func() (string, error) { n++; return secret, nil }, func() int { return n }
+}
+
 func TestAnswerPasswordPromptSingleSecret(t *testing.T) {
-	get := func() (string, error) { return "sekrit", nil }
-	got, err := answerPasswordPrompt([]string{"Password:"}, []bool{false}, get)
-	if err != nil || len(got) != 1 || got[0] != "sekrit" {
-		t.Fatalf("single password prompt = %q, %v", got, err)
-	}
-	if _, err := answerPasswordPrompt([]string{"Password:", "OTP:"}, []bool{false, false}, get); err == nil {
-		t.Fatal("multiple prompts must be refused")
-	}
-	if _, err := answerPasswordPrompt([]string{"Username:"}, []bool{true}, get); err == nil {
-		t.Fatal("echoing prompt must be refused")
-	}
-	if _, err := answerPasswordPrompt(nil, nil, get); err == nil {
-		t.Fatal("empty challenge must be refused")
+	t.Run("single password prompt", func(t *testing.T) {
+		get, calls := countingGetter("sekrit")
+		got, err := answerPasswordPrompt([]string{"Password:"}, []bool{false}, get)
+		if err != nil || len(got) != 1 || got[0] != "sekrit" {
+			t.Fatalf("single password prompt = %q, %v", got, err)
+		}
+		if n := calls(); n != 1 {
+			t.Errorf("the secret was asked for %d times, want 1: every mechanism in the chain shares one answer", n)
+		}
+	})
+	for _, tc := range []struct {
+		name      string
+		questions []string
+		echos     []bool
+	}{
+		{"multiple prompts", []string{"Password:", "OTP:"}, []bool{false, false}},
+		{"echoing prompt", []string{"Username:"}, []bool{true}},
+		{"empty challenge", nil, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			get, calls := countingGetter("sekrit")
+			if _, err := answerPasswordPrompt(tc.questions, tc.echos, get); err == nil {
+				t.Fatalf("a %s challenge was accepted, want it refused", tc.name)
+			}
+			if n := calls(); n != 0 {
+				t.Errorf("the secret was asked for %d times on a refused challenge, want 0", n)
+			}
+		})
 	}
 }
 

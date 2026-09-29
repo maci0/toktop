@@ -112,10 +112,7 @@ func importedModules(t *testing.T) []string {
 
 func TestDirectDependenciesAreImported(t *testing.T) {
 	imports := importedModules(t)
-	reasoned, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
-	if err != nil {
-		t.Fatalf("read %s: %v", dependencyTable, err)
-	}
+	documented := documentedNames(t)
 	for _, module := range directRequires(t) {
 		used := slices.ContainsFunc(imports, func(path string) bool {
 			return path == module || strings.HasPrefix(path, module+"/")
@@ -123,8 +120,8 @@ func TestDirectDependenciesAreImported(t *testing.T) {
 		if !used {
 			t.Errorf("%s is required by go.mod and imported nowhere; remove it or import it", module)
 		}
-		if !strings.Contains(string(reasoned), module) {
-			t.Errorf("%s is required by go.mod and has no entry in %s; record why it is here", module, dependencyTable)
+		if !documented[module] {
+			t.Errorf("%s is required by go.mod and has no row in %s; record why it is here", module, dependencyTable)
 		}
 	}
 }
@@ -144,20 +141,58 @@ func documentedModule(line string) string {
 	return cell
 }
 
+// documentedNames returns every name a table row in docs/DEPENDENCIES.md
+// carries: the module, the tool coordinate or the Makefile pin, in whichever
+// column that table puts it. A name the file only mentions in prose does not
+// count. The license and the reason a reader checks a supply chain against
+// live in the row, so a check that asks only whether the file mentions a name
+// passes after the row carrying both has been deleted.
+func documentedNames(t *testing.T) map[string]bool {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
+	if err != nil {
+		t.Fatalf("read %s: %v", dependencyTable, err)
+	}
+	names := map[string]bool{}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			continue
+		}
+		for _, cell := range strings.Split(line, "|") {
+			cell = strings.Trim(strings.TrimSpace(cell), "`")
+			// A cell holding whitespace is prose: the license and the reason
+			// columns. Only the bare name column names a package.
+			if cell == "" || strings.ContainsAny(cell, " \t") {
+				continue
+			}
+			names[cell] = true
+		}
+	}
+	if len(names) == 0 {
+		t.Fatalf("%s parsed to no table rows; the parser no longer understands the file", dependencyTable)
+	}
+	return names
+}
+
 func TestDependencyTableMatchesManifest(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
 	if err != nil {
 		t.Fatalf("read %s: %v", dependencyTable, err)
 	}
 	direct := directRequires(t)
+	rows := 0
 	for _, line := range strings.Split(string(raw), "\n") {
 		module := documentedModule(line)
 		if module == "" {
 			continue
 		}
+		rows++
 		if !slices.Contains(direct, module) {
 			t.Errorf("%s is documented in %s but is not a direct require in go.mod", module, dependencyTable)
 		}
+	}
+	if rows == 0 {
+		t.Fatalf("%s parsed to no dependency rows; the parser no longer understands the file", dependencyTable)
 	}
 }
 
@@ -201,11 +236,7 @@ func tierOf(t *testing.T) map[string]int {
 			tier[modulePath+"/"+name] = i
 		}
 	}
-	present, err := packageDirs(moduleRoot)
-	if err != nil {
-		t.Fatalf("walk module: %v", err)
-	}
-	for dir := range present {
+	for dir := range modulePackages(t) {
 		if _, ok := tier[dir]; !ok {
 			t.Errorf("package %q is in no tier; place it in tiers in deps_test.go", dir)
 		}
@@ -223,11 +254,7 @@ func TestArchitectureMapCoversEveryPackage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read docs/ARCHITECTURE.md: %v", err)
 	}
-	present, err := packageDirs(moduleRoot)
-	if err != nil {
-		t.Fatalf("walk module: %v", err)
-	}
-	for dir := range present {
+	for dir := range modulePackages(t) {
 		rel := strings.TrimPrefix(dir, modulePath+"/")
 		if !strings.Contains(string(raw), "`"+rel+"`") {
 			t.Errorf("package %q is in no entry in docs/ARCHITECTURE.md; add it to the map", rel)
@@ -274,6 +301,22 @@ func packageDirs(root string) (map[string]bool, error) {
 		return nil
 	})
 	return dirs, err
+}
+
+// modulePackages returns every package in the module by import path, and
+// fails the test when the walk found none: a walk that matches no directory
+// leaves the tier and architecture-map checks with nothing to say, and both
+// pass.
+func modulePackages(t *testing.T) map[string]bool {
+	t.Helper()
+	dirs, err := packageDirs(moduleRoot)
+	if err != nil {
+		t.Fatalf("walk module: %v", err)
+	}
+	if len(dirs) == 0 {
+		t.Fatal("the module walk found no package directory; the checks below would pass on an empty set")
+	}
+	return dirs
 }
 
 // TestImportsPointDownward fails when a package imports one at or above its
@@ -488,11 +531,7 @@ var pythonUnhashed = map[string]string{
 // no gate under it.
 func TestPythonPinsAreExactAndHashed(t *testing.T) {
 	records := pythonPinRecords(t)
-	hashed := map[string]bool{}
 	for _, pin := range records {
-		if pin.hashes > 0 {
-			hashed[pin.name] = true
-		}
 		_, exempt := pythonUnhashed[pin.name]
 		if pin.hashes == 0 && !exempt {
 			t.Errorf("scripts/%s: %s==%s carries no --hash=sha256 line and is not in pythonUnhashed; hash it, or record it there with the reason", pin.file, pin.name, pin.version)
@@ -672,9 +711,28 @@ func makeVars(t *testing.T) map[string]string {
 	return vars
 }
 
-// expandVars substitutes $(NAME) with the assignment makeVars read, once, and
-// leaves anything it cannot resolve alone so the caller can name it.
+// expandVars substitutes $(NAME) with the assignment makeVars read, and keeps
+// going through the value it substituted until none is left, so a pin defined
+// in terms of another (`BIOME := @biomejs/biome@$(BIOME_VERSION)`) arrives
+// expanded rather than carrying the inner reference into the gates below.
+// Anything it cannot resolve is left alone so the caller can name it. The
+// bound is a backstop against two assignments naming each other.
 func expandVars(s string, vars map[string]string) string {
+	for range maxVarDepth {
+		expanded := expandVarsOnce(s, vars)
+		if expanded == s {
+			return s
+		}
+		s = expanded
+	}
+	return s
+}
+
+// maxVarDepth bounds how many times expandVars follows a chain of assignments
+// before it gives up on a cycle.
+const maxVarDepth = 16
+
+func expandVarsOnce(s string, vars map[string]string) string {
 	var out strings.Builder
 	for {
 		before, after, found := strings.Cut(s, "$(")
@@ -751,13 +809,20 @@ func fetchedTools(t *testing.T) []fetchedTool {
 				}
 				continue
 			}
+			// `bunx` is a launcher like `uvx`, so it is read before the guard
+			// below for the same reason: a recipe is allowed to start with
+			// the launcher, and `bunx $(BIOME) check` is exactly that shape.
+			if launch(i) == "bunx" && i+1 < len(fields) {
+				fetched = append(fetched, fetchedTool{source: source, line: line, tool: fields[i+1]})
+				continue
+			}
 			if i == 0 || i+1 >= len(fields) {
 				continue
 			}
-			// `$(GO) run` and `bunx` fetch from a registry or a proxy. A bare
-			// `run` after an ordinary word is a recipe running something
-			// local, or the prose of a target's help line.
-			if (field == "run" && strings.HasPrefix(fields[i-1], "$(")) || launch(i) == "bunx" {
+			// `$(GO) run` fetches through the module proxy. A bare `run` after
+			// an ordinary word is a recipe running something local, or the
+			// prose of a target's help line.
+			if field == "run" && strings.HasPrefix(fields[i-1], "$(") {
 				fetched = append(fetched, fetchedTool{source: source, line: line, tool: fields[i+1]})
 			}
 		}
@@ -771,10 +836,13 @@ func fetchedTools(t *testing.T) []fetchedTool {
 // toolCoordinate splits a fetched coordinate into its package name and the
 // version it pins. npm and the Go proxy spell the separator `@`, uv spells it
 // `==`, so both count; without a separator the recipe resolved whatever the
-// registry served that minute, which is the thing the caller below refuses.
+// registry served that minute, which is the thing the callers below refuse.
+// An npm scope opens with `@` (`@biomejs/biome@2.5.14`), so the separator is
+// the last one: cutting at the first splits the scope off and hands the caller
+// a coordinate with no name, which then matches any document at all.
 func toolCoordinate(coord string) (name, version string, pinned bool) {
-	if name, version, ok := strings.Cut(coord, "@"); ok {
-		return name, version, true
+	if at := strings.LastIndex(coord, "@"); at > 0 {
+		return coord[:at], coord[at+1:], true
 	}
 	if name, version, ok := strings.Cut(coord, "=="); ok {
 		return name, version, true
@@ -896,14 +964,15 @@ func TestToolPinsAreExact(t *testing.T) {
 // nobody recorded a reason for. A row here costs one line, and it is what a
 // reader of the table has to check a supply chain against.
 func TestFetchedToolsAreDocumented(t *testing.T) {
-	reasoned, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
-	if err != nil {
-		t.Fatalf("read %s: %v", dependencyTable, err)
-	}
+	documented := documentedNames(t)
 	for _, f := range allFetchedTools(t) {
 		module, _, _ := toolCoordinate(f.tool)
-		if !strings.Contains(string(reasoned), module) {
-			t.Errorf("%s fetches %s and it has no entry in %s; record why it is here", f.source, module, dependencyTable)
+		if module == "" {
+			t.Errorf("%s fetches %q, which names no package; the check below would match every document", f.source, f.tool)
+			continue
+		}
+		if !documented[module] {
+			t.Errorf("%s fetches %s and it has no row in %s; record why it is here", f.source, module, dependencyTable)
 		}
 	}
 }

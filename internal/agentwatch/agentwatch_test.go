@@ -718,8 +718,13 @@ func TestReportsPromptAndThinking(t *testing.T) {
 		t.Fatalf("prompt/output/thinking = %d/%d/%d, want 900/120/40: %+v",
 			ev.PromptTokens, ev.OutputTokens, ev.ThinkingTokens, ev)
 	}
-	if !strings.Contains(ev.Note, "40 reasoning") {
-		t.Fatalf("reasoning missing from the note: %+v", ev)
+	// The tracker was built by hand, so it carries no dirNote and the note is
+	// the reasoning part alone. SingleLine folds the separator's leading
+	// space away on the way to the event, so what lands is the separator
+	// itself followed by the count.
+	want := "· 40 reasoning"
+	if ev.Note != want {
+		t.Fatalf("note = %q, want %q: %+v", ev.Note, want, ev)
 	}
 }
 
@@ -744,15 +749,19 @@ func TestReportStampsWithInjectedClock(t *testing.T) {
 // idRecorder drops a repeat of an id still in the list, matching the
 // collector's window. Agentwatch events used to have no id, so a retried
 // report of the same sample (final Poll after Run's last callback, a
-// tracker that forgot its baseline) double-counted.
+// tracker that forgot its baseline) double-counted. calls counts every
+// arrival, separately from the events kept, so a replay that never reached
+// the recorder cannot pass as one the recorder dropped.
 type idRecorder struct {
 	mu     sync.Mutex
+	calls  int
 	events []core.AgentEvent
 }
 
 func (r *idRecorder) RecordAgent(ev core.AgentEvent) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.calls++
 	if core.HasAgentID(r.events, ev.ID) {
 		return false
 	}
@@ -764,6 +773,12 @@ func (r *idRecorder) all() []core.AgentEvent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return append([]core.AgentEvent(nil), r.events...)
+}
+
+func (r *idRecorder) callCount() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls
 }
 
 func TestReplayOfSameSampleKeptOnce(t *testing.T) {
@@ -794,6 +809,9 @@ func TestReplayOfSameSampleKeptOnce(t *testing.T) {
 	// is the replay: same sample, same instant, a second RecordAgent.
 	tr.last = agentusage.Sample{}
 	w.report(tr, tr.watch.Poll())
+	if got := rec.callCount(); got != 2 {
+		t.Fatalf("RecordAgent called %d times, want 2: the replay has to reach the recorder for the id window to be what drops it", got)
+	}
 	if got := rec.all(); len(got) != 1 {
 		t.Fatalf("replay recorded %d events, want 1: %+v", len(got), got)
 	}
@@ -926,6 +944,10 @@ func TestLoadDefinitions(t *testing.T) {
 		}
 	})
 	t.Run("valid file registers the agent", func(t *testing.T) {
+		// The registry is process-wide, so the definition this subtest loads
+		// would otherwise stay in it for every later test in the binary, and
+		// for the next run of this one.
+		t.Cleanup(agentusage.ResetDefinitions)
 		dir := t.TempDir()
 		body := `{"deftest-agentwatch":{"usage":{"roots":["~/.deftest/sessions"]}}}`
 		if err := os.WriteFile(filepath.Join(dir, "agents.json"), []byte(body), 0o644); err != nil {

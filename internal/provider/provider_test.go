@@ -89,14 +89,22 @@ func TestParsePromRejectsNonFinite(t *testing.T) {
 // totals, or every derived rate stays broken until restart.
 func TestParsePromRejectsOverflowingSum(t *testing.T) {
 	fam := parseProm("gen_total{m=\"a\"} 1e308\ngen_total{m=\"b\"} 1e308\n")
-	if v := fam["gen_total"]; math.IsNaN(v) || math.IsInf(v, 0) {
-		t.Fatalf("overflowing family sum = %v, want the family dropped", v)
+	// The first series stored a finite sum, so the family keeps it and the
+	// overflowing second series is dropped, leaving 1e308.
+	if v := fam["gen_total"]; v != 1e308 {
+		t.Fatalf("overflowing family sum = %v, want the last finite sum 1e308", v)
 	}
 	var m Metrics
 	classify(parseProm("vllm:generation_tokens_total{a=\"1\"} 1e308\n"+
-		"vllm:generation_tokens_total{a=\"2\"} 1e308\n"), &m)
-	if math.IsInf(m.OutTotal, 0) || math.IsNaN(m.OutTotal) {
-		t.Fatalf("OutTotal = %v from an overflowing family, want the last finite sum", m.OutTotal)
+		"vllm:generation_tokens_total{a=\"2\"} 1e308\n"+
+		"vllm:prompt_tokens_total{a=\"1\"} 7\n"), &m)
+	if m.OutTotal != 1e308 {
+		t.Fatalf("OutTotal = %v from an overflowing family, want the last finite sum 1e308", m.OutTotal)
+	}
+	// A non-overflowing family in the same scrape still lands, so the guard
+	// drops the one poisoned sum rather than the whole exposition.
+	if m.InTotal != 7 {
+		t.Fatalf("InTotal = %v, want 7 from the family that does not overflow", m.InTotal)
 	}
 
 	// The mean divides a huge sum by a denormal count; an overflowing
@@ -1010,6 +1018,12 @@ func TestPollCapsTheLemonadeVersion(t *testing.T) {
 	m, err := p.Poll(context.Background())
 	if err != nil {
 		t.Fatalf("Poll: %v", err)
+	}
+	// The whitespace run collapses to one space, then the tail is cut to
+	// versionCap clusters. Asserting the exact value also pins that the
+	// version arrived at all, which the two checks below cannot.
+	if want := "1.0 2.0" + strings.Repeat("x", versionCap-7); m.Version != want {
+		t.Fatalf("version = %q (%d clusters), want %q", m.Version, len([]rune(m.Version)), want)
 	}
 	if strings.ContainsAny(m.Version, "\n\r") {
 		t.Fatalf("version kept a line break: %q", m.Version)

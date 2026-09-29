@@ -191,8 +191,8 @@ func TestIngestIdempotencyKeyFillsMissingID(t *testing.T) {
 	if pre1 != pre2 {
 		t.Errorf("two lines of one POST got different prefixes: %q and %q", pre1, pre2)
 	}
-	if pre1 == derivedKeyPrefix("harness-batch-8") {
-		t.Error("a different Idempotency-Key hashed to the same prefix")
+	if want := derivedKeyPrefix("harness-batch-7"); pre1 != want {
+		t.Errorf("derived prefix = %q, want %q, the hash of the key sent", pre1, want)
 	}
 	if rec.evs[0].OutputTokens != 50 || rec.evs[1].OutputTokens != 10 {
 		t.Errorf("tokens = %+v %+v", rec.evs[0], rec.evs[1])
@@ -298,8 +298,18 @@ func TestDerivedEventIDFitsCap(t *testing.T) {
 	// sequence, whatever runes the caller's key was written with.
 	flags := strings.Repeat("\U0001F1E9\U0001F1EA", 80)
 	id = derivedEventID(derivedKeyPrefix(flags), 1)
-	if want := derivedKeyPrefix(flags) + ":1"; id != want {
-		t.Fatalf("flag id = %q, want %q", id, want)
+	// The shape is checked against literals rather than against
+	// derivedKeyPrefix: comparing the minting function with the prefix helper
+	// it is built from agrees on any id at all.
+	if len(id) != 18 {
+		t.Fatalf("flag id = %q (%d bytes), want 16 hex characters and \":1\"", id, len(id))
+	}
+	if digest, seq, ok := strings.Cut(id, ":"); !ok || seq != "1" ||
+		digest != strings.ToLower(digest) || strings.Trim(digest, "0123456789abcdef") != "" {
+		t.Fatalf("flag id = %q, want 16 lowercase hex characters then \":1\"", id)
+	}
+	if other := derivedEventID(derivedKeyPrefix(flags+"x"), 1); other == id {
+		t.Fatalf("a different key minted the same id %q", id)
 	}
 	if !utf8.ValidString(id) || strings.ContainsFunc(id, func(r rune) bool { return r > 0x7f }) {
 		t.Fatalf("flag id = %q, want the ASCII digest", id)
@@ -558,19 +568,17 @@ func TestIngestBlankTimestampTakesArrivalInstant(t *testing.T) {
 	for _, ts := range []string{`""`, `"   "`, `" 2026-01-02T03:04:05Z "`} {
 		t.Run(ts, func(t *testing.T) {
 			rec := &memRecorder{}
-			s := startIngest(t, rec)
-			sent := time.Now()
+			// Frozen, so the assertion is an exact instant: a window around
+			// time.Now would pass a stamp that is minutes off.
+			frozen := time.Unix(1_700_000_000, 0).UTC()
+			s := startIngestAt(t, rec, frozen)
 			code, body := postBody(t, "http://"+s.Addr()+"/v1/events", `{"ts":`+ts+`}`)
 			if code != http.StatusAccepted {
 				t.Fatalf("status = %d %q, want 202", code, body)
 			}
 			awaitEvents(t, rec, 1)
-			// Between the request and the assertion, not merely after it: a
-			// stamp far in the future is negative to time.Since and would
-			// clear a one-sided bound.
-			at := rec.evs[0].At
-			if at.Before(sent.Add(-time.Minute)) || at.After(time.Now().Add(time.Minute)) {
-				t.Errorf("ts %s stored %s, want the arrival instant", ts, at)
+			if at := rec.evs[0].At; !at.Equal(frozen) {
+				t.Errorf("ts %s stored %s, want the arrival instant %s", ts, at, frozen)
 			}
 		})
 	}
@@ -1226,10 +1234,19 @@ func TestHealthzStatesItsLengthOnGETAndHEAD(t *testing.T) {
 		}
 		return resp.StatusCode, resp.Header.Get("Content-Length"), string(body)
 	}
-	assertParity := func(label string) {
+	// wantCode and wantSubstr pin the answer itself, not just that the two
+	// methods agree: a handler that always wrote 200 ok still answers both
+	// alike, and that is the failure the degraded pass exists to catch.
+	assertParity := func(label string, wantCode int, wantSubstr string) {
 		t.Helper()
 		getCode, getLen, getBody := probe(http.MethodGet)
 		headCode, headLen, headBody := probe(http.MethodHead)
+		if getCode != wantCode {
+			t.Errorf("%s: GET = %d, want %d (body %q)", label, getCode, wantCode, getBody)
+		}
+		if !strings.Contains(getBody, wantSubstr) {
+			t.Errorf("%s: GET body = %q, want it to contain %q", label, getBody, wantSubstr)
+		}
 		if getCode != headCode {
 			t.Errorf("%s: HEAD = %d, GET = %d; the two must answer alike", label, headCode, getCode)
 		}
@@ -1246,7 +1263,7 @@ func TestHealthzStatesItsLengthOnGETAndHEAD(t *testing.T) {
 			t.Errorf("%s: GET Content-Length = %q, want the %d bytes it sent", label, getLen, len(getBody))
 		}
 	}
-	assertParity("healthy")
+	assertParity("healthy", http.StatusOK, healthOK)
 
 	// Every decode slot held, so the probe answers degraded. Filled directly:
 	// nothing else is in flight, so the count is exact.
@@ -1258,7 +1275,7 @@ func TestHealthzStatesItsLengthOnGETAndHEAD(t *testing.T) {
 			<-eventSlots
 		}
 	}()
-	assertParity("degraded")
+	assertParity("degraded", http.StatusServiceUnavailable, "degraded:")
 }
 
 func TestIngestSecurityHeaders(t *testing.T) {
