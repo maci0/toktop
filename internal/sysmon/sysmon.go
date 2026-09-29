@@ -14,6 +14,7 @@ import (
 
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/gpu"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // gpuBudget bounds the whole vendor-tool sweep per poll cycle.
@@ -66,6 +67,75 @@ func instant() time.Time {
 	fn := clock
 	clockMu.RUnlock()
 	return fn()
+}
+
+// audit builds the logger for the host-vitals lines. A var so a test can point
+// it at a handler it can read.
+var audit = logcfg.Logger
+
+// sourceRun tracks whether a required host-vitals read is failing, so the
+// audit log records the start of an outage once and its end once rather than a
+// line per poll. Sample runs every interval, and a host whose memory source
+// cannot be read would otherwise write one line per second for the life of the
+// run.
+//
+// An entry is never removed, for the reason gpu's run state is not: the keys
+// are the fixed source set each platform samples from, and dropping one on
+// recovery loses a failure a concurrent poll had just recorded, so the next
+// failure reads as a fresh outage.
+var sourceRuns sync.Map // source name -> *sourceRun
+
+type sourceRun struct {
+	mu     sync.Mutex
+	failed bool
+	since  time.Time
+}
+
+// noteSourceFailure records the start of an outage on one required host-vitals
+// source. A source that cannot be read is not a fact about the host: the strip
+// then shows zero memory, no load and no uptime for the rest of the run, and
+// an idle machine reads the same on screen, so the line naming the source is
+// the only thing that tells the two apart.
+//
+// Every platform reaches this through the same call, so a line reads the same
+// whichever OS produced it: the source is named the way the platform file
+// spells it (a /proc path, a sysctl name, a Win32 entry point).
+func noteSourceFailure(source string, err error) {
+	s, _ := sourceRuns.LoadOrStore(source, &sourceRun{})
+	r := s.(*sourceRun)
+	r.mu.Lock()
+	first := !r.failed
+	if first {
+		r.failed, r.since = true, instant()
+	}
+	r.mu.Unlock()
+	if !first {
+		return
+	}
+	audit().Warn("toktop: host vitals source unreadable",
+		"source", logcfg.Field(source, 256),
+		"error", logcfg.Field(err.Error(), 256))
+}
+
+// noteSourceOK closes an outage recorded by noteSourceFailure. A source that
+// was never recorded as failing is the normal case and stays silent.
+func noteSourceOK(source string) {
+	s, ok := sourceRuns.Load(source)
+	if !ok {
+		return
+	}
+	r := s.(*sourceRun)
+	r.mu.Lock()
+	if !r.failed {
+		r.mu.Unlock()
+		return
+	}
+	r.failed = false
+	downFor := core.Age(instant(), r.since)
+	r.mu.Unlock()
+	audit().Info("toktop: host vitals source readable again",
+		"source", logcfg.Field(source, 256),
+		"down_for", downFor.Round(time.Second))
 }
 
 // Hooks implemented by each platform file.

@@ -3,6 +3,7 @@
 package sysmon
 
 import (
+	"fmt"
 	"os"
 	"unsafe"
 
@@ -40,12 +41,28 @@ func init() {
 func sampleMemoryWindows(s *core.SysSample) {
 	var ms memoryStatusEx
 	ms.Length = uint32(unsafe.Sizeof(ms))
-	r1, _, _ := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&ms)))
+	r1, _, err := procGlobalMemoryStatusEx.Call(uintptr(unsafe.Pointer(&ms)))
 	if r1 == 0 {
+		// Latched like a Linux procfs read: the host strip shows zero memory
+		// for the rest of the run otherwise, which is what an idle machine
+		// shows too.
+		noteSourceFailure("GlobalMemoryStatusEx", syscallErr("GlobalMemoryStatusEx", err))
 		return
 	}
+	noteSourceOK("GlobalMemoryStatusEx")
 	s.MemTotal = ms.TotalPhys
 	s.MemUsed = satSub(ms.TotalPhys, ms.AvailPhys)
 	s.SwapTotal = ms.TotalPageFile
 	s.SwapUsed = satSub(ms.TotalPageFile, ms.AvailPageFile)
+}
+
+// syscallErr names the entry point a call failed at, which a bare errno does
+// not. A LazyProc.Call returns a nil error alongside a zero result when the
+// call itself succeeded, so this is only reached on a failure and falls back to
+// a reason when the loader supplied none.
+func syscallErr(name string, err error) error {
+	if err == nil {
+		err = windows.ERROR_FUNCTION_FAILED
+	}
+	return fmt.Errorf("%s: %w", name, err)
 }

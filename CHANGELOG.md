@@ -91,6 +91,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- A host whose memory or load source cannot be read is now named in the audit
+  log on macOS and Windows, the way a failed `/proc` read already was on Linux.
+  `hw.memsize`, `kern.loadavg` and `GlobalMemoryStatusEx` failed silently, so
+  the host strip reported zero memory and no load for the rest of the run,
+  which is what an idle machine reports too. The outage is written once however
+  often the sampler runs, and its end is written once.
+
 - `--plain` without `--once` now runs the linear text report live, with the
   keys. The report was the screen-reader path into a finished run only, so a
   screen-reader user had to choose between the dashboard, which announces

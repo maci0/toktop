@@ -1,7 +1,11 @@
 package sysmon
 
 import (
+	"bytes"
+	"errors"
+	"log/slog"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -235,5 +239,49 @@ func TestSetNowOverridesAndNilRestores(t *testing.T) {
 	got := instant()
 	if got.Before(base) {
 		t.Fatalf("instant() = %v after SetNow(nil), want the wall clock at or after %v", got, base)
+	}
+}
+
+// A required host-vitals source that cannot be read is not a fact about the
+// host: the strip then shows zero memory, no load and no uptime, which is what
+// an idle machine shows. Every platform latches that outage through these two
+// calls, so the contract is pinned here rather than in one platform's file:
+// repeated failures write one line however often Sample runs, and a recovery
+// is announced once.
+func TestSourceOutageIsAuditedOnceAndRecoveryOnce(t *testing.T) {
+	var lines bytes.Buffer
+	lg := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	old := audit
+	audit = func() *slog.Logger { return lg }
+	defer func() { audit = old }()
+
+	source := "test.source/" + t.Name()
+	// A source that was never failing stays silent, or every platform's first
+	// successful sample would write a line.
+	noteSourceOK(source)
+	if lines.Len() != 0 {
+		t.Fatalf("a source with no recorded outage wrote a line:\n%s", lines.String())
+	}
+
+	for range 3 {
+		noteSourceFailure(source, errors.New("no such source"))
+	}
+	if n := strings.Count(lines.String(), "host vitals source unreadable"); n != 1 {
+		t.Fatalf("audited %d outage lines for three failing reads, want 1:\n%s", n, lines.String())
+	}
+	if !strings.Contains(lines.String(), source) {
+		t.Fatalf("the outage line does not name the source:\n%s", lines.String())
+	}
+
+	lines.Reset()
+	noteSourceOK(source)
+	noteSourceOK(source)
+	if n := strings.Count(lines.String(), "host vitals source readable again"); n != 1 {
+		t.Fatalf("audited %d recovery lines, want 1:\n%s", n, lines.String())
+	}
+	lines.Reset()
+	noteSourceFailure(source, errors.New("no such source"))
+	if n := strings.Count(lines.String(), "host vitals source unreadable"); n != 1 {
+		t.Fatalf("a failure after a recovery audited %d lines, want 1:\n%s", n, lines.String())
 	}
 }

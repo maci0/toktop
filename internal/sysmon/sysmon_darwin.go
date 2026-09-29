@@ -24,8 +24,13 @@ func init() {
 func sampleMemoryDarwin(s *core.SysSample) {
 	total, err := unix.SysctlUint64("hw.memsize")
 	if err != nil {
+		// Latched like a Linux procfs read: the host strip shows zero memory
+		// for the rest of the run otherwise, which is what an idle machine
+		// shows too.
+		noteSourceFailure("hw.memsize", err)
 		return
 	}
+	noteSourceOK("hw.memsize")
 	ps := uint64(0)
 	if v, err := unix.SysctlUint32("hw.pagesize"); err == nil {
 		ps = uint64(v)
@@ -54,9 +59,15 @@ func sampleMemoryDarwin(s *core.SysSample) {
 }
 
 func sampleLoadDarwin(s *core.SysSample) {
-	if b, err := unix.SysctlRaw("kern.loadavg"); err == nil {
-		s.Load1, s.Load5, s.Load15 = decodeLoadavg(b)
+	b, err := unix.SysctlRaw("kern.loadavg")
+	if err != nil {
+		// The load gauges read zero for the rest of the run without this, and
+		// a box at idle reads zero too.
+		noteSourceFailure("kern.loadavg", err)
+		return
 	}
+	noteSourceOK("kern.loadavg")
+	s.Load1, s.Load5, s.Load15 = decodeLoadavg(b)
 }
 
 // decodeLoadavg parses kern.loadavg: struct loadavg { int32 ldavg[3]; int32 scale }.

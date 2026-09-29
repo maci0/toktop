@@ -16,7 +16,6 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/maci0/toktop/internal/core"
-	"github.com/maci0/toktop/internal/logcfg"
 )
 
 const (
@@ -26,63 +25,6 @@ const (
 	sysHwmon    = "/sys/class/hwmon"
 	sysThermal  = "/sys/class/thermal"
 )
-
-// audit builds the logger for the host-vitals lines. A var so a test can point
-// it at a handler it can read.
-var audit = logcfg.Logger
-
-// procRun tracks whether a required procfs read is failing, so the audit log
-// records the start of an outage once and its end once rather than a line per
-// poll. Sample runs every interval, and a sandbox with no procfs would
-// otherwise write one line per second for the life of the run.
-//
-// An entry is never removed, for the reason gpu's run state is not: the keys
-// are the fixed file set readProc is called with, and dropping one on recovery
-// loses a failure a concurrent poll had just recorded, so the next failure
-// reads as a fresh outage.
-var procRuns sync.Map // path -> *procRun
-
-type procRun struct {
-	mu     sync.Mutex
-	failed bool
-	since  time.Time
-}
-
-func noteProcFailure(path string, err error) {
-	s, _ := procRuns.LoadOrStore(path, &procRun{})
-	p := s.(*procRun)
-	p.mu.Lock()
-	first := !p.failed
-	if first {
-		p.failed, p.since = true, instant()
-	}
-	p.mu.Unlock()
-	if !first {
-		return
-	}
-	audit().Warn("toktop: host vitals source unreadable",
-		"source", logcfg.Field(path, 256),
-		"error", logcfg.Field(err.Error(), 256))
-}
-
-func noteProcOK(path string) {
-	s, ok := procRuns.Load(path)
-	if !ok {
-		return
-	}
-	p := s.(*procRun)
-	p.mu.Lock()
-	if !p.failed {
-		p.mu.Unlock()
-		return
-	}
-	p.failed = false
-	downFor := core.Age(instant(), p.since)
-	p.mu.Unlock()
-	audit().Info("toktop: host vitals source readable again",
-		"source", logcfg.Field(path, 256),
-		"down_for", downFor.Round(time.Second))
-}
 
 // readProc reads one of the /proc files every Linux host has, and latches a
 // read failure into the audit log.
@@ -96,10 +38,10 @@ func noteProcOK(path string) {
 func readProc(path string) ([]byte, bool) {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		noteProcFailure(path, err)
+		noteSourceFailure(path, err)
 		return nil, false
 	}
-	noteProcOK(path)
+	noteSourceOK(path)
 	return b, true
 }
 
