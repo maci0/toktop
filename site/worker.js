@@ -294,10 +294,14 @@ const HTML = htmlForWire(`<!doctype html>
      frame so the capture never sits on the light-scheme paper. The frame
      re-points the page tokens at the dark scheme, so it is a terminal in
      both schemes without repeating a hex, and the light page can never
-     recolor the product. */
+     recolor the product. Every scheme token the frame's own text can name
+     is in that list, not only the ones it paints surfaces with: --fg and
+     --accent left pointing at the light values put light-scheme text on
+     the dark frame, unreadable rather than merely wrong. */
   .shot {
     --bg: var(--dark-bg); --panel: var(--dark-panel);
-    --line: var(--dark-line); --dim: var(--dark-dim);
+    --line: var(--dark-line); --fg: var(--dark-fg);
+    --dim: var(--dark-dim); --accent: var(--dark-accent);
     margin: 0; border: 1px solid var(--line);
     background: var(--bg); overflow: hidden;
   }

@@ -67,6 +67,9 @@ const FOOTER_MAXWIDTH_RE = /footer \{[^}]*max-width: 76rem/;
 // The role is the documented remedy for a list whose markers are removed.
 const GRID_LIST_RE = /<ul class="grid" role="list">/;
 const GRID_LIST_STYLE_RE = /\.grid \{[^}]*list-style: none/;
+// The terminal frame re-points the scheme it paints in; every scheme token its
+// text can name has to be in that list.
+const SHOT_FRAME_RE = /\.shot \{[^}]*\}/;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -307,7 +310,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4476);
+    expect(bytes.byteLength).toBe(4486);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1002,6 +1005,22 @@ test("the shell prompt in the capture caption is hidden from assistive technolog
   expect(identityBody).toMatch(SHELL_PROMPT_RE);
 });
 
+// The capture is the product, drawn as a terminal on the light paper too. The
+// frame re-points the scheme tokens so nothing inside it can be recolored by
+// the page it sits on, and the list is complete rather than the four tokens
+// its surfaces happen to paint with: --fg and --accent still carrying the
+// light values put near-black text on the dark frame and a light accent on a
+// dark surface, unreadable rather than merely out of place. Each pair is
+// checked in both directions, so dropping either re-point fails here.
+test("the terminal frame carries the whole dark scheme, text tokens included", () => {
+  const frame = identityBody.match(SHOT_FRAME_RE)?.[0] ?? "";
+  for (const name of ["bg", "panel", "line", "fg", "dim", "accent"]) {
+    expect(frame, `.shot does not re-point --${name}`).toContain(
+      `--${name}: var(--dark-${name})`,
+    );
+  }
+});
+
 // kbd is a UI component and this border is the only thing that draws it:
 // --line measures about 1.3:1 against the page background, under the 3:1 that
 // identifies a component's boundary (WCAG 1.4.11). Both schemes are measured,
@@ -1031,9 +1050,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(12968);
-  expect(gzipped).toBe(4476);
-  expect(brotli).toBe(3794);
+  expect(identity).toBe(13024);
+  expect(gzipped).toBe(4486);
+  expect(brotli).toBe(3801);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1064,7 +1083,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_371);
+  expect(visit[0][1]).toBe(14_378);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
@@ -1117,7 +1136,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_371);
+  expect(visit).toBe(14_378);
   expect(visit).toBeLessThan(25_000);
 });
 
