@@ -457,10 +457,136 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	if err := os.Chmod(tmpName, 0o755); err != nil {
 		return "", fmt.Errorf("cannot make %s executable: %w", tmpName, err)
 	}
-	if err := install(tmpName, self); err != nil {
-		return "", fmt.Errorf("cannot replace %s: %w", self, err)
+	// Two `toktop update` runs are not hypothetical: an operator whose first
+	// run reported a network failure re-runs it in a second terminal, and a
+	// dashboard's own watch makes the replacement visible before the first
+	// run has printed anything. Both reach this point with a verified
+	// download of the same release, and the check above was taken before
+	// either of them got here, so without the install lock the last rename
+	// decides which one wins and an update that ran after an older one can
+	// leave the older binary installed. Where the install displaces, the
+	// two-rename sequence is worse than a lost race: each run renames the
+	// installed binary aside and removes the other's, so a run that dies
+	// between its two renames leaves the only copy under the displaced name.
+	if err := lockInstall(self, func() error { return installIfChanged(tmpName, self, expect) }); err != nil {
+		return "", err
 	}
 	return self, nil
+}
+
+// The install lock: one install of one binary at a time, across processes.
+//
+// It is a file created exclusively beside the binary and removed on release,
+// the same construction and for the same reason as the host-key store's in
+// internal/remote (lockStore): exclusive create is atomic on every filesystem
+// toktop runs on, which a flock over the binary itself is not on Windows, and
+// the binary's directory is guaranteed to exist because the binary is in it.
+const (
+	// installLockSuffix names the lock file beside the installed binary.
+	installLockSuffix = ".lock"
+	// installLockPoll is how often a waiting install looks for the lock again.
+	installLockPoll = 20 * time.Millisecond
+	// installLockStale is how old a lock file has to be before it is assumed
+	// to belong to a process that died mid-replace and is broken. The
+	// download is outside the lock precisely so that this can stay far above
+	// the critical section: a stale threshold near the section's own length
+	// would break a live lock on a loaded host. Without the break, one kill
+	// would wedge every later update.
+	installLockStale = time.Minute
+)
+
+// installLockWait bounds how long an install waits for a peer to finish its
+// replace. The critical section is a checksum of one file and a rename, so this
+// is generous; exceeding it means a peer died holding the lock, which the stale
+// check then breaks. Var so tests can shrink it.
+var installLockWait = 5 * time.Second
+
+// lockInstall runs fn with an exclusive lock beside the installed binary. A
+// lock that cannot be released is reported rather than dropped: the next
+// update spends installLockWait on it before breaking it as stale, and an
+// operator who never learns why has no way to act. The result is named so the
+// deferred release can fold its own failure into whatever fn returned.
+func lockInstall(self string, fn func() error) (err error) {
+	lock := self + installLockSuffix
+	deadline := time.Now().Add(installLockWait)
+	for {
+		f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err == nil {
+			if cerr := f.Close(); cerr != nil {
+				lerr := fmt.Errorf("cannot write %s: %w", core.RedactHome(lock), cerr)
+				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+					lerr = errors.Join(lerr, fmt.Errorf("left a lock file at %s that must be deleted: %w",
+						core.RedactHome(lock), rerr))
+				}
+				return lerr
+			}
+			defer func() {
+				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w",
+						core.RedactHome(lock), rerr))
+				}
+			}()
+			return fn()
+		}
+		if !os.IsExist(err) {
+			// The directory is unwritable, or the filesystem has no exclusive
+			// create. The install itself fails on its own with a clearer
+			// error, so run it rather than reporting a lock error the operator
+			// cannot act on. This is the same rule lockStore follows.
+			return fn()
+		}
+		// A stale lock is only retried once the break actually took. A lock
+		// that cannot be unlinked would otherwise keep the stale arm true and
+		// spin here with no deadline check. The reason the break failed rides
+		// the give-up message: without it an unremovable lock is reported as
+		// one another toktop holds, which is not true and leaves the operator
+		// with nothing to act on.
+		var breakErr error
+		// core.Age, not time.Since: the mtime carries no monotonic reading,
+		// so this ages a wall clock, and a backward step (an NTP correction, a
+		// resumed laptop) makes the age negative. A negative age is not
+		// "older than installLockStale", so the lock from a killed update is
+		// never broken and the give-up below names a peer that is not running.
+		if info, serr := os.Stat(lock); serr == nil && core.Age(time.Now(), info.ModTime()) > installLockStale {
+			if breakErr = os.Remove(lock); breakErr == nil {
+				continue
+			}
+		}
+		if time.Now().After(deadline) {
+			if breakErr != nil {
+				return fmt.Errorf("%s is locked by another toktop; the stale lock at %s could not be removed: %w",
+					core.RedactHome(self), core.RedactHome(lock), breakErr)
+			}
+			return fmt.Errorf("%s is locked by another toktop; giving up after %s",
+				core.RedactHome(self), installLockWait)
+		}
+		time.Sleep(installLockPoll)
+	}
+}
+
+// installIfChanged puts the staged binary in place unless the installed one
+// already carries expect.
+//
+// The checksum is re-read here, not only before the download, because that is
+// what makes a duplicate run a no-op instead of a second replace. Two runs of
+// the same release both pass the pre-download check (neither has installed
+// anything yet), both download, and both arrive here; whichever runs second
+// finds the release already installed and leaves the binary alone, so the two
+// runs leave the same state as one. On Windows the second run is what would
+// otherwise rename the installed binary aside and delete the first run's,
+// leaving the only copy of the binary under the displaced name.
+//
+// A binary that cannot be read is installed over, not refused: the read
+// failure is the condition this path exists to recover from, and install
+// already refuses anything that does not match the release checksums.
+func installIfChanged(tmpName, self, expect string) error {
+	if have, cerr := fileChecksum(self); cerr == nil && have == expect {
+		return nil
+	}
+	if err := install(tmpName, self); err != nil {
+		return fmt.Errorf("cannot replace %s: %w", self, err)
+	}
+	return nil
 }
 
 // updateTempPrefix names the staging file a download is written to before it

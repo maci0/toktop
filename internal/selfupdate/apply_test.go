@@ -11,12 +11,15 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -410,5 +413,155 @@ func TestRestoreDisplacedWithNothingToRecover(t *testing.T) {
 	self := filepath.Join(dir, "toktop.exe")
 	if err := restoreDisplaced(self, self+displacedSuffix); err != nil {
 		t.Fatalf("restoreDisplacing on a first install: %v", err)
+	}
+}
+
+// A second `toktop update` is not hypothetical: an operator whose first run
+// reported a network failure re-runs it in another terminal while the first
+// is still downloading, and the dashboard's own watch makes the first
+// replacement visible before it has printed anything. Both runs check the
+// installed binary before either of them installs, so the check cannot keep
+// them apart on its own. Every one of them has to converge on the same
+// installed binary, and the install directory has to be left holding nothing
+// but that binary: a lock file, a staging file, or a displaced copy is an
+// update that reported success and left litter a later run has to reason
+// about.
+func TestApplyConcurrentlyLeavesOneInstalledBinary(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho new\n")
+	h := sha256.Sum256(payload)
+	rel := releaseServer(t, payload, hex.EncodeToString(h[:]))
+
+	target := oldBinaryTarget(t)
+	const runs = 8
+	var wg sync.WaitGroup
+	errs := make([]error, runs)
+	start := make(chan struct{})
+	for i := range runs {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, errs[i] = applyTo(context.Background(), rel, target)
+		}()
+	}
+	close(start)
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("run %d: %v", i, err)
+		}
+	}
+	got, err := os.ReadFile(target)
+	if err != nil || string(got) != string(payload) {
+		t.Fatalf("target = %q (%v), want the installed binary", got, err)
+	}
+	entries, err := os.ReadDir(filepath.Dir(target))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != filepath.Base(target) {
+			t.Errorf("install directory holds %q beside the installed binary", e.Name())
+		}
+	}
+}
+
+// The lock has to break one a killed update left, or every later update is
+// wedged behind it forever. It has to leave a lock of its own behind nothing,
+// and it has to name the peer that holds one it could not break.
+func TestLockInstallBreaksAStaleLockAndNamesALiveOne(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "toktop")
+	if err := os.WriteFile(self, []byte("old binary"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A fresh lock is a live peer. The wait is shortened so the test does not
+	// spend installLockWait on it, and the message has to name the peer.
+	wait := installLockWait
+	installLockWait = 50 * time.Millisecond
+	t.Cleanup(func() { installLockWait = wait })
+
+	lock := self + installLockSuffix
+	if err := os.WriteFile(lock, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := lockInstall(self, func() error {
+		t.Error("the install ran with a lock held by another process")
+		return nil
+	})
+	if !strings.Contains(err.Error(), "locked by another toktop") {
+		t.Fatalf("live lock error = %v, want it to name the peer holding the lock", err)
+	}
+
+	// An aged lock is a process that died mid-replace. It is broken, and the
+	// install that was waiting on it runs.
+	aged := time.Now().Add(-2 * installLockStale)
+	if err := os.Chtimes(lock, aged, aged); err != nil {
+		t.Fatal(err)
+	}
+	called := false
+	if err := lockInstall(self, func() error { called = true; return nil }); err != nil {
+		t.Fatalf("a stale lock was not broken: %v", err)
+	}
+	if !called {
+		t.Fatal("the install did not run once the stale lock was broken")
+	}
+	if _, err := os.Stat(lock); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("lock file = %v, want it released", err)
+	}
+}
+
+// The re-read inside the install lock is what makes a duplicate run a no-op
+// rather than a second replace. It has to be observable on the installed file
+// itself: two runs of one release that both got past the pre-download check
+// leave one installed binary, and the run that lost the race does not touch
+// it. The inode is what says "not touched": the content is identical either
+// way, so only the file's identity distinguishes a skipped install from a
+// second rename of the same bytes.
+func TestInstallIfChangedLeavesTheInstalledBinaryAlone(t *testing.T) {
+	payload := []byte("#!/bin/sh\necho new\n")
+	sum := sha256.Sum256(payload)
+	expect := hex.EncodeToString(sum[:])
+
+	dir := t.TempDir()
+	self := filepath.Join(dir, "toktop")
+	staged := filepath.Join(dir, updateTempPrefix+"staged")
+	if err := os.WriteFile(staged, payload, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The state a peer leaves behind: the release installed already.
+	if err := os.WriteFile(self, payload, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installIfChanged(staged, self, expect); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.Stat(self)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("the installed binary was replaced although it already carried the release checksum")
+	}
+
+	// A binary that is not the release is replaced, so the check is not a
+	// blanket refusal to install.
+	old := []byte("old binary")
+	if err := os.WriteFile(self, old, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := installIfChanged(staged, self, expect); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(self)
+	if err != nil || string(got) != string(payload) {
+		t.Fatalf("target = %q (%v), want the staged binary installed", got, err)
 	}
 }
