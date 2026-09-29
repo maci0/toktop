@@ -65,16 +65,20 @@ type Server struct {
 // to that end, so slow-but-alive NDJSON streams keep working while silent ones
 // are reaped. Tests shrink these per server, not per process.
 const (
-	defaultMaxEventLife  = 10 * time.Minute
-	defaultBodyIdle      = time.Minute
+	defaultMaxEventLife = 10 * time.Minute
+	defaultBodyIdle     = time.Minute
+	// defaultResponseWrite bounds writing the status line and the tiny JSON
+	// body after the request has been read. Without it a peer that stops
+	// reading pins the handler goroutine until the OS TCP timeout.
 	defaultResponseWrite = 30 * time.Second
 )
 
 // idleTimeout reaps keep-alive connections that sit between requests. Without
 // it a vanished peer holds an fd and a goroutine for the life of the dashboard.
 // A peer that goes silent mid-body is a different bound: progressBody applies
-// bodyIdleTimeout per read and maxEventLifetime to the stream as a whole. The
-// endpoint is localhost-bound by default but can be exposed via --ingest.
+// the server's bodyIdleTimeout per read and maxEventLifetime to the stream as
+// a whole. The endpoint is localhost-bound by default but can be exposed via
+// --ingest.
 const idleTimeout = 2 * time.Minute
 
 // readHeaderTimeout bounds a request's header read. A peer that opens a

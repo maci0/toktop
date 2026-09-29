@@ -397,7 +397,11 @@ func parseGeneric(line []byte) (values, string, bool) {
 	// the same fold parseClaude and parseDsh apply.
 	in := satAdd(counter(ev.Usage.Input), counter(ev.Usage.Cache))
 	tot := counter(ev.Usage.Total)
-	if tot == 0 && in > 0 {
+	// No total on the record: the turn billed what it read and wrote, the
+	// same fallback grok and gemini apply. Unconditional, or a record that
+	// reports only output is stored with a total of zero against a real
+	// output count.
+	if tot == 0 {
 		tot = satAdd(in, out)
 	}
 	v := values{

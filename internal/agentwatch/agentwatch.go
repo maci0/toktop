@@ -531,17 +531,15 @@ func (w *Watcher) stopAll() {
 const stopWait = 3 * time.Second
 
 func (w *Watcher) stopOne(t *tracked) {
-	if t.cancel != nil {
-		t.cancel()
-	}
-	if t.done != nil {
-		timer := time.NewTimer(stopWait)
-		defer timer.Stop()
-		select {
-		case <-t.done:
-		case <-timer.C:
-			return
-		}
+	// Both fields are set before the entry is in the map and reassigned only
+	// alongside each other, so neither is nil here.
+	t.cancel()
+	timer := time.NewTimer(stopWait)
+	defer timer.Stop()
+	select {
+	case <-t.done:
+	case <-timer.C:
+		return
 	}
 	if t.watch != nil {
 		w.report(t, t.watch.Poll())

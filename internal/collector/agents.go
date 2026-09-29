@@ -29,7 +29,7 @@ type agentSkewEntry struct {
 // the id ledger, and on the same reasoning: an agent that stops reporting ages
 // out of the horizon, so the count cap only ever bites for a fleet still
 // sending.
-const maxAgentSkews = 8 * core.AgentHistoryLen
+const maxAgentSkews = core.AgentIDLedgerMax
 
 // forgetAgedAgentSkews drops the offset ledger entries the window has moved
 // past, then the oldest ones if the count cap is still exceeded. An offset
@@ -110,6 +110,9 @@ func (r windowRun) empty() bool { return r.refused == 0 && !r.recovered }
 // writes nothing. Reading it here rather than in RecordAgent keeps the logging
 // off the ingest request path and behind the same lock the poll loop needs.
 // Call with c.mu held.
+// The recovery line closes the run, so it clears the refused count with it:
+// the next run starts at zero, not at whatever the run just closed happened to
+// leave standing.
 func (c *Collector) drainWindowRefusals() windowRun {
 	if c.windowLost.IsZero() {
 		return windowRun{}
@@ -128,7 +131,7 @@ func (c *Collector) drainWindowRefusals() windowRun {
 		lostFor:   core.Age(c.instant(), c.windowLost).Round(time.Second),
 		recovered: true,
 	}
-	c.windowLost, c.windowAgent = time.Time{}, ""
+	c.windowLost, c.windowAgent, c.windowRefused = time.Time{}, "", 0
 	c.windowRecovered, c.windowLogged = "", false
 	return run
 }

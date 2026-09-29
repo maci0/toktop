@@ -366,3 +366,54 @@ func TestWindowRefusalsAreAuditedOnce(t *testing.T) {
 		t.Fatalf("recovery logged again with no new refusals: %d lines\n%s", got, logs.String())
 	}
 }
+
+// The recovery line closes a run of refusals, so it closes the count with it.
+// A count left standing would be carried into the next run and its opening
+// line would report refusals that run never had.
+func TestWindowRefusalCountResetsAfterRecovery(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
+	c := New(nil, time.Second)
+	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
+	c.procFn = nil
+	logs := captureAudit(t)
+	ch := make(chan core.Snapshot, 1)
+	emit := func() {
+		c.emit(context.Background(), ch)
+		<-ch
+	}
+
+	for i := range core.AgentHistoryLen {
+		now = base.Add(time.Duration(i) * time.Second)
+		c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("n%d", i), Agent: "a"})
+	}
+	oldest := c.agents[0].At
+	refuse := func(id string) {
+		now = now.Add(time.Second)
+		if c.RecordAgent(core.AgentEvent{At: oldest.Add(-time.Second), ID: id, Agent: "lagging"}) {
+			t.Fatalf("%s was stored, so there is no run to close", id)
+		}
+	}
+
+	refuse("stale1")
+	refuse("stale2")
+	emit() // opening line: refused=2
+	refuse("stale3")
+	now = base.Add((core.AgentHistoryLen + 1) * time.Second)
+	if !c.RecordAgent(core.AgentEvent{At: now, ID: "fresh", Agent: "a"}) {
+		t.Fatal("a newer event was refused")
+	}
+	emit() // recovery line, which closes the run
+	refuse("stale4")
+	emit() // opening line of the next run: refused=1
+
+	lines := logs.String()
+	if got := countLines(logs, "refused=1"); got != 1 {
+		t.Fatalf("lines reporting refused=1 = %d, want only the new run's:\n%s", got, lines)
+	}
+	if got := countLines(logs, "refused=3"); got != 1 {
+		return // the new run wrongly inherited the closed run's two refusals
+	}
+	t.Errorf("the closed run's count carried into the next run:\n%s", lines)
+}

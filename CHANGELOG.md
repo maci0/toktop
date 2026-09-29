@@ -49,6 +49,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   that says which subsystem to fix exists only on stderr, under the alternate
   screen. The empty feed and the agents view both printed it; the fleet
   dashboard and the compact strip now do too.
+- A transcript store that could not be read in full was published as a
+  complete walk. The walk skipped the subtree it could not open and carried
+  on, and the error the caller checked for was never raised, so a partial
+  listing was cached as fresh and served to every other watcher on that root
+  for a whole rescan window. A path that is merely gone is still not a
+  failure: that is the ordinary race of a session rotating.
+- A generic transcript record reporting only output tokens was stored with a
+  total of zero, beside the real output count. Every other adapter derives the
+  total from the record when the record carries none.
 - The host-key pin store is no longer left with no copy beside it. A
   `known_hosts.bak` write that failed was warned about once, at the write,
   and a run that never connected again left the store the only record of

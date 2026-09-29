@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // The help screen and the help/version/update subcommands.
@@ -169,10 +171,12 @@ Environment (a flag always wins over the variable it mirrors):
                           trimmed; a blank value carries no token and is
                           skipped in favor of the next source
   TOKTOP_SSH_PASSWORD     ssh password for ssh:// targets, for headless runs
-  TOKTOP_COLUMNS          --once frame width, 41-1024 (default: the terminal,
-                          else 120 when stdout is not one)
-  TOKTOP_LINES            --once frame height, 21-512 (default: the terminal,
-                          else 38 when stdout is not one)
+`+fmt.Sprintf(`  TOKTOP_COLUMNS          --once frame width, %d-%d (default: the terminal,
+                          else %d when stdout is not one)
+  TOKTOP_LINES            --once frame height, %d-%d (default: the terminal,
+                          else %d when stdout is not one)`,
+		frameColumnsMin, frameColumnsMax, frameColumnsDefault,
+		frameLinesMin, frameLinesMax, frameLinesDefault)+`
   TOKTOP_LOG_LEVEL        audit log floor for every subsystem that writes one
                           (engine, ssh, ingest): debug, info, warn (or
                           warning), error; the name is case-insensitive
@@ -269,10 +273,12 @@ func subcommandFlagHint(err error) string {
 // package reports every one of them the same way ("parse error"), which names
 // neither the expectation nor a value that would work, so `--frames abc` and
 // `--seed 1.5` read the same as a malformed duration.
+// The two bounds are the constants the run is gated on, not numbers typed
+// beside them: flags.go already builds the --probe bound the same way.
 var valueForms = map[string]string{
-	"frames":   "a whole number of snapshots, 1-180",
+	"frames":   fmt.Sprintf("a whole number of snapshots, 1-%d", core.HistoryLen),
 	"interval": "a Go duration such as 1s or 500ms",
-	"probe":    "a whole number of seconds, 0-86400",
+	"probe":    fmt.Sprintf("a whole number of seconds, 0-%d", probeSecsMax),
 	"seed":     "a whole number",
 }
 

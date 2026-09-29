@@ -5,6 +5,7 @@ package agentusage
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -101,5 +102,47 @@ func TestIncompleteWalkCapsFailureLatches(t *testing.T) {
 	}
 	if !w.readFailed[live] || !w.ownsFailed[live] {
 		t.Error("the walk cleared the latches of a transcript the last complete listing still held")
+	}
+}
+
+// A walk that could not read part of the store has a list, not a whole one,
+// and the caller caches nothing on a list it cannot vouch for. A file that
+// merely vanished between the walk and the stat is the ordinary race of a
+// session rotating, and is not one.
+func TestWalkTranscriptsReportsAnUnreadableSubtree(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root, which reads a 0-mode directory")
+	}
+	root := t.TempDir()
+	for _, name := range []string{"a.jsonl", "sub/b.jsonl"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sub := filepath.Join(root, "sub")
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+	if err := os.Chmod(sub, 0); err != nil {
+		t.Skipf("cannot drop read permission on a directory: %v", err)
+	}
+	if _, err := walkTranscripts(root, []string{".jsonl"}, time.Now().Add(-time.Hour)); err == nil {
+		t.Fatal("an unreadable subtree reported as a complete walk")
+	}
+}
+
+func TestWalkTranscriptsIgnoresAVanishedFile(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "a.jsonl"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got, err := walkTranscripts(root, []string{".jsonl"}, time.Now().Add(-time.Hour))
+	if err != nil {
+		t.Fatalf("a plain walk failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("listed %d transcripts, want 1", len(got))
 	}
 }

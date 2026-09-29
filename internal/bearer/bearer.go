@@ -110,6 +110,9 @@ func CheckRedirect(req *http.Request, via []*http.Request) error {
 		return errors.New("stopped after 10 redirects")
 	}
 	if len(via) == 0 {
+		// No request to redirect away from, so there is no origin to leave.
+		// net/http never calls this with an empty chain; it is here so a
+		// direct caller cannot index an empty slice to find out.
 		return nil
 	}
 	from, to := originOf(via[0].URL), originOf(req.URL)

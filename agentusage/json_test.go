@@ -418,6 +418,12 @@ func TestParseGenericDropsAbsurdCounters(t *testing.T) {
 	if !ok || v.output != 42 {
 		t.Fatalf("sane generic usage lost: ok=%v %+v", ok, v)
 	}
+	// A record that reports no total bills what it read and wrote, whether or
+	// not it reported a prompt count. An output-only record stored with a
+	// total of zero reads as a turn that cost nothing.
+	if v.total != 42 {
+		t.Fatalf("total %d, want 42 (output when input and total are absent)", v.total)
+	}
 }
 
 // BenchmarkParse measures the per-line cost every transcript record pays.

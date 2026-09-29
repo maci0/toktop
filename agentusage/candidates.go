@@ -5,6 +5,8 @@ package agentusage
 
 import (
 	"cmp"
+	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -310,13 +312,25 @@ func walkTranscripts(root string, suffixes []string, cutoff time.Time) ([]string
 	}
 	defer r.Close()
 	var out []string
+	// Recorded rather than returned: the walk continues past a skipped entry
+	// so one unreadable subtree does not abandon the rest of the store, and
+	// the error is what tells the caller the list is short.
+	var incomplete error
 	err = fs.WalkDir(r.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
-			// Returning nil would swallow a subtree that could not be read and
-			// let the walk finish over the rest, which is the partial result
-			// the caller must be told about. Skip just this entry: a single
-			// vanished file is not a reason to abandon the store, and the walk
-			// continues to the end either way.
+			// Swallowing it would let the walk finish over the rest and hand
+			// back a partial list indistinguishable from a whole one, which is
+			// the result the caller must be told about. Skip just this entry:
+			// the walk continues to the end either way, so one unreadable
+			// subtree does not cost the rest of the store.
+			//
+			// A path that is not there is the ordinary race between the walk
+			// and a session being rotated, and a store that loses files every
+			// poll would audit a failure on every rescan and publish nothing.
+			// Only a store that could not be read is a failure.
+			if incomplete == nil && !errors.Is(err, fs.ErrNotExist) {
+				incomplete = fmt.Errorf("walk %s: %w", rel, err)
+			}
 			return nil
 		}
 		if rel == "." {
@@ -334,6 +348,9 @@ func walkTranscripts(root string, suffixes []string, cutoff time.Time) ([]string
 	})
 	if err != nil {
 		return nil, err
+	}
+	if incomplete != nil {
+		return nil, incomplete
 	}
 	return out, nil
 }

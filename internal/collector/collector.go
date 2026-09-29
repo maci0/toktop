@@ -228,9 +228,6 @@ func (c *Collector) instant() time.Time {
 	c.clockMu.Lock()
 	fn := c.now
 	c.clockMu.Unlock()
-	if fn == nil {
-		return time.Now()
-	}
 	return fn()
 }
 
@@ -242,9 +239,6 @@ func (c *Collector) clock() (time.Time, time.Time) {
 	c.clockMu.Lock()
 	fn, started := c.now, c.started
 	c.clockMu.Unlock()
-	if fn == nil {
-		return time.Now(), started
-	}
 	return fn(), started
 }
 
@@ -273,9 +267,6 @@ func (c *Collector) pacer() core.Pacer {
 	c.clockMu.Lock()
 	p := c.pace
 	c.clockMu.Unlock()
-	if p == nil {
-		return core.WallPacer
-	}
 	return p
 }
 
