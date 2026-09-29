@@ -435,11 +435,17 @@ func scanTemps(hwmonRoot, thermalRoot string) []core.TempReading {
 		}
 		return cmp.Compare(b.MilliC, a.MilliC)
 	})
-	if len(temps) > 16 { // keep the frame cheap on sensor-farm machines
-		temps = temps[:16]
+	if len(temps) > maxTempSensors {
+		temps = temps[:maxTempSensors]
 	}
 	return temps
 }
+
+// maxTempSensors caps the sensors one sample carries, hottest first with the
+// GPUs sorted to the front. It keeps the frame cheap on sensor-farm machines,
+// and it is the count internal/ui derives its "+N more" from, so the two must
+// be read together before either moves.
+const maxTempSensors = 16
 
 // sensorLayoutTTL bounds how long chip names, labels and paths are reused.
 // The values still come from the input files every poll; only the walk of

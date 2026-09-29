@@ -170,18 +170,22 @@ func runMain() int {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
 	}
 	warnUnknownEnv()
-	warnIgnoredFlags(explicit, f, len(f.adds), len(remoteTargets))
+	// targets, not remoteTargets, in every remote count below: see the note by
+	// logActiveConfig. ParseTargets only collapses repeats, so no branch here
+	// changes answer, but a count that means "ssh connections this run opens"
+	// has to come from one place.
+	warnIgnoredFlags(explicit, f, len(f.adds), len(targets))
 	warnIgnoredFrameEnv(f.once, f.plain, f.jsonOut)
-	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, f.agents, len(f.adds), len(remoteTargets))
+	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, f.agents, len(f.adds), len(targets))
 	warnIgnoredGauntletHome(f.agents)
-	warnIgnoredXDGHome(opencodeOn, !f.demo && len(remoteTargets) > 0, f.agents)
+	warnIgnoredXDGHome(opencodeOn, !f.demo && len(targets) > 0, f.agents)
 	if !f.noIngest {
 		if err := validateIngestAddr(f.ingest); err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 			return 2
 		}
 	}
-	if f.sshKey != "" && !f.demo && len(remoteTargets) > 0 {
+	if f.sshKey != "" && !f.demo && len(targets) > 0 {
 		resolved, err := remote.ResolveKeyFile(f.sshKey)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "toktop: --ssh-key: %v\n", err)

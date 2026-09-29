@@ -301,7 +301,7 @@ func (m Model) probesBody(w, h int) string {
 	var out strings.Builder
 	out.WriteString(BrailleChart(vals, w, chartH, ChartStyle{Heat: heatColor}) + "\n")
 	shown := 0
-	for i := len(m.snap.Probes) - 1; i >= 0 && shown < 2; i-- {
+	for i := len(m.snap.Probes) - 1; i >= 0 && shown < maxProbeRows; i-- {
 		p := m.snap.Probes[i]
 		outcome := probeOutcome(p, w)
 		mark := styleOK.Render("✓")

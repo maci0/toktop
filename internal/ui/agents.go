@@ -173,16 +173,18 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 
 // agentMiniLine is the compact-strip counterpart of one agentRows cell.
 func agentMiniLine(r core.AgentRate) string {
+	// Same order as agentSummary, agentRows, feedLine and the plain report:
+	// an engine-routed agent is named where the rate would go, never in
+	// addition to it. The engine's own row already counts those tokens.
 	name := core.SingleLine(r.Agent)
 	line := styleValue.Render(name) + " "
 	switch {
+	case r.ViaEngine != "":
+		line += dim("via " + shorten(core.SingleLine(r.ViaEngine), 16))
 	case r.TokPS > 0:
 		line += fmtRate(r.TokPS) + " tok/s"
 	default:
 		line += dim(fmtCount(r.Tokens) + " tok")
-	}
-	if r.ViaEngine != "" {
-		line += " " + dim("via "+shorten(core.SingleLine(r.ViaEngine), 16))
 	}
 	return line
 }

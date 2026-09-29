@@ -155,3 +155,31 @@ func TestJSONStampsAreUTCWhoseverTheZone(t *testing.T) {
 		t.Errorf("probes[0].at = %q, want UTC", got)
 	}
 }
+
+// A span shorter than a millisecond is still a span. The field's zero means
+// "the sender does not know it", and a truncated sub-millisecond span put a
+// real denominator in that state, so the report's own tok_per_s could not be
+// recomputed from the report that carries it.
+func TestSpanMsRoundsSubMillisecondSpan(t *testing.T) {
+	now := time.Date(2026, 3, 29, 8, 35, 12, 0, time.UTC)
+	for _, tc := range []struct {
+		name string
+		in   time.Duration
+		want int64
+	}{
+		{"absent", 0, 0},
+		{"negative, a sender whose clock stepped back", -3 * time.Millisecond, 0},
+		{"rounds up from under a millisecond", 900 * time.Microsecond, 1},
+		{"rounds up over the half", 1500 * time.Microsecond, 2},
+		{"rounds down under the half", 1400 * time.Microsecond, 1},
+		{"a whole millisecond is unchanged", 2000 * time.Millisecond, 2000},
+	} {
+		if got := spanMillis(tc.in); got != tc.want {
+			t.Errorf("spanMillis(%s) = %d, want %d", tc.name, got, tc.want)
+		}
+		agent := jsonAgentOf(core.AgentEvent{At: now, Span: tc.in})
+		if agent.SpanMs != tc.want {
+			t.Errorf("jsonAgentOf span %s: span_ms = %d, want %d", tc.name, agent.SpanMs, tc.want)
+		}
+	}
+}

@@ -309,10 +309,26 @@ func jsonAgentOf(a core.AgentEvent) jsonAgent {
 		PromptTokens:   a.PromptTokens,
 		OutputTokens:   a.OutputTokens,
 		ThinkingTokens: a.ThinkingTokens,
-		SpanMs:         a.Span.Milliseconds(),
+		SpanMs:         spanMillis(a.Span),
 		ViaEngine:      core.SanitizeText(a.ViaEngine),
 		Note:           core.SanitizeText(a.Note),
 	}
+}
+
+// spanMillis is an event's span in whole milliseconds, rounded rather than
+// truncated. Duration.Milliseconds truncates, and the local producers measure
+// their spans off a monotonic clock, so a span of a few hundred microseconds
+// reached this file as 0: the one value the schema defines as "the sender
+// does not know the span", which hands the rate back to the gap between
+// events and leaves the report's own tok_per_s unrecomputable from the report.
+// A span past core.MaxEventSpan is already clamped to zero upstream, and a
+// negative one (a sender whose clock stepped back) floors at zero rather than
+// reporting a span the model did not take.
+func spanMillis(d time.Duration) int64 {
+	if d <= 0 {
+		return 0
+	}
+	return int64((d + time.Millisecond/2) / time.Millisecond)
 }
 
 func jsonProbeOf(p core.ProbeSample) jsonProbe {

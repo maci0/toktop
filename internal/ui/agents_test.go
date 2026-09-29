@@ -505,6 +505,24 @@ func TestAgentRowsNameEngineOnce(t *testing.T) {
 	}
 }
 
+// The same rule on the compact strip, which the row renderer above is the
+// model for. It used to append the engine after the rate, so a via-engine
+// agent read "12.3k tok/s via ollama" there and "via ollama" everywhere else.
+func TestAgentMiniLineNamesEngineOnce(t *testing.T) {
+	got := strip(agentMiniLine(core.AgentRate{
+		Agent: "claude", Tokens: 5000, TokPS: 12.3, ViaEngine: "ollama",
+	}))
+	if n := strings.Count(got, "via "); n != 1 {
+		t.Errorf("engine named %d times, want once:\n%s", n, got)
+	}
+	if strings.Contains(got, "tok/s") {
+		t.Errorf("line still carries the rate the engine already counts:\n%s", got)
+	}
+	if !strings.Contains(got, "claude via ollama") {
+		t.Errorf("mini line lost the engine attribution:\n%s", got)
+	}
+}
+
 // The same rule in the linear report's AGENTS block, which the TUI and the
 // plain frame must agree about.
 func TestPlainAgentsNameEngineOnce(t *testing.T) {
