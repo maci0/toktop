@@ -1,0 +1,8 @@
+go test fuzz v1
+string("")
+string("")
+int64(-29999999939)
+int64(0)
+int64(10089)
+int64(0)
+int64(87)
