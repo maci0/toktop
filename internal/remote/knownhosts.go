@@ -758,7 +758,7 @@ func replaceFile(tmpName, path string) error {
 		// the store itself is missing, so a leftover nobody could delete
 		// would be handed back as the operator's pins on some later run.
 		audit().Warn("toktop: known_hosts backup left behind",
-			"path", logcfg.RedactedField(displaced, 256),
+			"path", logcfg.RedactedField(core.RedactHome(displaced), 256),
 			"error", logcfg.RedactedField(rerr.Error(), 256))
 	}
 	core.SyncDir(filepath.Dir(path))
