@@ -88,6 +88,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   trimmed, so `export TOKTOP_SCREENSHOT_FONT=$(cat font.path)` no longer fails
   on a file that is there, and it names the path a face fails to open from
   rather than answering an unreadable font with a traceback.
+- `--demo` keeps the header clock on the simulated timeline. The clock is
+  ticked by a wall-clock timer, so one second after launch it read a year the
+  frames under it did not: `--origin` pinned the fleet, the agent watcher and
+  the ingest server, and nothing told the dashboard. The header now reads the
+  demo source's own instant, so a run captured from two machines renders the
+  same bytes and the notice and probe timers expire against the same clock the
+  frame they clear belongs to.
 
 ### Added
 

@@ -432,7 +432,16 @@ func runMain() int {
 		return runOnce(ctx, os.Stdout, cfg, ch, f.frames, f.plain, f.jsonOut)
 	}
 
-	return runTUI(ctx, cfg, ch, !f.noReload)
+	// The dashboard's header clock rides the simulated timeline in a demo run,
+	// like the agent watcher and the ingest server above. Left on wall time it
+	// read a different year than every frame it drew a second after launch, and
+	// two runs of one seed could not be compared.
+	var uiNow func() time.Time
+	if demoSrc != nil {
+		uiNow = demoSrc.Now
+	}
+
+	return runTUI(ctx, cfg, ch, uiNow, !f.noReload)
 }
 
 // reloadPoll is how often the hot-reload watcher stats the executable. A dev
@@ -442,10 +451,11 @@ func runMain() int {
 const reloadPoll = 400 * time.Millisecond
 
 // runTUI runs the dashboard, restarting into a fresh binary whenever the
-// executable on disk is rebuilt (dev hot-reload). It returns the process exit
+// executable on disk is rebuilt (dev hot-reload). now overrides the clock the
+// header ticks on; nil leaves it on wall time. It returns the process exit
 // code: 0 for the q and Ctrl+C quit, 130 for a signal that reached the run
 // context, 1 for a dashboard that could not run.
-func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotReload bool) int {
+func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, now func() time.Time, hotReload bool) int {
 	self, selfErr := os.Executable()
 	var (
 		mu       sync.Mutex
@@ -492,7 +502,9 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 		// scrolls normally instead, which is how a terminal is read.
 		opts = append(opts, tea.WithAltScreen())
 	}
-	prog := tea.NewProgram(ui.New(cfg, ch), opts...)
+	m := ui.New(cfg, ch)
+	m.SetNow(now)
+	prog := tea.NewProgram(m, opts...)
 	mu.Lock()
 	current = prog
 	mu.Unlock()

@@ -3157,3 +3157,53 @@ func TestProviderBlockDropsLabelRepeatingKindInEitherForm(t *testing.T) {
 		t.Errorf("a label that differs from the kind was dropped:\n%s", row)
 	}
 }
+
+// A tick carries the instant bubbletea's own timer woke at, which is wall time
+// on every run. A demo run that pinned its origin has to keep the header on
+// the simulated timeline after that first tick, or the clock reads a year the
+// frames it draws do not.
+func TestTickStampsHeaderFromTheInjectedClock(t *testing.T) {
+	origin := time.Date(2026, 1, 1, 12, 0, 0, 0, time.Local)
+	sim := origin
+	m := New(Config{Version: "t", Demo: true, DemoSeed: 7, DemoOrigin: origin}, nil)
+	m.SetNow(func() time.Time { return sim })
+	m.w, m.h, m.ready = 110, 36, true
+	// The warm-up glyph has no header clock on it: the frame under test has to
+	// be one that is running.
+	nm, _ := m.Update(snapMsg(core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+	}))
+	m = nm.(Model)
+
+	nm, _ = m.Update(tickMsg(time.Now()))
+	m = nm.(Model)
+	if out := strip(m.View()); !strings.Contains(out, "12:00:00") {
+		t.Fatalf("first tick left the header off the simulated timeline:\n%s", out)
+	}
+
+	sim = origin.Add(90 * time.Second)
+	nm, _ = m.Update(tickMsg(time.Now()))
+	m = nm.(Model)
+	if !m.clock.Equal(sim) {
+		t.Errorf("header clock = %v, want the simulated instant %v", m.clock, sim)
+	}
+	if out := strip(m.View()); !strings.Contains(out, "12:01:30") {
+		t.Errorf("header clock did not follow the simulated timeline:\n%s", out)
+	}
+
+	// A live run has no injected clock and still ticks on the instant bubbletea
+	// delivers.
+	wall := time.Date(2026, 8, 25, 12, 0, 0, 0, time.Local)
+	live := New(Config{Version: "t"}, nil)
+	nm, _ = live.Update(tickMsg(wall))
+	if got := nm.(Model).clock; !got.Equal(wall) {
+		t.Errorf("live header clock = %v, want the tick instant %v", got, wall)
+	}
+
+	// nil restores the tick's own instant rather than pinning it forever.
+	m.SetNow(nil)
+	nm, _ = m.Update(tickMsg(wall))
+	if got := nm.(Model).clock; !got.Equal(wall) {
+		t.Errorf("header clock after SetNow(nil) = %v, want the tick instant %v", got, wall)
+	}
+}

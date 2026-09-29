@@ -63,6 +63,11 @@ type Model struct {
 	helpScroll  int
 	focusAgents bool // agents get the panel estate; engines keep header, charts, strip
 	clock       time.Time
+	// now is the clock a tick stamps itself with, nil when the dashboard runs
+	// on wall time. A tick carries the instant bubbletea's timer woke at, which
+	// is wall time even in a demo run, so an injected clock is what keeps the
+	// header clock and the frames it draws on the same timeline. See SetNow.
+	now func() time.Time
 	// tickAt is the newest wall time bubbletea delivered, which keeps
 	// advancing while clock is frozen by a pause. Timers that must keep
 	// running read it, not clock: a notice timed against clock expires on
@@ -116,11 +121,28 @@ func New(cfg Config, ch <-chan core.Snapshot) Model {
 	// A demo run launches at the pinned origin: the first frame a replay
 	// draws has to read the same wall of simulated time as every frame after
 	// it, not the wall clock of whichever machine is running the replay.
+	// SetNow is what keeps the ticks themselves on that wall.
 	now := time.Now()
 	if !cfg.DemoOrigin.IsZero() {
 		now = cfg.DemoOrigin
 	}
 	return Model{cfg: cfg, ch: ch, chartCompressed: chartCompressedDefault, clock: now, tickAt: now}
+}
+
+// SetNow overrides the clock a tick stamps the header with. A tick message
+// carries the instant bubbletea's own timer woke at, which is wall time on
+// every run, so a demo or a test that pinned its timeline had its header clock
+// jump off the simulated axis one second after launch while every frame it
+// drew stayed on it. A nil fn restores the tick's own instant.
+func (m *Model) SetNow(fn func() time.Time) { m.now = fn }
+
+// instant is the time a tick lands on: the injected clock when one is set,
+// otherwise the instant bubbletea delivered with the tick.
+func (m Model) instant(tick time.Time) time.Time {
+	if m.now == nil {
+		return tick
+	}
+	return m.now()
 }
 
 // noticeTTL is how long a "that key does nothing here" explanation stays on
@@ -236,12 +258,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tickMsg:
-		m.tickAt = time.Time(msg)
+		at := m.instant(time.Time(msg))
+		m.tickAt = at
 		// A paused frame must be genuinely still: the header clock is the
 		// only element that kept changing every second, churning the screen
 		// for anyone pausing to read it with a screen reader or magnifier.
 		if !m.paused {
-			m.clock = time.Time(msg)
+			m.clock = at
 		}
 		// Engines that never answer (no known model yet, all down) would
 		// leave the "probing…" marker up forever without this bail-out.
@@ -250,7 +273,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.probeReq.IsZero() && core.Age(m.clock, m.probeReq) > probeTimeout {
 			m.probeReq = time.Time{}
 		}
-		if !m.noticeAt.IsZero() && core.Age(time.Time(msg), m.noticeAt) >= noticeTTL {
+		if !m.noticeAt.IsZero() && core.Age(at, m.noticeAt) >= noticeTTL {
 			m.notice, m.noticeAt = "", time.Time{}
 		}
 		return m, tickClock()
