@@ -49,7 +49,10 @@ alongside them would be a layer importing sideways into itself.
   cadence every poller uses.
 - `internal/demo`: a seeded simulated fleet, so `--demo` and the tests have
   something to render.
-- `internal/gpu`: accelerator telemetry across vendors.
+- `internal/gpu`: accelerator telemetry across vendors. One concern per file:
+  `gpu.go` the per-tick sampling fan-out, `run.go` the vendor-CLI execution and
+  the caches around it (the resolved path, the injected clock, the outage
+  latch), `parse.go` the decoders for what those tools printed.
 - `internal/ingest`: a tiny localhost HTTP endpoint (`POST /v1/events`) that
   harnesses and agents post usage into, plus the `GET`/`HEAD` `/healthz`
   liveness probe. One concern per file: `server.go` is the listener, its
@@ -62,7 +65,10 @@ alongside them would be a layer importing sideways into itself.
 - `internal/logcfg`: the audit-log vocabulary every other package that logs
   builds its logger from.
 - `internal/probe`: small streaming generations at backends, to measure
-  throughput rather than read a counter.
+  throughput rather than read a counter. One concern per file: `probe.go` the
+  request, the budgets that bound a generation and the HTTP handling both
+  dialects share, `ollama.go` the Ollama dialect, `openai.go` the
+  OpenAI-compatible one, `model.go` the choice of which model to ask.
 - `internal/procs`: finds local inference engines by inspecting running
   processes, over procfs on linux and the OS tooling elsewhere.
 - `internal/provider`: engine discovery and metric scraping for local
@@ -81,7 +87,13 @@ alongside them would be a layer importing sideways into itself.
   `discover.go` and `stats.go` the two samplers.
 - `internal/selfreload`: watches the running executable for a rebuild and
   signals the process to restart.
-- `internal/selfupdate`: replaces the running binary with a newer release.
+- `internal/selfupdate`: replaces the running binary with a newer release. One
+  concern per file: `release.go` is the release API and everything read off the
+  network (repo validation, the GitHub-host URL and redirect rules, the release
+  lookup, the download), `checksum.go` the verification of what was fetched
+  against the release's own `checksums.txt`, `install.go` the filesystem half
+  (the staged download, the cross-process install lock, the rename that puts a
+  verified binary in place and the recovery of a displaced one).
 - `internal/sysmon`: host vitals (RAM, swap, load, temperatures, CPU) and
   GPU readings, which is why it sits above `gpu`.
 - `internal/ui`: the bubbletea dashboard, and the plain and JSON reports that

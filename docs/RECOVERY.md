@@ -17,8 +17,8 @@ somebody else's data.
 | a copy of the store, refreshed by every write, and rewritten from the store by the next connect that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
 | the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`) | `replaceFile` |
 | the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
-| a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/selfupdate.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
-| the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/selfupdate.go`, `installDisplacing`) | `installDisplacing` |
+| a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/install.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
+| the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/install.go`, `installDisplacing`) | `installDisplacing` |
 | the installed binary | the running executable's own path | `install` |
 | the store a killed write staged, and never renamed | a `.known_hosts-*` file beside the store (`internal/remote/knownhosts.go`, `knownHostsTempPrefix`), removed by the rename or by the failure that reports it | `atomicWriteFile` |
 | a store staging file older than 24 hours | the same directory, removed by prefix and age on the next store write (`internal/core/fs.go`, `SweepStaleTemps`, `StaleTempAge`) | `writeKnownHosts` |
