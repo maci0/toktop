@@ -15,17 +15,20 @@ import (
 )
 
 // engineEndpoints parses the monitored engines' advertised URLs into addresses
-// that can be compared against a process's open connections. A malformed URL
-// is returned as an error: dropping it silently would leave the agent's
-// tokens counted both by the engine and by its transcript, a double count
-// with no symptom the operator could trace back to a bad address.
-func (w *Watcher) engineEndpoints() ([]netip.AddrPort, []string, error) {
+// that can be compared against a process's open connections, each paired with
+// the label the dashboard shows for it. Two spellings of one address
+// ("http://127.0.0.1:80" and "127.0.0.1:80") collapse onto one map entry
+// holding the first label, so a match never depends on which engine was listed
+// first. A malformed URL is returned as an error: dropping it silently would
+// leave the agent's tokens counted both by the engine and by its transcript, a
+// double count with no symptom the operator could trace back to a bad address.
+func (w *Watcher) engineEndpoints() ([]netip.AddrPort, map[netip.AddrPort]string, error) {
 	if w.engines == nil {
 		return nil, nil, nil
 	}
 	raw := w.engines()
 	eps := make([]netip.AddrPort, 0, len(raw))
-	labels := make([]string, 0, len(raw))
+	labels := make(map[netip.AddrPort]string, len(raw))
 	var bad []string
 	for _, addr := range raw {
 		ap, label, err := parseEngineAddr(addr)
@@ -37,7 +40,9 @@ func (w *Watcher) engineEndpoints() ([]netip.AddrPort, []string, error) {
 			continue
 		}
 		eps = append(eps, ap)
-		labels = append(labels, label)
+		if _, seen := labels[ap]; !seen {
+			labels[ap] = label
+		}
 	}
 	if len(bad) > 0 {
 		return eps, labels, errors.New(strings.Join(bad, "; "))

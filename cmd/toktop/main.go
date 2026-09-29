@@ -357,51 +357,13 @@ func runMain() int {
 	}
 
 	if !f.noIngest && recorder != nil {
-		srv, err := ingest.New(f.ingest, recorder)
-		if err != nil {
-			if ingestSet {
-				// The operator explicitly asked for this endpoint; continuing
-				// would run the dashboard without the event feed they asked
-				// for, with only a stderr line lost under the alt screen.
-				fmt.Fprintf(os.Stderr, "toktop: --ingest %s unusable: %v\n", operatorText(f.ingest), err)
-				return 2
-			}
-			fmt.Fprintf(os.Stderr, "toktop: ingest disabled (%v)\n", err)
-			// The dashboard comes up without the event feed the operator asked
-			// for by default, and the only reason for it lives under the alt
-			// screen: a run that silently ingests nothing looks exactly like a
-			// run whose agents post nothing.
-			logcfg.Logger().Warn("toktop: ingest disabled",
-				"addr", logcfg.Field(f.ingest, logcfg.FieldCap),
-				"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), logcfg.FieldCap))
-		} else {
-			feedAddr = srv.Addr()
-			if demoSrc != nil {
-				srv.SetNow(demoSrc.Now)
-			}
-			// The address the endpoint actually bound, not the one the config
-			// line asked for: a --ingest on port 0 names an ephemeral port only
-			// this run knows. Without it the audit log holds the request and no
-			// way to post to what answered it.
-			logcfg.Logger().Info("toktop: ingest listening", "addr", logcfg.Field(feedAddr, logcfg.FieldCap))
-			if routableBind(feedAddr) {
-				fmt.Fprintf(os.Stderr, "toktop: warning: ingest endpoint %s accepts unauthenticated events from any reachable peer\n", operatorText(feedAddr))
-				// The one state change in the run that widens who can write to
-				// this machine's feed, and the only record of it was a stderr
-				// line the alt screen hides for the life of the run.
-				logcfg.Logger().Warn("toktop: ingest bound off loopback",
-					"addr", logcfg.Field(feedAddr, logcfg.FieldCap))
-			}
-			go func() {
-				if err := srv.Serve(); err != nil {
-					// Serve already audited the failure on the ingest logger,
-					// so stderr gets one line from here at most and the UI
-					// needs its own: the alt screen hides stderr, and the
-					// channel carries the agent watch's failures too, so the
-					// message names the subsystem that stopped.
-					feedFailure(feedErr, "ingest stopped", err)
-				}
-			}()
+		var srv *ingest.Server
+		var abort bool
+		srv, feedAddr, abort = startIngest(f, ingestSet, recorder, demoSrc, feedErr)
+		if abort {
+			return 2
+		}
+		if srv != nil {
 			defer srv.Close()
 		}
 	}
@@ -438,6 +400,57 @@ func runMain() int {
 	}
 
 	return runTUI(ctx, cfg, ch, uiNow, !f.noReload)
+}
+
+// startIngest binds the agent event endpoint, records the address the UI
+// advertises, and starts serving. It returns the live server, which the caller
+// closes, and the bound address, which is empty when the endpoint is not up.
+// abort is set only for an address the operator named explicitly: continuing
+// then would run the dashboard without the event feed they asked for, with
+// only a stderr line lost under the alt screen. A default-enabled endpoint
+// that will not bind degrades instead, and says so on stderr and in the audit
+// log because a run that silently ingests nothing looks exactly like a run
+// whose agents post nothing.
+func startIngest(f *cliFlags, ingestSet bool, recorder core.AgentRecorder, demoSrc *demo.Source, feedErr chan<- string) (srv *ingest.Server, addr string, abort bool) {
+	srv, err := ingest.New(f.ingest, recorder)
+	if err != nil {
+		if ingestSet {
+			fmt.Fprintf(os.Stderr, "toktop: --ingest %s unusable: %v\n", operatorText(f.ingest), err)
+			return nil, "", true
+		}
+		fmt.Fprintf(os.Stderr, "toktop: ingest disabled (%v)\n", err)
+		logcfg.Logger().Warn("toktop: ingest disabled",
+			"addr", logcfg.Field(f.ingest, logcfg.FieldCap),
+			"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), logcfg.FieldCap))
+		return nil, "", false
+	}
+	addr = srv.Addr()
+	if demoSrc != nil {
+		srv.SetNow(demoSrc.Now)
+	}
+	// The address the endpoint actually bound, not the one the config line
+	// asked for: a --ingest on port 0 names an ephemeral port only this run
+	// knows. Without it the audit log holds the request and no way to post to
+	// what answered it.
+	logcfg.Logger().Info("toktop: ingest listening", "addr", logcfg.Field(addr, logcfg.FieldCap))
+	if routableBind(addr) {
+		fmt.Fprintf(os.Stderr, "toktop: warning: ingest endpoint %s accepts unauthenticated events from any reachable peer\n", operatorText(addr))
+		// The one state change in the run that widens who can write to this
+		// machine's feed, and the only record of it was a stderr line the alt
+		// screen hides for the life of the run.
+		logcfg.Logger().Warn("toktop: ingest bound off loopback",
+			"addr", logcfg.Field(addr, logcfg.FieldCap))
+	}
+	go func() {
+		if err := srv.Serve(); err != nil {
+			// Serve already audited the failure on the ingest logger, so stderr
+			// gets one line from here at most and the UI needs its own: the alt
+			// screen hides stderr, and the channel carries the agent watch's
+			// failures too, so the message names the subsystem that stopped.
+			feedFailure(feedErr, "ingest stopped", err)
+		}
+	}()
+	return srv, addr, false
 }
 
 // feedFailure offers a subsystem's death to the UI feed, dropping it when

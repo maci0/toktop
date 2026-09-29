@@ -264,16 +264,19 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		if info.Engine == "" && info.PortHint == 0 {
 			continue // not an engine and no listen-port flag: drop it
 		}
+		// One probe of the tick ledger per process, read before anything here
+		// writes it: the derived percentage below and the baseline update under
+		// it are the same pid's two questions, asked once.
+		pticks, tracked := s.prev[r.pid]
 		switch {
 		case r.cpuPercent > 0:
 			info.CPUPct = r.cpuPercent
 		case dt > 0:
-			pticks, tracked := s.prev[r.pid]
 			if tracked && r.ticks >= pticks {
 				info.CPUPct = clampPct(float64(r.ticks-pticks) / clkTck / dt * 100)
 			}
 		}
-		if _, tracked := s.prev[r.pid]; !tracked || r.ticks != 0 {
+		if !tracked || r.ticks != 0 {
 			s.prev[r.pid] = r.ticks
 		}
 		out = append(out, info)

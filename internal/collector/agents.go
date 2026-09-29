@@ -217,8 +217,13 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	// after a quiet spell is the only reading there is.
 	c.forgetAgedAgentSkews(now.Add(-core.AgentIDHorizon))
 	lead := max(ev.At.Sub(now), 0)
+	// newMin is the one decision both the corrected stamp below and the
+	// ledger write further down are made on, so the two cannot disagree: a
+	// second estimate taken between them would read a map nothing in between
+	// writes.
 	offset, seen := c.agentSkews[key]
-	if !seen || lead < offset {
+	newMin := !seen || lead < offset
+	if newMin {
 		offset = lead
 	}
 	ev.At = ev.At.Add(-offset)
@@ -261,7 +266,7 @@ func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	// the id ledger, and one that slips through carries the original send's
 	// stamp, so its lead is at least the offset already in force and this
 	// leaves the correction alone.
-	if cur, ok := c.agentSkews[key]; !ok || lead < cur {
+	if newMin {
 		c.agentSkews[key] = lead
 		// A fresh order entry, not a rewrite of the old one: forgetAgedAgentSkews
 		// matches on agent and skew, so the superseded row ages out on its own

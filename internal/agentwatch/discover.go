@@ -261,15 +261,7 @@ func (w *Watcher) matchEngines() {
 	matched := agentusage.MatchingEndpoints(pids, endpoints)
 	w.mu.Lock()
 	for pid, t := range w.tracked {
-		t.viaEngine = ""
-		if ap, ok := matched[pid]; ok {
-			for i, e := range endpoints {
-				if e == ap {
-					t.viaEngine = labels[i]
-					break
-				}
-			}
-		}
+		t.viaEngine = labels[matched[pid]]
 	}
 	w.mu.Unlock()
 }

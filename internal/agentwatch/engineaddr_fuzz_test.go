@@ -86,19 +86,16 @@ func FuzzParseEngineAddr(f *testing.F) {
 
 		w := New(nil, func() []string { return []string{addr, "http://127.0.0.1:11434"} })
 		eps, labels, sweepErr := w.engineEndpoints()
-		if len(eps) != len(labels) {
-			t.Fatalf("engineEndpoints returned %d endpoints and %d labels for %q", len(eps), len(labels), addr)
-		}
-		if sweepErr != nil && len(eps) == 0 && len(labels) == 0 {
+		if len(eps) == 0 && len(labels) == 0 && sweepErr != nil {
 			if msg := sweepErr.Error(); core.SanitizeText(msg) != msg {
 				t.Fatalf("engineEndpoints error carries non-renderable bytes: %q", msg)
 			}
 		}
-		for i, e := range eps {
+		for _, e := range eps {
 			if !e.IsValid() || e.Port() == 0 {
 				t.Fatalf("engineEndpoints kept an unusable endpoint %v from %q", e, addr)
 			}
-			if labels[i] == "" {
+			if labels[e] == "" {
 				t.Fatalf("engineEndpoints kept endpoint %v from %q with no label", e, addr)
 			}
 		}
