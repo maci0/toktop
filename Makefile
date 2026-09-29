@@ -46,6 +46,14 @@ fi
 # this contract.
 PUBLIC_PKGS = ./agentusage
 
+# The surfaces whose content a reader or a caller reads, and so a change to
+# any of them is a change someone has to be told about. The rest of docs/ is
+# deliberately absent: ARCHITECTURE.md is a map of the tree and RECOVERY.md a
+# set of operator procedures, both correctable without a change anyone
+# upgrading can observe, and a gate that asked for an entry for every one of
+# them would train the entry to be boilerplate.
+CHANGELOG_WATCHED = README.md cmd/toktop/help.go docs/openapi.yaml agentusage site/worker.js site/README.md
+
 # The declarations each public package exports, taken from `go doc` with the
 # prose dropped by scripts/api-surface.awk. A removed or reshaped declaration
 # is a breaking change a Go caller meets as a compile error in their tree, and
@@ -1301,6 +1309,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the bash complet
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
 	@$(MAKE) --no-print-directory check-changelog-structure
+	@$(MAKE) --no-print-directory check-changelog-covers
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
 			echo "needs gofmt (run 'make fmt'):" >&2; echo "$$unformatted" >&2; exit 1; \
@@ -1370,6 +1379,43 @@ check-changelog-structure: ## fail if a CHANGELOG.md section repeats an impact h
 check-api: ## verify VERSION removes nothing PUBLIC_PKGS exported at the last release
 	@$(CHECK_API)
 
+# Every gate above reads the changelog's shape, not the diff it describes:
+# check-changelog finds the section for the version being cut, and it is
+# equally satisfied by notes that name the change and by notes that do not.
+# So a change to a surface a reader or a caller reads directly can sit in the
+# tree for sixty commits and ship under notes written for the other fifty
+# nine, which is the one failure the file exists to prevent and nothing here
+# would have seen it. A watched surface that moved since the last release tag
+# with CHANGELOG.md untouched since that tag is a change shipping unannounced;
+# the answer is an entry, not a reworded gate, so the entry is what is asked
+# for.
+#
+# The watched list is the surfaces a reader or a caller reads rather than
+# code it compiles: the README, the docs tree, the --help text, the feed
+# contract the OpenAPI describes, the importable package and the Worker the
+# site serves. A commit that touches only Go internals needs no entry, which
+# is what keeps this from demanding one per commit. The base is the last
+# released tag before HEAD, as check-api takes it, so a cut is measured
+# against the release it follows and not against the commit ahead of it. A
+# checkout with no tag to compare against, or no git at all, has no diff and
+# is let past.
+.PHONY: check-changelog-covers
+check-changelog-covers: ## fail if a consumer-facing surface moved since the last release with no CHANGELOG.md entry
+	@if ! git rev-parse HEAD >/dev/null 2>&1; then exit 0; fi; \
+	base=$$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null) || exit 0; \
+	if [ -z "$$base" ]; then exit 0; fi; \
+	changed=$$(git diff --name-only "$$base"..HEAD -- $(CHANGELOG_WATCHED)); \
+	if [ -z "$$changed" ]; then exit 0; fi; \
+	git diff --quiet "$$base"..HEAD -- CHANGELOG.md && { \
+		echo "make check-changelog-covers: these moved since $$base and CHANGELOG.md has not been touched since $$base:" >&2; \
+		printf '%s\n' "$$changed" | sed 's/^/  /' >&2; \
+		echo "  every one of them is a surface a reader or a caller reads, so the change ships under notes" >&2; \
+		echo "  that do not mention it. Add the entry under '## [Unreleased]', impact heading and all" >&2; \
+		echo "  (build, refactor and test-only commits need no entry and are not watched)" >&2; \
+		exit 1; \
+	}; \
+	exit 0
+
 # A release packages the working tree, so the two states that leave the bytes
 # unreproducible have to be refused before they are packaged rather than
 # recorded after: an uncommitted change, which buildinfo would name a commit
@@ -1411,9 +1457,9 @@ check-release-source: ## fail unless a non-dev VERSION builds from a clean, git-
 # that order is guaranteed by listing prerequisites, so .NOTPARALLEL below
 # inserts a .WAIT between them.
 .PHONY: release
-release: check-changelog check-api check-release-source sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
+release: check-changelog check-changelog-covers check-api check-release-source sbom checksums ## build every release platform and SBOM into dist/ with reproducible checksums
 
-# Without this, `make -j release` runs the three prerequisites above at once:
+# Without this, `make -j release` runs the prerequisites above at once:
 # dist-clean would delete the binaries test-dist is writing, and the checksums
 # glob would miss an SBOM that has not been written yet.
 .NOTPARALLEL: release

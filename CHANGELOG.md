@@ -80,6 +80,22 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   in two places, so a sender sizing its retries from the spec was answered
   with the wrong bound.
 
+- A feed crossing into and out of slot saturation says so. `GET /healthz`
+  answers `503` while all 64 event slots are held, but nothing was written at
+  the crossing, and on a box whose senders have all stopped posting the
+  refusals never appear either, since no POST arrives to be refused: the feed
+  is refusing everything and the log names neither the cap it reached nor the
+  moment it let go. One WARN line into saturation and one INFO line out of it
+  carry the fields a POST line does plus `in_flight` and `slot_cap`. The
+  crossings are logged rather than the state, so a probe on its usual interval
+  stays free.
+
+- A `--demo` run on a pane too small for the footer names its seed. The tag
+  rode the footer, and the compact strip renders no footer, so the layout
+  without one showed numbers with nothing saying which run produced them, and
+  the seed is what makes a captured frame reproducible. The compact strip
+  carries it as a line of its own, which is where it has the room.
+
 ### Security
 
 - A release download now refuses a port other than https's own. The GitHub
@@ -154,9 +170,40 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   separator) once per segment it dropped. The agent feed is also accounted
   once per snapshot instead of twice: the summary taken when the snapshot
   arrived is the one the frame is drawn from.
+- A relative `$XDG_CONFIG_HOME` now names the consequence that follows, since
+  it is not the same for the three variables the rule covers. The warning ended
+  "reading the default directory", which is true of `--opencode-db` and
+  `--agents` and false of the ssh host-key store: that path resolves through
+  `os.UserConfigDir`, which refuses a relative value outright on Linux, so the
+  run named no store at all and every `ssh://` target failed to connect, after
+  a message sending the operator after a directory the run was not reading. The
+  second line is asked of the package that resolves the path, so the warning and
+  the connect cannot disagree, and `--help` now says the same of the variable.
 
 ### Fixed
 
+- The compact agent strip names an engine-routed agent where its rate would
+  go, as the full row, the feed and the plain report already did. The strip
+  printed both, so a run through a gateway read one agent's tokens twice at
+  two rates, and the engine's own row counts them again: the one view a narrow
+  pane falls back to was the only one that disagreed.
+- `span_ms` in the `--json` report is rounded rather than truncated. The
+  schema defines zero as "the sender does not know the span", and
+  `Duration.Milliseconds` truncates, so a locally produced span of a few
+  hundred microseconds reached a report as that zero: `tok_per_s` could not be
+  recomputed from the report's own `span_ms`. A negative span floors at zero
+  rather than reporting one the model did not take.
+- The compact strip's overflow line spells `+N more` the way every other view
+  does. It carried a fourth wording, "(enlarge window to view)", on a row with
+  a line to itself, so the count a reader had to have was spelled differently
+  in each layout; the marker now picks the longest form that fits, and takes
+  the bare count when not even that does.
+- A store that stays in failure no longer has its outage re-announced. The
+  latch table's sweep dropped the oldest key, which on a host with many long
+  gone agent directories was the store that was failing right now, so its next
+  poll opened a new outage and wrote the same line again. The sweep drops the
+  oldest key that is not failing; every other entry is either failing too or
+  has nothing left to lose.
 - A probe against a reasoning model that answers 400 to any `temperature` but
   its own default (o1, o3, gpt-5 and the gateways in front of them) now lands on
   a request that caps the generation and names no sampling value, instead of

@@ -122,6 +122,15 @@ jobs:
       - name: no changelog section repeats an impact heading (linux only)
         if: runner.os == 'Linux'
         run: make check-changelog-structure
+      # The other half, and the one that reads the diff rather than the file:
+      # every changelog gate above asks whether the notes are well formed, so
+      # a change to a surface a consumer reads can sit in the tree and ship
+      # under notes written for other commits. The gate compares the watched
+      # surfaces against the last release tag, so it needs the checkout this
+      # leg already has and nothing else.
+      - name: a watched surface carries a changelog entry (linux only)
+        if: runner.os == 'Linux'
+        run: make check-changelog-covers
       # yamllint over the workflows runs in the scripts job below, which
       # already has uv and the pinned tool env this target installs from. The
       # workflow file is the one thing in this repo no Go analyzer reads, and a
