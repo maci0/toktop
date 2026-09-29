@@ -41,14 +41,19 @@
   machine happens to offer. `target-version` in `pyproject.toml` is the
   floor the code must keep supporting, not the interpreter it runs on.
 - No go command state to keep. `make` exports `GOENV=off` and clears
-  `GOFLAGS`, `GOEXPERIMENT`, `GODEBUG`, `GOPRIVATE`, `GONOSUMDB` and
-  `GOINSECURE`, so the go command reads neither the environment it inherits
+  `GOFLAGS`, `GOEXPERIMENT`, `GODEBUG`, `GOPRIVATE`, `GONOSUMDB`,
+  `GONOPROXY` and `GOINSECURE`, and names `GOSUMDB=sum.golang.org`, so the go
+  command reads neither the environment it inherits
   nor `~/.config/go/env`, whatever `go env -w` last wrote there. A value in
   that file is read before the Makefile's exports reach the go command and
   wins over them, so a machine carrying `go env -w GOAMD64=v3` would build a
   different binary from every other machine, and one carrying
   `GOPRIVATE=github.com/*` would skip the checksum database on modules the
-  go.sum lines cover. Everything the build needs is in the Makefile,
+  go.sum lines cover. `GOSUMDB` is named rather than cleared because `go.sum`
+  does not cover every tool the build runs: `make govulncheck` and
+  `make sbom` fetch govulncheck and cyclonedx-gomod at a
+  `go run <tool>@<version>` pin, so the checksum database is the only check
+  on those bytes. Everything the build needs is in the Makefile,
   `go.mod` and `GOWORK=off`. CI spells the same list in its workflow env
   block, because `make` exports reach its own recipes and not a workflow's
   `go` steps; `make check-ci-env` fails when the two copies disagree.

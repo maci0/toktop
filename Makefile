@@ -191,6 +191,22 @@ export GOENV := off
 export GOPRIVATE :=
 export GONOSUMDB :=
 export GOINSECURE :=
+# The other two halves of the same switch. GONOPROXY and GONOSUMDB are set
+# independently of GOPRIVATE rather than inherited from it, so clearing
+# GOPRIVATE alone leaves the bypass reachable: a pattern in either names the
+# modules fetched straight from their VCS and never looked up in the
+# checksum database.
+#
+# GOSUMDB is the one that has to be named rather than cleared, because it is
+# the only thing standing between a build and an unverified tool binary. The
+# module pins in go.mod are covered by go.sum, but govulncheck and
+# cyclonedx-gomod are run as `go run <tool>@<version>` and are in no go.sum:
+# with GOSUMDB off, or a GONOSUMDB pattern covering golang.org/x/vuln, the
+# build downloads and executes whatever the network hands back and calls it a
+# pinned tool. sum.golang.org is the toolchain default, so naming it changes
+# nothing on a clean machine and refuses the override on a dirty one.
+export GONOPROXY :=
+export GOSUMDB := sum.golang.org
 # Strip paths, omit git stamps (checkout vs tarball would disagree), honor
 # go.sum, produce a PIE.
 GO_BUILDFLAGS := -trimpath -buildvcs=false -mod=readonly -buildmode=pie
@@ -1106,7 +1122,7 @@ CI_ENV_REQUIRED := \
 	GOTOOLCHAIN=go$(GO_VERSION) \
 	GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off CGO_ENABLED=0 \
 	GOFLAGS= GOEXPERIMENT= GODEBUG= GOENV=off GOWORK=off \
-	GOPRIVATE= GONOSUMDB= GOINSECURE=
+	GOPRIVATE= GONOSUMDB= GONOPROXY= GOINSECURE= GOSUMDB=sum.golang.org
 
 .PHONY: check-ci-env
 check-ci-env: ## fail unless every workflow env block pins the build inputs the Makefile exports

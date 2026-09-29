@@ -30,6 +30,10 @@ jobs:
     # GOEXPERIMENT, a GOPRIVATE that skips the checksum database, or a go.work
     # above the checkout would move
     # the bytes this job publishes without moving anything in the repository.
+    # GOSUMDB names the database rather than clearing it: the module pins are
+    # covered by go.sum, but `make sbom` runs cyclonedx-gomod at a `go run
+    # <tool>@<version>` pin no go.sum covers, so that database is the only
+    # check on the bytes the SBOM tool runs.
     # GOTOOLCHAIN names the compiler go.mod pins: setup-go installs it, but
     # without this key a `go` line outside make keeps the runner image's own
     # toolchain and its GOEXPERIMENT defaults.
@@ -50,7 +54,9 @@ jobs:
       GOWORK: "off"
       GOPRIVATE: ""
       GONOSUMDB: ""
+      GONOPROXY: ""
       GOINSECURE: ""
+      GOSUMDB: "sum.golang.org"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:

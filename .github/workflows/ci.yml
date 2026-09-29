@@ -21,10 +21,13 @@ concurrency:
 # race-test steps turn cgo on. Empty GOFLAGS/GOEXPERIMENT/GODEBUG so a
 # runner-level extra flag cannot change compile or test results relative to
 # `make`. GOENV=off, GOWORK=off and the empty
-# GOPRIVATE/GONOSUMDB/GOINSECURE keep the go
+# GOPRIVATE/GONOSUMDB/GONOPROXY/GOINSECURE keep the go
 # command off the runner's own config file, out of workspace mode, and off the
-# checksum database, which
-# is what the Makefile exports for the steps that go through it. `make
+# checksum-database bypass, which
+# is what the Makefile exports for the steps that go through it. GOSUMDB names
+# the database rather than clearing it: the module pins are covered by go.sum,
+# but `make govulncheck` runs its tool at a `go run <tool>@<version>` pin that
+# no go.sum covers, so the database is the only check on those bytes. `make
 # check-ci-env` fails when these and the Makefile's exports stop agreeing.
 env:
   LC_ALL: C
@@ -41,7 +44,9 @@ env:
   GOWORK: "off"
   GOPRIVATE: ""
   GONOSUMDB: ""
+  GONOPROXY: ""
   GOINSECURE: ""
+  GOSUMDB: "sum.golang.org"
 
 jobs:
   test:
