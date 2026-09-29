@@ -36,7 +36,7 @@ release (`make sbom`).
 
 | Module | License | Why it is here |
 | --- | --- | --- |
-| github.com/muesli/termenv | MIT | Terminal capability detection, read by the UI perf benchmark. Direct so the benchmark measures one pinned version, which no released binary imports. |
+| github.com/muesli/termenv | MIT | Terminal capability detection, read by the UI theme and perf tests (`internal/ui/theme_test.go`, `internal/ui/perf_bench_test.go`). Direct so those tests measure one pinned version, which no released binary imports. |
 
 ## Go, tooling only
 
@@ -75,8 +75,11 @@ packages (a registry swap of those files fails the install). pillow, pytokens
 and pyyaml ship per-platform or per-interpreter wheels only, so they stay
 version pins: hashing
 one wheel would refuse every other OS/arch/CPython. mypy and its compiled
-runtime deps (librt, ast-serialize) are in that second group for the same
-reason: mypy 2.x publishes per-interpreter wheels only. The install runs with
+runtime deps (librt, ast-serialize), and the two tool executables black and
+ruff, are in that second group for the same reason. The `Tag:` lines in an
+installed `.dist-info/WHEEL` name which wheels those are; `pythonUnhashed` in
+`internal/repogate/deps_test.go` is the list, and the test fails on a pin
+that is neither hashed nor on it. The install runs with
 `--no-deps`, so the two files are the entire closure: nothing is resolved out
 of the index to satisfy a dependency the files do not name, and a tool that
 grows one fails its first run rather than pulling an unpinned package. That
@@ -113,6 +116,12 @@ against.
   files, a version on every `go run`/`bunx`/`uvx`/`npx`/`pip install`
   invocation the Makefile or a workflow step fetches with, and an entry here
   for the tool that invocation names.
+- `TestPythonPinsAreExactAndHashed`, same file: every pin in the two
+  requirements files is `name==version`, so a range cannot arrive by editing
+  one character of a pin, and every pin carries a sha256 unless
+  `pythonUnhashed` names it. Both directions fail the run: a pin that gains a
+  hash has to come off that list, and a name on it that no file pins any more
+  is a stale exception.
 - `TestPythonRuntimePinsAreUsed`, same file: every pin in
   `scripts/requirements.txt` is either imported by a file under `scripts/` or
   named in `pythonClosure` as a requirement of a pin that is. The install runs

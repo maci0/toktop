@@ -7,12 +7,17 @@
 # unknown-flag traceback.
 required-version = ">=0.12.6"
 
+# py312, the interpreter .python-version pins and the one [tool.mypy]
+# checks against below. A lower target lets the linters pass syntax and
+# stdlib moves the pinned interpreter accepts, and it is the floor that
+# decides which rewrite rules apply, so the two must name the same version.
+
 [tool.black]
 line-length = 88
-target-version = ["py310"]
+target-version = ["py312"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 88
 src = ["scripts"]
 required-version = ">=0.16.4"

@@ -390,37 +390,122 @@ func TestToolDirectivesAreDocumented(t *testing.T) {
 	}
 }
 
-// pythonPins returns the distribution name of every exact pin in the
-// requirements files under scripts/. Both files, because a package that moves
-// from runtime to tooling is still a pin the table has to account for.
-func pythonPins(t *testing.T) []string {
+// pythonPin is one requirement line in a requirements file under scripts/,
+// with the count of sha256 hashes written on the lines that continue it.
+type pythonPin struct {
+	file    string
+	name    string
+	version string
+	hashes  int
+}
+
+// pythonPinRecords returns every pin in the requirements files under
+// scripts/, each with its version and the hashes on its continuation lines.
+// Both files, because a package that moves from runtime to tooling is still a
+// pin the gates below have to account for.
+func pythonPinRecords(t *testing.T) []pythonPin {
 	t.Helper()
-	var names []string
+	var pins []pythonPin
 	for _, file := range []string{"requirements.txt", "requirements-dev.txt"} {
 		raw, err := os.ReadFile(filepath.Join(moduleRoot, "scripts", file))
 		if err != nil {
 			t.Fatalf("read scripts/%s: %v", file, err)
 		}
 		for _, line := range strings.Split(string(raw), "\n") {
-			line = strings.TrimSpace(line)
+			// A backslash continues the requirement onto the next line, and
+			// it is how every hash in these files is attached. The
+			// continuation itself is the line after this one, so the marker
+			// goes and the line is read as the requirement it belongs to.
+			line = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(line), `\`))
 			// Comments carry the reason a pin is there; `-r` pulls in the
-			// other file, whose names this walks directly. A `--hash` line
-			// continues the pin above it, so the name is already counted.
-			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-r ") || strings.HasPrefix(line, "--") {
+			// other file, whose pins this walks directly.
+			if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "-r ") {
 				continue
 			}
-			name, _, _ := strings.Cut(line, "==")
-			name = strings.TrimSpace(name)
-			if name == "" || strings.ContainsAny(name, " \t") {
-				t.Fatalf("scripts/%s: %q is not an exact name==version pin", file, line)
+			if strings.HasPrefix(line, "--") {
+				// A `--hash` continues the pin above it. Any other option
+				// is an install instruction with no pin to continue, so
+				// there is nothing to attribute it to.
+				if strings.HasPrefix(line, "--hash=") && len(pins) > 0 {
+					pins[len(pins)-1].hashes++
+				}
+				continue
 			}
-			names = append(names, name)
+			name, version, exact := strings.Cut(line, "==")
+			name, version = strings.TrimSpace(name), strings.TrimSpace(version)
+			if !exact || name == "" || version == "" || strings.ContainsAny(name+version, " \t") {
+				t.Fatalf("scripts/%s: %q is not an exact name==version pin; a range or a bare name lets the index choose what gets installed", file, line)
+			}
+			pins = append(pins, pythonPin{file: file, name: name, version: version})
 		}
 	}
-	if len(names) == 0 {
+	if len(pins) == 0 {
 		t.Fatal("the requirements files parsed to no pins; the parser no longer understands them")
 	}
+	return pins
+}
+
+// pythonPins returns the distribution name of every pin in the requirements
+// files under scripts/.
+func pythonPins(t *testing.T) []string {
+	t.Helper()
+	records := pythonPinRecords(t)
+	names := make([]string, 0, len(records))
+	for _, pin := range records {
+		names = append(names, pin.name)
+	}
 	return names
+}
+
+// pythonUnhashed names the pins written as a bare version, with no
+// --hash=sha256 line beside them, and why the hash is not there. A hash is
+// what makes a registry swap of that file fail the install, so a pin without
+// one takes whatever the index serves for the version. Every name is a
+// distribution whose wheel carries a platform and interpreter tag
+// (readable as the Tag: lines in the installed .dist-info/WHEEL), so hashing
+// the one wheel a developer happens to have would refuse every other
+// OS/arch/CPython. A pin added to a requirements file is either hashed or
+// added here with its reason, and both directions fail the run when they name
+// a pin that is gone.
+var pythonUnhashed = map[string]string{
+	"ast-serialize": "wheel is tagged for one interpreter and platform",
+	"black":         "wheel is tagged for one interpreter and platform",
+	"librt":         "wheel is tagged for one interpreter and platform",
+	"mypy":          "wheel is tagged for one interpreter and platform",
+	"pillow":        "wheel is tagged for one interpreter and platform",
+	"pytokens":      "wheel is tagged for one interpreter and platform",
+	"pyyaml":        "wheel is tagged for one interpreter and platform",
+	"ruff":          "wheel is tagged for one interpreter and platform",
+}
+
+// TestPythonPinsAreExactAndHashed fails when a pin in scripts/ is not an
+// exact name==version, or is exact and carries no sha256 and is not on the
+// list of pins the tree decided to run unhashed. Neither failure was caught
+// before: pythonPins read a range as part of the distribution's name, so a
+// pin that had drifted to `>=` only tripped the documentation check by
+// accident, and nothing in the run looked at the hash lines at all, so the
+// claim in docs/DEPENDENCIES.md that the pure-Python packages are hashed had
+// no gate under it.
+func TestPythonPinsAreExactAndHashed(t *testing.T) {
+	records := pythonPinRecords(t)
+	hashed := map[string]bool{}
+	for _, pin := range records {
+		if pin.hashes > 0 {
+			hashed[pin.name] = true
+		}
+		_, exempt := pythonUnhashed[pin.name]
+		if pin.hashes == 0 && !exempt {
+			t.Errorf("scripts/%s: %s==%s carries no --hash=sha256 line and is not in pythonUnhashed; hash it, or record it there with the reason", pin.file, pin.name, pin.version)
+		}
+		if pin.hashes > 0 && exempt {
+			t.Errorf("scripts/%s: %s==%s carries a hash and is still in pythonUnhashed; drop it from that list", pin.file, pin.name, pin.version)
+		}
+	}
+	for name := range pythonUnhashed {
+		if !slices.ContainsFunc(records, func(pin pythonPin) bool { return pin.name == name }) {
+			t.Errorf("pythonUnhashed names %s, which no requirements file pins any more", name)
+		}
+	}
 }
 
 func TestPythonPinsAreDocumented(t *testing.T) {
