@@ -79,8 +79,15 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	cmd := exec.CommandContext(ctx, systemProfiler, "SPDisplaysDataType", "-json")
 	cmd.WaitDelay = pipeGrace // a hung profiler must not hold the caller past its deadline
 	core.GroupKill(cmd)       // the profiler is a wrapper whose children must not outlive it
-	out, err := cmd.Output()
-	if err != nil {
+	// cappedOutput, not cmd.Output: Output grows an internal buffer for
+	// whatever the tool printed inside identityTimeout, on the same terms
+	// run() refuses. A system_profiler wedged on a busy host keeps printing
+	// for the whole window, and the identity probe is retried every
+	// identityRetry for as long as it keeps failing, so an uncapped read here
+	// is a memory exhaustion the dashboard cannot defend against.
+	var out cappedOutput
+	cmd.Stdout = &out
+	if err := cmd.Run(); err != nil {
 		// Audited like every other vendor CLI in this package: an empty GPU row
 		// is what both a Mac with no readable GPU and a profiler that failed
 		// look like, and the retry window above would otherwise hide the
@@ -88,6 +95,7 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 		noteRunFailure(systemProfiler, systemProfiler, err)
 		return nil
 	}
+	b := out.buf.Bytes()
 	var doc struct {
 		Displays []map[string]any `json:"SPDisplaysDataType"`
 	}
@@ -95,7 +103,7 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 	// output this build cannot read is not a working profiler, and clearing
 	// the recorded failure first would report "system_profiler answering
 	// again" and then leave the Mac with no GPU row for the whole session.
-	if uerr := json.Unmarshal(out, &doc); uerr != nil {
+	if uerr := json.Unmarshal(b, &doc); uerr != nil {
 		noteRunFailure(systemProfiler, systemProfiler, fmt.Errorf("output is not SPDisplaysDataType JSON: %w", uerr))
 		return nil
 	}

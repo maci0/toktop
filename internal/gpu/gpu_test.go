@@ -1,6 +1,7 @@
 package gpu
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -569,5 +570,34 @@ func TestParseXpuDiscoveryFoldsANewlineOutOfTheName(t *testing.T) {
 	}
 	if want := "Intel® Arc™ up 9/9 engines"; got != want {
 		t.Errorf("name = %q, want %q", got, want)
+	}
+}
+
+func TestCappedOutputStopsAtMax(t *testing.T) {
+	var c cappedOutput
+	chunk := bytes.Repeat([]byte("x"), 64<<10)
+	stopped := false
+	for range maxToolOutput/len(chunk) + 1 {
+		if _, err := c.Write(chunk); err != nil {
+			stopped = true
+			break
+		}
+	}
+	if !stopped {
+		t.Fatal("write past the cap was accepted")
+	}
+	if c.buf.Len() > maxToolOutput {
+		t.Fatalf("buffered %d bytes, cap is %d", c.buf.Len(), maxToolOutput)
+	}
+}
+
+func TestCappedOutputHoldsUnderCap(t *testing.T) {
+	var c cappedOutput
+	want := []byte(`{"SPDisplaysDataType":[]}`)
+	if _, err := c.Write(want); err != nil {
+		t.Fatalf("write under cap: %v", err)
+	}
+	if !bytes.Equal(c.buf.Bytes(), want) {
+		t.Fatalf("buffer = %q, want %q", c.buf.Bytes(), want)
 	}
 }
