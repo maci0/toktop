@@ -808,22 +808,21 @@ func TestRunCanceledContextFails(t *testing.T) {
 	}
 }
 
-// Older OpenAI-compat servers 400 on stream_options / max_completion_tokens.
-// One retry without those fields must land; 400 is not a spend multiplier
-// the way retrying 429 would be.
-func TestRunOpenAIRetriesWithoutExtraFields(t *testing.T) {
+// An engine that 400s on max_tokens (the reasoning models and their gateways)
+// must still be probed, on a request that caps the generation under the field
+// it accepts. A refusal is a rejection before any generation runs, so walking
+// the shapes costs nothing, and a walk that gave up here left the engine
+// permanently unreadable.
+func TestRunOpenAIRetriesWithoutLegacyCapField(t *testing.T) {
 	var n int
 	var retry map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n++
 		var body map[string]any
 		json.NewDecoder(r.Body).Decode(&body)
-		if n == 1 {
-			if _, ok := body["stream_options"]; !ok {
-				t.Error("first request missing stream_options")
-			}
+		if _, ok := body["max_tokens"]; ok {
 			w.WriteHeader(http.StatusBadRequest)
-			fmt.Fprint(w, `{"error":"unknown field stream_options"}`)
+			fmt.Fprint(w, `{"error":"unsupported parameter: max_tokens"}`)
 			return
 		}
 		retry = body
@@ -835,7 +834,49 @@ func TestRunOpenAIRetriesWithoutExtraFields(t *testing.T) {
 
 	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
 	if n != 2 {
-		t.Fatalf("POSTs = %d, want 2 (one retry)", n)
+		t.Fatalf("POSTs = %d, want 2 (one refusal, one accepted shape)", n)
+	}
+	if !s.OK {
+		t.Fatalf("retry should succeed, got %+v", s)
+	}
+	if retry["max_completion_tokens"] != float64(probeTokens) {
+		t.Errorf("retry max_completion_tokens = %v, want %d", retry["max_completion_tokens"], probeTokens)
+	}
+	if _, ok := retry["max_tokens"]; ok {
+		t.Error("retry still sent max_tokens")
+	}
+}
+
+// Older OpenAI-compat servers 400 on stream_options / max_completion_tokens,
+// and on the shape that keeps max_completion_tokens alone they 400 again, so
+// the walk has to reach the legacy spelling before the probe lands.
+func TestRunOpenAIRetriesWithoutExtraFields(t *testing.T) {
+	var n int
+	var retry map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if n == 1 {
+			if _, ok := body["stream_options"]; !ok {
+				t.Error("first request missing stream_options")
+			}
+		}
+		if _, ok := body["max_completion_tokens"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"unknown field max_completion_tokens"}`)
+			return
+		}
+		retry = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
+	if n != 3 {
+		t.Fatalf("POSTs = %d, want 3 (the walk ends on the legacy shape)", n)
 	}
 	if !s.OK {
 		t.Fatalf("retry should succeed, got %+v", s)
@@ -848,6 +889,26 @@ func TestRunOpenAIRetriesWithoutExtraFields(t *testing.T) {
 	}
 	if retry["max_tokens"] != float64(probeTokens) {
 		t.Errorf("retry max_tokens = %v, want %d", retry["max_tokens"], probeTokens)
+	}
+}
+
+// A refusal at every shape ends the walk and reports the engine's own error,
+// rather than re-POSTing the same generation until the client timeout.
+func TestRunOpenAIGivesUpAfterRefusingEveryShape(t *testing.T) {
+	var n int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		n++
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		fmt.Fprint(w, `{"error":"no such model"}`)
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
+	if n != len(openaiShapes) {
+		t.Errorf("POSTs = %d, want %d (the whole walk, no more)", n, len(openaiShapes))
+	}
+	if s.OK {
+		t.Errorf("refused probe reported ok: %+v", s)
 	}
 }
 

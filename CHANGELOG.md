@@ -24,6 +24,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A probe against an endpoint that answers 400 to `max_tokens` (the reasoning
+  models and the gateways in front of them) lands on a request that caps the
+  generation under `max_completion_tokens` instead of failing every wave. The
+  refusal walk covers both spellings of the cap, and still ends at the first
+  error that is not a 400 or 422, so an overloaded gateway is not re-POSTed.
 - A request that arrives without an `X-Request-Id` is minted one from a
   per-server counter instead of OS entropy. The minted id lands in the
   answer's header and on the audit line, so the same request sequence against

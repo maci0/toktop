@@ -319,18 +319,9 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 
 func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens int, ttft time.Duration, err error) {
 	url := r.Base + "/v1/chat/completions"
-	resp, err := postJSON(ctx, url, openaiBody(r.Model, true))
+	resp, err := postOpenAI(ctx, url, r.Model)
 	if err != nil {
-		var se *httpStatusError
-		// One retry with the legacy field set: stream_options and
-		// max_completion_tokens 400 on older llama.cpp / strict proxies.
-		// 429/503 are not retried — that would be a spend multiplier.
-		if errors.As(err, &se) && (se.status == http.StatusBadRequest || se.status == http.StatusUnprocessableEntity) {
-			resp, err = postJSON(ctx, url, openaiBody(r.Model, false))
-		}
-		if err != nil {
-			return 0, 0, err
-		}
+		return 0, 0, err
 	}
 	defer resp.Body.Close()
 	if jsonNotStream(resp.Header.Get("Content-Type")) {
@@ -580,22 +571,70 @@ func postJSON(ctx context.Context, url string, body []byte) (*http.Response, err
 	return resp, nil
 }
 
-// openaiBody is the chat-completions probe. extra adds fields some older
-// OpenAI-compat servers reject (stream_options, max_completion_tokens);
-// the caller retries once without them on 400/422.
-func openaiBody(model string, extra bool) []byte {
+// openaiShape is one spelling of the chat-completions request, the axes on
+// which OpenAI-compatible servers disagree about how a bounded generation is
+// asked for.
+type openaiShape int
+
+const (
+	// shapeBoth names the cap under both fields, and asks for usage in the
+	// stream. Every server that ignores an unknown field accepts this.
+	shapeBoth openaiShape = iota
+	// shapeCompletion drops max_tokens for servers that reject it outright:
+	// the reasoning models and their gateways answer 400 "unsupported
+	// parameter" to the legacy name.
+	shapeCompletion
+	// shapeLegacy drops max_completion_tokens and stream_options for older
+	// llama.cpp and strict proxies that 400 on either.
+	shapeLegacy
+)
+
+// openaiShapes is the order postOpenAI walks. The first shape is a superset of
+// the others, so a server that rejects one field it never needed is answered
+// by a shape carrying the field it does accept; a server needing both names
+// rejected shapeBoth, and gets a shape naming only its own.
+var openaiShapes = []openaiShape{shapeBoth, shapeCompletion, shapeLegacy}
+
+// postOpenAI POSTs the probe, walking the request shapes on a rejection. Only
+// 400 and 422 continue the walk: they are refused before any generation runs,
+// so the whole walk is free, and walking it is the only way a probe can reach
+// an engine whose cap field is named the other way. 429, 503 and transport
+// failures end it, since a retry there multiplies billed generations.
+func postOpenAI(ctx context.Context, url, model string) (*http.Response, error) {
+	var err error
+	for _, shape := range openaiShapes {
+		var resp *http.Response
+		if resp, err = postJSON(ctx, url, openaiBody(model, shape)); err == nil {
+			return resp, nil
+		}
+		var se *httpStatusError
+		if !errors.As(err, &se) || (se.status != http.StatusBadRequest && se.status != http.StatusUnprocessableEntity) {
+			return nil, err
+		}
+	}
+	return nil, err
+}
+
+// openaiBody is the chat-completions probe in one of its shapes. Every shape
+// caps the generation; only the field naming that cap differs.
+func openaiBody(model string, shape openaiShape) []byte {
 	m := map[string]any{
 		"model": model,
 		"messages": []map[string]string{
 			{"role": "user", "content": promptText},
 		},
-		"max_tokens":  probeTokens,
 		"n":           1, // some engines default n>1; that is n times the budget
 		"temperature": 0.2,
 		"stream":      true,
 	}
-	if extra {
-		// Newer OpenAI models reject max_tokens; older engines ignore this.
+	switch shape {
+	case shapeCompletion:
+		m["max_completion_tokens"] = probeTokens
+		m["stream_options"] = map[string]bool{"include_usage": true}
+	case shapeLegacy:
+		m["max_tokens"] = probeTokens
+	default:
+		m["max_tokens"] = probeTokens
 		m["max_completion_tokens"] = probeTokens
 		m["stream_options"] = map[string]bool{"include_usage": true}
 	}
