@@ -209,7 +209,7 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 			continue
 		}
 		if e.name == "KIMI_CODE_HOME" {
-			warnMissingKimiStore(v)
+			warnMissingKimiStore()
 		}
 	}
 }
@@ -217,8 +217,10 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 // warnMissingKimiStore names an absolute $KIMI_CODE_HOME with no sessions
 // directory under it. kimiRoots returns nothing for a store that cannot be
 // listed, and no watcher is built, so the dashboard shows no kimi agent at all
-// and reads as one that used no tokens.
-func warnMissingKimiStore(home string) {
+// and reads as one that used no tokens. The path comes from the package rather
+// than the caller, which is what KimiStorePath is exported for, so the
+// warning and the reader resolve $KIMI_CODE_HOME the same way.
+func warnMissingKimiStore() {
 	store := agentusage.KimiStorePath()
 	if info, err := os.Stat(store); err == nil && info.IsDir() {
 		return

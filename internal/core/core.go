@@ -3,13 +3,14 @@
 // The rest of the package is the set of helpers more than one of those
 // packages needs and none of them should own: redaction and sanitizing of
 // text that reaches a screen, a log or a file name, tilde and $HOME path
-// expansion, the saturating conversions vendor telemetry arrives as, and the
-// short spelling of a working directory the dashboard prints. Each of those
-// files says in its own doc comment which packages it is shared with, and why
-// it is here rather than there. What is not here is anything that polls,
-// opens a connection or renders: core holds what the collectors produce and
-// the vocabulary around it, so a package that does I/O can depend on it
-// without the reverse.
+// expansion, the saturating conversions vendor telemetry arrives as, the
+// short spelling of a working directory the dashboard prints, and the process
+// group kill a deadline needs so a wrapper CLI cannot outlive the poll that
+// started it. Each of those files says in its own doc comment which packages
+// it is shared with, and why it is here rather than there. What is not here
+// is anything that polls, opens a connection or renders: core holds what the
+// collectors produce and the vocabulary around it, so a package that does
+// I/O can depend on it without the reverse.
 package core
 
 import (

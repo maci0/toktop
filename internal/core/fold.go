@@ -60,29 +60,15 @@ func FoldASCII(s string) string {
 // strings EqualFold calls equal. s is returned unchanged when it is ASCII
 // with no uppercase in it, so the common case allocates nothing.
 func FoldCase(s string) string {
-	up, wide := -1, false
+	wide := false
 	for i := 0; i < len(s); i++ {
-		c := s[i]
-		if c >= utf8.RuneSelf {
+		if s[i] >= utf8.RuneSelf {
 			wide = true
-			break
-		}
-		if c >= 'A' && c <= 'Z' {
-			up = i
 			break
 		}
 	}
 	if !wide {
-		if up < 0 {
-			return s
-		}
-		b := []byte(s)
-		for i := up; i < len(b); i++ {
-			if c := b[i]; c >= 'A' && c <= 'Z' {
-				b[i] = c + ('a' - 'A')
-			}
-		}
-		return string(b)
+		return FoldASCII(s)
 	}
 	b := make([]byte, 0, len(s))
 	for _, r := range s {

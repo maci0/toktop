@@ -93,7 +93,7 @@ everywhere.
 case. Four files use it for `!windows` (`cmd/toktop/pipe_unix.go`,
 `internal/remote/auth_unix.go`, `internal/selfreload/exec_unix.go`,
 `internal/selfreload/stat_unix.go`), which is the opposite of the POSIX
-platforms. `internal/gpu/procattr_unix.go` uses it for the stricter `unix`
+platforms. `internal/core/procattr_unix.go` uses it for the stricter `unix`
 constraint Go provides, pairing with `procattr_other.go` on `!unix`. A file
 whose tag names a subset of the POSIX platforms takes no suffix, because a
 suffix would claim more than the tag delivers.

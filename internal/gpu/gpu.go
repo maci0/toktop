@@ -137,7 +137,7 @@ func run(ctx context.Context, name, path string, args ...string) ([]byte, bool) 
 	defer cancel()
 	cmd := exec.CommandContext(c, path, args...)
 	cmd.WaitDelay = pipeGrace
-	groupKill(cmd)
+	core.GroupKill(cmd)
 	// Capped like every HTTP body this process reads. Output would grow an
 	// internal buffer for whatever the tool printed inside runTimeout, and a
 	// wedged or hostile nvidia-smi on PATH has no reason to stop: the sampler

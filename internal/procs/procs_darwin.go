@@ -4,13 +4,11 @@ package procs
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -29,22 +27,7 @@ func listDarwin() ([]raw, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,%cpu=,rss=,command=")
 	cmd.WaitDelay = listPipeGrace
-	// ps is spawned by a fresh process group so a deadline kill reaches the
-	// whole tree: the listing runs on every poll, so a child surviving the
-	// kill would pile up one per poll for the life of the dashboard. The
-	// group Cancel also runs when listPipeGrace fires because a survivor
-	// still holds the output pipe.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	cmd.Cancel = func() error {
-		if cmd.Process == nil {
-			return nil
-		}
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		if err != nil && !errors.Is(err, syscall.ESRCH) {
-			return err
-		}
-		return nil
-	}
+	core.GroupKill(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ps -axo pid=,%%cpu=,rss=,command=: %w", err)
