@@ -115,6 +115,19 @@ func TestSamplerLinuxLongCmdlineIsBounded(t *testing.T) {
 	}
 }
 
+// BenchmarkListLinux measures one whole /proc sweep on the host running the
+// benchmark, which is the sweep every poll pays for and the reason the walk
+// reuses its buffers: the process count and the width of a browser's argv
+// are what set the cost, and neither is visible from a fixture.
+func BenchmarkListLinux(b *testing.B) {
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := listLinux(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestPagesToBytesSaturates(t *testing.T) {
 	_, rss := procStatCPUAndRSS("1 (x) S 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 18446744073709551615")
 	if rss != ^uint64(0) {

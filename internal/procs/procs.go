@@ -52,7 +52,14 @@ type raw struct {
 // can read. Both derivations run on the clipped command line, so what a
 // listing retains and what it reports are the same bytes.
 func annotate(r *raw) {
-	r.args = ClipArgs(r.args)
+	annotateClipped(r, ClipArgs(r.args))
+}
+
+// annotateClipped is annotate for a lister that has already clipped the
+// command line (see splitCmdline), so the line is not split and clipped
+// twice on its way to the same two derivations.
+func annotateClipped(r *raw, clipped []string) {
+	r.args = clipped
 	r.port = ExtractPort(r.args)
 	if eng, defPort, ok := MatchEngine(Info{Name: r.name, Args: r.args}); ok {
 		r.engine, r.defPort = eng, defPort
@@ -450,6 +457,63 @@ func ClipArgs(args []string) []string {
 		kept = append(kept, strings.Clone(a))
 	}
 	return kept
+}
+
+// splitCmdline is ClipArgs over a command line in the NUL-separated form
+// /proc/PID/cmdline holds, producing the same arguments it would and bounding
+// them the same way. It exists for the /proc walk, which reads every process
+// on the host on every poll: splitting each of those command lines allocated
+// a string header per argument for the whole host, and ClipArgs then
+// allocated a second slice sized by that argument count to keep the handful
+// of bytes the bound allows. A browser or an Electron app carries thousands
+// of arguments and is dropped again a few lines later, so the walk built
+// two large slices per process per poll to keep none of them. Here the
+// arguments are windows onto one copy of the line, cut where the budget runs
+// out rather than one at a time, and the walk's scratch carries the headers.
+//
+// line must already be trimmed of the trailing NUL a command line ends with.
+// The strings appended to dst alias it and are only valid while it is; a
+// lister that keeps them calls cloneArgs first, which is the detachment
+// ClipArgs does as it goes.
+func splitCmdline(line string, dst []string) []string {
+	dst = dst[:0]
+	spent := 0
+	for i := 0; line != ""; i++ {
+		var arg string
+		if n := strings.IndexByte(line, 0); n >= 0 {
+			arg, line = line[:n], line[n+1:]
+		} else {
+			arg, line = line, ""
+		}
+		if i > 0 {
+			spent++ // the separator a join writes between two arguments
+		}
+		if spent >= CmdlinePrefix {
+			break
+		}
+		room := CmdlinePrefix - spent
+		if len(arg) > room {
+			dst = append(dst, clipUTF8Prefix(arg, room))
+			break
+		}
+		spent += len(arg)
+		dst = append(dst, arg)
+	}
+	return dst
+}
+
+// cloneArgs detaches a command line split out of a read buffer from that
+// buffer, so a retained listing pins the arguments it keeps and not the whole
+// /proc/PID/cmdline read they were windows onto.
+func cloneArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = strings.Clone(a)
+	}
+	return out
 }
 
 // clipUTF8Prefix keeps at most n bytes of s, ending on a code-point

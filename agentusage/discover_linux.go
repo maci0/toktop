@@ -55,8 +55,14 @@ func Discover() []Process {
 		if err != nil || len(raw) == 0 {
 			continue
 		}
-		args := strings.Split(strings.TrimRight(string(raw), "\x00"), "\x00")
-		tool := agentName(comm, args, known)
+		// One copy of the line, and the words are cut from it as they are
+		// needed. Splitting it allocated a string header per argument for
+		// every process on the host, on a pass that runs every few seconds:
+		// a browser or an Electron app carries thousands of arguments, and
+		// the two readers below look at the first two words of the line and
+		// at whether any word of it is "web".
+		line := strings.TrimRight(string(raw), "\x00")
+		tool := agentName(comm, leadingWords(line, r.nameBuf[:0], agentNameWords), known)
 		if tool == "" {
 			continue
 		}
@@ -64,7 +70,7 @@ func Discover() []Process {
 		if err != nil {
 			continue // exited, or another user's process
 		}
-		out = append(out, Process{PID: pid, Tool: tool, Dir: cwd, Started: startedAt(pid), AllDirs: tool == "dsh" && dshHosts(args)})
+		out = append(out, Process{PID: pid, Tool: tool, Dir: cwd, Started: startedAt(pid), AllDirs: tool == "dsh" && dshHostLine(line)})
 	}
 	// os.ReadDir sorts entry names as strings, which orders pids 1, 10, 100,
 	// 11, 2. A caller listing agents would read that as a broken listing, so
@@ -94,9 +100,10 @@ const (
 // the string it is turned into is a copy, which is what the arguments and the
 // comm are cut from.
 type procReader struct {
-	pid  int
-	path []byte
-	buf  []byte
+	pid     int
+	path    []byte
+	buf     []byte
+	nameBuf [agentNameWords]string
 }
 
 // procPath builds /proc/PID/<name> in the reader's own buffer. The result is
@@ -148,6 +155,54 @@ func (r *procReader) read(name string) ([]byte, error) {
 // this covers the common file without a grow and the walk's widest one costs
 // one.
 const procReadInit = 512
+
+// agentNameWords is how many leading words of a command line agentName
+// reads. It is stated here because the walk hands agentName a slice of that
+// length rather than the whole line, and a shorter one would name a process
+// from fewer words than the macOS path reads while reading the same function.
+const agentNameWords = 2
+
+// nameBuf on procReader is the walk's scratch for the leading words agentName
+// reads, reused per process. The words are windows onto the line the walk
+// already holds, so filling it costs nothing after the first process, and it
+// belongs to the walk rather than the package because discovery runs from more
+// than one goroutine.
+
+// leadingWords appends up to n of the NUL-separated words a /proc command
+// line holds to dst. Words past n are not read, and an empty word is a word,
+// since agentName stops at one.
+func leadingWords(line string, dst []string, n int) []string {
+	for i := 0; i < n && line != ""; i++ {
+		word := line
+		if j := strings.IndexByte(line, 0); j >= 0 {
+			word, line = line[:j], line[j+1:]
+		} else {
+			line = ""
+		}
+		dst = append(dst, word)
+	}
+	return dst
+}
+
+// dshHostLine is dshHosts over a command line that has not been split: it
+// reports whether any word of the line is "web", which is what identifies
+// the dsh server. The walk runs it for the dsh processes it has already
+// matched, so the words of every other process on the host are never
+// examined a second time.
+func dshHostLine(line string) bool {
+	for line != "" {
+		word := line
+		if i := strings.IndexByte(line, 0); i >= 0 {
+			word, line = line[:i], line[i+1:]
+		} else {
+			line = ""
+		}
+		if word == "web" {
+			return true
+		}
+	}
+	return false
+}
 
 // linuxClkTck is USER_HZ. The Linux ABI fixes it at 100; /proc/PID/stat
 // starttime is in these ticks since boot.

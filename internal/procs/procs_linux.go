@@ -34,6 +34,11 @@ const (
 type procWalk struct {
 	path []byte
 	buf  []byte
+	// args is the scratch the command-line split is built in, reused for
+	// every process on the host. It holds headers only: the strings are
+	// windows onto the line they were cut from, and a process the walk keeps
+	// gets a detached copy of them (see cloneArgs).
+	args []string
 }
 
 // procPath builds procRoot/PID/<name> in the walk's own buffer. The result
@@ -93,6 +98,10 @@ func listLinux() ([]raw, error) {
 		// arguments a process keeps are the same either way.
 		path: make([]byte, 0, 64),
 		buf:  make([]byte, CmdlinePrefix),
+		// The widest argv a bounded command line can hold: one empty
+		// argument per byte, and the separators between them. The split
+		// stops there, so the scratch cannot grow past it either.
+		args: make([]string, 0, CmdlinePrefix/2+1),
 	}
 	var out []raw
 	for _, e := range entries {
@@ -104,19 +113,26 @@ func listLinux() ([]raw, error) {
 		if err != nil {
 			continue // vanished or kernel thread
 		}
-		// The string copy is what the arguments are cut from, and it is
-		// dropped with this process: ClipArgs clones what it keeps, so a
-		// process that turns out not to be an engine retains nothing.
-		args := strings.Split(strings.TrimRight(string(cmdlineB), "\x00"), "\x00")
+		// One copy of the line, and the arguments are windows onto it.
+		// Splitting it was the largest source of garbage in a sweep: every
+		// process on the host paid a string header per argument, twice
+		// (the split and the clip), for a listing that keeps a handful of
+		// processes and none of their tails.
+		line := strings.TrimRight(string(cmdlineB), "\x00")
+		args := splitCmdline(line, w.args)
 		if len(args) == 0 || args[0] == "" {
 			continue
 		}
 
-		r := raw{pid: pid, name: baseName(args[0]), args: args}
-		annotate(&r)
+		r := raw{pid: pid, name: baseName(args[0])}
+		annotateClipped(&r, args)
 		if r.engine == "" && r.port == 0 {
+			// Not an engine, so nothing past this line is read and
+			// nothing above is retained: the next read overwrites the
+			// buffer these arguments are windows onto.
 			continue // skip /proc/PID/stat for firefox and friends
 		}
+		r.args = cloneArgs(args)
 
 		// One stat read yields both CPU ticks and RSS; a second read of
 		// status would double the per-PID syscalls on every poll. A stat

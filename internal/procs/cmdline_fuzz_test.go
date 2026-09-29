@@ -1,6 +1,7 @@
 package procs
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -163,4 +164,60 @@ func args0(args []string) string {
 		return ""
 	}
 	return args[0]
+}
+
+// FuzzSplitCmdline holds the /proc walk's split to the same answer the
+// exported ClipArgs gives it. The walk cuts the command line as it reads it,
+// where ClipArgs cuts a line something else already split, so the two are
+// separate code over the same bound: if they drift, a process the walk
+// drops or keeps is not the process the other lister reports. Equality is
+// asserted over the arguments, not just their count, and the second call
+// into the same scratch is asserted to agree, since that is how the walk
+// uses it.
+func FuzzSplitCmdline(f *testing.F) {
+	for _, seed := range []string{
+		"",
+		"\x00",
+		"\x00\x00\x00",
+		"ollama\x00serve\x00--port\x0011434\x00",
+		"vllm\x00serve\x00--model\x00/models/meta-llama/Llama-3-8B",
+		"chromium\x00--disable-features=" + strings.Repeat("A", 40_000) + "\x00",
+		"\xff\xfe\x00--port\x0099999",
+		"日本語\x00" + strings.Repeat("é", 3000),
+		strings.Repeat("x", 200_000),
+		"ollama\x00serve\x00\x00--port\x0011434",
+		strings.Repeat("a", CmdlinePrefix) + "\x00" + strings.Repeat("b", 8),
+		strings.Repeat("a", CmdlinePrefix-1) + "\x00" + strings.Repeat("b", 8),
+		strings.Repeat("\x00", 64) + "vllm",
+	} {
+		f.Add(seed)
+	}
+	f.Fuzz(func(t *testing.T, cmdline string) {
+		line := strings.TrimRight(cmdline, "\x00")
+		scratch := make([]string, 0, 8)
+		got := splitCmdline(line, scratch)
+		if line == "" {
+			// A command line that is nothing but separators is a kernel
+			// thread. The walk reads it as no arguments at all and
+			// ClipArgs as one empty one, and both are dropped for having no
+			// argv[0] to match on, which is the only thing this list is for.
+			if len(got) != 0 {
+				t.Fatalf("splitCmdline(%q) = %q, want no arguments", line, got)
+			}
+			return
+		}
+		want := ClipArgs(strings.Split(line, "\x00"))
+		if !slices.Equal(got, want) {
+			t.Fatalf("splitCmdline(%d bytes) = %q, want ClipArgs(%q)", len(line), got, want)
+		}
+		// The scratch is reused per process, so a shorter line must not
+		// leave the previous one's arguments behind.
+		short := splitCmdline("vllm\x00serve", scratch)
+		if !slices.Equal(short, []string{"vllm", "serve"}) {
+			t.Fatalf("reused scratch = %q, want [vllm serve]", short)
+		}
+		if again := splitCmdline(line, scratch); !slices.Equal(again, want) {
+			t.Fatalf("splitCmdline is not stable over its scratch: %q then %q", got, again)
+		}
+	})
 }
