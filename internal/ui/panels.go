@@ -147,19 +147,25 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 }
 
 // engineStats composes one engine's out rate, in rate and queue counts for a
-// row w cells wide, dropping the in rate when the row cannot carry it: the
-// header and the PROMPT chart both show fleet-wide input, while the queue
-// counts are drawn from this row and no other panel, so on the narrowest legal
-// pane the input rate is what gives way.
+// row w cells wide, shedding readings until the row fits. The header and the
+// PROMPT chart both show fleet-wide input, so the in rate is the first reading
+// to give way; the running count is the next, being the shallower of the two
+// queue depths. The waiting count is never shed: a backlog is what this row
+// exists to show, and a row the pane cuts mid-number reads as a missing value
+// rather than a truncated one, which is the reading a queue backing up cannot
+// afford. What is left when even the backlog does not fit is the out rate.
 func engineStats(p core.ProviderSnapshot, w int) string {
 	out := "▲" + fmtRate(p.OutTokPS)
-	in := "▼" + fmtRate(p.InTokPS)
-	queue := fmt.Sprintf("run %d wait %d", p.Running, p.Waiting)
-	row := out + " " + in + " " + queue
-	if widthOf(row) > w {
-		return out + " " + queue
+	for _, row := range []string{
+		out + " ▼" + fmtRate(p.InTokPS) + fmt.Sprintf(" run %d wait %d", p.Running, p.Waiting),
+		out + fmt.Sprintf(" run %d wait %d", p.Running, p.Waiting),
+		out + fmt.Sprintf(" wait %d", p.Waiting),
+	} {
+		if widthOf(row) <= w {
+			return row
+		}
 	}
-	return row
+	return out
 }
 
 // gaugesBlockRows is the floor a gauge block costs: the name and the kv bar.

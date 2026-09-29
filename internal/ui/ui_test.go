@@ -3625,3 +3625,47 @@ func TestMinimalViewWithStaleAgentEventsIsNotEngineEmpty(t *testing.T) {
 		t.Errorf("minimal view lost the wait hint for a run holding agent events:\n%s", out)
 	}
 }
+
+// An engine's stats row is what the ENGINES column says about it, and the
+// queue depths are drawn from that row and nowhere else. A row the pane cuts
+// mid-number ("run 1 wait") reads as a queue count that is missing, which is
+// the one reading a backing-up engine cannot lose, so every width has to end
+// on a whole reading rather than an ellipsis.
+func TestEngineStatsShedsReadingsInsteadOfBeingCut(t *testing.T) {
+	p := core.ProviderSnapshot{OK: true, Kind: "ollama", Label: "ollama",
+		OutTokPS: 48.3, InTokPS: 153.7, Running: 1, Waiting: 3, KVPct: 80}
+	for w := 12; w <= 30; w++ {
+		for i, row := range providerBlock(p, w) {
+			if got := widthOf(row); got > w {
+				t.Errorf("width %d row %d is %d cells: %q", w, i, got, row)
+			}
+			if strings.Contains(row, "…") {
+				t.Errorf("width %d row %d is cut mid-reading: %q", w, i, row)
+			}
+		}
+	}
+	// The backlog is the last reading shed, so a row too narrow for the
+	// running count still says how deep the queue is.
+	if got := engineStats(p, 14); got != "▲48.3 wait 3" {
+		t.Errorf("narrowest stats row is %q, want the waiting count kept", got)
+	}
+}
+
+// The columns are sized to their widest cell, so an agent whose session name
+// runs long used to spend the whole row there and the recency cell, the one
+// the reader scans for, fell off the right edge on the narrowest legal pane.
+func TestAgentRowKeepsRecencyBesideALongName(t *testing.T) {
+	now := time.Now()
+	rows := agentRows([]core.AgentRate{{
+		Agent:  "a-very-long-coding-agent-session-name",
+		TokPS:  12,
+		Tokens: 900,
+		Last:   now,
+	}}, now)
+	if got := widthOf(rows[0]); got > minDashW-4 {
+		t.Errorf("row is %d cells, the narrowest legal pane has %d: %q", got, minDashW-4, rows[0])
+	}
+	if !strings.Contains(rows[0], "live") {
+		t.Errorf("recency cell lost to the name: %q", rows[0])
+	}
+}

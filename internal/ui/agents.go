@@ -114,6 +114,14 @@ const (
 	agentTokensMin = 8
 )
 
+// agentNameMax caps the name column. The columns are sized to their widest
+// cell, so one long session name spends its whole length there and padBlock
+// cuts the recency cell off the right edge, which is the reading the column
+// floors above exist to protect. The cap is the same one feedLine already
+// shortens an event's agent name to, so a name is never spelled at two
+// lengths in the two tables that carry it.
+const agentNameMax = 16
+
 // agentRows lays out one row per agent: name, rate, tokens, recency. Cells
 // are padded by visible cells (padTo/padStart), never %-Ns width verbs:
 // styled cells carry ANSI bytes whose rune counts would skew the columns.
@@ -124,7 +132,7 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 	sinceCells := make([]string, len(rates))
 	nameW, rateW, tokW := agentNameMin, agentRateMin, agentTokensMin
 	for i, r := range rates {
-		names[i] = core.SingleLine(r.Agent)
+		names[i] = shorten(core.SingleLine(r.Agent), agentNameMax)
 		// Engine-routed tokens are already counted by the engine, so the row
 		// names the engine where the rate would go and does not also print it
 		// again beside the recency cell. agentSummary, agentMiniLine, feedLine
