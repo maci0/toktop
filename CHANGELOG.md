@@ -151,6 +151,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   outright, and no gate noticed. shellcheck has no mode for either, so each is
   parsed by the shell that will source it, in `make check-shell` and on the
   Linux CI leg. `zsh` and `fish` are now prerequisites alongside `shellcheck`.
+- `toktop completion --help` says that its example paths are the directories a
+  POSIX shell reads. The three published scripts are the same bytes on Windows
+  and work under whatever bash, zsh or fish is installed there, but none of
+  the example directories exists, and the screen named only those.
 - `agentusage.Watcher` now says what a consumer has to release, which is
   nothing. The type held no file handle between calls and `Run` started no
   goroutine of its own, so there is no `Close` to find and none was added, but
@@ -223,6 +227,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   sent the operator after a chain that was never suppressed. It now reads the
   variables the way the chain does and names every one of them, so a third
   source added to the chain is named too.
+- A home directory reached with a different case is stripped again on macOS,
+  so a note no longer carries the operator's account name. `RedactHome` folded
+  case on the two platforms whose file systems look names up that way, and
+  `ShortDir` leaned on `filepath.Rel`, which folds on Windows and compares
+  bytes on macOS. A working directory spelled `/users/dev/proj` under a home
+  spelled `/Users/dev` came back `..`, the home was not stripped, and the note
+  kept the path stripping it exists to remove.
+- The agent index cache is keyed by the directory the way every other
+  directory comparison in `agentusage` is, so two spellings of one store on
+  macOS or Windows no longer re-read `history.jsonl` and
+  `last_conversations.json` on every poll.
 - The compact agent strip names an engine-routed agent where its rate would
   go, as the full row, the feed and the plain report already did. The strip
   printed both, so a run through a gateway read one agent's tokens twice at

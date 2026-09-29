@@ -9,6 +9,16 @@ import (
 	"unicode/utf8"
 )
 
+// lookupFoldsCase reports whether this platform's file systems match a path
+// name case-insensitively, which is what lets two spellings of one directory
+// stand in for each other when a home is compared against a path. Linux stores
+// UTF-8 exactly and a Windows volume holds UTF-16 where the composed and
+// decomposed spellings of a name are different names, so only the two case-folding
+// platforms answer true. RedactHome and ShortDir's stripHome both decide this
+// way and have to agree: a home they disagree about is one a note keeps the
+// account name of.
+func lookupFoldsCase() bool { return runtime.GOOS == "windows" || runtime.GOOS == "darwin" }
+
 // RedactHome rewrites the home directory in msg to "~". An absolute path
 // under $HOME names the account that owns it, and toktop's diagnostics are
 // copied into issues and bug reports; the path is what makes them
@@ -30,7 +40,7 @@ func RedactHome(msg string) string {
 	if filepath.Dir(home) == home {
 		return msg // a filesystem root would swallow every absolute path
 	}
-	folded := runtime.GOOS == "windows" || runtime.GOOS == "darwin"
+	folded := lookupFoldsCase()
 	// Windows names one directory with either separator, and a path reaching
 	// a message can carry either: a user-supplied argument, an ssh target, or
 	// a tool built for another platform all spell it with '/'. Matching only

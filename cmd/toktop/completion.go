@@ -45,6 +45,14 @@ The script is printed on stdout and nothing else goes there, so it can be
 redirected or inspected before it is installed. It completes the flags this
 build actually defines, so it does not go stale as flags change.
 
+The three shells above are the ones a script is published for, and the paths
+in the examples are the directories those shells read on a POSIX system. On
+Windows the scripts are the same bytes and work under the bash, zsh or fish
+you installed (Git Bash, WSL, MSYS2, a package manager), but none of the
+example paths exists there: redirect to whatever directory that shell's
+completion setup already reads, the way the bash comment names
+~/.local/share/bash-completion/completions for a user install.
+
 A missing or unknown shell is a usage error; 'bash' is the one that drops into
 a file wherever a completion belongs.
 `)

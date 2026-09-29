@@ -86,3 +86,76 @@ func TestShortDirHidesHomeForAPathNotOnDisk(t *testing.T) {
 		t.Errorf("project in home = %q, want ~/toktop", got)
 	}
 }
+
+// relUnderFolded is only reached on the platforms whose file systems fold
+// case, so it is tested directly to keep the walk under test on every one.
+func TestRelUnderFolded(t *testing.T) {
+	sep := string(filepath.Separator)
+	home := strings.Join([]string{"Users", "dev"}, sep)
+	cases := []struct {
+		dir  string
+		want string
+		ok   bool
+	}{
+		{strings.Join([]string{"Users", "dev"}, sep), ".", true},
+		{strings.Join([]string{"users", "dev"}, sep), ".", true},
+		{strings.Join([]string{"users", "dev", "src", "toktop"}, sep), filepath.Join("src", "toktop"), true},
+		{strings.Join([]string{"USERS", "DEV", "toktop"}, sep), "toktop", true},
+		// A different directory that shares the home's first element is not
+		// under home, however the two are spelled.
+		{strings.Join([]string{"users", "dev2", "proj"}, sep), "", false},
+		{strings.Join([]string{"users"}, sep), "", false},
+		{"/var/log", "", false},
+	}
+	for _, c := range cases {
+		got, ok := relUnderFolded(home, c.dir)
+		if ok != c.ok || got != c.want {
+			t.Errorf("relUnderFolded(%q, %q) = %q, %t; want %q, %t", home, c.dir, got, ok, c.want, c.ok)
+		}
+	}
+}
+
+// The end of the fold: a home reached with a different case is still the
+// operator's home, and the note must not carry the account name. Windows is
+// covered by filepath.Rel's own folding, so this pins the macOS walk.
+func TestShortDirHidesHomeSpelledWithAnotherCase(t *testing.T) {
+	if !lookupFoldsCase() {
+		t.Skip("this platform compares path names by their bytes")
+	}
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "home")
+	if err := os.Symlink(real, link); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	t.Setenv("HOME", link)
+	t.Setenv("USERPROFILE", link)
+
+	folded := swapCase(link)
+	if folded == link {
+		t.Skipf("%q has no letters to fold", link)
+	}
+	if got := ShortDir(filepath.Join(folded, "src", "toktop")); got != "src/toktop" {
+		t.Errorf("nested under a home spelled another case = %q, want src/toktop", got)
+	}
+	if got := ShortDir(folded); got != "~" {
+		t.Errorf("home itself spelled another case = %q, want ~", got)
+	}
+}
+
+// swapCase flips the case of the ASCII letters in a path, leaving the rest
+// alone. The result is a spelling of the same directory on the platforms
+// that fold case, and a different one everywhere else.
+func swapCase(p string) string {
+	var b strings.Builder
+	for _, r := range p {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r - 'a' + 'A')
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r - 'A' + 'a')
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}

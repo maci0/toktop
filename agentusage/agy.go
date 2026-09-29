@@ -144,7 +144,7 @@ func agyIndex(root string) (map[string]string, bool) {
 	agyHistMu.Lock()
 	c := agyHistCache
 	agyHistMu.Unlock()
-	if c.root == root && c.hist == hs && c.last == ls && c.ids != nil {
+	if SameDir(c.root, root) && c.hist == hs && c.last == ls && c.ids != nil {
 		return c.ids, true
 	}
 	// The two loads below read up to agyIndexCap each and can block in the kernel

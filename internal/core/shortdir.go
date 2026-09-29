@@ -41,15 +41,64 @@ func stripHome(dir string) (string, bool) {
 	// filepath.Rel compares bytes. Skipped, the relation came back "..",
 	// the home was not stripped, and the note kept the whole absolute path,
 	// account name included, which is the one thing stripping it prevents.
+	// relUnder then matches the way the platform's file system does, which
+	// is where RedactHome's case fold is picked up too.
 	cleanDir, cleanHome := normalizeSpelling(resolvePath(dir)), normalizeSpelling(resolvePath(home))
-	rel, err := filepath.Rel(cleanHome, cleanDir)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	rel, ok := relUnder(cleanHome, cleanDir)
+	if !ok {
 		return "", false
 	}
 	if rel == "." {
 		return "~", true
 	}
 	return "~/" + filepath.ToSlash(rel), true
+}
+
+// relUnder returns dir relative to home and whether dir lies under home.
+// Windows already matches path elements case-insensitively, so filepath.Rel
+// covers it; macOS file systems look names up that way too and Rel compares
+// bytes, so a home spelled "/Users/dev" against a working directory spelled
+// "/users/dev/proj" would come back "..", the home would not be stripped, and
+// the note would carry the account name. Everywhere else two spellings really
+// are two directories, so folding one into the other would hide the path that
+// matters.
+func relUnder(home, dir string) (string, bool) {
+	if rel, err := filepath.Rel(home, dir); err == nil && !escapesHome(rel) {
+		return rel, true
+	}
+	if !lookupFoldsCase() {
+		return "", false
+	}
+	return relUnderFolded(home, dir)
+}
+
+// relUnderFolded is relUnder for the platforms that fold case. It walks the
+// two paths element by element and returns the elements of dir that home does
+// not cover, so the result keeps dir's own spelling.
+func relUnderFolded(home, dir string) (string, bool) {
+	sep := string(filepath.Separator)
+	// Clean first: the split has to see the same components Rel would.
+	hParts := strings.Split(filepath.Clean(home), sep)
+	dParts := strings.Split(filepath.Clean(dir), sep)
+	if len(dParts) < len(hParts) {
+		return "", false
+	}
+	for i, part := range hParts {
+		if !strings.EqualFold(part, dParts[i]) {
+			return "", false
+		}
+	}
+	rest := dParts[len(hParts):]
+	if len(rest) == 0 {
+		return ".", true
+	}
+	return filepath.Join(rest...), true
+}
+
+// escapesHome reports whether a filepath.Rel result left the directory it was
+// computed against, which is how a path that is not under home says so.
+func escapesHome(rel string) bool {
+	return rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // maxPathWalk bounds how many ancestors resolvePath climbs. A path of

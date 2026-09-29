@@ -787,6 +787,11 @@ toktop completion zsh  > "${fpath[1]}/_toktop"             # a directory on your
 toktop completion fish > ~/.config/fish/completions/toktop.fish
 ```
 
+Those paths are the directories the shells read on a POSIX system. On Windows
+the same three scripts run under whatever bash, zsh or fish you installed
+(Git Bash, WSL, MSYS2), but none of the example paths exists there: redirect
+to the directory that shell's completion setup reads.
+
 The script is generated from the flags this build actually defines, so a new
 flag is completed the day it lands and the completion never goes stale. It
 completes the subcommands and their own flags (`toktop update --<TAB>` offers
