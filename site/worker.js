@@ -590,12 +590,15 @@ function pageBody(coding, request, started) {
         // will not turn up later, so the slot keeps that answer rather than
         // retrying a build this isolate cannot make. Anything else (out of
         // memory, a stream that dies mid-pipeline) would ship the page at
-        // its uncompressed size forever without a word, so name it.
+        // its uncompressed size forever without a word, so name it, with the
+        // frames that say where the build died.
+        const stack = stackLine(err);
         logFailure(request, "coding-dropped", {
           ...requestFields(request, started),
           coding,
           // A throw carries any value, null included, so err may have no message.
           error: String(err?.message ?? err),
+          ...(stack === "" ? {} : { stack }),
         });
         return null;
       }),
@@ -804,6 +807,23 @@ function reasonLine(text) {
   return text.replace(CONTROL_CHARS_RE, " ").trim().slice(0, 200);
 }
 
+// How much of a stack one line carries. Bounded like the reason beside it and
+// for the same reason: the line is one JSON object, so the stack is folded
+// onto it rather than left to break the format Workers Logs reads.
+const maxStackLength = 2048;
+
+// The stack behind an unhandled throw, folded and capped, or an empty string
+// when the thrown value carries none. A throw that reaches the top of fetch is
+// the one failure on this site an operator cannot reproduce: the request that
+// caused it is a visitor's, on an isolate that is gone by the time anyone reads
+// the line, and a message alone ("x is not a function") names neither the call
+// nor the deploy it came from. Folded to one line because the log format is one
+// JSON object per line, which a raw multi-line stack would split.
+function stackLine(err) {
+  if (typeof err?.stack !== "string") return "";
+  return err.stack.replace(CONTROL_CHARS_RE, " ").trim().slice(0, maxStackLength);
+}
+
 // captureUnavailable names why the captures are not being served, or null
 // when they are. The read is one HEAD against a store that answers it from the
 // edge cache, once per probe, which is what a probe interval is measured in;
@@ -864,15 +884,21 @@ const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=3600";
 export default {
   // Every throw below would otherwise reach the client as the edge's opaque
   // 1101 page with nothing in Workers Logs to explain it. Name the request,
-  // the reason and how long it took, then answer with the same plain-text
-  // envelope every other failure here uses, so a client can still act on it.
+  // the reason, the stack it unwound through and how long it took, then answer
+  // with the same plain-text envelope every other failure here uses, so a
+  // client can still act on it.
   async fetch(request, env) {
     const started = Date.now();
     try {
       return await handle(request, env, started);
     } catch (err) {
+      // A throw carries any value, null included, so err may have no message
+      // and no stack; the line carries the stack only when there is one rather
+      // than an empty field that reads like a stack of nothing.
+      const stack = stackLine(err);
       return failRequest(request, started, 500, "unhandled", "internal error", undefined, {
         error: String(err?.message ?? err),
+        ...(stack === "" ? {} : { stack }),
       });
     }
   },

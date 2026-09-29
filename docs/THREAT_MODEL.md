@@ -552,8 +552,11 @@ Deployment surface:
   `path` on the `method-not-allowed`, `assets-unbound`, `asset-missing`,
   `asset-store-error`, and `unhandled` lines (`failRequest`, with the shared
   field set in `requestFields`). The unhandled line adds
-  `error: String(err?.message ?? err)`, a thrown message from the asset store
-  or the runtime rather than from the caller. The values are JSON-encoded, so
+  `error: String(err?.message ?? err)` and, when the thrown value carries one,
+  a `stack` folded onto a single bounded line (`stackLine`). Both are a thrown
+  message from the asset store or the runtime rather than from the caller, and
+  the stack is a path list from this repo, not a caller string. The values are
+  JSON-encoded, so
   this is not injection into the log, but a caller can write arbitrary
   strings into the log stream. `REFUSAL_LOG_CAP` and `loggedPerEvent` are
   what keep one caller from writing that many lines: the log is bounded per
@@ -1057,9 +1060,10 @@ Other claims checked against code on this pass, all of which hold as written:
   `ok` for an upload that never took effect.
 - Every answer carries `server-timing: edge;dur=<ms>`. It names the worker,
   not an origin, so it adds no disclosure.
-- `failRequest` (:632) adds `error: String(err?.message ?? err)` to the
-  unhandled-500 line, so a thrown message from the asset store or the runtime
-  reaches Workers Logs alongside the caller-controlled `cf-ray`. The
+- `failRequest` (:632) adds `error: String(err?.message ?? err)` and the
+  folded `stack` to the unhandled-500 line, so a thrown message from the asset
+  store or the runtime reaches Workers Logs alongside the caller-controlled
+  `cf-ray`, and the deploy that threw can be named from the frames. The
   caller-controlled set is unchanged in kind: JSON-encoded, so still
   caller-chosen strings in a log stream, not injection.
 - The bearer call sites re-verified: `Set` at :51, `Allow` at :68,

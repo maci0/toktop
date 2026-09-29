@@ -583,8 +583,13 @@ test("a coding the runtime cannot build is logged with the request behind it", a
         duration_ms: expect.any(Number),
         coding: "gzip",
         error: "gzip unavailable",
+        // The frames ride along for the same reason the unhandled line's do:
+        // a build that dies mid-pipeline leaves the page uncompressed for the
+        // isolate's life, and the message alone says which format, not where.
+        stack: expect.stringContaining("gzip unavailable"),
       },
     ]);
+    expect(logs.parse()[0].stack).not.toContain("\n");
   } finally {
     logs.restore();
     globalThis.CompressionStream = NativeCompressionStream;
@@ -1524,6 +1529,13 @@ test("an unhandled throw answers 500 and logs the request that caused it", async
     expect(line.error).toBe("asset store unreachable");
     expect(line.status).toBe(500);
     expect(typeof line.duration_ms).toBe("number");
+    // The stack rides along because nothing else on the line says where the
+    // throw came from: the request that caused it belongs to a visitor and the
+    // isolate is gone by the time anyone reads the line. Folded onto one line,
+    // since a raw stack would split the JSON object Workers Logs reads.
+    expect(line.stack).toContain("Error: asset store unreachable");
+    expect(line.stack).toContain("worker.js");
+    expect(line.stack).not.toContain("\n");
     // The failing request is measurable the same way a served one is, so a
     // visitor's report and the log agree on what it cost.
     expect(res.headers.get("server-timing")).toMatch(DUR_SUFFIX_RE);

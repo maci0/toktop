@@ -205,11 +205,11 @@ a line per visit would bury the few that name a broken deploy.
 
 | `event` | means |
 | --- | --- |
-| `unhandled` | a throw reached the top of `fetch`; the client gets a plain 500 instead of the edge's opaque 1101 page |
+| `unhandled` | a throw reached the top of `fetch`; the client gets a plain 500 instead of the edge's opaque 1101 page. The `error` names the throw and the `stack`, when the thrown value carries one, is folded onto the same line: the request that caused it is a visitor's on an isolate that is gone by the time anyone reads the line, so the frames are the only thing that says which deploy threw |
 | `asset-missing` | the asset store answered 404 or 410 for a capture, the client gets the same `not found` either way |
 | `asset-store-error` | the asset store answered 5xx |
 | `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 and `/health` reports `degraded` |
-| `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size |
+| `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size, and the `stack` says where the build died |
 | `health-degraded` | `/health` answered 503 because the captures are not served: no binding, or the store cannot produce the share card. The `reason` field says which; the healthy answer logs nothing |
 | `method-not-allowed` | a method the path does not take, on the page or on an image |
 | `not-acceptable` | the client refused every encoding the isolate can produce, so the page cannot be sent to it at all |

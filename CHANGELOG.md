@@ -13,6 +13,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- The site's `unhandled` line carries the stack behind the throw, folded onto
+  the one JSON object Workers Logs reads. A throw that reached the top of
+  `fetch` is the one failure on the site nobody can reproduce: the request
+  belongs to a visitor and the isolate is gone by the time the line is read, so
+  a message alone named neither the call nor the deploy it came from.
+
 ### Added
 
 - `--plain` without `--once` now runs the linear text report live, with the
