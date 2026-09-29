@@ -54,6 +54,12 @@ var (
 	// numerically right beside it ("2/3 engines"), so color is redundant.
 	dotWarn = styleWarn.Render("●")
 
+	// The strip separator, rendered once. Every SYS, header and agent row
+	// joins on it, and the joiner re-rendered the same three cells from a
+	// literal at each call site: a Style.Render is a word-wrap and a width
+	// measurement, and a frame spends those on a constant.
+	sepDim = styleDim.Render(" │ ")
+
 	kindStyles = map[string]lipgloss.Style{
 		core.KindOllama:    lipgloss.NewStyle().Foreground(cYellow),
 		core.KindVLLM:      lipgloss.NewStyle().Foreground(cGreen),

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -75,17 +76,67 @@ func formatHexRGB(r, g, b uint64) string {
 // background, bloom or no bloom.
 const minGraphicContrast = 3.0
 
+// rgb is a parsed "#rrggbb" color, cached so a per-column fade does not
+// re-parse the same palette entry for every column of every chart.
+type rgb struct {
+	r, g, b uint64
+	ok      bool
+}
+
+// colorMemo caches work keyed by a color string. The chart fade asks for one
+// color per column of every chart, on every frame, and the colors it asks
+// about are drawn from a five-entry palette, so a live dashboard cycles
+// through a bounded set of keys. The cap bounds it regardless: a caller that
+// keeps producing fresh keys falls back to computing rather than growing the
+// map for the life of the process.
+type colorMemo[T any] struct {
+	mu    sync.Mutex
+	items map[string]T
+}
+
+// cap is where a memo drops itself. Sized above the palette a dashboard
+// actually cycles through, so the steady state never reaches it.
+const colorMemoCap = 512
+
+func (m *colorMemo[T]) load(key string, build func() T) T {
+	m.mu.Lock()
+	if v, ok := m.items[key]; ok {
+		m.mu.Unlock()
+		return v
+	}
+	m.mu.Unlock()
+	v := build()
+	m.mu.Lock()
+	if m.items == nil {
+		m.items = make(map[string]T, colorMemoCap)
+	}
+	if len(m.items) >= colorMemoCap {
+		clear(m.items)
+	}
+	m.items[key] = v
+	m.mu.Unlock()
+	return v
+}
+
+// hexRGB memoizes parseHexRGB. The fade runs it once per column, on colors
+// the heat palette hands out by constant, so the same handful of strings were
+// being split and re-parsed a few hundred times a frame.
+var hexRGB colorMemo[rgb]
+
 // fadeClamped blends c toward black by factor f, but never past the darkest
 // point that still meets min contrast against the dashboard background, so
 // the age fade cannot melt data past legibility. Colors that cannot reach
 // the floor at all (non-hex encodings, colors darker than the background)
 // come back at full strength rather than half-hidden.
 func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
-	r0, g0, b0, ok := parseHexRGB(c)
-	if !ok {
+	parsed := hexRGB.load(string(c), func() rgb {
+		r, g, b, ok := parseHexRGB(c)
+		return rgb{r: r, g: g, b: b, ok: ok}
+	})
+	if !parsed.ok {
 		return c
 	}
-	rf, gf, bf := float64(r0), float64(g0), float64(b0)
+	rf, gf, bf := float64(parsed.r), float64(parsed.g), float64(parsed.b)
 
 	// The three conversions index linearChannel, so a factor outside 0..1
 	// (or NaN) would index past the array rather than blend. clamp01 also
@@ -136,7 +187,18 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 
 	dotH := h * 4
 	levels := make([]float64, w)
-	colColors := make([]lipgloss.Color, w)
+	// One style render per column, not per cell: a cell's bytes are its
+	// color's escape prefix, the dot rune and the reset suffix, and only the
+	// middle one changes as the pattern fills in. Style.Render measured the
+	// widest part of this loop (word wrap, getLines, width on every call), so
+	// the escape run is taken once per column and the cells concatenate.
+	//
+	// The run is indexed by column, not looked up by color in a map. The age
+	// fade gives every column its own color, so such a map never hit: it cost
+	// a Style.Render per column and a map hash per cell, which is a chart's
+	// cells rather than its columns. styleSides is memoized by color instead,
+	// so a column that keeps its color across frames is rendered once ever.
+	colSides := make([][2]string, w)
 	denom := float64(max(w-1, 1))
 	for cx := range w {
 		frac := clamp01(cols[cx] / peak)
@@ -146,20 +208,9 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 			f := 0.30 + 0.70*(float64(cx)/denom)
 			col = fadeClamped(col, f, minGraphicContrast)
 		}
-		colColors[cx] = col
-	}
-
-	// One style render per column, not per cell: a cell's bytes are its color's
-	// escape prefix, the dot rune and the reset suffix, and only the middle one
-	// changes as the pattern fills in. Style.Render measured the widest part of
-	// this loop (word wrap, getLines, width on every call), so the escape run
-	// is taken once per color and the cells concatenate.
-	sides := make(map[string][2]string, w)
-	for cx := range w {
-		col := colColors[cx]
-		if _, ok := sides[string(col)]; !ok {
-			sides[string(col)] = styleSides(lipgloss.NewStyle().Foreground(col))
-		}
+		colSides[cx] = sideMemo.load(string(col), func() [2]string {
+			return styleSides(lipgloss.NewStyle().Foreground(col))
+		})
 	}
 
 	rows := make([]strings.Builder, h)
@@ -182,7 +233,7 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 				rows[cy].WriteByte(' ')
 				continue
 			}
-			sd := sides[string(colColors[cx])]
+			sd := colSides[cx]
 			rows[cy].WriteString(sd[0])
 			rows[cy].WriteRune(0x2800 + rune(pattern))
 			rows[cy].WriteString(sd[1])
@@ -229,6 +280,12 @@ func styleSides(st lipgloss.Style) [2]string {
 	}
 	return [2]string{out[:at], out[at+1:]}
 }
+
+// sideMemo holds the escape runs styleSides has already recovered. A chart
+// fades one color per column, but the palette behind it is a handful of
+// entries, so the same color comes back on the next frame and the run it
+// resolved to is reused rather than re-rendered.
+var sideMemo colorMemo[[2]string]
 
 // wrap applies a style's escape run around s. It is Style.Render for text this
 // package has already measured and knows to be a single line of cells: the

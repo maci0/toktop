@@ -96,7 +96,7 @@ type headerSeg struct {
 // segments is joined with. The separator is the same string on every pair, so
 // its styled width is measured once rather than inside the shed loop, which
 // re-rendered and re-walked it on every pass.
-var headerSegWidth = sync.OnceValue(func() int { return lipgloss.Width(dim(" │ ")) })
+var headerSegWidth = sync.OnceValue(func() int { return lipgloss.Width(sepDim) })
 
 // fitSegments sheds the highest-numbered segments (rightmost first) until
 // the dim-piped row fits avail cells. When nothing sheddable remains it hard
@@ -147,7 +147,7 @@ func fitSegments(segs []headerSeg, avail int) string {
 	for i, s := range kept {
 		parts[i] = s.text
 	}
-	line := strings.Join(parts, dim(" │ "))
+	line := strings.Join(parts, sepDim)
 	if w := lipgloss.Width(line); w > avail {
 		line = clip(line, avail)
 	}

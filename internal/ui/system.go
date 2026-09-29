@@ -115,15 +115,34 @@ func (m Model) renderSystem() string {
 // temperature cap), which have to land in the same number as the ones the pack
 // shed, or the row carries two "+N more" a reader cannot tell apart.
 func packSegs(segs []string, w int, extraHidden int) string {
-	_, kept := joinSpreadLeft(segs, w)
+	// Segment widths are measured once, into a prefix sum, so asking how wide
+	// a prefix is, or whether the overflow marker now fits beside it, is
+	// arithmetic. The shed search walked the whole row it had just built for
+	// every candidate it tried, once per segment it dropped, so a host with
+	// several accelerators and sensors paid a full re-measure of the strip per
+	// candidate.
+	sums := make([]int, len(segs)+1)
+	for i, s := range segs {
+		wSeg := widthOf(s)
+		if i > 0 {
+			wSeg = widthOf(sepDim + s)
+		}
+		sums[i+1] = sums[i] + wSeg
+	}
+	kept := 0
+	for kept < len(segs) && sums[kept+1] <= w {
+		kept++
+	}
 	hidden := extraHidden + len(segs) - kept
 	if hidden == 0 {
 		return spreadRow(segs)
 	}
+	sepW := widthOf(sepDim)
 	for kept > 0 {
 		for _, form := range moreForms(hidden) {
-			if row := spreadRow(slices.Concat(segs[:kept], []string{dim(form)})); widthOf(row) <= w {
-				return row
+			mark := dim(form)
+			if sums[kept]+sepW+widthOf(mark) <= w {
+				return spreadRow(slices.Concat(segs[:kept], []string{mark}))
 			}
 		}
 		kept--
@@ -138,7 +157,7 @@ func packSegs(segs []string, w int, extraHidden int) string {
 // spreadRow joins segs with the strip's separator, for the one place that has
 // to rebuild a packed row instead of appending to it.
 func spreadRow(segs []string) string {
-	return strings.Join(segs, dim(" │ "))
+	return strings.Join(segs, sepDim)
 }
 
 // hostSegmentLimits caps each identity segment's cells. The SYS strip packs

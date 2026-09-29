@@ -83,12 +83,18 @@ func (c *Collector) startProcPoller(ctx context.Context) <-chan struct{} {
 	return core.TickWith(ctx, c.pacer(), c.interval, refresh, refresh)
 }
 
-// procSnapshot returns the latest cached engine processes, detached from the
-// poller's buffer so a later refresh cannot mutate a snapshot already in emit.
-func (c *Collector) procSnapshot() []procs.Info {
+// procByPort indexes the latest cached engine processes by their effective
+// listen port, read under the poller's lock so a refresh cannot land mid-walk.
+//
+// The index is a copy by construction: it holds procs.Info values, and emit
+// reads three scalars out of each hit, so nothing it hands out points into
+// the poller's buffer. The process list therefore does not have to be cloned
+// first, which is what it used to be: the whole table was copied per tick and
+// then copied again into the index, and neither copy outlived the tick.
+func (c *Collector) procByPort() map[int]procs.Info {
 	c.procMu.Lock()
 	defer c.procMu.Unlock()
-	return slices.Clone(c.procCache)
+	return procsByPort(c.procCache)
 }
 
 // cloneSys copies a vitals sample so a snapshot handed to the UI does not

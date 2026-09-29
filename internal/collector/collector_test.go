@@ -1589,13 +1589,16 @@ func TestEmitSysSampleDetachedFromCache(t *testing.T) {
 	}
 }
 
-func TestProcSnapshotDetachedFromCache(t *testing.T) {
+func TestProcByPortDetachedFromCache(t *testing.T) {
 	c := New(nil, time.Hour)
-	c.procCache = []procs.Info{{PID: 1, RSS: 10}}
-	got := c.procSnapshot()
-	got[0].PID = 99
-	if c.procCache[0].PID != 1 {
-		t.Fatalf("procSnapshot aliased the cache: %+v", c.procCache)
+	c.procCache = []procs.Info{{PID: 1, RSS: 10, PortHint: 8000}}
+	got := c.procByPort()
+	got[8000] = procs.Info{PID: 99}
+	c.procMu.Lock()
+	cached := c.procCache[0]
+	c.procMu.Unlock()
+	if cached.PID != 1 {
+		t.Fatalf("procByPort aliased the cache: %+v", cached)
 	}
 }
 

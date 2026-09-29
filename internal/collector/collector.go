@@ -402,7 +402,7 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// inside the critical section would stall RecordAgent/ProbeAll for the
 	// whole vendor-CLI sweep on a cold cache.
 	sys := c.sysSnapshot()
-	byPort := procsByPort(c.procSnapshot())
+	byPort := c.procByPort()
 
 	c.mu.Lock()
 	// Engine health transitions, collected under the lock and logged after it:

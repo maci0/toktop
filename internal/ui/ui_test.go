@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -3250,4 +3251,69 @@ func TestTickStampsHeaderFromTheInjectedClock(t *testing.T) {
 	if got := nm.(Model).clock; !got.Equal(wall) {
 		t.Errorf("header clock after SetNow(nil) = %v, want the tick instant %v", got, wall)
 	}
+}
+
+// packSegs measures segment widths into a prefix sum instead of re-measuring
+// the built row for every overflow marker it tries. This pins the result to
+// the row-at-a-time packing it replaced, across widths that land on either
+// side of every segment boundary and either side of every marker form.
+func TestPackSegsMatchesRowAtATimePacking(t *testing.T) {
+	// packSegsRows is the packing packSegs replaced: build the row, measure
+	// it, shed a segment, repeat.
+	packSegsRows := func(segs []string, w, extraHidden int) string {
+		_, kept := joinSpreadLeftRows(segs, w)
+		hidden := extraHidden + len(segs) - kept
+		if hidden == 0 {
+			return spreadRow(segs)
+		}
+		for kept > 0 {
+			for _, form := range moreForms(hidden) {
+				if row := spreadRow(slices.Concat(segs[:kept], []string{dim(form)})); widthOf(row) <= w {
+					return row
+				}
+			}
+			kept--
+			hidden++
+		}
+		return dim(bareMoreForm(hidden))
+	}
+	sets := [][]string{
+		nil,
+		{"ld 0.42"},
+		{"ld 0.42", "gpu0 61%", "gpu1 12%"},
+		{"2/3 engines", "cpu 9950X", "linux 6.9", "nvidia 570.1"},
+		{"a", "b", "c", "d", "e", "f", "g", "h"},
+		{"wide segment that eats most of a narrow strip", "x"},
+	}
+	for _, segs := range sets {
+		for w := 0; w <= 90; w++ {
+			for _, extra := range []int{0, 2, 17} {
+				want := packSegsRows(segs, w, extra)
+				if got := packSegs(segs, w, extra); got != want {
+					t.Fatalf("packSegs(%q, %d, %d) = %q, want %q", segs, w, extra, got, want)
+				}
+			}
+		}
+	}
+}
+
+// joinSpreadLeftRows is the packing packSegs replaced, kept here as the
+// reference the prefix-sum version is checked against.
+func joinSpreadLeftRows(segs []string, w int) (string, int) {
+	var b strings.Builder
+	used, kept := 0, 0
+	for _, s := range segs {
+		seg := sepDim + s
+		if kept == 0 {
+			seg = s
+		}
+		sw := widthOf(seg)
+		if used+sw > w {
+			break
+		}
+		b.WriteString(seg)
+		used += sw
+		kept++
+	}
+	return b.String(), kept
 }
