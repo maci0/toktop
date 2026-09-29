@@ -59,30 +59,20 @@ const maxEventSkew = 2 * time.Minute
 // says and ignores the other retries faster than the slots free.
 const retryAfterSeconds = 1
 
-// maxEventLifetime and bodyIdleTimeout bound how long one POST may hold the
-// connection. The byte cap above limits volume, not time: a peer that sends
-// headers and then drips bytes (or goes silent mid-body) would otherwise pin
-// an fd and a goroutine apiece until it finishes, and IdleTimeout does not
-// apply mid-request. The absolute deadline caps total lifetime; each
-// successful read extends the deadline up to that end, so slow-but-alive
-// NDJSON streams keep working while silent ones are reaped. Both are vars so
-// tests can shrink them.
-var (
-	maxEventLifetime = 10 * time.Minute
-	bodyIdleTimeout  = time.Minute
-	// responseWriteTimeout bounds writing the status line and tiny JSON
-	// body after the request has been read. Without it a peer that stops
-	// reading pins the handler goroutine until the OS TCP timeout.
-	responseWriteTimeout = 30 * time.Second
-)
-
 // progressBody arms the read deadline before every read: no progress within
-// bodyIdleTimeout, or past the absolute end, surfaces as an i/o timeout from
-// Decode. Deadline setting is best effort; on ResponseWriters without
-// support the body degrades to volume-only capping.
+// idle, or past the absolute end, surfaces as an i/o timeout from Decode.
+// Deadline setting is best effort; on ResponseWriters without support the body
+// degrades to volume-only capping.
+//
+// idle and life are this server's bodyIdleTimeout and maxEventLifetime,
+// carried here rather than read from a package var, so the deadlines a
+// request is held to and the bound its 408 names are the same two values the
+// server was built with.
 type progressBody struct {
 	io.ReadCloser
 	rc    *http.ResponseController
+	idle  time.Duration
+	life  time.Duration
 	until time.Time
 	last  time.Time // the deadline the read that failed was armed with
 	// armed records whether a deadline of ours was ever accepted. It is false
@@ -103,7 +93,7 @@ func (b *progressBody) arm(deadline time.Time) error {
 }
 
 func (b *progressBody) Read(p []byte) (int, error) {
-	next := time.Now().Add(bodyIdleTimeout)
+	next := time.Now().Add(b.idle)
 	if next.After(b.until) {
 		next = b.until
 	}
@@ -123,9 +113,9 @@ func (b *progressBody) stallReason() string {
 		return "request stalled: the server's read timeout fired, not this endpoint's body limits"
 	}
 	if b.last.Before(b.until) {
-		return fmt.Sprintf("request stalled: no body bytes for %s", bodyIdleTimeout)
+		return fmt.Sprintf("request stalled: no body bytes for %s", b.idle)
 	}
-	return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", maxEventLifetime)
+	return fmt.Sprintf("request stalled: stream exceeded the %s lifetime", b.life)
 }
 
 // clientEventKey is the caller-supplied idempotency token for this POST, if
@@ -175,7 +165,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// would never come back. Same reason handleHealth binds it, to read len and
 	// cap of one channel.
 	slots := eventSlots
-	reqID := requestID(r)
+	reqID := s.requestID(r)
 	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
 	// keyAttrs is the request's replay key on the audit line, hashed into the
 	// same prefix the derived event ids carry (derivedKeyPrefix). It is filled
@@ -214,7 +204,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// the way progressBody.armed records whether a read deadline was accepted.
 	var writeArm []any
 	armWrite := func() {
-		if err := rc.SetWriteDeadline(time.Now().Add(responseWriteTimeout)); err != nil {
+		if err := rc.SetWriteDeadline(time.Now().Add(s.responseWriteTimeout)); err != nil {
 			writeArm = []any{"write_deadline_unarmed", logcfg.RedactedField(err.Error(), 256)}
 		} else {
 			writeArm = nil
@@ -243,8 +233,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			append([]any{"in_flight", len(slots), "slot_cap", cap(slots)}, writeArm...)...)
 		return
 	}
-	until := time.Now().Add(maxEventLifetime)
-	progress := &progressBody{ReadCloser: r.Body, rc: rc, until: until}
+	until := time.Now().Add(s.maxEventLifetime)
+	progress := &progressBody{ReadCloser: r.Body, rc: rc, idle: s.bodyIdleTimeout, life: s.maxEventLifetime, until: until}
 	_ = progress.arm(until) // covers reads before the first progress extension
 	r.Body = http.MaxBytesReader(w, progress, maxEventBody)
 	br := bufio.NewReader(r.Body)

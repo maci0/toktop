@@ -444,8 +444,10 @@ bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. An accept failure that ends the
 endpoint writes one ERROR line naming the bound address and the reason.
 Responses carry `X-Request-Id`, echoed from the request when the sender set
-one and freshly minted when it did not, so every answer is correlatable to its
-audit line either way. An echoed id is single-lined and cut to 64 characters,
+one and minted from a per-server counter when it did not, so every answer is
+correlatable to its
+audit line either way and a request sequence replayed against a fresh server
+mints the same ids twice. An echoed id is single-lined and cut to 64 characters,
 so an id longer than that comes back truncated rather than as it was sent. The
 id is a correlation id only: the `req` on the log
 line is the same value, and neither it nor the sender's own key is read as an

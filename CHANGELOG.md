@@ -24,6 +24,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A request that arrives without an `X-Request-Id` is minted one from a
+  per-server counter instead of OS entropy. The minted id lands in the
+  answer's header and on the audit line, so the same request sequence against
+  a fresh server now produces the same transcript twice, which is what lets a
+  run be diffed against a baseline.
+- The POST body bounds are the per-server values the server was built with.
+  The handler read package-level durations while the server carried its own
+  fields, so a server built with tighter bounds still held a stalled body for
+  the full minute idle window and the full 10 minute stream lifetime, and the
+  `408` it finally wrote named those bounds rather than the ones in force.
 - The host-key pin store is no longer left with no copy beside it. A
   `known_hosts.bak` write that failed was warned about once, at the write,
   and a run that never connected again left the store the only record of

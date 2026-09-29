@@ -2,7 +2,6 @@ package ingest
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"net"
@@ -103,7 +102,7 @@ func loopbackHostGuard(addr net.Addr) func(string) bool {
 func (s *Server) wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		setSecurityHeaders(w.Header())
-		id := incomingRequestID(r)
+		id := s.incomingRequestID(r)
 		w.Header().Set("X-Request-Id", id)
 		state := &requestState{id: id}
 		r = r.WithContext(context.WithValue(r.Context(), ctxRequest{}, state))
@@ -172,18 +171,25 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 // rather than its own value, so the cap is stated in the README.
 const maxRequestID = 64
 
-func incomingRequestID(r *http.Request) string {
+// incomingRequestID is the caller's own id when it sent one, and a counter
+// derived name when it did not. The counter is per server and starts at one,
+// so a request sequence replayed against a fresh server produces the same
+// transcript twice: the ids land in the answer's headers and in the audit
+// line, and a run that cannot be replayed cannot be diffed against a
+// baseline. The id is a correlation handle, not a secret, and it is minted
+// only when the sender supplied nothing to correlate against.
+func (s *Server) incomingRequestID(r *http.Request) string {
 	if v := logcfg.Field(r.Header.Get("X-Request-Id"), maxRequestID); v != "" {
 		return v
 	}
-	return rand.Text()
+	return fmt.Sprintf("toktop-%012d", s.reqSeq.Add(1))
 }
 
-func requestID(r *http.Request) string {
+func (s *Server) requestID(r *http.Request) string {
 	if state, ok := r.Context().Value(ctxRequest{}).(*requestState); ok && state.id != "" {
 		return state.id
 	}
-	return incomingRequestID(r)
+	return s.incomingRequestID(r)
 }
 
 // logRequest writes the one audit line a finished request produces, success
