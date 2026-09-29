@@ -136,7 +136,9 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 	lg.Warn("toktop: probe failed", attrs...)
 }
 
-// ProbeAll launches one probe against every known backend, asynchronously.
+// ProbeAll launches one probe per backend whose last poll named a model, at
+// most probeWaveMax of them; a wider fleet rotates in on the next wave. A
+// backend with no known model is skipped rather than probed against a guess.
 // Probes ride the Run context so shutdown cancels in-flight generations
 // instead of leaving them running for the client's full timeout.
 func (c *Collector) ProbeAll() {

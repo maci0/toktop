@@ -237,7 +237,10 @@ func shortVendor(v string) string {
 	}
 }
 
-// sysCPUTemps filters out GPU hwmon readings; those arrive via SysSample.GPUs.
+// sysCPUTemps drops GPU-marked readings, which arrive via SysSample.GPUs
+// instead, but only when the sample carries GPU devices. With none, every
+// reading is kept: a host whose only temperature sensors are GPU-bound would
+// otherwise print no temperatures at all.
 func sysCPUTemps(sy *core.SysSample) []core.TempReading {
 	if sy == nil {
 		return nil

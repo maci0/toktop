@@ -57,8 +57,8 @@ const (
 )
 
 // The k suffix starts at a whole thousand, the same place fmtCount starts
-// it: 999.5 rendered "1.0k" while 999 read "999", so a rate under a thousand
-// carried the unit of a rate over it. unitRoundTo is the threshold for a
+// it: 999 reads "999" and 1000 reads "1.0k", so no rate under a thousand
+// carries the unit of a rate over it. unitRoundTo is the threshold for a
 // value about to be divided by a larger unit (fmtMs, where ms is compared
 // against it before the switch to seconds), not one to compare a raw
 // tok/s count against.

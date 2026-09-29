@@ -153,7 +153,8 @@ func engineStats(p core.ProviderSnapshot, w int) string {
 }
 
 // gaugesBody renders the healthy engines' detail blocks, three rows each (or
-// two when the host reports no memory, cpu or ttft for one) into the row
+// two when the engine reports neither vram, context length, rss nor ttft for
+// one) into the row
 // budget, and reports how many it drew. Same whole-block rule as
 // providersBody: a block that would not fit is dropped rather than cut, so
 // ENGINE STATE never ends on a kv bar with no engine named above it. The blank

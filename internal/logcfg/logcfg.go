@@ -44,7 +44,7 @@ func ParseLogLevel(s string) (slog.Level, error) {
 	case "error":
 		return slog.LevelError, nil
 	default:
-		return 0, fmt.Errorf("$%s must be debug, info, warn, or error, got %q", LevelEnv, s)
+		return 0, fmt.Errorf("$%s must be debug, info, warn (or warning), or error, got %q", LevelEnv, s)
 	}
 }
 

@@ -63,9 +63,11 @@ var vendorOrder = map[string]int{"nvidia": 0, "amd": 1, "intel": 2, "apple": 3}
 const maxXpuDevices = 4
 
 // Sample collects devices from every vendor present on the host.
-// Vendor CLIs are independent and each can take up to runTimeout, so they
-// run concurrently: a 1s nvidia-smi plus a 1s rocm-smi finishes in ~1s
-// instead of ~2s on the sysmon budget.
+// Vendor CLIs are independent, so they run concurrently: a 1s nvidia-smi
+// plus a 1s rocm-smi finishes in ~1s instead of ~2s. runTimeout bounds one
+// CLI invocation, not a vendor, and xpu-smi takes two rounds (discovery, then
+// metrics per device), so the whole sweep is bounded by sysmon's gpuBudget
+// rather than by runTimeout.
 func Sample(ctx context.Context) []core.GPUDevice {
 	var (
 		mu   sync.Mutex

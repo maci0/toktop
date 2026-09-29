@@ -167,8 +167,9 @@ that keeps its transcripts inside the project it works in:
 ```
 
 A program that writes that file marshals `agentusage.Definitions`, a map of
-agent name to `Definition` whose `Usage` field is the `Spec` above, so what it
-writes is the file `LoadDefinitions` reads. An entry carrying fields beside
+agent name to `*Definition` whose `Usage` field is a `*Spec`, the spec shape
+above, so what it writes is the file `LoadDefinitions` reads. An entry
+carrying fields beside
 `usage` survives a round trip, since the same file also describes how to
 launch an agent: decoding one keeps those keys in `Definition.Extra` as the
 raw JSON the file spelled them with, and writing the value again puts them
@@ -184,8 +185,8 @@ It needs Go 1.27, the version `go.mod` pins, and the `sqlite` build tag if you
 want crush and opencode (`go build -tags sqlite`); without it the package still
 compiles and `Supported` reports those two unreadable. Reading transcripts
 works on every platform, but `Discover` and `Peers` need a process table to
-read (procfs on Linux, `ps` on macOS) and report nothing elsewhere, so a
-program that runs on more than one platform should read an empty result as
+read (procfs on Linux; `ps` plus `lsof` on macOS) and report nothing elsewhere,
+so a program that runs on more than one platform should read an empty result as
 "no local agents here". Import
 `github.com/maci0/toktop/agentusage` to discover agent processes and read the
 token counts they already write:
@@ -304,7 +305,8 @@ dashboard also needs to know when an agent's tokens are already being counted
 by an engine it watches: `Peers` lists the TCP endpoints a process is
 connected to, `ConnectedTo` answers that for one process, and
 `MatchingEndpoints` maps many processes to the first of a set of endpoints each
-holds a connection to, reading the kernel's connection tables once. An empty
+holds a connection to, reading the kernel's connection tables once on Linux
+and falling back to one query per process elsewhere. An empty
 result from any of them means "cannot tell", which reads as "not connected".
 
 ## What it shows
@@ -588,7 +590,7 @@ technology:
 
   ```
   $ toktop --once --plain
-  toktop v0.20.0
+  toktop v0.22.0
 
   5/5 engines up · out 1.5k tok/s · in 10k tok/s · 2 agents · session 24s
 
