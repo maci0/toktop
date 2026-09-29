@@ -402,11 +402,12 @@ stripped. `go install` without ldflags reads the module version Go embeds, so
 not a leftover `0.1.0`.
 
 Push a tag `v*`: GitHub Actions tests (both halves of the sqlite tag gate),
-cross-compiles every platform, generates checksums, a buildinfo manifest, and
-a CycloneDX SBOM, and attaches binaries to the release. The buildinfo file
+cross-compiles every platform, generates checksums, a buildinfo manifest, a
+CycloneDX SBOM and the license text of every module the binary links, and
+attaches binaries to the release. The buildinfo file
 records the commit, toolchain, and flags behind the bytes, so a rebuild
 attempt has something to match; it is listed in checksums.txt too, as is
-the SBOM. `make dist-clean` keeps only the files the current `VERSION`
+the SBOM and the license file. `make dist-clean` keeps only the files the current `VERSION`
 publishes, so a leftover binary, SBOM, or tarball from an earlier local
 `make release` cannot be checksummed and shipped with this one. Versions with a prerelease suffix, such as
 `v0.6.0-rc.1`, are marked as prereleases and excluded from the stable
@@ -473,9 +474,9 @@ make release-verify VERSION=0.15.0
 ```
 
 The two globs are the whole asset set `release-verify` expects: the
-`toktop_<version>_*` binaries, buildinfo manifest and checksums tarball, and
-the `toktop-sbom-<version>*` file, which is spelled with a dash and is
-therefore not in the first glob.
+`toktop_<version>_*` binaries, buildinfo manifest, license file and checksums
+tarball, and the `toktop-sbom-<version>*` file, which is spelled with a dash
+and is therefore not in the first glob.
 
 The rebuild is byte-identical to what was published, which is what makes this
 safe under the rule that forbids replacing a published version: the checksums

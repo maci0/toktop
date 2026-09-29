@@ -5,6 +5,16 @@ VERSION ?= dev
 # VERSION is interpolated into -ldflags and dist filenames. Refuse values
 # that would break the shell, the linker flag, or the artifact name.
 CHECK_VERSION = printf '%s' '$(VERSION)' | grep -qE '^[A-Za-z0-9._+-]+$$' || { echo "make: VERSION must match [A-Za-z0-9._+-]+ (got '$(VERSION)')" >&2; exit 1; }
+# The files a release publishes that are not per-platform binaries, named once.
+# Every recipe that writes one spells the name from here, and release-verify
+# reads the same four names when it compares the published asset list against
+# what a VERSION produces: a name spelled in both places is a release that
+# uploads a file the restore drill then reports as unexpected.
+SBOM_ASSET      = $(BINARY)-sbom-$(VERSION).cdx.json
+BUILDINFO_ASSET = $(BINARY)_$(VERSION)_buildinfo.txt
+LICENSES_ASSET  = $(BINARY)_$(VERSION)_licenses.txt
+CHECKSUMS_ASSET = $(BINARY)_$(VERSION)_checksums.tar.gz
+RELEASE_ASSETS  = $(SBOM_ASSET) $(BUILDINFO_ASSET) $(LICENSES_ASSET) $(CHECKSUMS_ASSET)
 # A cut leaves an empty '## [Unreleased]' stub, and the stub is a heading
 # without a version. Only a versioned heading closes the section and names the
 # version the bump is compared against, so a stub anywhere below the new
@@ -586,7 +596,7 @@ sbom: ## generate CycloneDX SBOM of all dependencies into dist/
 	@$(CHECK_VERSION)
 	mkdir -p $(DIST)
 	$(GO) run $(SBOM_TOOL) \
-		mod -licenses -std -noserial -notimestamp -json -output $(DIST)/toktop-sbom-$(VERSION).cdx.json .
+		mod -licenses -std -noserial -notimestamp -json -output $(DIST)/$(SBOM_ASSET) .
 
 # The names a dependency uses for its license text, in the order they are
 # preferred. A module that grants under a name not on this list ships no grant
@@ -641,8 +651,8 @@ licenses: buildinfo ## write the license text of every module the binary links i
 				cat "$$text"; \
 				echo; \
 			done; \
-	} > $(DIST)/$(BINARY)_$(VERSION)_licenses.txt
-	@test -s $(DIST)/$(BINARY)_$(VERSION)_licenses.txt || \
+	} > $(DIST)/$(LICENSES_ASSET)
+	@test -s $(DIST)/$(LICENSES_ASSET) || \
 		{ echo "make licenses: wrote no module sections; the module list came back empty" >&2; exit 1; }
 
 # -tests=true turns on vet's tests analyzer, which is off by default. It reads
@@ -1407,7 +1417,7 @@ release: check-changelog check-api check-release-source sbom checksums ## build 
 dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 	@mkdir -p $(DIST)
 	@find $(DIST) -maxdepth 1 -type f ! -name '$(BINARY)_$(VERSION)_*' ! -name '$(BINARY)-sbom-$(VERSION)*' -delete
-	@rm -f $(DIST)/$(BINARY)_$(VERSION)_checksums.tar.gz
+	@rm -f $(DIST)/$(CHECKSUMS_ASSET)
 
 # The SBOM is named with a `-` where the binaries use `_`, so it needs its own
 # glob: the `$(BINARY)_*` list below would otherwise skip it. `make release`
@@ -1428,7 +1438,7 @@ checksums: sbom buildinfo licenses ## checksum the dist/ binaries into a byte-re
 		else \
 			shasum -a 256 "$$@" > checksums.txt && shasum -a 256 -c checksums.txt; \
 		fi
-	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > $(BINARY)_$(VERSION)_checksums.tar.gz && rm checksums.txt
+	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > $(CHECKSUMS_ASSET) && rm checksums.txt
 
 # Binaries of any earlier version are dropped first: leftovers would
 # otherwise ride the toktop_* glob into checksums.txt and the release.
@@ -1495,7 +1505,7 @@ buildinfo: dist-clean test-dist ## record the toolchain, commit, and flags behin
 		echo "goamd64: $(GOAMD64)"; \
 		echo "goarm64: $(GOARM64)"; \
 		echo "gofips140: $(GOFIPS140)"; \
-	} > $(DIST)/$(BINARY)_$(VERSION)_buildinfo.txt
+	} > $(DIST)/$(BUILDINFO_ASSET)
 
 # A published release is only a backup once something has fetched from it and
 # the bytes came back whole. The publish step's exit status is not that
@@ -1535,9 +1545,7 @@ release-verify: ## fetch every published asset for VERSION and re-verify its che
 		if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
 		printf '%s_%s_%s_%s%s\n' "$(BINARY)" "$(VERSION)" "$$goos" "$$goarch" "$$ext"; \
 	done; \
-	printf '%s-sbom-%s.cdx.json\n' "$(BINARY)" "$(VERSION)"; \
-	printf '%s_%s_buildinfo.txt\n' "$(BINARY)" "$(VERSION)"; \
-	printf '%s_%s_checksums.tar.gz\n' "$(BINARY)" "$(VERSION)"; } | sort > "$$dir/expected.txt"; \
+	for asset in $(RELEASE_ASSETS); do printf '%s\n' "$$asset"; done; } | sort > "$$dir/expected.txt"; \
 	awk '{ print $$2 }' "$$dir/published.txt" > "$$dir/names.txt"; \
 	missing=$$(grep -vxF -f "$$dir/names.txt" "$$dir/expected.txt" || true); \
 	extra=$$(grep -vxF -f "$$dir/expected.txt" "$$dir/names.txt" || true); \
@@ -1553,9 +1561,9 @@ release-verify: ## fetch every published asset for VERSION and re-verify its che
 	fi; \
 	awk '{ if ($$1 <= 0) { printf "  EMPTY      %s\n", $$2; exit 1 } }' "$$dir/published.txt" >&2 || exit 1; \
 	gh release download "$$tag" --repo $(RELEASE_REPO) --dir "$$dir" --pattern '$(BINARY)*$(VERSION)*' || exit 1; \
-	tar -xzf "$$dir/$(BINARY)_$(VERSION)_checksums.tar.gz" -C "$$dir/sums" || exit 1; \
+	tar -xzf "$$dir/$(CHECKSUMS_ASSET)" -C "$$dir/sums" || exit 1; \
 	listed=$$(cut -c67- "$$dir/sums/checksums.txt" 2>/dev/null | tr -d '*' | sort || true); \
-	unlisted=$$(grep -vxF -e "$$listed" -e "$(BINARY)_$(VERSION)_checksums.tar.gz" "$$dir/expected.txt" || true); \
+	unlisted=$$(grep -vxF -e "$$listed" -e "$(CHECKSUMS_ASSET)" "$$dir/expected.txt" || true); \
 	if [ -z "$$listed" ] || [ -n "$$unlisted" ]; then \
 		echo "make release-verify: $$tag's checksums.txt does not cover every artifact it should:" >&2; \
 		if [ -n "$$unlisted" ]; then sed 's/^/  UNLISTED   /' <<< "$$unlisted" >&2; fi; \

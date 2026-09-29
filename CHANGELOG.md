@@ -127,6 +127,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A tagged release no longer fails after it has published. The release job
+  uploads every file in `dist/`, so the license text added beside the SBOM went
+  up as an asset, and the restore drill that runs last compared the published
+  list against an expected list that did not name it and called the file
+  unexpected. The four non-platform assets are now named once and both the
+  recipes that write them and `release-verify` read that one list.
 - A crush store whose sessions total more token counters are meant to hold now
   reads as enormous rather than as nothing. The reading was refused outright,
   and since the store is re-read from the attach instant on every poll, the same
