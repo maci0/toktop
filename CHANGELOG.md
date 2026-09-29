@@ -757,6 +757,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   not execute the update meant to repair it, the state the restore exists to
   end. The file is left where it is and the checksummed download is installed
   over the missing path instead.
+- A `known_hosts.displaced` left behind by a write that landed is now removed
+  by the next connect. It holds the pins from before a write the store already
+  carries, so beside a store that is there it recovers nothing, while its name
+  keeps saying a write was interrupted: deleting the store to accept a host's
+  new key then read as a loss, and the rejected key was handed back and the
+  connect refused. A store that is missing keeps the copy, since a restore is
+  what reads it then.
 
 ## [0.22.0] - 2026-09-29
 

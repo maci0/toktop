@@ -15,8 +15,8 @@ somebody else's data.
 | --- | --- | --- |
 | ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts`; a config directory that is itself unusable names no store, and the run fails at connect (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
 | a copy of the store, refreshed by every write, and rewritten from the store by the next connect that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
-| the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
-| the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
+| the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, by the next connect once that replacement is in place (`clearSupersededCopy`), or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
+| the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`, created and removed by `internal/lockfile/lockfile.go`, which `lockStore` and `lockInstall` both take), removed on release, broken when older than a minute | `lockStore` |
 | a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/install.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
 | the install lock, while a replacement holds it | the installed binary plus `.lock` (`internal/selfupdate/install.go`, `installLockSuffix`), removed on release, broken when older than a minute | `lockInstall` |
 | the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/install.go`, `installDisplacing`) | `installDisplacing` |
@@ -65,9 +65,12 @@ installed binary with it:
 - `known_hosts.displaced` is cleared before `replaceFile` moves a store aside,
   and a copy that could not be cleared fails the write by name, so the
   operator learns which file has to be deleted by hand. One that survives a
-  replacement that did land is reported the same way, and one a restore has
-  already read the store back from is removed by that restore
-  (`clearInterruptedWrite`).
+  replacement that did land is reported the same way, and the next connect
+  removes it: beside a store that parses, it holds the pins from before a write
+  the store already carries, and its name answering `interruptedWrite` is what
+  would turn a later re-pin into a restore of the rejected key
+  (`clearSupersededCopy`). One a restore has already read the store back from
+  is removed by that restore (`clearInterruptedWrite`).
 - `known_hosts.lock` is removed on release and broken as stale after a minute
   (`lockStore`). It is the only file toktop creates and deletes in one write.
 - `.known_hosts-*` and `.toktop-update-*` are removed by the rename that
@@ -234,6 +237,14 @@ The half that makes an accidental deletion recoverable is
 hand with its copy intact, and the warning is the only thing that tells the
 operator the copy is there. It also holds that a store which was never written
 warns about nothing, so the first connect on a fresh install stays quiet.
+
+A copy the store has already superseded is the other half of that rule, and
+`internal/remote/knownhosts_superseded_test.go` pins it:
+`TestDeletingTheStoreAfterAClearedCopyStillRepins` deletes the store on purpose
+after a connect has cleared the copy the last write left behind, and holds that
+the rejected key is not handed back. `TestConnectKeepsACopyThatStillHoldsTheOnlyRecord`
+is the other side: a store that is missing keeps the copy a restore is about to
+read, because a copy is only superseded by a store that is there.
 
 Every write to the store is atomic (staged, fsynced, renamed, with the
 directory entry flushed afterwards) and cross-process serialized by a lock

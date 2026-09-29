@@ -154,6 +154,7 @@ func tofu() (ssh.HostKeyCallback, error) {
 	// the probe's error to report, not this one's to swallow.
 	restoreStore(path)
 	checkStoreCopy(path)
+	clearSupersededCopy(path)
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		if strings.ContainsAny(hostname, " \t\r\n\x00") {
 			return fmt.Errorf("invalid hostname %q: contains whitespace or newline", hostname)
@@ -673,6 +674,42 @@ func checkStoreCopy(path string) {
 			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
 			"reason", why)
 	}
+}
+
+// clearSupersededCopy removes a displaced copy whose replacement landed, which
+// is the leftover replaceFile warned about when its removal failed.
+//
+// Left beside a store that is there, the copy is evidence of nothing: it holds
+// the pins from before a write the store already carries, so it cannot recover
+// a loss the store did not have. Left in place, though, its name keeps
+// answering interruptedWrite, and a store the operator later deletes on purpose
+// reads as a write that died rather than as the re-pin it is. That reads the
+// copy back and hands over the key the deletion was meant to reject, and it
+// does so for as long as the leftover survives: nothing else removes it, since
+// the write that could not already happened.
+//
+// So every connect tries again, once the store is known to parse. A store that
+// is missing, or one that does not parse, keeps the copy: there it is the
+// fallback readKnownHosts would recover the store from, and a copy nobody could
+// delete is reported rather than retried in silence.
+func clearSupersededCopy(path string) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	if _, err := parseKnownHosts(path, b); err != nil {
+		return
+	}
+	displaced := displacedPath(path)
+	if err := os.Remove(displaced); err != nil {
+		if !os.IsNotExist(err) {
+			audit().Warn("toktop: superseded host key copy beside the store not removed",
+				"path", logcfg.RedactedField(core.RedactHome(displaced), logcfg.FieldCap),
+				"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
+		}
+		return
+	}
+	core.SyncDir(filepath.Dir(path))
 }
 
 // staleStoreCopy returns why the copy beside the store cannot recover it, and
