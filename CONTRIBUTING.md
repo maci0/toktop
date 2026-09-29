@@ -229,6 +229,7 @@ in day-to-day work:
 | `make check-release-source` | fail unless a non-dev VERSION builds from a clean, git-backed tree with a nonzero `SOURCE_DATE_EPOCH` (`make release` runs it; `ALLOW_DIRTY=1` overrides the tree check) |
 | `make check-deploy-source` | fail unless `site/` and `wrangler.jsonc` hold no uncommitted changes, so the Worker and the captures it serves are in a commit (`make site-deploy` runs it; `ALLOW_DIRTY=1` overrides the tree check, the same override the release path uses) |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
+| `make host-dist` | print the path of this host's `VERSION` artifact in `dist/`, or fail when that platform is not in `PLATFORMS` (the release job smoke-tests this path) |
 | `make release-verify` | fetch every asset a published `VERSION` holds back from GitHub and re-verify each digest against that release's own `checksums.txt` (the restore drill the release job runs) |
 | `make repro-check` | build every release platform twice, from two different source paths and two different build caches, then diff |
 | `make repro-check-pair` | the same gate over `REPRO_PLATFORMS`, the pair the PR gate and the release job both build twice |

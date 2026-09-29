@@ -13,6 +13,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- `make site-rollback` and `make site-deploy` cleared the rolled-back record
+  with `rmdir`, which cannot remove a marker directory that still holds the
+  manifest a previous rollback wrote into it. The `rmdir` failed, was
+  swallowed, and `mv` then moved the new record *inside* the old one, so
+  `dist/site.rolled-back/` accumulated one nested `manifest` per rollback and
+  the version that was undone stopped being readable at the path the docs
+  name. Both targets remove the directory instead, so the record is replaced
+  rather than buried.
+
 ## [0.22.0] - 2026-09-29
 
 Binaries, checksums, and a CycloneDX SBOM are on

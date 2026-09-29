@@ -122,9 +122,13 @@ jobs:
           make release VERSION="$VERSION"
           # smoke test the host-platform artifact: proves the binary runs,
           # carries the release version (not the unstamped fallback), and
-          # actually linked the sqlite driver the Makefile ships.
-          echo "smoke test: toktop_${VERSION}_linux_amd64"
-          bin="./dist/toktop_${VERSION}_linux_amd64"
+          # actually linked the sqlite driver the Makefile ships. The path
+          # comes from the Makefile, which owns the artifact naming and
+          # PLATFORMS; a second copy of that rule here would smoke test a
+          # file no build wrote, and the failure would read as a broken
+          # build rather than as a renamed artifact.
+          bin="./$(make --no-print-directory host-dist VERSION="$VERSION")"
+          echo "smoke test: $bin"
           test "$("$bin" --version)" = "toktop $VERSION"
           set +e
           smoke="$("$bin" --agents --opencode-db --once --demo --frames 1 --no-hot-reload 2>&1)"

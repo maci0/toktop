@@ -1052,7 +1052,7 @@ check-deploy-source: ## fail unless the files 'make site-deploy' uploads are com
 site-deploy: require-bun site-lint site-check check-wrangler-doc check-deploy-source ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
 	@$(SITE_GUARD) \
 	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
-	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
+	rm -rf $(SITE_ROLLED_BACK); \
 	mkdir -p $(SITE_DEPLOYED) || { echo "deployed, but cannot record $(SITE_DEPLOYED); the next 'make site-rollback' would find nothing to undo" >&2; exit 1; }; \
 	$(SITE_DEPLOYINFO) || { echo "deployed, but cannot write the manifest in $(SITE_DEPLOYED); the audit trail of what is serving is in the Cloudflare deployment log instead" >&2; exit 1; }; \
 	wait_for_site || { echo "deploy finished but the site is not serving; roll back with 'make site-rollback'" >&2; exit 1; }
@@ -1066,7 +1066,7 @@ site-rollback: require-bun ## roll the site Worker back to the version before th
 		exit 0; \
 	fi; \
 	(cd site && bunx wrangler@$(WRANGLER) rollback) || exit 1; \
-	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
+	rm -rf $(SITE_ROLLED_BACK); \
 	mv $(SITE_DEPLOYED) $(SITE_ROLLED_BACK) || { echo "rolled back, but cannot move $(SITE_DEPLOYED) aside; the next 'make site-rollback' would undo this one as well" >&2; exit 1; }; \
 	wait_for_site || { echo "rollback finished but the site is not serving; retry, or read the deployment log in the Cloudflare dashboard" >&2; exit 1; }
 
@@ -1303,6 +1303,25 @@ test-dist: ## build every release platform without packaging
 		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch \
 			$(GO) build $(GOTAGS) $(GO_BUILDFLAGS) -ldflags "$(LDFLAGS)" -o $(DIST)/$$name $(CMD) || exit 1; \
 	done
+
+# The path of the artifact for this host, out of $(DIST). The release job
+# smoke-tests it, and spelling the name in the workflow instead would be a
+# second copy of the naming rule: a BINARY or a VERSION separator that moved
+# here would leave the job smoke-testing a file no build wrote, and a
+# `test -x` on a path that does not exist is a failure that reads as a broken
+# build rather than as a renamed artifact. PLATFORMS is the source of truth
+# for what exists; a host outside it is named by the failure below.
+.PHONY: host-dist
+host-dist: ## print the path of this host's VERSION artifact in dist/
+	@$(CHECK_VERSION)
+	@goos=$$($(GO) env GOOS); goarch=$$($(GO) env GOARCH); \
+	case " $(PLATFORMS) " in \
+		*" $$goos/$$goarch "*) ;; \
+		*) echo "make host-dist: $$goos/$$goarch is not in PLATFORMS, so 'make release VERSION=$(VERSION)' built no artifact to smoke test" >&2; exit 1;; \
+	esac; \
+	ext=""; \
+	if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
+	echo "$(DIST)/$(BINARY)_$(VERSION)_$${goos}_$${goarch}$$ext"
 
 # What produced the bytes, recorded next to them. A checksum list proves the
 # download arrived intact, not which toolchain made it; without the commit,
