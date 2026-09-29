@@ -37,6 +37,14 @@ alongside them would be a layer importing sideways into itself.
   endpoint and target wiring (`attach.go`, `endpoints.go`), the
   subcommands (`help.go`, `update.go`, `version.go`, `completion.go`), and
   `main.go`, whose `runMain` is the whole startup sequence in one function.
+- `internal/agentwatch`: the bridge from `agentusage` watchers to the
+  dashboard: it follows the agent processes on this machine and records what
+  their transcripts grew by. One concern per file: `agentwatch.go` the
+  watcher's own state, injected clock and pacer, and the start and stop of a
+  tracker, `discover.go` the pass that classifies this pass's processes
+  against the trackers and attaches, follows and hands over stores,
+  `engines.go` the monitored engines a tracker is matched against, and
+  `report.go` the events read off a tracker.
 - `internal/bearer`: one process-wide optional `Bearer` token for gateways
   that require an API key.
 - `internal/collector`: polls providers on an interval, derives rates, and is

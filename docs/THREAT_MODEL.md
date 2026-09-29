@@ -22,7 +22,7 @@ they live and what already stands in their way.
   the code they pointed at, and the churning-file rule at the end of this
   file already prescribes the fix. The drifted citations now name symbols,
   and the rule's list of churning files covers the packages where the drift
-  was observed (`cmd/toktop/main.go`, `internal/agentwatch/agentwatch.go`,
+  was observed (`cmd/toktop/main.go`, `internal/agentwatch/`,
   and the `agentusage/` package). Two asset citations named the wrong file
   outright: the claude and codex session roots live in the built-in
   definitions map in `agentusage/registry.go`, not in the parsers this file
@@ -36,7 +36,7 @@ the in-repo `agentusage` readers the binary compiles in, and deployment
 artifacts in this repository (GitHub Actions workflows, Makefile release
 targets, the static site worker at site/worker.js). Out of scope: the
 `gauntlet` tool that also imports `agentusage`
-(internal/agentwatch/agentwatch.go consumes it here).
+(internal/agentwatch/ consumes it here).
 
 ## Risk-ranked summary
 
@@ -170,11 +170,11 @@ What is worth stealing, corrupting, or denying:
 - **Information disclosure via display**: remote host CPU/OS/kernel/GPU
   inventory, engine/model lists, and agent working directories (last two path
   components in event notes, `core.ShortDir` resolved once per tracked process
-  into `dirNote` at discovery, internal/agentwatch/agentwatch.go) appear
+  into `dirNote` at discovery, internal/agentwatch/discover.go) appear
   on screen and in scrollback; screen shares and captures leak them. The note a
   sample carries is folded through `core.SingleLine` and `core.RedactHome`
   before it is stored (`core.ClampField(core.RedactHome(core.SingleLine(note)))`
-  on the `Note:` field, internal/agentwatch/agentwatch.go), so a home prefix in
+  on the `Note:` field, internal/agentwatch/report.go), so a home prefix in
   those components does not become the note either. The `--once --json`
   report carries the same fields to a machine consumer, where the sanitization
   and redaction of the display path are the only ones in force: what the
@@ -382,7 +382,7 @@ Every externally reachable input, with its code location:
 8. **Agent transcript and session-store reading** (local disk, `--agents`
    only): `/proc` (Linux) or `ps`/`lsof` (Darwin) finds coding-agent
    processes; their JSONL transcripts are read every second via `agentusage`
-   (internal/agentwatch/agentwatch.go; agentusage/watcher.go),
+   (internal/agentwatch/discover.go; agentusage/watcher.go),
    including dsh's default concatenated-zstd logs (agentusage/dsh.go). On
    Linux, attributing an agent to the same engine walks the descriptors of
    *other* processes: `socketInodes` reads `/proc/<pid>/fd` and matches the
@@ -945,7 +945,7 @@ Controls verified in code, with the threats they cover:
 | M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 91, `ModelName` 104; call sites the `core.ModelName` folds in internal/provider/openai.go, internal/provider/ollama.go, and the one in internal/probe/model.go |
 | M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, 64, the `logcfg.Logger()` call in `New`; internal/remote/client.go, 33; internal/collector/collector.go, 38; internal/gpu/run.go, the `logcfg.Logger()` call in `audit`; cmd/toktop/attach.go, 28; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 118, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own audit lines additionally run `RedactAddrs` over the text through `logcfg.RedactedField` (client.go, 237-455). Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; a destination the operator typed (an engine `addr`) is not a peer address, so nothing short of the home fold removes it, while an ssh `target` is stripped of its account at the call site before the fold ever sees it (M40); and the one payload that quotes text the process did not author, the recovered panic value and its stack, is folded at the call site instead (M46) rather than by the handler, since `logcfg.Field` alone would not reach the message | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 77, `HomeHandler` 101, `Field` 167, `RedactedField` 201; internal/core/redact.go, `RedactHome` 24 |
 | M37: `make release` refuses a non-dev `VERSION` built from a tree that cannot be tied to the bytes shipped. `check-release-source` fails the cut when `git rev-parse HEAD` fails (a source export, where buildinfo has no commit to record and `SOURCE_DATE_EPOCH` falls back to 0, dating every archive member to the epoch) and, unless `ALLOW_DIRTY=1` is passed by name, when `git status --porcelain` is nonempty; a non-numeric `SOURCE_DATE_EPOCH` is refused too. `VERSION=dev` is exempt, since a dev build is a local artifact whose manifest records the tree honestly. This is the reproducibility half of the update channel's trust story: an artifact whose bytes do not match the commit the release page points at cannot be re-derived or audited by anyone who downloads it | a release cut from an uncommitted or non-git tree, shipping binaries that buildinfo names a commit for while the archive members carry something else, against the same trust anchor as summary risk 3 (B5 tampering/repudiation) | Makefile, `check-release-source`, a prerequisite of `release` |
-| M38: One watcher per agent store. `discover` stops the trackers of exited processes before it installs a follower onto a store a dead tracker was still tailing (`for _, t := range exited { w.stopOne(t) }` ahead of the install, internal/agentwatch/agentwatch.go, the `exited` loop in `discover`), and `stopOne` reports the dead watcher's final growth first, so the follower's baseline is taken after the stopped tracker's last sample. Two watchers on one store each report the same growth under their own PID, and the collector's id window cannot merge two sample ids, so every token written in the overlap is counted twice | doubled token counts and a follower whose baseline overlaps the partition it replaced: a dashboard-integrity defect on a path a process exit alone triggers, with no hostile input (B7 tampering) | internal/agentwatch/agentwatch.go, `discover` and `stopOne`; test internal/agentwatch/handover_test.go |
+| M38: One watcher per agent store. `discover` stops the trackers of exited processes before it installs a follower onto a store a dead tracker was still tailing (`for _, t := range exited { w.stopOne(t) }` ahead of the install, internal/agentwatch/discover.go, the `exited` loop in `discover`), and `stopOne` reports the dead watcher's final growth first, so the follower's baseline is taken after the stopped tracker's last sample. Two watchers on one store each report the same growth under their own PID, and the collector's id window cannot merge two sample ids, so every token written in the overlap is counted twice | doubled token counts and a follower whose baseline overlaps the partition it replaced: a dashboard-integrity defect on a path a process exit alone triggers, with no hostile input (B7 tampering) | internal/agentwatch/discover.go, `discover`, and internal/agentwatch/agentwatch.go, `stopOne`; test internal/agentwatch/handover_test.go |
 | M39: Clocks and callbacks a running goroutine reads are taken under a lock rather than raced. The ingest server's `SetNow` writes `s.now` under `nowMu` and `instant` reads it under `RLock` (internal/ingest/server.go, `nowMu`, `SetNow`, `instant`); the agent watcher guards the two fields `SetNow` and `SetOnError` write with `clockMu`, because every tracker's own reader goroutine stamps events from that clock (internal/agentwatch/agentwatch.go, `clockMu` with `reportError` releasing the lock before calling a caller-supplied sink); `gpu.Sample` collects its per-tool results under a local mutex; the host-vitals sampler reads its clock through `instant`, which takes `clockMu` before calling the caller's function, so a `SetNow` swap cannot tear against a cache window being aged (internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`) | a data race on the demo clock or the error sink between a handler goroutine and a tracker, which is a correctness and availability fault rather than a boundary crossing, recorded here because the ingest clock is set from demo mode and a race there lands in the same audit surface as B1 | internal/ingest/server.go, `nowMu`, `SetNow`, `instant`; internal/agentwatch/agentwatch.go, `clockMu`, `reportError`; internal/gpu/gpu.go, `Sample` (the local mutex around the per-tool results); internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`; tests internal/ingest/server_test.go, internal/agentwatch/concurrency_test.go |
 | M43: A JSONL record's own counters bound what it can put in a display. `maxTurnMS` caps a recorded turn length — grok's `apiDurationMs`/`elapsed_ms`, microagent's `elapsed_ms` — before it is multiplied out to nanoseconds, so a record naming a millisecond count near `MaxInt64` cannot wrap its span negative and report the turn's rate with the wrong sign. A session directory name that percent-decodes to a path carrying a NUL byte is refused rather than read as a working directory. agy's `last_conversations.json` winner is chosen by sorted workspace, not by Go's randomized map order, so one conversation named under two workspaces cannot change directory between polls. Pinned by `FuzzParseAgentLines` (every record parser, its negative-counter, determinism, and restatement-refusal invariants), `FuzzAgyIndex`, `FuzzGrokSessionCwd`, and `FuzzGrokSessionPath` | a hostile or corrupt session store steering attribution between workspaces, or reporting a rate of the wrong sign (B1 tampering) | agentusage/grok.go, `maxTurnMS` and `grokSessionCwd`; agentusage/microagent.go, `parseMicroagent`; agentusage/agy.go, `loadAgyLast`; tests agentusage/fuzz_test.go, agentusage/agy_grok_fuzz_test.go |
 | M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, 42-69 |
@@ -1369,7 +1369,7 @@ Recorded as threats with locations; fixes do not happen in this document:
     the
     watcher cannot return, warn, with the error text. The dedup latch that
     keeps it to one line per distinct condition lives in the watcher
-    (agentwatch.go, `engineError`), not here. The agentusage package writes
+    (engines.go, `engineError`), not here. The agentusage package writes
     its own lines through the logger the host installs
     (`agentusage.SetLogger`, cmd/toktop/main.go, 118, over
     `agentusage.SetLogger` at agentusage/candidates.go): a transcript
@@ -1422,7 +1422,7 @@ Recorded as threats with locations; fixes do not happen in this document:
   the make target, not a line. That rule covers `Makefile`, `site/worker.js`,
   `internal/ingest/`, `internal/provider/`, `internal/probe/`,
   `internal/selfupdate/`, `internal/ui/`, `cmd/toktop/validate.go`,
-  `cmd/toktop/main.go`, `internal/agentwatch/agentwatch.go` and the
+  `cmd/toktop/main.go`, `internal/agentwatch/` and the
   `agentusage/` package (`definitions.go`, `transcript.go`, `candidates.go`,
   `registry.go`, `kimi.go`) as well as the Go files it was written for: each
   carries hundreds of lines that no review touches, and a line number there
