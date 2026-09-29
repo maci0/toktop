@@ -108,13 +108,20 @@ jobs:
       - name: the build matrix below is the Makefile's PLATFORMS
         if: runner.os == 'Linux'
         run: make check-ci-platforms
-      # The fourth doc guard, and the only one 'make check' runs that this job
-      # did not: a target added to CONTRIBUTING.md's table without the '## '
-      # comment is missing from `make help`, so the run that is supposed to
-      # find it is the one that never learns the name.
+      # The fourth doc guard: a target added to CONTRIBUTING.md's table
+      # without the '## ' comment is missing from `make help`, so the run that
+      # is supposed to find it is the one that never learns the name.
       - name: every documented make target is in make help (linux only)
         if: runner.os == 'Linux'
         run: make check-help-docs
+      # The changelog's shape, not one release's contents: an impact heading
+      # repeated inside a section means the entries under the second one ship
+      # unlabelled, and the only other place that refuses it is the cut, which
+      # runs once the notes are already written. Pure text, so it belongs
+      # beside the other guards and not behind the release gates.
+      - name: no changelog section repeats an impact heading (linux only)
+        if: runner.os == 'Linux'
+        run: make check-changelog-structure
       # yamllint over the workflows runs in the scripts job below, which
       # already has uv and the pinned tool env this target installs from. The
       # workflow file is the one thing in this repo no Go analyzer reads, and a

@@ -20,6 +20,43 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   identifier and nothing else, and MIT, BSD-3-Clause and Apache-2.0 each ask
   the notice or the license itself to travel with the redistributed bytes.
 
+- A host whose memory or load source cannot be read is now named in the audit
+  log on macOS and Windows, the way a failed `/proc` read already was on Linux.
+  `hw.memsize`, `kern.loadavg` and `GlobalMemoryStatusEx` failed silently, so
+  the host strip reported zero memory and no load for the rest of the run,
+  which is what an idle machine reports too. The outage is written once however
+  often the sampler runs, and its end is written once.
+
+- `--plain` without `--once` now runs the linear text report live, with the
+  keys. The report was the screen-reader path into a finished run only, so a
+  screen-reader user had to choose between the dashboard, which announces
+  braille charts as dot-pattern noise, and giving up the live view. The live
+  report scrolls normally rather than repainting an alternate screen, and
+  `space`, `p` and `q` work as they do in the drawn frame.
+- `agentusage` names the pacer `Watcher.SetPacer` takes: `Pacer`, `Ticker`,
+  `WallPacer`, `VirtualPacer` and `NewVirtualPacer`. The method took a type
+  from `internal/core`, which a program outside this module cannot name, so
+  the replay the doc comment describes had no way to be written. The names are
+  the same types, so every existing call still compiles.
+
+- The demo source, the agent watcher, the remote sampler and
+  `agentusage.Watcher` pace their loops through `core.Pacer` rather than a
+  `time.NewTicker` of their own, so a simulated run fires those passes itself.
+  The demo stamped its frames on a pinned timeline but took the number of
+  frames from how long the process happened to run, the watcher admitted
+  whichever agents the wall clock had reached, the transcript watcher read
+  whatever had been written in real time, and the remote sampler sampled a
+  box once per elapsed interval while stamping the sample on the injected
+  clock: four loops a replay could not step, feeding a run it could not
+  reproduce. `Watcher.SetPacer` is the transcript watcher's half and is
+  exported, since the package is importable and the loop is its public entry
+  point; the other three are set from the same process. Production is
+  unchanged on `core.WallPacer`, and a nil pacer restores it.
+- The site bar links the closing section, `#measured`, beside the other five.
+  A section reachable only by scrolling past everything else is a section the
+  bar does not describe. The phone view already wrapped the link list to a
+  second row, so the sixth label costs no extra line there.
+
 ### Security
 
 - A release download now refuses a port other than https's own. The GitHub
@@ -27,6 +64,66 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `browser_download_url` naming `https://github.com:8443/...` passed a check
   that answers for the authority an operator trusts, at a hop and an asset URL
   alike.
+
+### Breaking
+
+- `agentusage.Definition` and `agentusage.Spec` now carry `UnmarshalJSON` and
+  `MarshalJSON`. A program that decoded or encoded either one through
+  `encoding/json` is unaffected, but a program that embedded one in a struct of
+  its own no longer decodes. A `UnmarshalJSON` on an embedded type is promoted
+  to the outer type, so `json.Unmarshal` into a `T` that embeds
+  `agentusage.Definition` calls `Definition`'s method with the whole document
+  and leaves every field of `T` beside it at its zero value. On an `agents.json`
+  entry those fields are where an entry's launch configuration is read into,
+  and the loss is quiet: the entry re-marshals with them, since `MarshalJSON`
+  writes the keys beside `usage` back out, so a read, edit and write cycle
+  drops a field no error names. Decode into a `Definition` and copy it into `T`
+  afterwards, or give `T` its own `UnmarshalJSON`; a program that reads and
+  writes the whole file should decode into `agentusage.Definitions`, which does
+  the split already. The method's doc comment now says so where a caller
+  embedding the type will read it.
+- `agentusage.Definition` gained the `Extra` field, so an unkeyed composite
+  literal of it (`agentusage.Definition{spec}`) no longer compiles. A keyed
+  literal, and every read of `Usage`, is unchanged.
+
+### Changed
+
+- Two files in this tree no gate read are read by one. The bash completion
+  script `toktop completion bash` prints carried a `# shellcheck disable` for a
+  rule nothing ever ran, which reads as a check that passed; the script is now
+  generated from the flag set and run through shellcheck in `make check` and on
+  the Linux CI leg. `docs/openapi.yaml`, the feed contract `internal/ingest`
+  parses, joined the workflows in the yamllint run for the same reason.
+- A footer notice no longer takes the key list with it. On a pane too narrow
+  for the full list and the notice together, every key, `q quit` and `? help`
+  included, gave way for the length of the notice, so the key that did nothing
+  took the reader's map of the app away with it. The optional keys shed first
+  and the gap between the two closes before the notice does; the notice itself
+  is printed whole or not at all, since cut mid-sentence it stops answering
+  the press it exists to answer.
+- A panel that drops rows counts them the same way everywhere. The agent table
+  and the AGENT FEED stats spelled their overflow a bare `+3 more` beside
+  engine columns spelling `+3 more (enlarge window)`, so one frame named the
+  same overflow two ways and only one of them named the way out of it. All
+  three take the marker from one place now.
+- A panel title too narrow for the count beside it keeps the count. The 31%
+  `ENGINE STATE` takes on the 62-cell minimum dashboard is 15 cells, two short
+  of the bare count on its usual two-cell gap, and the count was dropped whole
+  there: a panel that silently drew fewer engines than the fleet has. The gap
+  closes before the wording does, and the bare number is the last form.
+- Several per-poll paths stopped repeating work the frame or the poll had
+  already done. A vendor GPU CLI's output is now parsed once per poll rather
+  than twice (once to judge the output readable, once to report it), an
+  amdgpu card's `product_name` is discovered with the card list instead of
+  re-read and re-sanitized every interval, and a transcript read takes its
+  64 KiB fill buffer from a pool instead of allocating one per file per poll.
+- The dashboard measures each rendered line once per frame rather than two or
+  three times. Block padding re-walks a line whose width it just computed, the
+  side-by-side join re-measures every row in the pass that only pads it, and
+  the header's shed loop re-measured the whole row (and re-rendered its styled
+  separator) once per segment it dropped. The agent feed is also accounted
+  once per snapshot instead of twice: the summary taken when the snapshot
+  arrived is the one the frame is drawn from.
 
 ### Fixed
 
@@ -107,89 +204,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   demo source's own instant, so a run captured from two machines renders the
   same bytes and the notice and probe timers expire against the same clock the
   frame they clear belongs to.
-
-### Added
-
-- A host whose memory or load source cannot be read is now named in the audit
-  log on macOS and Windows, the way a failed `/proc` read already was on Linux.
-  `hw.memsize`, `kern.loadavg` and `GlobalMemoryStatusEx` failed silently, so
-  the host strip reported zero memory and no load for the rest of the run,
-  which is what an idle machine reports too. The outage is written once however
-  often the sampler runs, and its end is written once.
-
-- `--plain` without `--once` now runs the linear text report live, with the
-  keys. The report was the screen-reader path into a finished run only, so a
-  screen-reader user had to choose between the dashboard, which announces
-  braille charts as dot-pattern noise, and giving up the live view. The live
-  report scrolls normally rather than repainting an alternate screen, and
-  `space`, `p` and `q` work as they do in the drawn frame.
-- `agentusage` names the pacer `Watcher.SetPacer` takes: `Pacer`, `Ticker`,
-  `WallPacer`, `VirtualPacer` and `NewVirtualPacer`. The method took a type
-  from `internal/core`, which a program outside this module cannot name, so
-  the replay the doc comment describes had no way to be written. The names are
-  the same types, so every existing call still compiles.
-
-### Changed
-
-- Two files in this tree no gate read are read by one. The bash completion
-  script `toktop completion bash` prints carried a `# shellcheck disable` for a
-  rule nothing ever ran, which reads as a check that passed; the script is now
-  generated from the flag set and run through shellcheck in `make check` and on
-  the Linux CI leg. `docs/openapi.yaml`, the feed contract `internal/ingest`
-  parses, joined the workflows in the yamllint run for the same reason.
-- A footer notice no longer takes the key list with it. On a pane too narrow
-  for the full list and the notice together, every key, `q quit` and `? help`
-  included, gave way for the length of the notice, so the key that did nothing
-  took the reader's map of the app away with it. The optional keys shed first
-  and the gap between the two closes before the notice does; the notice itself
-  is printed whole or not at all, since cut mid-sentence it stops answering
-  the press it exists to answer.
-- A panel that drops rows counts them the same way everywhere. The agent table
-  and the AGENT FEED stats spelled their overflow a bare `+3 more` beside
-  engine columns spelling `+3 more (enlarge window)`, so one frame named the
-  same overflow two ways and only one of them named the way out of it. All
-  three take the marker from one place now.
-- A panel title too narrow for the count beside it keeps the count. The 31%
-  `ENGINE STATE` takes on the 62-cell minimum dashboard is 15 cells, two short
-  of the bare count on its usual two-cell gap, and the count was dropped whole
-  there: a panel that silently drew fewer engines than the fleet has. The gap
-  closes before the wording does, and the bare number is the last form.
-- Several per-poll paths stopped repeating work the frame or the poll had
-  already done. A vendor GPU CLI's output is now parsed once per poll rather
-  than twice (once to judge the output readable, once to report it), an
-  amdgpu card's `product_name` is discovered with the card list instead of
-  re-read and re-sanitized every interval, and a transcript read takes its
-  64 KiB fill buffer from a pool instead of allocating one per file per poll.
-- The dashboard measures each rendered line once per frame rather than two or
-  three times. Block padding re-walks a line whose width it just computed, the
-  side-by-side join re-measures every row in the pass that only pads it, and
-  the header's shed loop re-measured the whole row (and re-rendered its styled
-  separator) once per segment it dropped. The agent feed is also accounted
-  once per snapshot instead of twice: the summary taken when the snapshot
-  arrived is the one the frame is drawn from.
-
-### Added
-
-- The demo source, the agent watcher, the remote sampler and
-  `agentusage.Watcher` pace their loops through `core.Pacer` rather than a
-  `time.NewTicker` of their own, so a simulated run fires those passes itself.
-  The demo stamped its frames on a pinned timeline but took the number of
-  frames from how long the process happened to run, the watcher admitted
-  whichever agents the wall clock had reached, the transcript watcher read
-  whatever had been written in real time, and the remote sampler sampled a
-  box once per elapsed interval while stamping the sample on the injected
-  clock: four loops a replay could not step, feeding a run it could not
-  reproduce. `Watcher.SetPacer` is the transcript watcher's half and is
-  exported, since the package is importable and the loop is its public entry
-  point; the other three are set from the same process. Production is
-  unchanged on `core.WallPacer`, and a nil pacer restores it.
-- The site bar links the closing section, `#measured`, beside the other five.
-  A section reachable only by scrolling past everything else is a section the
-  bar does not describe. The phone view already wrapped the link list to a
-  second row, so the sixth label costs no extra line there.
-
-### Fixed
-
 - `POST /v1/events` gave the two spellings of `-9223372036854775808`
   different answers. The integer form is inside the int64 range, so it clamped
   to `0`; the whole-float form parsed through a float64, which rounds that
@@ -282,6 +296,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   it, and half a character is not, so the same process could be matched under
   one spelling on the far side of a case fold and another on this side. The
   partial character is now dropped, as every other ill-formed byte is.
+- The site measures how long an edge request took on a monotonic clock.
+  `Date.now()` was the reading, and the runtime freezes it across a
+  synchronous stretch and advances it only at I/O, so a request that spent its
+  time in `env.ASSETS.fetch` or a compression stream read the same millisecond
+  before and after: the log line and the `Server-Timing` header both reported
+  `0` for an answer that took a second to reach the client. `performance.now()`
+  keeps running across those waits and cannot step backwards the way a wall
+  clock can, so the header stops needing its clamp against a negative reading
+  too. Fractional milliseconds are rounded, the header being an integer.
+- The site's sticky bar and its code blocks now have a 3:1 edge. Both took
+  `--line`, which sits at 1.3:1 against `--bg`: nothing separated the bar from
+  the section passing behind it, and a code block's border was the only cue
+  that it scrolled at all, a scrollbar being absent until the block is hovered
+  or dragged. A reader scrolling could not see content entering or leaving the
+  bar, and a reader who tabbed into a code block could not tell it from a
+  clipped one. Both take `--fg` for the reason `kbd` already did: `--fg` names
+  a boundary, `--line` divides the page.
 
 ## [0.22.0] - 2026-09-29
 

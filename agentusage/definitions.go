@@ -285,6 +285,13 @@ type Definition struct {
 // present but not an object is an error, since every field a watcher will walk
 // comes from it, and an entry that is not an object at all is an error for the
 // same reason a null one is: the file cannot mean what it appears to mean.
+//
+// A program that embeds Definition in a struct of its own has to decode into a
+// Definition and copy it across. encoding/json promotes this method to the
+// outer type, so a struct that embeds Definition decodes through it with the
+// whole document, and every field beside the embedded one is left at its zero
+// value without an error. A program reading and writing a whole file should
+// use [Definitions], which does the split itself.
 func (d *Definition) UnmarshalJSON(data []byte) error {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(data, &raw); err != nil {

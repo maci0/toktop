@@ -1271,6 +1271,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the bash complet
 	@$(MAKE) --no-print-directory check-ci-platforms
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
+	@$(MAKE) --no-print-directory check-changelog-structure
 	@unformatted=$$($(GOFMT) -s -l .); \
 		if [ -n "$$unformatted" ]; then \
 			echo "needs gofmt (run 'make fmt'):" >&2; echo "$$unformatted" >&2; exit 1; \
@@ -1315,6 +1316,26 @@ clean: ## remove build artifacts
 check-changelog: ## verify CHANGELOG.md contains release section and link for VERSION
 	@$(CHECK_VERSION)
 	@$(CHECK_CHANGELOG)
+
+# The shape of CHANGELOG.md, and it holds for every section, not only the one
+# being cut. A release accumulates entries under the same impact heading each
+# time one lands, and a second `### Added` reads as two groups where a reader
+# takes the first as the whole: the cut then fails on a section that was
+# malformed long before the tag, and the entries a second heading collected
+# would ship unlabelled. Checked here rather than in CHECK_CHANGELOG, which
+# only runs with a VERSION, so the shape is refused on the push that breaks it
+# instead of on the cut that trips over it.
+.PHONY: check-changelog-structure
+check-changelog-structure: ## fail if a CHANGELOG.md section repeats an impact heading
+	@awk 'function report(	 h) { \
+			for (h in seen) if (seen[h] > 1) { \
+				printf "make: CHANGELOG.md %s repeats %s %d times; one heading per impact\n", sec, h, seen[h]; \
+				d = 1 \
+			} \
+		} \
+		/^## \[/ { report(); sec = $$0; delete seen; next } \
+		/^### / { seen[$$0]++ } \
+		END { report(); exit (d == 1) }' CHANGELOG.md >&2
 
 .PHONY: check-api
 check-api: ## verify VERSION removes nothing PUBLIC_PKGS exported at the last release
