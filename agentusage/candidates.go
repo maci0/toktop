@@ -420,6 +420,14 @@ func (w *Watcher) walkCandidates(cutoff time.Time, cache bool) []string {
 	// transcripts that are still on disk. The next poll re-walks, and the
 	// freshness stamp stays zero so the walk is claimed rather than served.
 	if !complete {
+		// The recency sweep cannot run on a partial listing, but the caps that
+		// bound the per-file bookkeeping can: a walk that missed part of the
+		// store is exactly the walk a store produces while it grows, and
+		// skipping the caps for as long as one root keeps failing to walk
+		// leaves every map keyed by path unbounded for the life of the run.
+		// The last complete listing stands in for the shortfall, so a file
+		// merely missed by this walk is not mistaken for an aged-out one.
+		w.capFileState(append(slices.Clone(w.cached), out...))
 		return out
 	}
 	w.forgetIdle(out)
@@ -499,12 +507,66 @@ func (w *Watcher) forgetIdle(live []string) {
 	for _, path := range drop {
 		w.dropFile(path)
 	}
+	w.capFileState(live)
+}
+
+// capFileState applies the two backstops that bound the bookkeeping for
+// transcripts that aged out of the walk. It runs on every walk, including one
+// that missed part of the store: forgetIdle above cannot, because a file
+// missing from a partial listing may still be on disk, but these two are the
+// only bound on how far the maps grow, and a store whose walk fails while its
+// other root keeps producing sessions is the case they exist for. live is the
+// set of paths to spare, so a caller walking a partial listing passes what it
+// did see alongside what the last complete walk saw.
+func (w *Watcher) capFileState(live []string) {
 	inWalk := make(map[string]struct{}, len(live))
 	for _, path := range live {
 		inWalk[path] = struct{}{}
 	}
-	w.trimCounted(inWalk, len(live))
+	w.trimCounted(inWalk, len(inWalk))
 	w.trimOwned(inWalk)
+	w.trimLatches(inWalk)
+}
+
+// latchCap bounds the failure latches held for transcripts outside the walk.
+// Same value as the caps above, for the same reason: forgetIdle ages these out
+// only when a walk covers the whole store, so a store that fails to walk while
+// its other root keeps starting sessions would leave one latch per file it ever
+// failed on, for the life of the run.
+//
+// A release costs one more audit line the next time that file fails, and only
+// for a file this walk did not reach, so the cap is spent on the least
+// recently written of them.
+const latchCap = stateCap
+
+// trimLatches releases the latches of transcripts past latchCap that the walk
+// did not reach. A latch on a transcript still in the walk is kept whatever its
+// age: dropping it would re-log the same unreadable file on every poll.
+func (w *Watcher) trimLatches(inWalk map[string]struct{}) {
+	cut := make([]aged, 0, len(w.readFailed)+len(w.ownsFailed))
+	listed := make(map[string]struct{}, cap(cut))
+	add := func(m map[string]bool) {
+		for path := range m {
+			if _, ok := inWalk[path]; ok {
+				continue
+			}
+			if _, dup := listed[path]; dup {
+				continue
+			}
+			listed[path] = struct{}{}
+			cut = append(cut, aged{path: path, mtimeNanos: w.stamps[path].mtimeNanos})
+		}
+	}
+	add(w.readFailed)
+	add(w.ownsFailed)
+	if len(cut) <= latchCap {
+		return
+	}
+	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeNanos, b.mtimeNanos) })
+	for _, a := range cut[:len(cut)-latchCap] {
+		delete(w.readFailed, a.path)
+		delete(w.ownsFailed, a.path)
+	}
 }
 
 // countedCap bounds the per-file bookkeeping for transcripts that have aged
