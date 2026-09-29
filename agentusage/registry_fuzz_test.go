@@ -4,10 +4,12 @@
 package agentusage
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -175,7 +177,75 @@ func FuzzSpecAdapter(f *testing.F) {
 				t.Fatalf("dir %q produced different roots at a later instant: %q then %q", dir, out, again)
 			}
 		}
+
+		// The same spec as a definitions file spells it, so it goes through
+		// the decode rather than around it. A decoded spec has to compile to
+		// the adapter the hand-built one does: the decode resolves the two
+		// suffix fields against each other and trims the single one, which is
+		// what makes the value a program read from a file the value a watcher
+		// applies to it. Without that, editing Suffix and writing the file
+		// back edits a field nothing reads.
+		encoded, err := json.Marshal(spec)
+		if err != nil {
+			t.Fatalf("json.Marshal(%#v) = %v", spec, err)
+		}
+		var decoded Spec
+		if err := json.Unmarshal(encoded, &decoded); err != nil {
+			t.Fatalf("json.Unmarshal(%s) = %v", encoded, err)
+		}
+		// A spec a definitions file cannot spell does not have to survive
+		// one: JSON carries text, and encoding a string that is not valid
+		// UTF-8 replaces the invalid bytes with U+FFFD. The fuzzer reaches
+		// such a value (a lone \xc7 is one), and comparing its adapter to the
+		// decoded one would assert that a file round trip preserves something
+		// the file format cannot hold.
+		if !specIsText(spec) {
+			return
+		}
+		decodedAd, ok := specAdapter(decoded)
+		if ok != (len(specRoots(decoded)) > 0) {
+			t.Fatalf("decoded spec usable=%v for %d non-blank roots out of %#v", ok, len(specRoots(decoded)), decoded.Roots)
+		}
+		if !ok {
+			return
+		}
+		if decodedAd.suffix != ad.suffix || !slices.Equal(decodedAd.suffixes, ad.suffixes) {
+			t.Fatalf("decoding %s filtered as suffix %q suffixes %#v, want %q and %#v from %#v",
+				encoded, decodedAd.suffix, decodedAd.suffixes, ad.suffix, ad.suffixes, spec)
+		}
+		if decodedAd.kind != ad.kind || (decodedAd.sessionCwd != nil) != (ad.sessionCwd != nil) {
+			t.Fatalf("decoding %s changed the kind or the owner rule: %+v", encoded, decodedAd)
+		}
+		// A program that reads a file and writes it back twice has not
+		// drifted: encoding the decoded value decodes to itself.
+		reencoded, err := json.Marshal(decoded)
+		if err != nil {
+			t.Fatalf("json.Marshal(%#v) = %v", decoded, err)
+		}
+		var again Spec
+		if err := json.Unmarshal(reencoded, &again); err != nil {
+			t.Fatalf("json.Unmarshal(%s) = %v", reencoded, err)
+		}
+		if !slices.Equal(again.Roots, decoded.Roots) || again.Suffix != decoded.Suffix ||
+			!slices.Equal(again.Suffixes, decoded.Suffixes) ||
+			again.Cumulative != decoded.Cumulative || again.HeaderCwd != decoded.HeaderCwd {
+			t.Fatalf("re-decoding %s gave %+v, want %+v", reencoded, again, decoded)
+		}
 	})
+}
+
+// specIsText reports whether every string a spec carries is valid UTF-8, which
+// is what a definitions file can hold: JSON text with an invalid byte in it
+// does not survive a round trip, since encoding/json writes U+FFFD in its
+// place.
+func specIsText(spec Spec) bool {
+	text := func(s string) bool { return utf8.ValidString(s) }
+	for _, s := range append(slices.Clone(spec.Roots), spec.Suffixes...) {
+		if !text(s) {
+			return false
+		}
+	}
+	return text(spec.Suffix)
 }
 
 func countNonBlank(in []string) int {

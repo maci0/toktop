@@ -18,6 +18,10 @@
 // reads the same declaration from a JSON file, DefinitionsPath being the
 // default location. Definitions is that file as a Go value, so a program
 // writing or editing one marshals it rather than hand-building the shape.
+// The keys an entry carries beside its usage block (how to launch the agent)
+// are kept rather than dropped, in Definition.Extra, so a program that reads
+// the file and writes it back does not delete the configuration it does not
+// model.
 //
 // Database agents are registered as sources instead: crush is built in,
 // opencode is added by EnableOpenCodeDB because its store is machine-wide

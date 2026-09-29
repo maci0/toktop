@@ -108,6 +108,30 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   earlier definitions file after a load of a path with no file at it. A
   missing file is not a refused one, so the load now clears the answer, as
   the doc already said it would.
+- `agentusage.Definitions` keeps the keys of an entry beside its `usage`
+  block, so a program that reads an `agents.json` and writes it back no longer
+  deletes the launch configuration they carry. The doc comment promised a
+  round trip preserves them and the decode did not: `Definition` had one
+  field, so every other key was dropped on read and gone from the rewritten
+  file. Those keys now decode into the new `Definition.Extra` as the JSON the
+  file spelled them with, and a write puts them back. A `usage` value that is
+  present but is not an object is refused rather than read as no spec, which
+  is the same treatment a `null` entry already got.
+- An `agentusage.Spec` no longer reports a `Suffix` that nothing will read,
+  on the way in or the way out. A file spelling both `suffix` and `suffixes`
+  has always meant the list, and the adapter read it that way, so a program
+  that read the spec, edited `Suffix` and wrote the file back edited the field
+  with no effect: the rewritten file kept the original list and the change
+  vanished. Decoding settles the pair the same way the adapter does, and
+  encoding writes the settled form, so the file a program writes names the one
+  field in force. A padded `suffix` is trimmed for the same reason: that is
+  also the value the adapter uses.
+- `agentusage.Discover` reports processes in ascending pid order on macOS as
+  well as Linux. The doc promised one order for every platform, and only the
+  `/proc` reader kept it: `ps` orders by its own defaults, so a macOS caller
+  listing agents read an order the contract did not name. Both readers sort
+  through one function now, and the assertion moved out of the Linux-only
+  test file so it covers every platform the package builds for.
 - `make site-rollback` and `make site-deploy` cleared the rolled-back record
   with `rmdir`, which cannot remove a marker directory that still holds the
   manifest a previous rollback wrote into it. The `rmdir` failed, was

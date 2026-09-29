@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -698,6 +699,150 @@ func TestDefinitionsRoundTripLoads(t *testing.T) {
 	}
 	if !slices.Equal(slices.Sorted(maps.Keys(back)), slices.Sorted(maps.Keys(file))) {
 		t.Errorf("round trip changed the agent names: %v, want %v", maps.Keys(back), maps.Keys(file))
+	}
+}
+
+// An agents.json entry describes how to launch its agent as well as where it
+// keeps its transcripts, and this package reads only the second. The doc
+// promises a program that reads a file and writes it again keeps the launch
+// fields, which means the read must carry them: without that, editing one
+// usage root through Definitions would silently delete every other key in the
+// entry, in the operator's own configuration file.
+func TestDefinitionsRoundTripKeepsKeysBesideUsage(t *testing.T) {
+	const body = `{"myagent":{
+		"launch":{"cmd":["myagent","--serve"],"env":{"HOME":"/tmp"}},
+		"notes":"kept",
+		"usage":{"roots":["~/.myagent/sessions"],"suffix":".jsonl"}
+	}}`
+
+	var file Definitions
+	if err := json.Unmarshal([]byte(body), &file); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := file["myagent"].Extra["launch"]; !ok {
+		t.Fatal("the launch block beside usage was dropped on read")
+	}
+
+	// The edited usage root is the one write, and the rest of the entry is
+	// what the file already said.
+	file["myagent"].Usage.Roots = []string{"~/.myagent/logs"}
+	out, err := json.Marshal(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var back Definitions
+	if err := json.Unmarshal(out, &back); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(back["myagent"].Usage.Roots, []string{"~/.myagent/logs"}) {
+		t.Errorf("rewritten roots = %v, want the edited ones", back["myagent"].Usage.Roots)
+	}
+	for _, key := range []string{"launch", "notes"} {
+		if _, ok := back["myagent"].Extra[key]; !ok {
+			t.Errorf("key %q was dropped by the rewrite: %s", key, out)
+		}
+	}
+	var raw map[string]map[string]json.RawMessage
+	if err := json.Unmarshal(out, &raw); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(raw["myagent"]["launch"]); !strings.Contains(got, `"--serve"`) {
+		t.Errorf("launch block = %s, want the file's own value", got)
+	}
+}
+
+// A decoded spec has to hold the value the watcher will apply, not every value
+// the file spelled. suffixes replaces suffix, and a program that read both,
+// changed suffix and wrote the file back would have edited the field nothing
+// reads: the file said one extension list, the rewritten one said another,
+// and nothing named the change. Decoding settles the pair the way the adapter
+// does, so a value read from a file is the value written for it.
+func TestSpecDecodeResolvesSuffixesAgainstSuffix(t *testing.T) {
+	// A root in every case, since a spec without one is not buildable into an
+	// adapter and the question here is which suffix field survives.
+	cases := []struct {
+		body         string
+		suffix       string
+		wantSuffix   string
+		wantSuffixes []string
+	}{
+		{`{"roots":["~/r"],"suffix":".ndjson"}`, `.ndjson`, ".ndjson", nil},
+		{`{"roots":["~/r"],"suffix":"  .ndjson  "}`, `  .ndjson  `, ".ndjson", nil},
+		{`{"roots":["~/r"],"suffix":".ndjson","suffixes":[".jsonl"]}`, `.ndjson`, "", []string{".jsonl"}},
+		{`{"roots":["~/r"],"suffix":".ndjson","suffixes":[]}`, `.ndjson`, ".ndjson", []string{}},
+		{`{"roots":["~/r"],"suffix":".ndjson","suffixes":["   "]}`, `.ndjson`, ".ndjson", []string{"   "}},
+		{`{"roots":["~/r"],"suffix":"   ","suffixes":[".jsonl"]}`, `   `, "", []string{".jsonl"}},
+	}
+	for _, tc := range cases {
+		var spec Spec
+		if err := json.Unmarshal([]byte(tc.body), &spec); err != nil {
+			t.Fatalf("json.Unmarshal(%s) = %v", tc.body, err)
+		}
+		if spec.Suffix != tc.wantSuffix {
+			t.Errorf("json.Unmarshal(%s) Suffix = %q, want %q", tc.body, spec.Suffix, tc.wantSuffix)
+		}
+		if !slices.Equal(spec.Suffixes, tc.wantSuffixes) {
+			t.Errorf("json.Unmarshal(%s) Suffixes = %v, want %v", tc.body, spec.Suffixes, tc.wantSuffixes)
+		}
+		// What the adapter derives is the rule the decode just applied, so the
+		// two cannot disagree about which field was in force.
+		ad, ok := specAdapter(spec)
+		if !ok {
+			t.Fatalf("specAdapter(%s) = false, want an adapter", tc.body)
+		}
+		if ad.suffix != tc.wantSuffix {
+			t.Errorf("specAdapter(%s) suffix = %q, want the decoded %q", tc.body, ad.suffix, tc.wantSuffix)
+		}
+		// And the write side carries the same resolution, so a value assembled
+		// in Go is not a second dialect the file format would disagree with
+		// on the way back in.
+		encoded, err := json.Marshal(spec)
+		if err != nil {
+			t.Fatalf("json.Marshal(%s) = %v", tc.body, err)
+		}
+		if tc.wantSuffix == "" {
+			if strings.Contains(string(encoded), `"suffix":`) {
+				t.Errorf("json.Marshal(%s) = %s, want no suffix key beside the list", tc.body, encoded)
+			}
+		} else if !strings.Contains(string(encoded), `"suffix":`+strconv.Quote(tc.wantSuffix)) {
+			t.Errorf("json.Marshal(%s) = %s, want the resolved suffix", tc.body, encoded)
+		}
+		var back Spec
+		if err := json.Unmarshal(encoded, &back); err != nil {
+			t.Fatalf("json.Unmarshal(%s) = %v", encoded, err)
+		}
+		backAd, ok := specAdapter(back)
+		if !ok || backAd.suffix != ad.suffix || !slices.Equal(backAd.suffixes, ad.suffixes) {
+			t.Errorf("re-decoding %s gave %q and %#v, want %q and %#v",
+				encoded, backAd.suffix, backAd.suffixes, ad.suffix, ad.suffixes)
+		}
+	}
+}
+
+// A usage block that is not an object carries no roots a watcher could walk,
+// so it is a file that cannot mean what it appears to mean, the same as a null
+// entry. A null usage block, on the other hand, is a launch-only entry and
+// registers nothing without refusing the file.
+func TestDefinitionRejectsNonObjectUsage(t *testing.T) {
+	for _, body := range []string{
+		`{"myagent":{"usage":"~/.myagent/sessions"}}`,
+		`{"myagent":{"usage":["roots"]}}`,
+	} {
+		var file Definitions
+		if err := json.Unmarshal([]byte(body), &file); err == nil {
+			t.Errorf("json.Unmarshal(%s) = nil error, want a refusal", body)
+		}
+	}
+
+	var file Definitions
+	if err := json.Unmarshal([]byte(`{"myagent":{"launch":["myagent"],"usage":null}}`), &file); err != nil {
+		t.Fatalf("a null usage block = %v, want a launch-only entry", err)
+	}
+	if file["myagent"].Usage != nil {
+		t.Error("a null usage block decoded to a spec")
+	}
+	if _, ok := file["myagent"].Extra["launch"]; !ok {
+		t.Error("the launch block beside a null usage block was dropped")
 	}
 }
 

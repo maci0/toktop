@@ -170,7 +170,9 @@ A program that writes that file marshals `agentusage.Definitions`, a map of
 agent name to `Definition` whose `Usage` field is the `Spec` above, so what it
 writes is the file `LoadDefinitions` reads. An entry carrying fields beside
 `usage` survives a round trip, since the same file also describes how to
-launch an agent and this package leaves those alone.
+launch an agent: decoding one keeps those keys in `Definition.Extra` as the
+raw JSON the file spelled them with, and writing the value again puts them
+back.
 
 ### Using the Go package
 

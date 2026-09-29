@@ -80,7 +80,10 @@ type Spec struct {
 	Roots []string `json:"roots"`
 	// Suffix filters transcript files (default [DefaultSuffix]). Surrounding
 	// whitespace is trimmed, and a value left blank by that falls back to the
-	// default rather than matching nothing.
+	// default rather than matching nothing. Suffixes, when set, replaces it:
+	// this field is then unused, and a value decoded from a file that spells
+	// both is left holding the one the reader will use, so the value a caller
+	// reads is the value the watcher applies.
 	Suffix string `json:"suffix,omitempty"`
 	// Suffixes matches several extensions, for an agent that writes more than
 	// one (compressed by default, plain when compression is off). It replaces
@@ -95,6 +98,50 @@ type Spec struct {
 	// the file. Without it, a transcript whose usage lines carry no cwd is
 	// attributed by location alone.
 	HeaderCwd bool `json:"header_cwd,omitempty"`
+}
+
+// UnmarshalJSON decodes a spec and resolves its two suffix fields, so the
+// value a caller reads back is the value a watcher will apply to it rather
+// than both values with a precedence the caller has to know. A file spelling
+// `suffix` and `suffixes` is not ambiguous to the reader, which reads only the
+// list, but it is to a program that read the spec, changed Suffix and wrote
+// the file back: the field it edited would have been the one out of force.
+func (s *Spec) UnmarshalJSON(data []byte) error {
+	type specFields Spec // the fields, without these two methods
+	if err := json.Unmarshal(data, (*specFields)(s)); err != nil {
+		return err
+	}
+	*s = s.resolved()
+	return nil
+}
+
+// MarshalJSON writes the resolved form, so a value assembled in Go and a value
+// read from a file produce the same file. Without it, a program that set
+// Suffixes on a spec carrying a Suffix wrote a file naming both, which reads
+// back with the Suffix gone: the change it made would appear to apply and then
+// not be the one any watcher used.
+func (s Spec) MarshalJSON() ([]byte, error) {
+	// The alias, not the resolved Spec: a value of Spec's own type still
+	// carries this method, so marshalling it would call the method again.
+	type specFields Spec
+	return json.Marshal(specFields(s.resolved()))
+}
+
+// resolved is the spec with one suffix field in force: the list where it holds
+// a non-blank entry, the single value otherwise, trimmed. The adapter derives
+// its filters the same way, so a spec, the file it writes and the adapter a
+// watcher builds all agree on which field counts.
+func (s Spec) resolved() Spec {
+	out := s
+	out.Suffix = strings.TrimSpace(s.Suffix)
+	for _, suffix := range s.Suffixes {
+		if strings.TrimSpace(suffix) != "" {
+			// A suffix list is in force, so a single suffix beside it is not.
+			out.Suffix = ""
+			break
+		}
+	}
+	return out
 }
 
 // canonicalTool is the map key for an agent name. Surrounding whitespace is
@@ -220,8 +267,78 @@ func SpecFor(tool string) (Spec, bool) {
 // business. A definition with no usage is kept by a round trip rather than
 // dropped, so editing a file this package ignored does not delete the
 // launch fields beside it.
+//
+// Extra holds the entry's remaining keys exactly as the file spelled them, so
+// the same holds for them: a program that reads a file, changes a usage root
+// and writes it back preserves the launch configuration it does not model
+// rather than deleting it. The values are the raw JSON, which is what a
+// program writing them needs (an arbitrary object, unmodeled here, has no Go
+// type to hold). A key this package does decode is not accepted here, so an
+// entry's two sources of truth cannot disagree.
 type Definition struct {
-	Usage *Spec `json:"usage,omitempty"`
+	Usage *Spec                      `json:"usage,omitempty"`
+	Extra map[string]json.RawMessage `json:"-"`
+}
+
+// UnmarshalJSON splits one entry into the usage block this package reads and
+// the keys beside it, which it keeps rather than drops. A usage block that is
+// present but not an object is an error, since every field a watcher will walk
+// comes from it, and an entry that is not an object at all is an error for the
+// same reason a null one is: the file cannot mean what it appears to mean.
+func (d *Definition) UnmarshalJSON(data []byte) error {
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	*d = Definition{}
+	for k, v := range raw {
+		if k == "usage" {
+			if isJSONNull(v) {
+				continue
+			}
+			var s Spec
+			if err := json.Unmarshal(v, &s); err != nil {
+				return err
+			}
+			d.Usage = &s
+			continue
+		}
+		if d.Extra == nil {
+			d.Extra = make(map[string]json.RawMessage, len(raw))
+		}
+		d.Extra[k] = bytes.Clone(v)
+	}
+	return nil
+}
+
+// MarshalJSON writes the usage block beside the keys the entry carried and
+// this package does not model, so a file this package read and a program wrote
+// again is the file it read. Keys are emitted in one object, sorted by
+// encoding/json, which is a spelling a reader does not care about.
+func (d Definition) MarshalJSON() ([]byte, error) {
+	out := make(map[string]json.RawMessage, len(d.Extra)+1)
+	for k, v := range d.Extra {
+		if k == "usage" {
+			continue // the Usage field is the one that spells it
+		}
+		out[k] = v
+	}
+	if d.Usage != nil {
+		usage, err := json.Marshal(d.Usage)
+		if err != nil {
+			return nil, err
+		}
+		out["usage"] = usage
+	}
+	return json.Marshal(out)
+}
+
+// isJSONNull reports whether raw is the JSON null literal, which an agent
+// entry may carry in place of an object. A null usage block is a launch-only
+// entry as far as this package is concerned, so it decodes to no spec rather
+// than to an error, the same as leaving the key out.
+func isJSONNull(raw json.RawMessage) bool {
+	return string(bytes.TrimSpace(raw)) == "null"
 }
 
 // Definitions is a whole definitions file, keyed by agent name as written

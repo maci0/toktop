@@ -6,13 +6,11 @@
 package agentusage
 
 import (
-	"cmp"
 	"errors"
 	"io"
 	"math"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -71,7 +69,7 @@ func Discover() []Process {
 	// os.ReadDir sorts entry names as strings, which orders pids 1, 10, 100,
 	// 11, 2. A caller listing agents would read that as a broken listing, so
 	// the order is fixed here rather than left to each caller's sort.
-	slices.SortFunc(out, func(a, b Process) int { return cmp.Compare(a.PID, b.PID) })
+	sortByPID(out)
 	return out
 }
 

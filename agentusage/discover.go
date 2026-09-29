@@ -4,7 +4,9 @@
 package agentusage
 
 import (
+	"cmp"
 	"path/filepath"
+	"slices"
 	"time"
 )
 
@@ -52,6 +54,15 @@ func dshHosts(argv []string) bool {
 // report nothing at all. None of those shells out to a helper binary to
 // enumerate processes: only ps(1) and lsof(8), and only on macOS, where
 // there is no procfs to read.
+
+// sortByPID orders a discovery result by process id, which is the order
+// [Discover] documents on every platform. Each reader hands its matches back
+// in whatever order its source produced them: /proc entries sort as strings
+// (1, 10, 100, 11, 2), and ps orders by its own defaults, which are not pid.
+// One sort here is what makes the guarantee a single one.
+func sortByPID(procs []Process) {
+	slices.SortFunc(procs, func(a, b Process) int { return cmp.Compare(a.PID, b.PID) })
+}
 
 // knownNames is the set of agent names a discovered process is matched
 // against, keyed the way agentName looks them up: canonical (NFC, trimmed).

@@ -3,7 +3,44 @@
 
 package agentusage
 
-import "testing"
+import (
+	"math/rand/v2"
+	"slices"
+	"testing"
+)
+
+// Discover documents one order on every platform, so the assertion belongs
+// where it covers all of them rather than beside the one reader that used to
+// be the only one sorting: a reader that hands matches back in its source's
+// order (ps on macOS) otherwise breaks the promise silently, and the package
+// only gets tested on the platform that already sorted.
+func TestDiscoverIsOrderedByPID(t *testing.T) {
+	got := Discover()
+	for i := 1; i < len(got); i++ {
+		if got[i-1].PID > got[i].PID {
+			t.Fatalf("Discover returned pid %d before %d: %v", got[i-1].PID, got[i].PID, got)
+		}
+	}
+}
+
+// The same guarantee, on a listing no platform can supply: the sort is what
+// turns an unordered result into a documented one, so it is checked directly
+// rather than only where a machine happens to have agents running.
+func TestSortByPIDOrdersAnyListing(t *testing.T) {
+	procs := make([]Process, 0, 64)
+	for i := range cap(procs) {
+		procs = append(procs, Process{PID: i + 1})
+	}
+	rand.Shuffle(len(procs), func(i, j int) { procs[i], procs[j] = procs[j], procs[i] })
+	sortByPID(procs)
+	pids := make([]int, len(procs))
+	for i, p := range procs {
+		pids[i] = p.PID
+	}
+	if !slices.IsSorted(pids) {
+		t.Fatalf("sortByPID left the listing unordered: %v", pids)
+	}
+}
 
 func TestAgentName(t *testing.T) {
 	known := map[string]bool{"claude": true, "codex": true, "node": false}

@@ -53,6 +53,9 @@ func Discover() []Process {
 		}
 		found = append(found, Process{PID: pid, Tool: tool, Dir: dir, AllDirs: tool == "dsh" && dshHosts(argv)})
 	}
+	// ps orders by its own defaults, not by pid, so the documented order is
+	// fixed here rather than inherited from the listing it read.
+	sortByPID(found)
 	return found
 }
 

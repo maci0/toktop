@@ -67,17 +67,10 @@ func TestDiscoverFindsProcessByArgvName(t *testing.T) {
 	}
 }
 
-// The listing is reported in ascending pid order. os.ReadDir hands back the
-// /proc entry names as strings, which orders 1, 10, 100, 11, 2, and a
-// consumer printing that reads as a broken listing.
-func TestDiscoverIsOrderedByPID(t *testing.T) {
-	got := Discover()
-	for i := 1; i < len(got); i++ {
-		if got[i-1].PID > got[i].PID {
-			t.Errorf("Discover returned pid %d before %d: %v", got[i-1].PID, got[i].PID, got)
-		}
-	}
-}
+// os.ReadDir hands back the /proc entry names as strings, which orders
+// pids 1, 10, 100, 11, 2, and a consumer printing that reads as a broken
+// listing. TestDiscoverIsOrderedByPID in discover_test.go asserts the order on
+// every platform; the reader-specific half is that the sort is the shared one.
 
 func TestProcStartTicks(t *testing.T) {
 	// 18 zeros after state fill fields 4–21 so 12345 is field 22 (starttime).

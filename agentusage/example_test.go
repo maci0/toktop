@@ -370,3 +370,28 @@ func ExampleDefinitions() {
 	fmt.Println(string(data))
 	// Output: {"myagent":{"usage":{"roots":["{dir}/.myagent/sessions"]}}}
 }
+
+// Editing a definitions file a program did not write is the case that costs:
+// the file also describes how to launch each agent, and a rewrite that dropped
+// those keys would delete an operator's configuration from their own file.
+// Reading keeps them in Definition.Extra as the JSON the file spelled them
+// with, so a rewrite changes the usage block and leaves the rest.
+func ExampleDefinition_roundTrip() {
+	const written = `{"myagent":{"launch":["myagent","--serve"],"usage":{"roots":["~/.myagent/sessions"]}}}`
+
+	var file agentusage.Definitions
+	if err := json.Unmarshal([]byte(written), &file); err != nil {
+		fmt.Println(err)
+		return
+	}
+	// The one change this program makes.
+	file["myagent"].Usage.Roots = []string{"{dir}/.myagent/logs"}
+
+	data, err := json.Marshal(file)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println(string(data))
+	// Output: {"myagent":{"launch":["myagent","--serve"],"usage":{"roots":["{dir}/.myagent/logs"]}}}
+}
