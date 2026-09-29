@@ -740,8 +740,8 @@ func TestCompressSeriesZeroBlock(t *testing.T) {
 }
 
 func TestHeatFunctionsNaN(t *testing.T) {
-	if got := tempColor(math.NaN()); got != cGreen {
-		t.Errorf("tempColor(NaN) = %v, want %v", got, cGreen)
+	if got := tempBand(math.NaN()).color(); got != cGreen {
+		t.Errorf("tempBand(NaN).color() = %v, want %v", got, cGreen)
 	}
 	if got := memHeat(math.NaN()); got != cGreen {
 		t.Errorf("memHeat(NaN) = %v, want %v", got, cGreen)
@@ -763,8 +763,8 @@ func TestHeatFunctionsThresholds(t *testing.T) {
 		{100.0, cRed},
 	}
 	for _, tc := range tempCases {
-		if got := tempColor(tc.v); got != tc.want {
-			t.Errorf("tempColor(%v) = %v, want %v", tc.v, got, tc.want)
+		if got := tempBand(tc.v).color(); got != tc.want {
+			t.Errorf("tempBand(%v).color() = %v, want %v", tc.v, got, tc.want)
 		}
 	}
 

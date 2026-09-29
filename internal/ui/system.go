@@ -282,8 +282,6 @@ func sysCPUTemps(sy *core.SysSample) []core.TempReading {
 // and a number already and are left alone.
 func tempBand(celsius float64) band { return bandOf(celsius, tempWarnC, tempCritC) }
 
-func tempColor(celsius float64) lipgloss.Color { return tempBand(celsius).color() }
-
 func memBand(v float64) band { return bandOf(v, memWarnPct, memCritPct) }
 
 func memHeat(v float64) lipgloss.Color { return memBand(v).color() }
