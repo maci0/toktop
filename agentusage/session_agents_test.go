@@ -159,10 +159,10 @@ func writeAgySteps(t *testing.T, store, id string, withUsage bool) {
 	}
 	var lines []string
 	for i := range ownerScanLines + 1 {
-		lines = append(lines, `{"step_index":`+itoa(i)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:33:17Z","content":"reading the tree"}`)
+		lines = append(lines, `{"step_index":`+strconv.Itoa(i)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:33:17Z","content":"reading the tree"}`)
 	}
 	if withUsage {
-		lines = append(lines, `{"step_index":`+itoa(ownerScanLines+1)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:34:00Z","usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":6,"thoughtsTokenCount":2,"cachedContentTokenCount":5,"totalTokenCount":28}}`)
+		lines = append(lines, `{"step_index":`+strconv.Itoa(ownerScanLines+1)+`,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-09-27T11:34:00Z","usageMetadata":{"promptTokenCount":20,"candidatesTokenCount":6,"thoughtsTokenCount":2,"cachedContentTokenCount":5,"totalTokenCount":28}}`)
 	}
 	append_(t, filepath.Join(dir, "transcript.jsonl"), lines...)
 }
@@ -253,14 +253,10 @@ func writeGrokTurn(t *testing.T, store, dir string, in, out, cached, think, elap
 		t.Fatal(err)
 	}
 	line := `{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","elapsed_ms":` +
-		itoa(elapsedMS) + `,"usage":{"inputTokens":` + itoa(in) +
-		`,"outputTokens":` + itoa(out) +
-		`,"cachedReadTokens":` + itoa(cached) +
-		`,"cacheCreationTokens":0,"reasoningTokens":` + itoa(think) +
-		`,"totalTokens":` + itoa(in+out) + `}}}}`
+		strconv.Itoa(elapsedMS) + `,"usage":{"inputTokens":` + strconv.Itoa(in) +
+		`,"outputTokens":` + strconv.Itoa(out) +
+		`,"cachedReadTokens":` + strconv.Itoa(cached) +
+		`,"cacheCreationTokens":0,"reasoningTokens":` + strconv.Itoa(think) +
+		`,"totalTokens":` + strconv.Itoa(in+out) + `}}}}`
 	append_(t, filepath.Join(sess, "updates.jsonl"), line)
-}
-
-func itoa(n int) string {
-	return strconv.Itoa(n)
 }
