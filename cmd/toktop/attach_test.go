@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -128,6 +129,34 @@ func TestAttachLocalAppendsToExistingProviders(t *testing.T) {
 	}
 	if got[0].Label != "local:0" || got[1].Addr != base {
 		t.Errorf("order = %+v, want the discovered provider first", labels(got))
+	}
+}
+
+// An --add base carrying no http origin is what a host:port typed without a
+// scheme parses to, and it is the one way an endpoint the operator named
+// silently loses the bearer token: no origin to admit, so every request to it
+// goes out unauthenticated. The token being dropped is only survivable if the
+// operator is told, because a gateway that answers 401 on every request looks
+// like a dead engine rather than a mistyped flag. The endpoint still attaches:
+// the operator named it, and refusing it would hide an engine that is up.
+func TestAttachLocalWarnsWhenTheBearerTokenCannotRide(t *testing.T) {
+	// A closed port, so identify finds nothing quickly and the generic
+	// fallback is what attaches.
+	base := "127.0.0.1:" + strconv.Itoa(closedPort(t))
+
+	var got []provider.Provider
+	stderr := captureStderr(t, func() {
+		got = attachLocal(context.Background(), nil, base)
+	})
+
+	if len(got) != 1 {
+		t.Fatalf("providers = %+v, want the named endpoint attached anyway", labels(got))
+	}
+	if got[0].Poll == nil {
+		t.Error("attached provider has no poll function")
+	}
+	if !strings.Contains(stderr, "unauthenticated") || !strings.Contains(stderr, base) {
+		t.Errorf("stderr = %q, want the unauthenticated warning naming %s", stderr, base)
 	}
 }
 
