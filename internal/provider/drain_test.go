@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // connCounter records how many distinct TCP connections a server accepted. The
@@ -113,5 +115,62 @@ func TestDrainAndCloseStopsAtCap(t *testing.T) {
 	case <-done2:
 	case <-time.After(5 * time.Second):
 		t.Fatal("probe on an endless body did not return")
+	}
+}
+
+// errorBodySrv serves a failing status with a body the client reads only a
+// snippet of, padded afterwards so the transfer is provably unfinished when
+// the client closes. A gateway in trouble answers this way on every poll, so
+// the connection has to come back to the pool here too.
+//
+// The padding has to clear 4*core.SnippetCap, which is where httpStatus stops
+// reading. A body shorter than that is consumed whole by the read that builds
+// the message, reaches EOF on its own, and would be reusable with or without
+// a drain, so it pins nothing.
+func errorBodySrv(t *testing.T, cc *connCounter) *httptest.Server {
+	t.Helper()
+	pad := strings.Repeat("x", 4*core.SnippetCap+512)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		cc.new(r)
+		w.Header().Set("Content-Type", "text/plain")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte("engine is loading the model " + pad))
+		w.(http.Flusher).Flush()
+		time.Sleep(100 * time.Millisecond)
+		_, _ = w.Write([]byte(strings.Repeat(" ", 512)))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+// TestFailingPollsReuseConnections pins the same drain on the error path.
+// The status is turned into an error message, so nothing here parses a body,
+// but the snippet is read to build that message and the transfer stops there.
+// Closing the body at that point sends the connection to TIME_WAIT, which is
+// the one path a poll takes whenever the engine is down: a flat retry rate
+// against a failing engine then costs a handshake and a socket per tick for
+// as long as it stays down.
+func TestFailingPollsReuseConnections(t *testing.T) {
+	cc := &connCounter{}
+	srv := errorBodySrv(t, cc)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var listing struct {
+		Data []struct{ ID string }
+	}
+	for range 3 {
+		err := getJSON(ctx, srv.URL+"/v1/models", &listing)
+		if err == nil {
+			t.Fatal("503 accepted as a listing")
+		}
+		// The message still has to carry the engine's own words, since that
+		// is the part that says what went wrong.
+		if !strings.Contains(err.Error(), "engine is loading the model") {
+			t.Errorf("error dropped the response body: %v", err)
+		}
+	}
+	if n := cc.count(); n != 1 {
+		t.Errorf("failing polls opened %d connections, want 1 reused connection", n)
 	}
 }

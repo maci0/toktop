@@ -99,7 +99,13 @@ func get(ctx context.Context, c *http.Client, url string) (*http.Response, error
 	}
 	if resp.StatusCode != http.StatusOK {
 		err := httpStatus(url, resp)
-		resp.Body.Close()
+		// httpStatus stops after the snippet it puts in the message, so the
+		// body is left unread. Closing it there returns the connection to
+		// TIME_WAIT rather than the idle pool, and the paths that hit this
+		// most are the ones an engine in trouble takes: every refused or
+		// failing poll paid a fresh dial, forever. drainAndClose finishes
+		// the transfer so the next request reuses the socket.
+		drainAndClose(resp.Body)
 		return nil, err
 	}
 	return resp, nil

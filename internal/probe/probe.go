@@ -288,7 +288,12 @@ func postJSON(ctx context.Context, url string, body []byte) (*http.Response, err
 		return nil, fmt.Errorf("%s: %w", url, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
+		// The snippet below is read for the message only, and a body closed
+		// partway through goes back to TIME_WAIT rather than the idle pool.
+		// A 429 or a 503 is exactly the answer an overloaded gateway gives on
+		// every tick, so without the drain each one cost a fresh dial and a
+		// socket to the same host for as long as the backend stayed down.
+		defer drainAndClose(resp.Body)
 		b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
 		msg := fmt.Sprintf("%s: http %s", url, core.HTTPStatus(resp.Status))
 		if s := core.Snippet(b); s != "" {
@@ -314,6 +319,23 @@ type httpStatusError struct {
 	status int
 	after  time.Duration
 	err    error
+}
+
+// probeDrainCap bounds the tail drainAndClose throws away so the connection
+// can be reused. The bytes go to io.Discard, so this bounds time rather than
+// memory: an endpoint streaming an endless body on the error path would
+// otherwise hold the caller on a read that answers nothing. Past the cap the
+// connection is simply not reused, which is what closing an undrained body
+// did anyway.
+const probeDrainCap = 64 << 10
+
+// drainAndClose reads out the tail of a body the caller stopped reading and
+// then closes it. net/http only returns a connection to the idle pool when its
+// body is closed at EOF, so a caller that stops at the end of a snippet has to
+// finish the transfer here.
+func drainAndClose(body io.ReadCloser) {
+	_, _ = io.Copy(io.Discard, io.LimitReader(body, probeDrainCap))
+	body.Close()
 }
 
 func (e *httpStatusError) Error() string { return e.err.Error() }

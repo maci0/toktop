@@ -2,7 +2,9 @@ package ingest
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -3187,5 +3189,67 @@ func TestIngestMintsRequestIDDeterministically(t *testing.T) {
 		if logcfg.Field(id, maxRequestID) != id {
 			t.Errorf("minted id %q does not survive the audit-line field filter", id)
 		}
+	}
+}
+
+// TestDecodeFailureKeepsTheCauseDistinguishable pins which decode failures
+// reach the audit log as a body read error. A sender that vanished mid-body
+// and a sender that sent the wrong bytes both used to reach the operator as
+// the same text with no attribute, because clientJSONError returns a string
+// and the error value was dropped there. They call for different fixes, and
+// only the first is a network problem.
+func TestDecodeFailureKeepsTheCauseDistinguishable(t *testing.T) {
+	hasBodyError := func(r streamResult) bool {
+		for i := 0; i+1 < len(r.extra); i += 2 {
+			if s, ok := r.extra[i].(string); ok && s == "body_error" {
+				return true
+			}
+		}
+		return false
+	}
+
+	// A read that fails partway is the case the attribute exists for: the
+	// sender's object never finished arriving.
+	truncated := streamResult{}.decodeFailure(io.ErrUnexpectedEOF, false)
+	if !hasBodyError(truncated) {
+		t.Errorf("a truncated body reached the log as a bare message: %q", truncated.msg)
+	}
+	// A cancelled request is the same: nothing is wrong with the payload.
+	cancelled := streamResult{}.decodeFailure(context.Canceled, false)
+	if !hasBodyError(cancelled) {
+		t.Errorf("a cancelled body read reached the log as a bare message: %q", cancelled.msg)
+	}
+
+	// Malformed JSON the decoder classified itself is not a read failure, and
+	// labelling it one would send the operator at the network when the
+	// sender's own bytes are wrong. Its message still says where.
+	syntax := streamResult{}.decodeFailure(&json.SyntaxError{Offset: 12}, false)
+	if hasBodyError(syntax) {
+		t.Errorf("a syntax error was reported as a body read failure: %q", syntax.msg)
+	}
+	if !strings.Contains(syntax.msg, "offset 12") {
+		t.Errorf("syntax error = %q, want the offset a sender can act on", syntax.msg)
+	}
+
+	// A field of the wrong type is a payload error too, and the sender-facing
+	// message has to keep naming the field.
+	typeErr := streamResult{}.decodeFailure(&json.UnmarshalTypeError{Field: "tokens", Value: "string"}, false)
+	if hasBodyError(typeErr) {
+		t.Errorf("a type error was reported as a body read failure: %q", typeErr.msg)
+	}
+	if !strings.Contains(typeErr.msg, "tokens") {
+		t.Errorf("type error = %q, want it to name the field", typeErr.msg)
+	}
+
+	// A body over the cap is neither: the sender has to trim, and the 413
+	// with the limit says so.
+	var mbe http.MaxBytesError
+	mbe.Limit = 1024
+	over := streamResult{}.decodeFailure(&mbe, false)
+	if over.status != http.StatusRequestEntityTooLarge {
+		t.Errorf("over-cap body status = %d, want %d", over.status, http.StatusRequestEntityTooLarge)
+	}
+	if hasBodyError(over) {
+		t.Error("an over-cap body was reported as a read failure")
 	}
 }

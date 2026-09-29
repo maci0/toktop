@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -252,12 +255,35 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 // those outlive the run: a vitals script failing in the peer's login shell
 // reports the path of the account it ran as, which core.RedactHome cannot
 // touch because the local account is a different one.
+//
+// The fold is a wrapper, not a rewrite. A %w wrap would re-expose the very
+// path the fold exists to remove, since the cause renders unredacted text
+// through Error(). Rebuilding the error with errors.New dropped the chain
+// instead, so connLost, which classifies by error identity before it reads
+// text, matched nothing: an ssh.ExitError, a deadline and a net.OpError all
+// arrived as the same untyped string, and the "connection lost" branch was
+// reachable only by matching words in text that was itself rebuilt from text.
 func (c *Client) redactPeerHome(err error) error {
 	if err == nil {
 		return nil
 	}
-	return errors.New(core.RedactUserHome(c.account(), err.Error()))
+	return peerHomeError{
+		msg:   core.RedactUserHome(c.account(), err.Error()),
+		cause: err,
+	}
 }
+
+// peerHomeError renders an error with the peer account's home folded out
+// while keeping the cause reachable through errors.Is and errors.As. The
+// rendered text is the only thing a log line or a report shows, so the fold
+// applies to it alone and the cause stays as it arrived.
+type peerHomeError struct {
+	msg   string
+	cause error
+}
+
+func (e peerHomeError) Error() string { return e.msg }
+func (e peerHomeError) Unwrap() error { return e.cause }
 
 // account is the login the peer's shell runs as, for the fold in
 // redactPeerHome. The resolved login is the account whose home the peer's own
@@ -301,7 +327,21 @@ func stderrTail(s string) string {
 // connLost classifies session-open failures so callers can tell a dead
 // connection from a transient hiccup. The original cause stays wrapped: the
 // classification label is for branching, not a replacement for detail.
+//
+// Identity decides first, because the wrapped cause now survives
+// redactPeerHome and errors.Is reaches the real reason: a peer that hung up
+// hands back an io.EOF, a client we closed hands back net.ErrClosed, and a
+// channel past its deadline hands back a timeout. Only a cause that carries
+// no identity falls through to the words, which is where x/crypto/ssh's own
+// "ssh: unexpected packet in response to channel open" and a script's
+// "connection lost" on stdout still land.
 func connLost(err error) error {
+	if errors.Is(err, io.EOF) ||
+		errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, os.ErrDeadlineExceeded) ||
+		errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("ssh connection lost: %w", err)
+	}
 	msg := err.Error()
 	if strings.Contains(msg, "connection lost") ||
 		strings.Contains(msg, "EOF") ||

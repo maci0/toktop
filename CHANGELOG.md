@@ -132,6 +132,34 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   and since the store is re-read from the attach instant on every poll, the same
   refusal came back each time and the agent reported nothing for as long as the
   rows stood.
+- A remote command's failure is now classifiable again. Folding the peer
+  account's home directory out of the text a remote run produced rebuilt the
+  error from that string, which dropped the cause with it: an `ssh.ExitError`,
+  a deadline and a `net.OpError` all arrived as the same untyped value, and
+  the "connection lost" label that tells a dead connection from a refused one
+  was reachable only by matching words in text that had itself been rebuilt
+  from text. The fold is a wrapper now, so `errors.Is` and `errors.As` reach
+  the cause while the rendered text stays folded.
+- A forwarded port whose listener cannot accept no longer spins at ten
+  wakeups a second for the life of the connection. The gap between attempts
+  grows, with jitter so several ports failing on one system condition do not
+  retry in lockstep, and resets the moment an accept succeeds. The failure
+  line also carries how many accepts have failed back to back, since the
+  throttle means a port that stays down says one line and then nothing: a
+  count climbing into the thousands is a port that is not coming back.
+- Polling an engine that answers with an error status no longer pays a fresh
+  TCP handshake on every poll. The status is turned into a message read from
+  a snippet of the body, and closing the body there sent the connection to
+  TIME_WAIT instead of the idle pool, so the paths a struggling engine takes
+  most were the ones that could not reuse a socket. The body is now drained
+  before it is closed, on both the provider and the probe path.
+- An ingest request whose body fails to arrive now says so in the audit log.
+  A body that stopped mid-transfer reached both the sender and the log as the
+  same text as a sender that sent malformed JSON, because the sender-facing
+  message is a string and the error behind it was dropped there. A truncated
+  or cancelled read is now recorded as a body error; a payload the JSON
+  decoder classified itself is still reported as a payload error, since its
+  message already names the field or offset the sender needs.
 - An ssh_config `Host` block written for a name with an accent now matches
   that host. `?` matched one byte rather than one character, so `Host cafe?`
   stopped inside the last rune of "café" and reported no match, and the block's

@@ -9,8 +9,10 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"maps"
+	"net"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1924,5 +1926,106 @@ func TestStdoutBufClipsAStraddlingWrite(t *testing.T) {
 	}
 	if got := len(b.String()); got != stdoutCap {
 		t.Errorf("collected %d bytes, want %d", got, stdoutCap)
+	}
+}
+
+func TestRedactPeerHomeKeepsTheCauseReachable(t *testing.T) {
+	c := &Client{Target: Target{Host: "box", User: "peer"}}
+
+	// The text is folded, so the account's own name and its home path are
+	// gone from what a log line or a report renders.
+	folded := c.redactPeerHome(errors.New("bash: /home/peer/.bashrc: No such file"))
+	if msg := folded.Error(); strings.Contains(msg, "/home/peer") || !strings.Contains(msg, "~") {
+		t.Errorf("redactPeerHome left the peer home in the text: %q", msg)
+	}
+
+	// The cause is still reachable by identity, which is what lets connLost
+	// tell a hung-up peer from a refused one without reading words. A rebuild
+	// from the string matched nothing here, so every remote failure arrived
+	// as the same untyped value.
+	sentinel := errors.New("remote read failed")
+	if got := c.redactPeerHome(sentinel); !errors.Is(got, sentinel) {
+		t.Errorf("redactPeerHome dropped the cause: errors.Is cannot find %v in %v", sentinel, got)
+	}
+
+	// net.OpError carries a *net.OpError under it, so the type assertion has
+	// to keep working through the fold too.
+	opErr := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connection refused")}
+	var target *net.OpError
+	if got := c.redactPeerHome(opErr); !errors.As(got, &target) {
+		t.Errorf("redactPeerHome dropped the *net.OpError: errors.As cannot find it in %v", got)
+	}
+
+	// nil stays nil: a successful run has no error to fold.
+	if got := c.redactPeerHome(nil); got != nil {
+		t.Errorf("redactPeerHome(nil) = %v, want nil", got)
+	}
+}
+
+func TestConnLostClassifiesByIdentityBeforeText(t *testing.T) {
+	// A peer that hung up and a client we closed both mean the connection is
+	// gone, and neither says so in words this function would have matched
+	// before the fold stopped erasing the cause.
+	for name, cause := range map[string]error{
+		"eof":      io.EOF,
+		"closed":   net.ErrClosed,
+		"deadline": os.ErrDeadlineExceeded,
+	} {
+		if err := connLost(cause); !strings.Contains(err.Error(), "ssh connection lost") {
+			t.Errorf("connLost(%s) = %q, want the connection-lost label", name, err)
+		}
+	}
+
+	// A cause that is not a lost connection is left alone, and it keeps its
+	// identity either way.
+	authErr := errors.New("ssh: unable to authenticate, attempted methods [none]")
+	if got := connLost(authErr); !errors.Is(got, authErr) {
+		t.Errorf("connLost relabeled an auth failure: %v", got)
+	}
+
+	// The word match is still the only way to classify a cause the standard
+	// library gives no identity to, so a script's own "connection lost" on
+	// stdout keeps reaching the branch.
+	if got := connLost(errors.New("vitals: connection lost")); !strings.Contains(got.Error(), "ssh connection lost") {
+		t.Errorf("connLost dropped the text fallback: %q", got)
+	}
+}
+
+func TestAcceptBackoffGrowsJittersAndStaysUnderTheCap(t *testing.T) {
+	// The first retry has to stay near forwardAcceptRetry: the case the pacing
+	// exists for is a descriptor exhaustion that clears on its own, and a port
+	// waiting seconds to answer again is the failure the gap was added to stop.
+	first := acceptBackoff(forwardAcceptRetry)
+	if first <= 0 || first > forwardAcceptRetry {
+		t.Errorf("acceptBackoff(%v) = %v, want (0, %v]", forwardAcceptRetry, first, forwardAcceptRetry)
+	}
+
+	// Jitter has to actually move the value, or two ports failing on one
+	// system condition retry in lockstep and rebuild the pressure that failed
+	// them. A single draw proves nothing, so look at a run of them.
+	seen := make(map[time.Duration]bool)
+	for range 64 {
+		seen[acceptBackoff(forwardAcceptRetryMax)] = true
+	}
+	if len(seen) < 8 {
+		t.Errorf("acceptBackoff produced %d distinct values in 64 draws, want a spread", len(seen))
+	}
+
+	// Every draw stays inside the cap, including at the top of the range where
+	// an off-by-one would push past it.
+	for range 64 {
+		if got := acceptBackoff(forwardAcceptRetryMax); got > forwardAcceptRetryMax {
+			t.Fatalf("acceptBackoff(%v) = %v, over the cap", forwardAcceptRetryMax, got)
+		}
+	}
+
+	// A wait that has not yet reached the cap is exactly doubled by the relay
+	// loop, and the doubling is what has to stop.
+	wait := forwardAcceptRetry
+	for i := 0; i < 20; i++ {
+		wait = min(wait*2, forwardAcceptRetryMax)
+	}
+	if wait != forwardAcceptRetryMax {
+		t.Errorf("doubling settled at %v, want the cap %v", wait, forwardAcceptRetryMax)
 	}
 }

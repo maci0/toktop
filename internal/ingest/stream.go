@@ -114,6 +114,25 @@ func (r streamResult) decodeFailure(err error, keyed bool) streamResult {
 		r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), 256)}
 		return r
 	}
+	// Anything else that came out of the decoder is a read failure the
+	// *net.OpError test does not name: a cancelled lifecycle, a connection
+	// reset mid-body, a handler timeout. clientJSONError returns a string, so
+	// without this the error value is gone by the time the audit line is
+	// written, and the operator is left with "bad json: <text>" and no way to
+	// tell a sender that vanished from a sender that sent the wrong bytes.
+	//
+	// A payload error the decoder classified itself is left alone: its
+	// message already names the field or the offset a sender can act on, and
+	// calling it a body read failure would point the operator at the network
+	// when the sender's own object is what is wrong.
+	if _, ok := errors.AsType[*json.SyntaxError](err); !ok {
+		if _, ok := errors.AsType[*json.UnmarshalTypeError](err); !ok {
+			r.status = http.StatusBadRequest
+			r.msg = clientJSONError(err)
+			r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), 256)}
+			return r
+		}
+	}
 	r.status, r.msg = http.StatusBadRequest, clientJSONError(err)
 	return r
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/rand/v2"
 	"net"
 	"strconv"
 	"time"
@@ -26,9 +27,18 @@ import (
 // reason other than Close. Without it a descriptor-exhausted process
 // would spin on the failed call, and with it the port keeps answering
 // once the descriptors come back.
+//
+// forwardAcceptRetryMax caps how far that pacing grows. A flat gap cannot
+// tell a listener that is about to recover from one whose failure is
+// permanent, and the difference costs ten wakeups a second for the life of
+// the client: the failure is a system condition, not a per-connection one,
+// so a port stuck refusing to accept burns a core while every dashboard poll
+// against it times out. The cap keeps a port that recovered immediately from
+// sitting out a long delay.
 var (
-	forwardDialTimeout = 8 * time.Second
-	forwardAcceptRetry = 100 * time.Millisecond
+	forwardDialTimeout    = 8 * time.Second
+	forwardAcceptRetry    = 100 * time.Millisecond
+	forwardAcceptRetryMax = 5 * time.Second
 )
 
 // forwardBindAttempts bounds the rebind loop that steers a kernel-chosen
@@ -126,8 +136,26 @@ func listenEphemeralAvoiding(rports []int, taken map[int]int) (net.Listener, err
 	return nil, fmt.Errorf("no loopback port free of the forwarded set after %d attempts", forwardBindAttempts)
 }
 
+// acceptBackoff spreads wait over a range below it, so several forwarded
+// ports failing on the same system condition do not retry in lockstep and
+// rebuild the pressure that failed them. The floor is a tenth of the wait,
+// which keeps the first retry close to forwardAcceptRetry, where the point is
+// only to keep a port answering as soon as its descriptors come back.
+func acceptBackoff(wait time.Duration) time.Duration {
+	lo := wait / 10
+	if lo <= 0 {
+		lo = 1
+	}
+	return lo + time.Duration(rand.Int64N(int64(wait-lo)+1))
+}
+
 func (c *Client) relay(l net.Listener, rport int) {
 	target := net.JoinHostPort("127.0.0.1", strconv.Itoa(rport))
+	// wait is the gap before the next attempt after a failed Accept, grown
+	// while the failures continue and reset the moment one succeeds, so a
+	// listener that recovers pays the base gap rather than the grown one.
+	wait := forwardAcceptRetry
+	fails := 0
 	for {
 		local, err := l.Accept()
 		if err != nil {
@@ -140,10 +168,13 @@ func (c *Client) relay(l net.Listener, rport int) {
 			if errors.Is(err, net.ErrClosed) {
 				return
 			}
-			c.auditForwardFailure(rport, err)
-			time.Sleep(forwardAcceptRetry)
+			fails++
+			c.auditForwardFailure(rport, err, fails)
+			time.Sleep(acceptBackoff(wait))
+			wait = min(wait*2, forwardAcceptRetryMax)
 			continue
 		}
+		wait, fails = forwardAcceptRetry, 0
 		if !c.acquireRelay(local) {
 			local.Close()
 			continue
@@ -160,7 +191,7 @@ func (c *Client) relay(l net.Listener, rport int) {
 				// the local engine refusing a connection it never made. The
 				// rate limit keeps a permanently down engine from writing one
 				// line per poll.
-				c.auditForwardFailure(rport, derr)
+				c.auditForwardFailure(rport, derr, 0)
 				return
 			}
 			defer remote.Close()
@@ -187,7 +218,7 @@ func (c *Client) relay(l net.Listener, rport int) {
 			}
 			<-piped
 			if first != nil {
-				c.auditForwardFailure(rport, first)
+				c.auditForwardFailure(rport, first, 0)
 			}
 		}(local)
 	}
@@ -217,13 +248,20 @@ const forwardWarnInterval = time.Minute
 // tcp: connection refused" and "connection lost" call for different fixes and
 // the local dashboard reports both as a refused connection.
 //
+// fails is how many accepts on this port have failed back to back, or 0 when
+// the failure belongs to a single connection. The throttle means a listener
+// stuck refusing to accept says one line and then nothing for the rest of
+// the run, so a single line has to carry the scale of it: a count that climbs
+// from 1 into the thousands is a port that is not coming back, and the same
+// line at 1 is a transient that already cleared.
+//
 // The gap is measured on the monotonic reading time.Now carries, not on unix
 // nanoseconds. A wall-clock difference is wrong on either side of a step: a
 // backward NTP correction or a laptop resuming from sleep makes now-last
 // negative, which is under the interval, and the throttle then suppresses
 // every further line until real time passes the value it lost, so a remote
 // engine that stayed down for an hour after the step said nothing at all.
-func (c *Client) auditForwardFailure(rport int, err error) {
+func (c *Client) auditForwardFailure(rport int, err error, fails int) {
 	now := time.Now()
 	c.forwardWarnMu.Lock()
 	if last, seen := c.forwardWarnAt[rport]; seen && now.Sub(last) < forwardWarnInterval {
@@ -235,11 +273,16 @@ func (c *Client) auditForwardFailure(rport int, err error) {
 	}
 	c.forwardWarnAt[rport] = now
 	c.forwardWarnMu.Unlock()
-	audit().Warn("toktop: ssh forward failed",
+	fields := []any{
 		"target", logcfg.RedactedField(c.Target.LogHost(), 256),
 		"port", c.Target.Port,
 		"forwarded_port", rport,
-		"error", logcfg.RedactedField(c.Target.RedactUser(err.Error()), 256))
+	}
+	if fails > 0 {
+		fields = append(fields, "consecutive_failures", fails)
+	}
+	audit().Warn("toktop: ssh forward failed", append(fields,
+		"error", logcfg.RedactedField(c.Target.RedactUser(err.Error()), 256))...)
 }
 
 // acquireRelay records local as a connection this client is piping, or refuses
