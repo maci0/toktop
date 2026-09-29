@@ -254,6 +254,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A session store that cannot be read is no longer opened once per poll. The
+  handle table caches the read-only connection a poll reuses, but the
+  connection was cached before anything had confirmed it works: `sql.Open` is
+  lazy, so a path with no database and a file that is not a database both
+  opened without an error and failed on the first query, and the read that
+  failed then dropped the handle. The stat such a handle carries is nil, so
+  the next poll did not reuse it either, and a machine running an agent with no
+  store at all paid a failed open on every poll for the life of the dashboard.
+  The handle is now pinged once before it is cached, so the table holds only
+  connections a query can run on. What a poll reports is unchanged: a store
+  that cannot be read is still audited once per outage, and a store that
+  recovers is read by the next poll.
+
 - The lock error `toktop update` prints when it cannot take the install lock
   named the home directory back after redacting it. The message wrapped the
   `*fs.PathError` from `os.Remove`, whose own text spells the path out in full,

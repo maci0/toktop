@@ -6,6 +6,7 @@
 package agentusage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -134,25 +135,32 @@ var openStores = struct {
 // is a replaced store, and the old handle is dropped rather than served. A read
 // that failed drops its handle through closeStore, so a corrupt page or a
 // database left mid-recovery costs one poll rather than every poll after it.
+// A store whose connection does not answer is reported here rather than
+// cached, so the table holds only handles a query can run on.
 //
 // The returned handle is held for the caller: releaseStore hands it back, and
 // until then it is not closed even if the table drops it. Caller must not hold
 // openStores' lock, and must not close the *sql.DB itself.
 func openStore(path string) (*storeHandle, error) {
-	openStores.Lock()
-	defer openStores.Unlock()
-	if h, ok := openStores.byPath[path]; ok {
-		if sameFile(h.fi, statFile(path)) {
-			h.refs++
-			return h, nil
-		}
-		delete(openStores.byPath, path)
-		openStores.order = removeKey(openStores.order, path)
-		dropStoreLocked(h)
+	if h := claimCachedStore(path); h != nil {
+		return h, nil
 	}
-	db, err := openReadOnly(path)
+	// The connection is established without the table's lock, because
+	// establishing it is I/O: a store a writer holds waits out the busy
+	// timeout, and every other watcher's open and release queues behind that
+	// wait to reuse a handle it could have had for nothing.
+	db, err := openReady(path)
 	if err != nil {
 		return nil, err
+	}
+	openStores.Lock()
+	defer openStores.Unlock()
+	// A peer opened the same store while this one was connecting, or replaced
+	// it, so the table is read again rather than trusted: two handles on one
+	// path would keep two connections to it and evict each other.
+	if h := claimCachedStoreLocked(path); h != nil {
+		_ = db.Close()
+		return h, nil
 	}
 	h := &storeHandle{db: db, fi: statFile(path), refs: 1}
 	openStores.byPath[path] = h
@@ -166,6 +174,55 @@ func openStore(path string) (*storeHandle, error) {
 		}
 	}
 	return h, nil
+}
+
+// claimCachedStore takes a reference on the handle open on the file now at
+// path, reporting nil when the table holds none or holds one on a file the
+// path has been replaced by. The dropped handle is closed by whoever released
+// it, not here.
+func claimCachedStore(path string) *storeHandle {
+	openStores.Lock()
+	defer openStores.Unlock()
+	return claimCachedStoreLocked(path)
+}
+
+// claimCachedStoreLocked is claimCachedStore with the table's lock already
+// held.
+func claimCachedStoreLocked(path string) *storeHandle {
+	h, ok := openStores.byPath[path]
+	if !ok {
+		return nil
+	}
+	if sameFile(h.fi, statFile(path)) {
+		h.refs++
+		return h
+	}
+	delete(openStores.byPath, path)
+	openStores.order = removeKey(openStores.order, path)
+	dropStoreLocked(h)
+	return nil
+}
+
+// openReady opens a connection to the store at path and confirms it reads,
+// which sql.Open on its own does not: it is lazy, so a path that is not there
+// and a file that is not a database both open without an error and fail on the
+// first query. Caching either one is a handle nothing can read, and the stat
+// it carries is nil, so the read that fails drops it and the next poll builds
+// another: an agent with no store at all (the common case for opencode) pays
+// a failed open on every poll for the life of the dashboard. One ping settles
+// it here, once per handle rather than once per poll.
+func openReady(path string) (*sql.DB, error) {
+	db, err := openReadOnly(path)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
+	defer cancel()
+	if err := db.PingContext(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	return db, nil
 }
 
 // dropStoreLocked takes a handle out of the table for good and closes it once

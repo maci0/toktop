@@ -139,6 +139,64 @@ func TestCloseStoreLeavesAHeldHandleUsable(t *testing.T) {
 	}
 }
 
+// A store that is not there, and a file that is not a database, both open
+// lazily and fail on the first query. Handing such a handle out caches a
+// connection nothing can read, and the stat it carries is nil, so every later
+// poll drops it and builds another: an agent with no store at all pays a failed
+// open on every poll for the life of the dashboard.
+func TestOpenStoreRefusesAStoreItCannotRead(t *testing.T) {
+	dir := t.TempDir()
+	resetOpenStores(t)
+
+	missing := filepath.Join(dir, "missing.db")
+	if _, err := openStore(missing); err == nil {
+		t.Error("a path with no database opened a handle; every poll then pays for a read that cannot run")
+	}
+	garbage := filepath.Join(dir, "garbage.db")
+	if err := os.WriteFile(garbage, []byte("not a sqlite database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openStore(garbage); err == nil {
+		t.Error("a file that is not a database opened a handle")
+	}
+	openStores.Lock()
+	n := len(openStores.byPath)
+	openStores.Unlock()
+	if n != 0 {
+		t.Errorf("the handle table holds %d unreadable stores; each one is rebuilt on the next poll", n)
+	}
+}
+
+// A store that recovers is opened by the next read, which is the point of
+// reporting an unreadable one instead of caching it: the failure costs the
+// poll it happened on, and nothing after it.
+func TestOpenStoreOpensAfterAStoreRecovers(t *testing.T) {
+	dir := t.TempDir()
+	resetOpenStores(t)
+	// A file the open refuses, replaced by the store the agent writes.
+	path := filepath.Join(dir, ".crush", "crush.db")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("not a sqlite database"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := openStore(path); err == nil {
+		t.Fatal("a file that is not a database opened a handle")
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	crushDB(t, dir, map[string][3]int64{"s1": {10, 20, 1789581724}})
+	sess, ok := readCrushSessions(path, time.Time{})
+	if !ok {
+		t.Fatal("the read failed after the store was replaced by a database")
+	}
+	if _, found := sess["s1"]; !found {
+		t.Errorf("read %+v from the recovered store, want s1", sess)
+	}
+}
+
 // A project-local store is found by walking up from the agent's working
 // directory, so the key set is every project an agent has run in. Without a cap
 // the table would pin a handle for each one for the life of the dashboard.
