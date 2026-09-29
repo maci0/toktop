@@ -146,10 +146,10 @@ func TestChecksumForRejectsNonHex(t *testing.T) {
 func TestChecksumForNameHoldingUnicodeWhitespace(t *testing.T) {
 	okHex := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 	for _, asset := range []string{
-		"toktop 1.2.3_linux_amd64.tar.gz",  // U+0020, an ordinary space
+		"toktop 1.2.3_linux_amd64.tar.gz", // U+0020, an ordinary space
 		"toktop 1.2.3_linux_amd64.tar.gz", // U+00A0 no-break space
 		"toktop　1.2.3_linux_amd64.tar.gz", // U+3000 ideographic space
-		"toktop 1.2.3_linux_amd64.tar.gz",  // U+2028 line separator
+		"toktop 1.2.3_linux_amd64.tar.gz", // U+2028 line separator
 	} {
 		// The name a caller asks for is the release asset's own, so it carries
 		// the space too: filepath.Base of the listing field has to equal it.
