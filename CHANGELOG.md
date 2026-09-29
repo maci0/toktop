@@ -30,7 +30,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   every pin on the host. The next connect now finds a copy that is missing,
   damaged, or older than the store, rewrites it from the store, and logs that
   it did.
-
 - A probe failure no longer spells out the home directory. An engine's own
   error text (`model not found: /home/<user>/models/m.gguf`) reached the
   frame, `--json` and `--plain` unfolded, so a copy of a report named the
@@ -112,6 +111,22 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   script ends in `true`, so its exit status never reported the failure the
   warning was written for, and a hardened kernel hiding the table produced a
   silent empty sweep that read as a host with no listening ports.
+
+- A wall-clock step backwards no longer discards the tokens generated since
+  the previous sample, and no longer restarts the smoothed rate from zero.
+  The interval the step made reports nothing, as before; the next one now
+  accounts for the same tokens the zero-elapsed branch already kept.
+
+- A peer's host-identity field and a model id sent to a probe both take the
+  one shape `core.ModelName` gives such a string. Each had its own near-copy
+  of the trim and cap, and the probe's dropped the one-line fold, so a model
+  id carrying a control character reached the generation body unfolded.
+
+- An engine serving a `/readyz` body that merely contains `ok` inside a longer
+  word is no longer identified as LocalAI. The needle has to stand on its own.
+
+- An ingest failure reaching the feed notice folds the home directory, like
+  the agent-watch notice beside it.
 
 ## [0.21.0] - 2026-09-28
 

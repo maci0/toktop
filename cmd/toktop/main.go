@@ -389,7 +389,7 @@ func runMain() int {
 					// channel carries the agent watch's failures too, so the
 					// message names the subsystem that stopped.
 					select {
-					case feedErr <- "ingest stopped: " + err.Error():
+					case feedErr <- "ingest stopped: " + core.RedactHome(err.Error()):
 					default:
 					}
 				}

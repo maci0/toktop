@@ -461,5 +461,5 @@ func trimQuotes(s string) string {
 // 5 MB field in the snapshot, re-sanitized by every renderer on every frame
 // and written whole into --json.
 func vitalsField(s string) string {
-	return core.SingleLine(core.TruncateClusters(s, core.ModelNameMax))
+	return core.ModelName(s)
 }

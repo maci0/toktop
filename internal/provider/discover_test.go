@@ -214,6 +214,19 @@ func TestIdentifyLocalAI(t *testing.T) {
 	}
 }
 
+func TestIdentifyLocalAINeedleIsAWholeWord(t *testing.T) {
+	// A /readyz body that merely contains "ok" inside a longer word names no
+	// engine. Falling through here lands on the OpenAI default, which is the
+	// answer a plain OpenAI-shaped listing deserves.
+	kind := httptestKind(t, map[string]fakeRoute{
+		"/v1/models": {200, `{"data":[{"id":"luna-ai"}]}`},
+		"/readyz":    {200, "BROKEN"},
+	})
+	if kind != core.KindOpenAI {
+		t.Errorf("kind = %q", kind)
+	}
+}
+
 func TestIdentifyLiteLLM(t *testing.T) {
 	// litellm /v1/models usually needs an API key -> 401
 	kind := httptestKind(t, map[string]fakeRoute{

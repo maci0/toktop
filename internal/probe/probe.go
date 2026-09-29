@@ -432,11 +432,13 @@ func longest(values ...string) string {
 	return longest
 }
 
-// capModel trims and bounds an engine-supplied model id at core.ModelNameMax,
-// the bound the provider layer already stored ids under, so a name that
-// reached a snapshot is one the generation request sends unchanged.
+// capModel puts an engine-supplied model id through the one shape the tree
+// gives such a name, so the name stored in a snapshot and the name the
+// generation request sends are the same string. The one-line fold is the
+// load-bearing half: a Request.Model is not otherwise sanitized on its way
+// into the JSON body.
 func capModel(name string) string {
-	return core.TruncateClusters(strings.TrimSpace(name), core.ModelNameMax)
+	return core.ModelName(name)
 }
 
 // SelectModel picks the model a probe should measure from what an engine

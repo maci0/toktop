@@ -45,9 +45,10 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 		// The wall clock moved backwards (NTP correction, a resume from
 		// sleep). Elapsed time over this interval is negative, so no rate is
 		// defined, and holding the prior one would report it unchanged for as
-		// long as the step lasts. Re-seed the baseline here and report no
-		// throughput for the interval the step made.
-		c.prev[key] = prevSample{at: now, outTotal: m.OutTotal, inTotal: m.InTotal}
+		// long as the step lasts. Report no throughput for the interval the
+		// step made, and keep the older baseline, as the dt == 0 branch does,
+		// so the next real interval accounts for these tokens too instead of
+		// dropping them and restarting the EMA from zero.
 		return 0, 0
 	}
 	if dt == 0 {

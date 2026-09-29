@@ -6,6 +6,8 @@ package agentusage
 import (
 	"math"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Sample is the usage observed since the watcher attached, as the transcripts
@@ -265,6 +267,6 @@ func satAddSpan(a, b time.Duration) time.Duration {
 	return a + b
 }
 
-// maxSaneSpan bounds an accumulated model-time span. It is core.MaxEventSpan
-// by value: see satAddSpan.
-const maxSaneSpan = 24 * time.Hour
+// maxSaneSpan bounds an accumulated model-time span, the same ceiling the
+// event boundary applies to a single event: see satAddSpan.
+const maxSaneSpan = core.MaxEventSpan

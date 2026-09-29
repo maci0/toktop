@@ -268,6 +268,9 @@ func AppendSorted[T any](s []T, item T, max int, cmp func(a, b T) int) []T {
 // reports the count back to a sender, and keeps the id a caller ledgers for
 // suppressed replays off entries nothing holds.
 func AppendRetained[T any](s []T, item T, max int, cmp func(a, b T) int) ([]T, bool) {
+	if max <= 0 {
+		return s, false
+	}
 	if len(s) == max && cmp(item, s[0]) <= 0 {
 		return s, false
 	}

@@ -204,7 +204,7 @@ func identify(ctx context.Context, base string) string {
 	case probeContains(ctx, base, "/info", `"version"`),
 		probeContains(ctx, base, "/info", "text-generation"):
 		return core.KindTGI
-	case probeContains(ctx, base, "/readyz", "ok"):
+	case probeContainsWord(ctx, base, "/readyz", "ok"):
 		return core.KindLocalAI
 	case probeContains(ctx, base, "/", "gpustack"):
 		return core.KindGPUStack
@@ -232,6 +232,37 @@ func probeContains(ctx context.Context, base, path string, needles ...string) bo
 		}
 	}
 	return true
+}
+
+// probeContainsWord is probeContains for a bare word needle, which must stand
+// on its own in the body. A two-letter needle like "ok" otherwise matches
+// inside any larger word the engine happened to serve, and an engine identity
+// is a far worse answer than no answer.
+func probeContainsWord(ctx context.Context, base, path, needle string) bool {
+	text, err := getText(ctx, scanClient, base+path)
+	if err != nil {
+		return false
+	}
+	lower := core.FoldASCII(text)
+	for at := 0; at < len(lower); {
+		i := strings.Index(lower[at:], needle)
+		if i < 0 {
+			return false
+		}
+		start, end := at+i, at+i+len(needle)
+		at = end
+		if (start == 0 || !isWordByte(lower[start-1])) && (end == len(lower) || !isWordByte(lower[end])) {
+			return true
+		}
+	}
+	return false
+}
+
+// isWordByte reports whether b is a letter or a digit. FoldASCII has already
+// mapped the body's non-ASCII letters onto ASCII, so these two ranges cover
+// every byte that can begin or continue a word.
+func isWordByte(b byte) bool {
+	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
 }
 
 // sglangInfoOK detects SGLang via its native /get_model_info endpoint.
