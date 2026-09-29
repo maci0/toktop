@@ -114,6 +114,10 @@ func TestChangelogGateVersionBumps(t *testing.T) {
 		{name: "fix in a patch", version: "0.18.3", prev: "0.18.2", heading: "### Fixed", stubFirst: true},
 		{name: "fix in a minor", version: "0.19.0", prev: "0.18.2", heading: "### Fixed", stubFirst: true},
 		{name: "added in a patch", version: "0.18.3", prev: "0.18.2", heading: "### Added", stubFirst: true},
+		{name: "breaking in a patch-line prerelease", version: "0.18.3-rc.1", prev: "0.18.2", heading: "### Breaking", stubFirst: true, wantCutOff: true},
+		{name: "breaking in a patch-line build metadata", version: "0.18.3+build.7", prev: "0.18.2", heading: "### Breaking", stubFirst: true, wantCutOff: true},
+		{name: "breaking in a minor-line prerelease", version: "0.19.0-rc.1", prev: "0.18.2", heading: "### Breaking", stubFirst: true},
+		{name: "fix in a patch-line prerelease", version: "0.18.3-rc.1", prev: "0.18.2", heading: "### Fixed", stubFirst: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

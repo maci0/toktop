@@ -394,6 +394,14 @@ run at all. The rest of `docs/` is not watched: `ARCHITECTURE.md` is a map of
 the tree and `RECOVERY.md` a set of procedures, both correctable without a
 change an upgrading user can observe.
 
+`docs/openapi.yaml` carries the feed's own version, and
+`TestOpenAPIVersionNamesTheReleaseItDescribes` in `internal/repogate` holds it
+to the release the document's last change shipped in. A client generator pins
+`info.version`, so a feed that moved under a version that stood still leaves a
+generated client unable to tell it is stale. The changelog entry the file owes
+and the version it owes are both asked for separately, because a release can
+carry the entry and still leave the field behind.
+
 `make check-api` runs beside it on the tag push. It reads the exported
 declarations `agentusage` carries now and the ones it carried at the last
 release, and refuses a version that drops one, since a Go caller meets that as
@@ -417,9 +425,11 @@ Keep one heading per impact, in the order the file uses: `Breaking`, then
 would notice belongs under `Breaking` even at 0.x, and it names the before
 and after plus what to do about it. The same gate reads the heading and the
 previous release's version: a `Breaking` entry under a patch bump fails,
-because 0.x still owes the caller a minor, not a patch, for a break. Adding a
-field to an exported `agentusage` struct lands there, since a Go caller
-building it unkeyed no longer compiles.
+because 0.x still owes the caller a minor, not a patch, for a break. The
+version is compared with any prerelease or build suffix stripped, so
+`0.18.3-rc.1` is the patch bump it is and a `Breaking` entry under it fails
+the same way. Adding a field to an exported `agentusage` struct lands there,
+since a Go caller building it unkeyed no longer compiles.
 
 The source stamp is empty. `make build` writes `dev` via `-ldflags
 -X main.version=...`; a release tag writes the version with the `v` prefix

@@ -221,6 +221,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `docs/openapi.yaml` names the toktop release it describes in
+  `info.version`, which is the field a client generator pins. It said `0.1.0`
+  through every change to the answers `/healthz` gives, to the `X-Request-Id`
+  header and to the event caps, and through the release the document first
+  shipped in, so a generated client could not tell it was describing an older
+  feed than the one it was generated against. It reads `0.22.0` now, and
+  `TestOpenAPIVersionNamesTheReleaseItDescribes` in `internal/repogate` holds
+  the field to the release the file's last change shipped in, so a contract
+  change cannot move without it.
+
 - An empty `--bearer` no longer reports overriding a bearer variable that
   holds only whitespace. `resolveBearer` skips such a value, so nothing was
   overridden; the warning read the variable untrimmed, named the fallback, and
@@ -308,6 +318,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   admitting it. A repository's first commit still passes: it has no parent to
   compare against either way. `ALLOW_SHALLOW=1` overrides for a cut you accept
   going unchecked.
+- A prerelease can no longer carry a breaking change on a patch line. The
+  changelog gate reads the version being cut and compares it with the release
+  below it, refusing a `### Breaking` section under a patch bump, but it gave
+  up on any version that was not three bare numbers, so `0.18.3-rc.1` and
+  `0.18.3+build.7` were never compared with anything. A cut tagged
+  `v0.18.3-rc.1` could remove an export and ship it under a patch, past the
+  only gate that reads the version. The rule now strips the prerelease and
+  build suffix and compares what is left, which is the line a caller on
+  0.18.2 is on. A prerelease of a minor (`0.19.0-rc.1`) is let through as
+  before, since that is the bump the rule asks for anyway.
 - A tagged release no longer fails after it has published. The release job
   uploads every file in `dist/`, so the license text added beside the SBOM went
   up as an asset, and the restore drill that runs last compared the published

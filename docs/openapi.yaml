@@ -11,11 +11,18 @@
 # served path), both as a one-line text/plain reason; neither is an operation
 # of its own, so they are named in the server description rather than attached
 # to a path.
+#
+# `info.version` is the toktop release this document describes, not a counter
+# of edits to the file: a client generator pins it, so a feed that moved and a
+# version that stood still is a client that cannot tell it is stale.
+# TestOpenAPIVersionNamesTheReleaseItDescribes in internal/repogate holds it to
+# the release the last change to this file shipped in, and refuses a version
+# naming a release CHANGELOG.md has no section for.
 
 openapi: 3.1.0
 info:
   title: toktop agent feed
-  version: "0.1.0"
+  version: "0.22.0"
   license:
     name: MIT
     identifier: MIT

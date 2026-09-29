@@ -26,6 +26,14 @@ type semver struct {
 	extra string
 }
 
+func (v semver) String() string {
+	s := strconv.Itoa(v.major) + "." + strconv.Itoa(v.minor) + "." + strconv.Itoa(v.patch)
+	if v.extra != "" {
+		return s + "-" + v.extra
+	}
+	return s
+}
+
 func parseSemver(s string) (semver, bool) {
 	parts := strings.SplitN(s, "-", 2)
 	extra := ""
