@@ -383,6 +383,19 @@ components:
         otherwise put the account that owns the home into whichever field it
         chose. The stored value is what the feed, the dashboard and the report
         render.
+
+        Every `maxLength` below counts grapheme clusters, the unit the feed
+        displays in, not the Unicode code points a validator counts: an id of
+        129 flags is past the cap, and 129 bytes of a two-byte rune is not.
+
+        The caps are not all the same rule. `id` is the one field where a value
+        past the cap is a 400, because the id is the dedup key and two keys
+        clamped onto one stored id would drop the second event. Every other
+        string field and every numeric field past its cap is clamped to it
+        rather than refused, so the schema's bounds are what a conforming
+        sender stays inside, not a rejection the server performs. Sending one
+        anyway is accepted, not refused, and the stored value is the bounded
+        one.
       additionalProperties: true
       properties:
         id:
@@ -408,11 +421,11 @@ components:
           type: string
           maxLength: 64
           default: anonymous
-          description: The agent the event came from.
+          description: The agent the event came from. Past the cap it is clamped, not refused.
         model:
           type: string
           maxLength: 128
-          description: The model that served it.
+          description: The model that served it. Past the cap it is clamped, not refused.
         kind:
           type: string
           maxLength: 24
@@ -420,7 +433,8 @@ components:
           description: |
             One of `turn`, `tool`, `error`, `note`, matched whatever case it
             is written in. A custom kind passes through ASCII-lowercased, so a
-            non-ASCII letter keeps its case.
+            non-ASCII letter keeps its case. Past the cap it is
+            clamped, not refused.
         prompt_tokens:
           type: integer
           minimum: 0
@@ -446,7 +460,8 @@ components:
           maxLength: 128
           description: |
             A monitored engine already counting this output; the aggregates
-            skip the event so its tokens are not added twice.
+            skip the event so its tokens are not added twice. Past the cap it
+            is clamped, not refused.
         span_ms:
           type: integer
           minimum: 0
@@ -463,4 +478,5 @@ components:
           description: |
             Free text. A note that is nothing but a directory is reduced to
             its last two components, with a path under `$HOME` folded to `~`.
-            Any other text is stored as sent, past that fold.
+            Any other text is stored as sent, past that fold. Past the cap it
+            is clamped, not refused.

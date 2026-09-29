@@ -391,6 +391,14 @@ Event fields are all optional; anything omitted gets the default:
 | `span_ms` | integer | `0` | how long the model spent on this event's tokens, in milliseconds. It is the rate denominator, so it beats the gap between events. Negative values and values above 86400000 clamp to `0`, which leaves the gap between events in charge; a whole JSON number such as `2000.0` counts, and a value that is not a number is a `400` naming the field |
 | `note` | string | - | free-form, capped at 512 characters; a note that is nothing but a directory is reduced to its last two components, with a path under `$HOME` folded to `~`, so client and project names above the checkout never reach the feed |
 
+Every length cap above counts grapheme clusters, the unit the feed displays
+in, not the code points a JSON schema's `maxLength` counts: an id of 129 flags
+is past the cap, and 129 bytes of a two-byte rune is not. The caps are not one
+rule. `id` is the only field where a value past the cap is a `400`, because it
+is the key the feed deduplicates on; every other string field and every token
+count past its bound is clamped to it, so a sender that goes over is accepted
+and the stored value is the bounded one.
+
 One POST answers `202` with `{"accepted":N,"stored":M}` once every event in
 the stream is decoded, where `accepted` is what the wire carried and
 `stored` is what the retained feed took. A replayed event (an id already

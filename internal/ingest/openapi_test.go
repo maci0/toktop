@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // docs/openapi.yaml is the machine-readable form of the agent feed contract
@@ -184,6 +186,103 @@ func TestOpenAPIDocumentsEveryAnswerTheServerGives(t *testing.T) {
 				healthPath, code, strings.Join(openapiCodes(headSection), " "))
 		}
 	}
+}
+
+// Every maxLength the Event schema declares is the constant the handler bounds
+// that field with, and one of them (id) is refused where the rest are clamped.
+// A cap that drifts in either file is a client generated against a bound the
+// server does not hold, so both halves are pinned here: the number, and which
+// side of it the server refuses on.
+func TestOpenAPIEventCapsMatchTheBounds(t *testing.T) {
+	declared := declaredCaps(t, "Event")
+	want := map[string]int{
+		"id":         core.AgentIDMax,
+		"agent":      core.AgentNameMax,
+		"model":      core.AgentModelMax,
+		"kind":       core.AgentKindMax,
+		"via_engine": core.AgentViaMax,
+		"note":       core.AgentNoteMax,
+	}
+	for field, limit := range want {
+		got, ok := declared[field]
+		if !ok {
+			t.Errorf("the Event schema declares no maxLength for %q, which the handler caps at %d", field, limit)
+			continue
+		}
+		if got != limit {
+			t.Errorf("the Event schema caps %q at %d, which the handler bounds at %d", field, got, limit)
+		}
+	}
+	for field := range declared {
+		if _, ok := want[field]; !ok {
+			t.Errorf("the Event schema caps %q, which the handler does not bound", field)
+		}
+	}
+
+	// The two rules the caps sit on either side of. wireEventID refuses a
+	// past-the-cap id and ClampField drops the rest, so a sender that reads
+	// the schema alone has to be told which field is which: a generated
+	// client that treats every maxLength as a rejection loses events the
+	// server accepts.
+	clamped := []string{"agent", "model", "kind", "via_engine", "note"}
+	for _, field := range clamped {
+		if !strings.Contains(propertySection(t, "Event", field), "clamped, not refused") {
+			t.Errorf("the Event schema does not say %q clamps past its cap rather than refusing it", field)
+		}
+	}
+	// The numeric fields clamp out-of-range counts to zero the same way, and
+	// the spec's prose carries the ceiling the handler clamps with. The token
+	// ceiling is written as a power of two in both the schema and the README;
+	// the constant beside it is what makes that spelling checkable.
+	props := propertySection(t, "Event", "prompt_tokens")
+	if core.MaxEventTokens != 1<<40 || !strings.Contains(props, "2^40") {
+		t.Errorf("the Event schema does not name the token ceiling core.MaxEventTokens (%d) spells as 2^40", core.MaxEventTokens)
+	}
+	if !strings.Contains(propertySection(t, "Event", "span_ms"), strconv.FormatInt(maxSpanMS, 10)) {
+		t.Errorf("the Event schema does not name the span bound (%d ms) the handler clamps with", maxSpanMS)
+	}
+}
+
+// declaredCaps maps each property of one schema to the maxLength it declares.
+func declaredCaps(t *testing.T, name string) map[string]int {
+	t.Helper()
+	caps := map[string]int{}
+	for _, prop := range declaredProps(t, name) {
+		for _, line := range strings.Split(propertySection(t, name, prop), "\n") {
+			v, ok := strings.CutPrefix(strings.TrimSpace(line), "maxLength: ")
+			if !ok {
+				continue
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				t.Fatalf("schema %s property %s declares maxLength %q, which is not a number", name, prop, v)
+			}
+			caps[prop] = n
+		}
+	}
+	return caps
+}
+
+// propertySection is one property's block of a schema, from its own key at
+// eight spaces to the next key at the same indent.
+func propertySection(t *testing.T, schema, prop string) string {
+	t.Helper()
+	lines := strings.Split(schemaSection(t, schema), "\n")
+	heading := "        " + prop + ":"
+	start := -1
+	for i, l := range lines {
+		if l == heading {
+			start = i
+			continue
+		}
+		if start >= 0 && strings.HasPrefix(l, "        ") && !strings.HasPrefix(l, "         ") {
+			return strings.Join(lines[start:i], "\n")
+		}
+	}
+	if start < 0 {
+		t.Fatalf("schema %s declares no property %q", schema, prop)
+	}
+	return strings.Join(lines[start:], "\n")
 }
 
 // schemaSection is one named block of docs/openapi.yaml's components section,
