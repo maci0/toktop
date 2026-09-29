@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"os"
 	"os/signal"
 	"sync"
@@ -307,12 +308,7 @@ func runMain() int {
 			// has no other supervisor to notice: dropped, the dashboard came
 			// up collecting nothing and said nothing.
 			if err := col.Run(ctx, ch); err != nil {
-				logcfg.Logger().Error("toktop: collector stopped",
-					"error", logcfg.Field(core.RedactHome(err.Error()), 256))
-				select {
-				case feedErr <- "collector stopped: " + core.RedactHome(err.Error()):
-				default:
-				}
+				reportFailure(feedErr, slog.LevelError, "collector stopped", err)
 			}
 		}()
 		prober = col.ProbeAll
@@ -348,12 +344,7 @@ func runMain() int {
 		// banner is gone with the run and a watch that stopped following an
 		// agent looks the same as one that never saw it.
 		aw.SetOnError(func(err error) {
-			logcfg.Logger().Warn("toktop: agent watch failed",
-				"error", logcfg.Field(core.RedactHome(err.Error()), 256))
-			select {
-			case feedErr <- "agent watch: " + core.RedactHome(err.Error()):
-			default:
-			}
+			reportFailure(feedErr, slog.LevelWarn, "agent watch failed", err)
 		})
 		go aw.Run(ctx)
 	}
@@ -401,10 +392,7 @@ func runMain() int {
 					// needs its own: the alt screen hides stderr, and the
 					// channel carries the agent watch's failures too, so the
 					// message names the subsystem that stopped.
-					select {
-					case feedErr <- "ingest stopped: " + core.RedactHome(err.Error()):
-					default:
-					}
+					feedFailure(feedErr, "ingest stopped", err)
 				}
 			}()
 			defer srv.Close()
@@ -443,6 +431,27 @@ func runMain() int {
 	}
 
 	return runTUI(ctx, cfg, ch, uiNow, !f.noReload)
+}
+
+// feedFailure offers a subsystem's death to the UI feed, dropping it when
+// nothing is drawing yet. The live dashboard paints with alt-screen sequences
+// that hide stderr, so this is the only place a running dashboard says why a
+// panel stopped moving. The channel carries every subsystem's failures, so the
+// message names the one that stopped.
+func feedFailure(feedErr chan<- string, msg string, cause error) {
+	select {
+	case feedErr <- msg + ": " + core.RedactHome(cause.Error()):
+	default:
+	}
+}
+
+// reportFailure is feedFailure plus the audit line, for a subsystem whose
+// death nothing else records. The cause is home-redacted in both: the audit
+// line is what an operator pastes into issues.
+func reportFailure(feedErr chan<- string, level slog.Level, msg string, cause error) {
+	logcfg.Logger().Log(context.Background(), level, "toktop: "+msg,
+		"error", logcfg.Field(core.RedactHome(cause.Error()), 256))
+	feedFailure(feedErr, msg, cause)
 }
 
 // reloadPoll is how often the hot-reload watcher stats the executable. A dev

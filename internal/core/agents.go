@@ -82,37 +82,87 @@ type AgentSummary struct {
 	Own   []AgentRate // the same, counting only unattributed tokens
 }
 
-// agentAcc is one agent's running totals over the summary window.
-type agentAcc struct {
+// tokenAcc is one counted half of an agent's window: every event the agent
+// reported, or only the unattributed ones.
+type tokenAcc struct {
 	tokens   int64
 	prompt   int64
 	thinking int64
 	first    time.Time
 	last     time.Time
+	n        int
+	// span is the sum of event durations the sender reported. spanned counts
+	// those events. A rate uses the durations only when every event in the
+	// window brought one: a grok turn is a single event minutes after the
+	// last, and the gap between them is not how long the model ran.
+	span    time.Duration
+	spanned int
+}
+
+// add folds one event into the totals. The feed is not ordered by time: the
+// remote ingest endpoint accepts any ts, and a producer's clock can step. Track
+// the extremes rather than the last event walked, or a single out-of-order
+// stamp shortens the span below and the rate with it.
+func (t *tokenAcc) add(ev AgentEvent) {
+	if t.n == 0 {
+		t.first = ev.At
+	}
+	if ev.At.Before(t.first) {
+		t.first = ev.At
+	}
+	if ev.At.After(t.last) {
+		t.last = ev.At
+	}
+	t.tokens = satAddPos(t.tokens, ev.OutputTokens)
+	t.prompt = satAddPos(t.prompt, ev.PromptTokens)
+	t.thinking = satAddPos(t.thinking, ev.ThinkingTokens)
+	if ev.Span > 0 {
+		t.span += ev.Span
+		t.spanned++
+	}
+	t.n++
+}
+
+// row renders the accumulated totals. A rate needs a span: one event says how
+// much, not how fast, so a window holding a single event reports tokens without
+// a rate, unless the event itself said how long the model spent. That duration
+// is the span, not the time since the previous event.
+func (t *tokenAcc) row(agent, via string) AgentRate {
+	r := AgentRate{
+		Agent:     agent,
+		Tokens:    t.tokens,
+		Prompt:    t.prompt,
+		Thinking:  t.thinking,
+		Last:      t.last,
+		ViaEngine: via,
+	}
+	var secs float64
+	switch {
+	case t.spanned == t.n && t.span > 0:
+		secs = t.span.Seconds()
+	case t.n > 1:
+		secs = t.last.Sub(t.first).Seconds()
+	}
+	if secs > 0 {
+		r.TokPS = float64(t.tokens) / secs
+		r.PromptPS = float64(t.prompt) / secs
+	}
+	return r
+}
+
+// agentAcc is one agent's running totals over the summary window.
+type agentAcc struct {
+	// all and own are the two halves the summary reports. They are kept per
+	// event rather than per agent: an agent that connects to (or leaves) a
+	// monitored engine mid-window contributes the slice that went direct.
+	all tokenAcc
+	own tokenAcc
 	// via is the engine every attributed event named, and viaSplit records
 	// that the agent named more than one across the window. Neither is read
 	// off the last event walked: the feed is not time-ordered, so that made
 	// the label depend on arrival order.
 	via      string
 	viaSplit bool
-	n        int
-	// Unattributed half. Kept per event rather than per agent: an
-	// agent that connects to (or leaves) a monitored engine mid-window
-	// contributes the slice that went direct.
-	ownTokens   int64
-	ownPrompt   int64
-	ownThinking int64
-	ownFirst    time.Time
-	ownLast     time.Time
-	ownN        int
-	// span is the sum of event durations the sender reported. spanned counts
-	// those events. A rate uses the durations only when every event in the
-	// window brought one: a grok turn is a single event minutes after the
-	// last, and the gap between them is not how long the model ran.
-	span       time.Duration
-	spanned    int
-	ownSpan    time.Duration
-	ownSpanned int
 }
 
 // viaEngine is the engine a rate row may name: one every in-window event of
@@ -122,7 +172,7 @@ type agentAcc struct {
 // to point at. An agent in either case reports no label, which every consumer
 // already renders as the row's own measured rate.
 func (a *agentAcc) viaEngine() string {
-	if a.ownN > 0 || a.viaSplit {
+	if a.own.n > 0 || a.viaSplit {
 		return ""
 	}
 	return a.via
@@ -147,52 +197,19 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 		agent := CanonicalAgent(ev.Agent)
 		a, ok := by[agent]
 		if !ok {
-			a = &agentAcc{first: ev.At}
+			a = &agentAcc{}
 			by[agent] = a
 		}
-		a.tokens = satAddPos(a.tokens, ev.OutputTokens)
-		a.prompt = satAddPos(a.prompt, ev.PromptTokens)
-		a.thinking = satAddPos(a.thinking, ev.ThinkingTokens)
-		// The feed is not ordered by time: the remote ingest endpoint
-		// accepts any ts, and a producer's clock can step. Track the
-		// extremes rather than the last event walked, or a single
-		// out-of-order stamp shortens the span below and the rate with it.
-		if ev.At.Before(a.first) {
-			a.first = ev.At
-		}
-		if ev.At.After(a.last) {
-			a.last = ev.At
-		}
+		a.all.add(ev)
 		if ev.ViaEngine != "" {
 			if a.via == "" {
 				a.via = ev.ViaEngine
 			} else if a.via != ev.ViaEngine {
 				a.viaSplit = true
 			}
+			continue
 		}
-		a.n++
-		if ev.Span > 0 {
-			a.span += ev.Span
-			a.spanned++
-		}
-		if ev.ViaEngine == "" {
-			if a.ownN == 0 {
-				a.ownFirst = ev.At
-			} else if ev.At.Before(a.ownFirst) {
-				a.ownFirst = ev.At
-			}
-			a.ownTokens = satAddPos(a.ownTokens, ev.OutputTokens)
-			a.ownPrompt = satAddPos(a.ownPrompt, ev.PromptTokens)
-			a.ownThinking = satAddPos(a.ownThinking, ev.ThinkingTokens)
-			if ev.Span > 0 {
-				a.ownSpan += ev.Span
-				a.ownSpanned++
-			}
-			if ev.At.After(a.ownLast) {
-				a.ownLast = ev.At
-			}
-			a.ownN++
-		}
+		a.own.add(ev)
 	}
 
 	sum := AgentSummary{
@@ -200,49 +217,14 @@ func Summarize(events []AgentEvent, now time.Time) AgentSummary {
 		Own:   make([]AgentRate, 0, len(by)),
 	}
 	for name, a := range by {
-		r := AgentRate{
-			Agent:    name,
-			Tokens:   a.tokens,
-			Prompt:   a.prompt,
-			Thinking: a.thinking,
-			Last:     a.last,
-			// The engine label says the engine already counts these tokens, so
-			// it is claimed only when it is true of the whole row; see
-			// agentAcc.viaEngine.
-			ViaEngine: a.viaEngine(),
-		}
-		// A rate needs a span. One event says how much, not how fast, so it
-		// reports tokens without a rate, unless the event itself says how
-		// long the model spent. That duration is the span, not the time
-		// since the previous event.
-		if a.spanned == a.n && a.span > 0 {
-			secs := a.span.Seconds()
-			r.TokPS = float64(a.tokens) / secs
-			r.PromptPS = float64(a.prompt) / secs
-		} else if span := a.last.Sub(a.first).Seconds(); a.n > 1 && span > 0 {
-			r.TokPS = float64(a.tokens) / span
-			r.PromptPS = float64(a.prompt) / span
-		}
-		sum.Rates = append(sum.Rates, r)
-		if a.ownN == 0 {
+		// The engine label says the engine already counts these tokens, so it
+		// is claimed only when it is true of the whole row; see
+		// agentAcc.viaEngine.
+		sum.Rates = append(sum.Rates, a.all.row(name, a.viaEngine()))
+		if a.own.n == 0 {
 			continue
 		}
-		o := AgentRate{
-			Agent:    name,
-			Tokens:   a.ownTokens,
-			Prompt:   a.ownPrompt,
-			Thinking: a.ownThinking,
-			Last:     a.ownLast,
-		}
-		if a.ownSpanned == a.ownN && a.ownSpan > 0 {
-			secs := a.ownSpan.Seconds()
-			o.TokPS = float64(a.ownTokens) / secs
-			o.PromptPS = float64(a.ownPrompt) / secs
-		} else if span := a.ownLast.Sub(a.ownFirst).Seconds(); a.ownN > 1 && span > 0 {
-			o.TokPS = float64(a.ownTokens) / span
-			o.PromptPS = float64(a.ownPrompt) / span
-		}
-		sum.Own = append(sum.Own, o)
+		sum.Own = append(sum.Own, a.own.row(name, ""))
 	}
 	sortRates(sum.Rates)
 	sortRates(sum.Own)

@@ -88,7 +88,7 @@ func Sample(ctx context.Context) []core.GPUDevice {
 	wg.Go(func() {
 		if p, ok := lookup("nvidia-smi"); ok {
 			var devs []core.GPUDevice
-			if _, ok2 := run(ctx, "nvidia-smi", p, nvidiaDecode(&devs), NvidiaQuery, NvidiaFormat); ok2 {
+			if _, ran := run(ctx, "nvidia-smi", p, nvidiaDecode(&devs), NvidiaQuery, NvidiaFormat); ran {
 				add(devs)
 			}
 		}
@@ -115,10 +115,10 @@ func Sample(ctx context.Context) []core.GPUDevice {
 func sampleAMD(ctx context.Context) []core.GPUDevice {
 	if p, ok := lookup("rocm-smi"); ok {
 		var devs []core.GPUDevice
-		if _, ok2 := run(ctx, "rocm-smi", p, rocmDecode(&devs), RocmArgs()...); ok2 {
-			if len(devs) > 0 {
-				return devs
-			}
+		// rocmDecode rejects an empty card list, so a successful run has
+		// already proved devs holds at least one card.
+		if _, ran := run(ctx, "rocm-smi", p, rocmDecode(&devs), RocmArgs()...); ran {
+			return devs
 		}
 	}
 	if platformExtras != nil {
@@ -164,11 +164,11 @@ func sampleXPU(ctx context.Context, name, xpu string) []core.GPUDevice {
 		})
 	}
 	wg.Wait()
-	out2 := make([]core.GPUDevice, 0, len(devs))
+	devices := make([]core.GPUDevice, 0, len(devs))
 	for _, d := range devs {
 		if d != nil {
-			out2 = append(out2, *d)
+			devices = append(devices, *d)
 		}
 	}
-	return out2
+	return devices
 }
