@@ -260,6 +260,44 @@ func TestRatesHonorDirectThroughput(t *testing.T) {
 	}
 }
 
+// A rate that is not a finite number cannot be smoothed or drawn: NaN
+// compares false against every bound, and both NaN and +Inf reach the JSON
+// report, which has no spelling for either and fails the whole frame. A
+// derived rate overflowing its divisor, and a direct gauge carrying one, must
+// both read as no throughput for that interval.
+func TestRatesRejectNonFiniteThroughput(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		bad  float64
+	}{
+		{"nan", math.NaN()},
+		{"posinf", math.Inf(1)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := New(nil, time.Second)
+			now := time.Now()
+			c.rates("p", &provider.Metrics{OutTotal: 100}, now)
+			// The derived half: a total that overflows the interval.
+			out, in := c.rates("p", &provider.Metrics{OutTotal: math.Inf(1)}, now.Add(time.Second))
+			if out != 0 || in != 0 {
+				t.Fatalf("derived rate from an infinite total = %v/%v, want 0/0", out, in)
+			}
+			// The direct half: the engine's own gauge, which bypasses the
+			// delta entirely.
+			out, _ = c.rates("q", &provider.Metrics{OutTotal: 10, DirectOutPS: tc.bad, HasDirectOutPS: true}, now.Add(time.Second))
+			if out != 0 {
+				t.Fatalf("direct rate %v = %v, want 0", tc.name, out)
+			}
+			// Neither poisons the next interval: a well-formed sample after a
+			// rejected one still measures from the baseline it left.
+			out, _ = c.rates("q", &provider.Metrics{OutTotal: 10, DirectOutPS: 200, HasDirectOutPS: true}, now.Add(2*time.Second))
+			if want := 200 * 0.35; out != want {
+				t.Fatalf("rate after a rejected sample = %v, want %v", out, want)
+			}
+		})
+	}
+}
+
 func TestEmitFirstThroughputGaugeSeedsRate(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -24,6 +24,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A throughput reading that is not a finite number reads as no throughput
+  instead of reaching the frame. The collector clamped a rate against a counter
+  reset with `max(v, 0)`, which in Go returns NaN for a NaN and +Inf for an
+  infinity, and took the engine's own tok/s gauge with no check at all. Either
+  one poisons the smoothing and every sample derived from it after, and the JSON
+  report has no spelling for either, so one corrupt reading failed the whole
+  `--json` frame rather than the reading that produced it.
 - Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
   stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
   the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting

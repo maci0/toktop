@@ -1,6 +1,7 @@
 package collector
 
 import (
+	"math"
 	"net"
 	"net/url"
 	"strconv"
@@ -35,7 +36,7 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 		// but a direct gauge does not need history: report it now instead
 		// of blanking a live engine for one interval.
 		if m.HasDirectOutPS {
-			outPS = m.DirectOutPS
+			outPS = rateOrZero(m.DirectOutPS)
 		}
 		c.prev[key] = prevSample{at: now, outTotal: m.OutTotal, inTotal: m.InTotal, outEMA: outPS}
 		return outPS, 0
@@ -64,10 +65,10 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 		// the next real interval accounts for these tokens too.
 		return pv.outEMA, pv.inEMA
 	}
-	rawOut := max((m.OutTotal-pv.outTotal)/dt, 0) // clamp on counter reset
-	rawIn := max((m.InTotal-pv.inTotal)/dt, 0)
+	rawOut := rateOrZero((m.OutTotal - pv.outTotal) / dt) // clamp on counter reset
+	rawIn := rateOrZero((m.InTotal - pv.inTotal) / dt)
 	if m.HasDirectOutPS { // trust the engine's own tok/s gauge when present
-		rawOut = m.DirectOutPS
+		rawOut = rateOrZero(m.DirectOutPS)
 	}
 	outPS = ema(pv.outEMA, rawOut)
 	inPS = ema(pv.inEMA, rawIn)
@@ -79,6 +80,21 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 }
 
 func ema(prev, raw float64) float64 { return prev*(1-emaAlpha) + raw*emaAlpha }
+
+// rateOrZero is one interval's throughput, with the counter-reset floor and
+// the non-finite filter on it. max alone covers neither: max(NaN, 0) is NaN
+// and max(+Inf, 0) is +Inf in Go, so a non-finite value would pass the clamp
+// and then poison the EMA, every sample derived from it after, and the JSON
+// report, which cannot encode either. Both reach here from the same wire the
+// finite check in the metrics parser guards, so a NaN or an overflowed rate is
+// a corrupt reading rather than a missing one, and reading it as no throughput
+// is the honest answer: the same rule the zero-elapsed branch above applies.
+func rateOrZero(v float64) float64 {
+	if !(v > 0) || math.IsInf(v, 0) { // also catches NaN: every comparison with it is false
+		return 0
+	}
+	return v
+}
 
 // timedRing is a value history carrying the wall-clock time of every sample,
 // so charts can place each point on an absolute time axis.
