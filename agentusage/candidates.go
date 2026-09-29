@@ -86,9 +86,13 @@ var (
 // auditLogger returns the logger audit lines go to. Caller must not hold
 // auditMu.
 func auditLogger() *slog.Logger {
+	// The value is copied out under the lock and called after it is released, so
+	// the two-word func value is read whole, as it is published, and a logger
+	// that logs while being resolved cannot re-enter this non-reentrant mutex.
 	auditMu.Lock()
-	defer auditMu.Unlock()
-	return audit()
+	resolve := audit
+	auditMu.Unlock()
+	return resolve()
 }
 
 // SetLogger sends the lines this package audits to l. The default is the

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 )
@@ -129,5 +130,69 @@ func TestDeletingTheStoreAfterAClearedCopyStillRepins(t *testing.T) {
 	restoreStore(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("the rejected pin was written back to the store (stat err %v); the delete was a re-pin request, not a loss", err)
+	}
+}
+
+// Every connect clears a superseded copy, so a connect to a second target runs
+// the unlink while a first target's handshake is rewriting the same store. The
+// removal has to wait for that write: replaceFile renames the store aside and
+// only then renames the replacement in, and a removal landing in between
+// deletes the only copy of the pins that a failed rename would put back.
+func TestConnectWaitsForAWriteBeforeClearingTheSupersededCopy(t *testing.T) {
+	path := useStore(t)
+	line := pinLine("h:22", "pinned")
+	if err := writeKnownHosts(path, map[string]string{"h:22": line}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(displacedPath(path), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captureAudit(t)
+
+	held := make(chan struct{})
+	release := make(chan struct{})
+	written := make(chan error, 1)
+	go func() {
+		written <- lockStore(path, func() error {
+			mu := storeMutex(path)
+			mu.Lock()
+			defer mu.Unlock()
+			close(held)
+			<-release
+			tmp := path + ".concurrent"
+			if err := os.WriteFile(tmp, []byte(line+"\n"), 0o600); err != nil {
+				return err
+			}
+			return replaceFile(tmp, path)
+		})
+	}()
+	<-held
+
+	cleared := make(chan struct{})
+	go func() {
+		clearSupersededCopy(path)
+		close(cleared)
+	}()
+	select {
+	case <-cleared:
+		t.Fatal("the superseded copy was cleared while a write held the store, so a rename that failed would have found its rollback copy deleted")
+	case <-time.After(2 * storeLockPoll):
+	}
+
+	if _, err := os.Stat(displacedPath(path)); err != nil {
+		t.Errorf("the copy a write in flight depends on is gone (stat err %v)", err)
+	}
+	close(release)
+	if err := <-written; err != nil {
+		t.Fatalf("write the store while a connect waits for it: %v", err)
+	}
+	<-cleared
+
+	got, err := readKnownHosts(path)
+	if err != nil {
+		t.Fatalf("read the store back: %v", err)
+	}
+	if got["h:22"] != line {
+		t.Errorf("store = %v, want the pin the write carried", got)
 	}
 }

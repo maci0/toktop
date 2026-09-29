@@ -57,6 +57,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   transition with no trace on either side. Latched to one line per episode,
   like the saturation crossing beside it.
 
+- A connect no longer clears a superseded `known_hosts` copy out from under a
+  write in flight. Every connect retries the removal, and it took the store's
+  locks around reading the store but not around the unlink, so a connect to a
+  second target could delete the displaced copy a concurrent rewrite of the same
+  store was relying on: `replaceFile` renames the store aside and puts it back
+  if the replacement cannot land, and the rollback copy was gone. The removal
+  now runs under the same store mutex and cross-process lock every other writer
+  takes, and re-checks the state under each.
+
 - A crush store handle the kernel did not take back is now logged, on its own
   latch. The handle is opened on the poll path and its `Close` error was
   dropped, so a descriptor the kernel refused to reclaim leaked one per project

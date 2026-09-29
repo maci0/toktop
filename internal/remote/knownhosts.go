@@ -707,27 +707,52 @@ func checkStoreCopy(path string) {
 // fallback readKnownHosts would recover the store from, and a copy nobody could
 // delete is reported rather than retried in silence.
 func clearSupersededCopy(path string) {
+	// The unlink is a write to the store's directory, so it runs under the same
+	// two locks every other mutator takes. Unlocked, it races a concurrent
+	// writer's own displaced copy: replaceFile renames the store aside, leaves
+	// the previous pins under the displaced name, and renames the replacement
+	// in. A removal landing in that window deletes the rollback copy a failing
+	// rename still needs, so the writer reports a loss it could have undone.
+	// The check is repeated under each lock because each of them can find the
+	// state changed on the way in.
+	if !supersededCopyRemovable(path) {
+		return
+	}
+	err := lockStore(path, func() error {
+		if !supersededCopyRemovable(path) {
+			return nil
+		}
+		mu := storeMutex(path)
+		mu.Lock()
+		defer mu.Unlock()
+		if !supersededCopyRemovable(path) {
+			return nil
+		}
+		if err := os.Remove(displacedPath(path)); err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		return core.SyncDir(filepath.Dir(path))
+	})
+	if err != nil {
+		audit().Warn("toktop: superseded host key copy beside the store not removed",
+			"path", logcfg.RedactedField(core.RedactHome(displacedPath(path)), logcfg.FieldCap),
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
+	}
+}
+
+// supersededCopyRemovable reports whether a displaced copy beside the store is
+// the leftover of a write that landed, and so carries nothing the store does
+// not already hold.
+func supersededCopyRemovable(path string) bool {
 	b, err := os.ReadFile(path)
 	if err != nil {
-		return
+		return false
 	}
-	if _, err := parseKnownHosts(path, b); err != nil {
-		return
-	}
-	displaced := displacedPath(path)
-	if err := os.Remove(displaced); err != nil {
-		if !os.IsNotExist(err) {
-			audit().Warn("toktop: superseded host key copy beside the store not removed",
-				"path", logcfg.RedactedField(core.RedactHome(displaced), logcfg.FieldCap),
-				"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
-		}
-		return
-	}
-	if serr := core.SyncDir(filepath.Dir(path)); serr != nil {
-		audit().Warn("toktop: removal of the superseded host key copy not durable",
-			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
-			"error", logcfg.RedactedField(serr.Error(), logcfg.FieldCap))
-	}
+	_, err = parseKnownHosts(path, b)
+	return err == nil
 }
 
 // staleStoreCopy returns why the copy beside the store cannot recover it, and
