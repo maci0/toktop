@@ -68,12 +68,17 @@ const StaleTempAge = 24 * time.Hour
 // away, where prefix names the staging files of the caller. Anything it cannot
 // remove is left alone. Callers serialize their writers, so within one process
 // only the crashed runs of earlier sessions are ever this old.
-func SweepStaleTemps(dir, prefix string) {
+//
+// The ages are measured against now, so a driver decides which leftovers a
+// write sweeps instead of the sweep following the wall clock: which staging
+// files are swept has to be a step the run took, or a write that deletes a
+// peer's in-flight staging file and a write that spares it replay differently.
+func SweepStaleTemps(dir, prefix string, now time.Time) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return
 	}
-	cutoff := time.Now().Add(-StaleTempAge)
+	cutoff := now.Add(-StaleTempAge)
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
 			continue

@@ -127,6 +127,126 @@ func testPolicy() Policy {
 	return Policy{Wait: 200 * time.Millisecond, Poll: time.Millisecond, Stale: time.Minute}
 }
 
+// virtualOrigin is where the simulated timelines below start. A fixed instant
+// rather than time.Now: the lock mtimes a test ages are set against it, so the
+// stale break is decided on the same timeline every run rather than on how far
+// the run happened to take.
+var virtualOrigin = time.Date(2026, time.January, 2, 3, 4, 5, 0, time.UTC)
+
+// virtualClock is the timeline a simulated contention runs on. Sleep advances
+// it instead of blocking, so a wait costs no wall time and the number of polls
+// is a function of the policy alone: the same contention replays the same
+// number of times on every run, which is the whole point of the seam.
+type virtualClock struct {
+	mu     sync.Mutex
+	at     time.Time
+	slept  []time.Duration
+	origin time.Time
+}
+
+func newVirtualClock() *virtualClock {
+	return &virtualClock{at: virtualOrigin, origin: virtualOrigin}
+}
+
+func (c *virtualClock) Now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at
+}
+
+func (c *virtualClock) Sleep(d time.Duration) {
+	c.mu.Lock()
+	c.at = c.at.Add(d)
+	c.slept = append(c.slept, d)
+	c.mu.Unlock()
+}
+
+// elapsed is how far the simulated timeline has moved, and polls how many times
+// the loop slept to get there.
+func (c *virtualClock) elapsed() (time.Duration, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at.Sub(c.origin), len(c.slept)
+}
+
+// onClock returns p running on this clock.
+func (c *virtualClock) onClock(p Policy) Policy {
+	p.Now, p.Sleep = c.Now, c.Sleep
+	return p
+}
+
+// The wait loop is a function of the policy and the clock alone: run twice from
+// the same origin against the same stuck holder and the two give up on the same
+// poll of the same timeline. Under wall-clock time the poll count is a function
+// of how long the process was descheduled, so a failure in the give-up could
+// not be replayed from the instant it was seen.
+func TestStuckHolderGivesUpOnTheSameStepEveryRun(t *testing.T) {
+	p := Policy{Wait: 200 * time.Millisecond, Poll: 5 * time.Millisecond, Stale: time.Minute}
+	run := func() (time.Duration, int, error) {
+		dir := t.TempDir()
+		lock := filepath.Join(dir, "store.lock")
+		holdLock(t, lock)
+		clock := newVirtualClock()
+		ran := false
+		err := With(lock, "known-host store", clock.onClock(p), Raw, func() error {
+			ran = true
+			return nil
+		})
+		if ran {
+			t.Fatal("fn ran while another process held the lock")
+		}
+		elapsed, polls := clock.elapsed()
+		return elapsed, polls, err
+	}
+	firstElapsed, firstPolls, firstErr := run()
+	secondElapsed, secondPolls, secondErr := run()
+	if firstErr == nil || secondErr == nil {
+		t.Fatalf("With succeeded against a lock nobody released: %v / %v", firstErr, secondErr)
+	}
+	if firstElapsed != secondElapsed || firstPolls != secondPolls {
+		t.Errorf("the same contention gave up at %s after %d polls and at %s after %d polls",
+			firstElapsed, firstPolls, secondElapsed, secondPolls)
+	}
+	// The deadline is what ends the wait, not a scheduler: past Wait, and
+	// within one poll of it, because the loop only looks at the clock between
+	// polls.
+	if firstElapsed <= p.Wait || firstElapsed > p.Wait+p.Poll {
+		t.Errorf("gave up after %s; the deadline is %s and the loop checks it between polls of %s",
+			firstElapsed, p.Wait, p.Poll)
+	}
+}
+
+// A lock that ages past Stale on the simulated timeline is broken on the first
+// attempt, with no poll at all. Wall-clock time cannot place a break that
+// precisely: whether the break beat the deadline is a race between the test's
+// ageing and the loop's first deadline check.
+func TestStaleLockBreaksOnTheFirstPollOfAVirtualTimeline(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "store.lock")
+	holdLock(t, lock)
+	stale := virtualOrigin.Add(-2 * time.Minute)
+	if err := os.Chtimes(lock, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	clock := newVirtualClock()
+	p := Policy{Wait: 200 * time.Millisecond, Poll: 5 * time.Millisecond, Stale: time.Minute}
+	ran := false
+	if err := With(lock, "store", clock.onClock(p), Raw, func() error {
+		ran = true
+		return nil
+	}); err != nil {
+		t.Fatalf("a stale lock was not broken: %v", err)
+	}
+	if !ran {
+		t.Error("fn never ran after the stale lock was broken")
+	}
+	if elapsed, polls := clock.elapsed(); elapsed != 0 || polls != 0 {
+		t.Errorf("the break waited %s over %d polls; a lock already stale is taken at once", elapsed, polls)
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("the lock outlived the broken critical section: %v", err)
+	}
+}
+
 // holdLock takes the lock the way a peer process would and leaves it behind,
 // so a test can contend with a holder that never releases.
 func holdLock(t *testing.T, lock string) {
@@ -216,7 +336,8 @@ func TestWithGivesUpOnAStuckHolder(t *testing.T) {
 	lock := filepath.Join(t.TempDir(), "store.lock")
 	holdLock(t, lock)
 
-	err := With(lock, "known-host store", testPolicy(), Raw, func() error {
+	clock := newVirtualClock()
+	err := With(lock, "known-host store", clock.onClock(testPolicy()), Raw, func() error {
 		t.Error("fn ran while another process held the lock")
 		return nil
 	})
@@ -246,22 +367,24 @@ func TestWithReportsAnUnremovableStaleLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(lock, "held"), nil, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	stale := time.Now().Add(-2 * time.Minute)
+	stale := virtualOrigin.Add(-2 * time.Minute)
 	if err := os.Chtimes(lock, stale, stale); err != nil {
 		t.Fatal(err)
 	}
 
 	redact := func(s string) string { return strings.ReplaceAll(s, dir, "<home>") }
-	start := time.Now()
-	err := With(lock, "known-host store", testPolicy(), redact, func() error {
+	clock := newVirtualClock()
+	err := With(lock, "known-host store", clock.onClock(testPolicy()), redact, func() error {
 		t.Error("fn ran while the lock could not be broken")
 		return nil
 	})
 	if err == nil {
 		t.Fatal("With succeeded against a stale lock that would not unlink")
 	}
-	if elapsed := time.Since(start); elapsed > 10*time.Second {
-		t.Errorf("the give-up took %s; the stale arm spins instead of checking the deadline", elapsed)
+	// On the simulated timeline the spin the stale arm would have caused is a
+	// poll count, not a wall-clock stall.
+	if elapsed, polls := clock.elapsed(); elapsed > 10*time.Second || polls > int(testPolicy().Wait/testPolicy().Poll)+1 {
+		t.Errorf("the give-up took %s over %d polls; the stale arm spins instead of checking the deadline", elapsed, polls)
 	}
 	for _, want := range []string{"known-host store", "could not be removed", "<home>"} {
 		if !strings.Contains(err.Error(), want) {

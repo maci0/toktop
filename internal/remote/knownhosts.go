@@ -453,7 +453,7 @@ func writeKnownHosts(path string, store map[string]string) error {
 	for _, host := range slices.Sorted(maps.Keys(store)) {
 		b.WriteString(store[host] + "\n")
 	}
-	core.SweepStaleTemps(dir, knownHostsTempPrefix)
+	core.SweepStaleTemps(dir, knownHostsTempPrefix, time.Now())
 	if err := atomicWriteFile(path, b.String()); err != nil {
 		return err
 	}

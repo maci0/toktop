@@ -77,8 +77,10 @@ alongside them would be a layer importing sideways into itself.
   builds its logger from.
 - `internal/lockfile`: the exclusive-create lock a process takes before it
   rewrites a file another process may be reading, with the stale break and the
-  wait it applies. `internal/remote` takes it over the host-key pin store and
-  `internal/selfupdate` over the installed binary.
+  wait it applies. The wait runs on the `Policy` clock and sleep, which a
+  driver replaces with a virtual pair so the polls, the break and the give-up
+  land on steps it took. `internal/remote` takes it over the host-key pin store
+  and `internal/selfupdate` over the installed binary.
 - `internal/probe`: small streaming generations at backends, to measure
   throughput rather than read a counter. One concern per file: `probe.go` the
   request, the budgets that bound a generation and the HTTP handling both

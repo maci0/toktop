@@ -100,7 +100,7 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	}
 
 	dir := filepath.Dir(self)
-	core.SweepStaleTemps(dir, updateTempPrefix)
+	core.SweepStaleTemps(dir, updateTempPrefix, time.Now())
 	tmp, err := os.CreateTemp(dir, updateTempPrefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("cannot write next to %s: %w", self, err)

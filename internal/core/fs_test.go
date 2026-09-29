@@ -80,12 +80,15 @@ func TestExpandHome(t *testing.T) {
 // prefix belongs to someone else. Both survive; only the aged one goes.
 func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
 	dir := t.TempDir()
+	// A fixed sweep instant, so the ages below are the ones the test names
+	// rather than however long the setup took.
+	sweep := time.Now()
 	write := func(name string, age time.Duration) string {
 		path := filepath.Join(dir, name)
 		if err := os.WriteFile(path, []byte(name), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		when := time.Now().Add(-age)
+		when := sweep.Add(-age)
 		if err := os.Chtimes(path, when, when); err != nil {
 			t.Fatal(err)
 		}
@@ -98,11 +101,11 @@ func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
 	if err := os.Mkdir(sub, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.Chtimes(sub, time.Now().Add(-StaleTempAge-time.Hour), time.Now()); err != nil {
+	if err := os.Chtimes(sub, sweep.Add(-StaleTempAge-time.Hour), sweep); err != nil {
 		t.Fatal(err)
 	}
 
-	SweepStaleTemps(dir, "known_hosts.tmp")
+	SweepStaleTemps(dir, "known_hosts.tmp", sweep)
 
 	if _, err := os.Stat(aged); !os.IsNotExist(err) {
 		t.Errorf("the aged staging file survived the sweep: %v", err)
@@ -118,7 +121,7 @@ func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
 // A directory the caller cannot read is not a reason to fail the write that
 // is about to happen: the sweep runs before it.
 func TestSweepStaleTempsOnMissingDir(t *testing.T) {
-	SweepStaleTemps(filepath.Join(t.TempDir(), "absent"), "toktop.tmp")
+	SweepStaleTemps(filepath.Join(t.TempDir(), "absent"), "toktop.tmp", time.Now())
 }
 
 // DiscardStaged decides what a caller is told about a staging file left behind

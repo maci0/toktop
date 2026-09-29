@@ -29,6 +29,28 @@ type Policy struct {
 	// Stale is how old a lock has to be before its holder is assumed to have
 	// died holding it and the lock is broken.
 	Stale time.Duration
+	// Now reads the clock the deadline and the stale age are measured on, and
+	// Sleep is the wait between polls. A nil half is wall-clock time, which is
+	// production. A driver supplies a virtual pair, so the polls, the instant
+	// the deadline is reached and the instant a lock ages past Stale are steps
+	// it took rather than how long the process happened to block: the same
+	// contention then breaks and gives up at the same steps on every run,
+	// which is the only way the give-up and the break can be replayed.
+	Now   func() time.Time
+	Sleep func(time.Duration)
+}
+
+// clock returns the timing the policy runs on, substituting wall-clock time for
+// either half a caller left nil.
+func (p Policy) clock() (func() time.Time, func(time.Duration)) {
+	now, sleep := p.Now, p.Sleep
+	if now == nil {
+		now = time.Now
+	}
+	if sleep == nil {
+		sleep = time.Sleep
+	}
+	return now, sleep
 }
 
 // Raw prints a path as it is. A caller whose messages hide the home
@@ -59,8 +81,13 @@ func redactPathErr(redact func(string) string, err error) error {
 // caller spends p.Wait on it before breaking it as stale, and an operator who
 // never learns why has no way to act. The result is named so the deferred
 // release can fold its own failure into whatever fn returned.
+//
+// The waiting is paced on p.Now and p.Sleep, so a driver supplies a virtual
+// pair and the wait, the stale break and the give-up land on the steps it took
+// rather than on real time.
 func With(lock, owner string, p Policy, redact func(string) string, fn func() error) (err error) {
-	deadline := time.Now().Add(p.Wait)
+	now, sleep := p.clock()
+	deadline := now().Add(p.Wait)
 	for {
 		// The token names this acquisition, and the release below removes the
 		// lock only while the file still carries it.
@@ -126,19 +153,19 @@ func With(lock, owner string, p Policy, redact func(string) string, fn func() er
 		// "older than the stale age", so the lock from a killed toktop is
 		// never broken and the give-up below names a peer that is not
 		// running.
-		if info, serr := os.Stat(lock); serr == nil && core.Age(time.Now(), info.ModTime()) > p.Stale {
+		if info, serr := os.Stat(lock); serr == nil && core.Age(now(), info.ModTime()) > p.Stale {
 			if breakErr = os.Remove(lock); breakErr == nil {
 				continue
 			}
 		}
-		if time.Now().After(deadline) {
+		if now().After(deadline) {
 			if breakErr != nil {
 				return fmt.Errorf("%s is locked by another toktop; the stale lock at %s could not be removed: %w",
 					redact(owner), redact(lock), redactPathErr(redact, breakErr))
 			}
 			return fmt.Errorf("%s is locked by another toktop; giving up after %s", redact(owner), p.Wait)
 		}
-		time.Sleep(p.Poll)
+		sleep(p.Poll)
 	}
 }
 
