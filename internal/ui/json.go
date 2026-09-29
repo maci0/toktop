@@ -39,7 +39,7 @@ func JSONFrame(cfg Config, s core.Snapshot) (string, error) {
 // ignores what it does not know, and that is the property the revision
 // exists to preserve. The number is the contract, so it never moves for a
 // change that keeps every published field readable as before.
-const jsonReportSchema = 1
+const jsonReportSchema = 2
 
 type jsonReport struct {
 	Schema int `json:"schema"`

@@ -57,8 +57,11 @@ PUBLIC_PKGS = ./agentusage
 # deliberately absent: ARCHITECTURE.md is a map of the tree and RECOVERY.md a
 # set of operator procedures, both correctable without a change anyone
 # upgrading can observe, and a gate that asked for an entry for every one of
-# them would train the entry to be boilerplate.
-CHANGELOG_WATCHED = README.md cmd/toktop/help.go docs/openapi.yaml agentusage site/worker.js site/README.md
+# them would train the entry to be boilerplate. internal/ui/json.go is here
+# for the same reason help.go is: it holds the keys of the --json report, and
+# a key renamed or a field dropped is a report a script decodes into a zero
+# with no error to notice it by.
+CHANGELOG_WATCHED = README.md cmd/toktop/help.go docs/openapi.yaml agentusage internal/ui/json.go site/worker.js site/README.md
 
 # The declarations each public package exports, taken from `go doc` with the
 # prose dropped by scripts/api-surface.awk. A removed or reshaped declaration

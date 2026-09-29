@@ -10,9 +10,9 @@
 // docs/ARCHITECTURE.md, the reason column in docs/DEPENDENCIES.md, the pins in
 // scripts/requirements.txt, the CHECK_CHANGELOG recipe in the Makefile, the
 // action refs in .github/workflows, the go floor quoted in the README, and the
-// surface a package published outside the module exposes. Each is written by
-// hand and checked by CI, so each drifts silently the moment the thing it
-// describes moves.
+// surface a package published outside the module exposes, and the schema
+// revision the --json report publishes. Each is written by hand and checked
+// by CI, so each drifts silently the moment the thing it describes moves.
 //
 // The tests live here rather than beside the code they check because none of
 // them is about a Go package. In cmd/toktop, where these tests sat, a reader

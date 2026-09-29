@@ -162,6 +162,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Breaking
 
+- Five keys of the `--once --json` report were renamed, and the report's
+  `schema` field moved from `1` to `2`: `engines[].proc_rss_mb` is
+  `engines[].proc_rss_mib`, and in `system` the pairs `mem_total_mb` and
+  `mem_used_mb` are `mem_total_mib` and `mem_used_mib`, `swap_total_mb` and
+  `swap_used_mb` are `swap_total_mib` and `swap_used_mib`. The values did not
+  move: a MiB figure is still MiB, as the other `_mib` keys in the report and
+  the `proc_rss_mib` the typed report already published were, and the `_mb`
+  spelling is what disagreed with them. A consumer reading a renamed key
+  decodes a report with no error and reads zero, because the key it asked for
+  is not there and the one beside it is. Read the `schema` field first and
+  treat `2` as the `_mib` spelling, or read whichever key is present. No
+  other published field changed name, meaning or unit, and adding a field is
+  not a schema bump, so a consumer reading named fields needs no change for
+  anything else in this report.
+
 - `agentusage.Definition` and `agentusage.Spec` now carry `UnmarshalJSON` and
   `MarshalJSON`. A program that decoded or encoded either one through
   `encoding/json` is unaffected, but a program that embedded one in a struct of

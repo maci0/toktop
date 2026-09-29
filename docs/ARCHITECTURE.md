@@ -19,7 +19,7 @@ omission. This document is the map; the test is the enforcement.
 | 4 | `internal/sysmon`, `internal/ingest`, `internal/agentwatch` | collection and event intake: host vitals, the localhost events endpoint, the bridge from `agentusage` watchers to the dashboard |
 | 5 | `internal/remote`, `internal/collector` | the two fan-ins: the ssh client and host-relayed stats, and the poller every engine-side package reports into |
 | 6 | `cmd/toktop` | the only package allowed to wire the rest together |
-| 7 | `internal/repogate` | no shipped code: the tests over the repository's own metadata (the tier table above, the dependency table, the tool pins, the changelog, the CI action refs) |
+| 7 | `internal/repogate` | no shipped code: the tests over the repository's own metadata (the tier table above, the dependency table, the tool pins, the changelog, the CI action refs, the `--json` report's schema revision) |
 
 `logcfg` sits below its consumers rather than beside them. `procs`, `gpu` and
 `ingest` all reach for the redaction helpers, so a tier that held `logcfg`
@@ -96,7 +96,9 @@ alongside them would be a layer importing sideways into itself.
   OpenAI-compatible backends.
 - `internal/repogate`: no shipped code. It holds the tests over the
   repository's own metadata: the tier table enforced above, the dependency
-  table, the tool pins, the changelog and the CI action refs. Those tests are
+  table, the tool pins, the changelog, the CI action refs, and the `--json`
+  report's `schema` revision, which `json_report_test.go` holds to the keys the
+  report published at the last release. Those tests are
   about files rather than about a Go package, so they sit in their own package
   above every tier instead of inside `cmd/toktop`, where a reader looking for
   how a run starts would have found the supply-chain gate first.
