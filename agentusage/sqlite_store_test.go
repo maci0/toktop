@@ -7,26 +7,33 @@ package agentusage
 
 import (
 	"context"
+	"maps"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 )
 
 // resetOpenStores empties the shared handle table between tests, closing every
 // handle in it: a test that leaves one open holds a file descriptor and a lock
-// on a database a later test writes to.
+// on a database a later test writes to. It empties the table now and again at
+// the end of the test, because the table is process-global and a watcher test
+// that ran earlier leaves its polled store cached for every test that follows.
 func resetOpenStores(t *testing.T) {
 	t.Helper()
-	t.Cleanup(func() {
-		openStores.Lock()
-		for path, h := range openStores.byPath {
-			_ = h.db.Close()
-			delete(openStores.byPath, path)
-		}
-		openStores.order = nil
-		openStores.Unlock()
-	})
+	emptyOpenStores()
+	t.Cleanup(emptyOpenStores)
+}
+
+func emptyOpenStores() {
+	openStores.Lock()
+	defer openStores.Unlock()
+	for path, h := range openStores.byPath {
+		_ = h.db.Close()
+		delete(openStores.byPath, path)
+	}
+	openStores.order = nil
 }
 
 // The whole point of the table: a second read of a store the agent has not
@@ -148,6 +155,11 @@ func TestOpenStoreRefusesAStoreItCannotRead(t *testing.T) {
 	dir := t.TempDir()
 	resetOpenStores(t)
 
+	// The table is process-global and a watcher test's last poll can still be
+	// caching its store, so this asserts on what these two opens added rather
+	// than on the whole table: what must not be cached is an unreadable one.
+	before := openStorePaths()
+
 	missing := filepath.Join(dir, "missing.db")
 	if _, err := openStore(missing); err == nil {
 		t.Error("a path with no database opened a handle; every poll then pays for a read that cannot run")
@@ -159,12 +171,18 @@ func TestOpenStoreRefusesAStoreItCannotRead(t *testing.T) {
 	if _, err := openStore(garbage); err == nil {
 		t.Error("a file that is not a database opened a handle")
 	}
-	openStores.Lock()
-	n := len(openStores.byPath)
-	openStores.Unlock()
-	if n != 0 {
-		t.Errorf("the handle table holds %d unreadable stores; each one is rebuilt on the next poll", n)
+	for _, path := range openStorePaths() {
+		if !slices.Contains(before, path) {
+			t.Errorf("the handle table cached %q, an unreadable store; each one is rebuilt on the next poll", path)
+		}
 	}
+}
+
+// openStorePaths lists the paths the shared handle table holds.
+func openStorePaths() []string {
+	openStores.Lock()
+	defer openStores.Unlock()
+	return slices.Sorted(maps.Keys(openStores.byPath))
 }
 
 // A store that recovers is opened by the next read, which is the point of
