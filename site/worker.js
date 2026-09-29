@@ -700,7 +700,13 @@ const VARY = "Accept-Encoding";
 const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
-  "strict-transport-security": "max-age=31536000",
+  // includeSubDomains pins every subdomain of a name the first time the name
+  // itself is visited, instead of waiting for each subdomain to serve the
+  // header itself. Both custom domains here are covered by their own header,
+  // but any subdomain added later (a preview host, a redirect target) is
+  // served nothing until someone remembers to configure it, and the first
+  // request to it is exactly the one an on-path attacker waits for.
+  "strict-transport-security": "max-age=31536000; includeSubDomains",
   "referrer-policy": "strict-origin-when-cross-origin",
   "content-security-policy":
     "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
@@ -941,8 +947,18 @@ async function captureUnavailable(request, env) {
     if (res.status < 400) return null;
     return reasonLine(`the share card answered ${res.status} from the asset store`);
   } catch (err) {
-    // A throw carries any value, null included, so err may have no message.
-    return reasonLine(`the asset store could not be read: ${String(err?.message ?? err)}`);
+    // The reason does not carry the exception's own text. It is returned to
+    // /health, which is unauthenticated and public, and a runtime exception
+    // message names the deploy's internals (bindings, paths, the runtime's
+    // own wording) to whoever asks. The detail goes to the log instead, the
+    // way the top-level catch in fetch already does, so an operator reads it
+    // there and a visitor reads only that the store is down.
+    logFailure(request, "asset-store-unreadable", {
+      path: new URL(request.url).pathname,
+      error: reasonLine(`the asset store could not be read: ${String(err?.message ?? err)}`),
+      stack: stackLine(err),
+    });
+    return reasonLine("the asset store could not be read");
   }
 }
 

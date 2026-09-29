@@ -584,10 +584,16 @@ test("/health reports degraded when the store cannot serve the share card", asyn
     const broken = { ASSETS: { fetch: () => Promise.reject(new Error("store unreachable")) } };
     const down = await call({}, { path: "/health", env: broken });
     expect(down.status).toBe(503);
-    expect(await down.text()).toBe(
-      "degraded: the asset store could not be read: store unreachable; " +
-        "the dashboard captures are not served\n",
+    // /health is unauthenticated and public, so the reason it carries is fixed
+    // text: a store exception message names the deploy's internals to whoever
+    // asks. The detail is logged instead, where an operator reads it.
+    const downBody = await down.text();
+    expect(downBody).toBe(
+      "degraded: the asset store could not be read; the dashboard captures are not served\n",
     );
+    expect(downBody).not.toContain("store unreachable");
+    const storeLine = logs.parse().find((l) => l.event === "asset-store-unreadable");
+    expect(storeLine.error).toBe("the asset store could not be read: store unreachable");
   } finally {
     logs.restore();
   }
@@ -606,17 +612,15 @@ test("a folded reason caps on code points, never between the halves of one", asy
     const res = await call({}, { path: "/health", env: broken });
     expect(res.status).toBe(503);
     const body = await res.text();
-    expect(body).toContain("😀");
-    expect(body).not.toContain("�");
+    // The cap is on the logged detail, which is where the store's own text
+    // lands; the answer carries fixed text and none of it.
+    expect(body).not.toContain(padding);
     // 35 characters of prefix plus 164 of padding is 199 units, so the emoji's
     // high surrogate is unit 200 and the low one is past the old cut.
-    expect(body).toBe(
-      `degraded: the asset store could not be read: ${padding}😀; ` +
-        "the dashboard captures are not served\n",
-    );
-    const reason = logs.parse().at(-1).reason;
-    expect(reason).toBe(`the asset store could not be read: ${padding}😀`);
-    expect(reason).not.toContain("�");
+    const storeLine = logs.parse().find((l) => l.event === "asset-store-unreadable");
+    expect(storeLine.error).toBe(`the asset store could not be read: ${padding}😀`);
+    expect(storeLine.error).not.toContain("�");
+    expect(logs.parse().at(-1).reason).toBe("the asset store could not be read");
   } finally {
     logs.restore();
   }
@@ -679,6 +683,11 @@ test("every page answer carries the security headers, not only revalidations", a
       expect(res.headers.get(name)).not.toBeNull();
     }
   }
+  // includeSubDomains is what pins a subdomain nobody configured before its
+  // first request, so dropping it is a silent weakening of the same header.
+  const hsts = fresh.headers.get("strict-transport-security");
+  expect(hsts).toContain("max-age=");
+  expect(hsts).toContain("includeSubDomains");
 });
 
 const IMAGE_CACHE = "public, max-age=86400, stale-while-revalidate=3600";
