@@ -1061,3 +1061,34 @@ func TestGetTextAcceptsABodyAtTheCap(t *testing.T) {
 		t.Fatalf("read %d bytes, want %d", len(b), textCap)
 	}
 }
+
+// A discovery probe is a whole-word match, and FoldASCII folds ASCII A-Z
+// only. A non-ASCII letter is therefore still a letter in the body, and
+// reading its bytes as a word break lets "йeep" answer for the word "eep":
+// any engine could then advertise a capability it does not have by
+// embedding the needle in a different word.
+func TestProbeContainsWordTreatsForeignLettersAsWord(t *testing.T) {
+	cases := []struct {
+		body, needle string
+		want         bool
+	}{
+		{"llama-server is running", "llama-server", true},
+		{"vllm engine ready", "vllm", true},
+		{"не-vllm here", "vllm", true}, // the hyphen is a real boundary
+		{"йeep-alive", "eep", false},
+		{"йeep-alive", "йeep", true},
+		{"vllm", "vllm", true},
+		{"2vllm", "vllm", false},
+		{"vllm2", "vllm", false},
+	}
+	for _, c := range cases {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(c.body))
+		}))
+		got := probeContainsWord(context.Background(), srv.URL, "/probe", c.needle)
+		srv.Close()
+		if got != c.want {
+			t.Errorf("probeContainsWord(%q, %q) = %v, want %v", c.body, c.needle, got, c.want)
+		}
+	}
+}

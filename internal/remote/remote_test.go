@@ -457,6 +457,14 @@ func TestPatternMatch(t *testing.T) {
 		{"a*b", "b", false},
 		{"?a", "a", false},
 		{"*a*b*c*", "xxaxxbxxcxx", true},
+		// '?' is one character, and a character in a host name may need
+		// two bytes. A byte-wise '?' stops inside the last rune and reports
+		// no match, so an IDN in U-label form never reaches its own block.
+		{"caf?", "café", true},
+		{"?é", "café", false},
+		{"caf??", "cafés", true},
+		{"caf?", "caf", false},
+		{"caf?", "cafés", false},
 	}
 	for _, c := range cases {
 		if got := patternMatch(c.pat, c.s); got != c.want {

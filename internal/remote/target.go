@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 	"golang.org/x/text/unicode/norm"
@@ -397,13 +398,22 @@ func validTargetField(s string) error {
 // Every other byte in a pattern is a literal, including a '[', a '\' and
 // a '*' that is not a wildcard, so only the two wildcards below are
 // special.
+//
+// '?' consumes one character, not one byte: a host name is UTF-8, so
+// `Host cafe?` has to match "café" rather than stop inside its last rune
+// and report no match. On an ill-formed name there is no character to take,
+// so the byte stands in and the match is decided on the bytes that arrived.
 func patternMatch(pat, s string) bool {
 	pIdx, sIdx := 0, 0
 	starIdx := -1
 	sTmpIdx := -1
 
 	for sIdx < len(s) {
-		if pIdx < len(pat) && (pat[pIdx] == '?' || pat[pIdx] == s[sIdx]) {
+		if pIdx < len(pat) && pat[pIdx] == '?' {
+			_, size := utf8.DecodeRuneInString(s[sIdx:])
+			pIdx++
+			sIdx += size
+		} else if pIdx < len(pat) && pat[pIdx] == s[sIdx] {
 			pIdx++
 			sIdx++
 		} else if pIdx < len(pat) && pat[pIdx] == '*' {

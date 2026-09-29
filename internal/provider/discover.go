@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/core"
@@ -251,18 +253,35 @@ func probeContainsWord(ctx context.Context, base, path, needle string) bool {
 		}
 		start, end := at+i, at+i+len(needle)
 		at = end
-		if (start == 0 || !isWordByte(lower[start-1])) && (end == len(lower) || !isWordByte(lower[end])) {
+		if (start == 0 || !isWordByteAt(lower, start-1)) && (end == len(lower) || !isWordByteAt(lower, end)) {
 			return true
 		}
 	}
 	return false
 }
 
-// isWordByte reports whether b is a letter or a digit. FoldASCII has already
-// mapped the body's non-ASCII letters onto ASCII, so these two ranges cover
-// every byte that can begin or continue a word.
-func isWordByte(b byte) bool {
-	return b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
+// isWordByteAt reports whether the character of s that ends at index i is a
+// letter or a digit, the condition for a word boundary there. i is either a
+// rune start or a continuation byte, so a byte at or above 0x80 is backed up
+// to its own lead byte and decoded.
+//
+// FoldASCII folds ASCII A-Z only and leaves every non-ASCII letter as it is,
+// so a body is not known to be ASCII here. Reading those bytes as boundaries
+// makes a foreign letter a word break, and a body of "йeep" then contains the
+// whole word "eep": an engine could advertise a capability by embedding the
+// needle in a different word.
+func isWordByteAt(s string, i int) bool {
+	if i < 0 || i >= len(s) {
+		return false
+	}
+	if b := s[i]; b < utf8.RuneSelf {
+		return b >= 'a' && b <= 'z' || b >= '0' && b <= '9'
+	}
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	r, _ := utf8.DecodeRuneInString(s[i:])
+	return unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
 // sglangInfoOK detects SGLang via its native /get_model_info endpoint.

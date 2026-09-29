@@ -23,6 +23,29 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- An ssh_config `Host` block written for a name with an accent now matches
+  that host. `?` matched one byte rather than one character, so `Host cafe?`
+  stopped inside the last rune of "café" and reported no match, and the block's
+  HostName, User, Port and IdentityFile never applied. That block is what
+  decides which machine toktop dials and whose key it pins, so a non-ASCII
+  host name silently reached for the wrong host.
+- An engine can no longer advertise a capability by embedding a probe's needle
+  inside a different word. The word-boundary test read every byte at or above
+  0x80 as a boundary, on the stated assumption that the body's non-ASCII
+  letters had been folded onto ASCII. FoldASCII folds A-Z only, so a body of
+  "йeep-alive" contained the whole word "eep". Boundaries are now decided on
+  the decoded character.
+- A CPU model and an OS name written in a non-UTF-8 byte are no longer
+  mangled. Both come from firmware or from a distribution's build, the same
+  class of source the device-tree model beside them already handled, but both
+  reached the system panel as raw bytes. A byte the panel cannot decode was
+  then dropped one at a time by the sanitizer, so the name lost characters; it
+  is now replaced once, as U+FFFD, at the read.
+- An engine naming itself with the same word as its kind no longer prints that
+  name twice. The label and the kind badge are compared in both normalization
+  forms, so "café" spelled NFD and spelled NFC are one word, matching how the
+  model name is composed at its own boundary.
+
 - A downed engine no longer sizes the collector's memory. The fold that keeps
   one poll error from being re-folded every interval remembered the error
   itself, and an engine's error is its to choose and is not bounded: a decoder

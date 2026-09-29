@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -572,5 +573,20 @@ func TestParseCPUModelFoldsASCIIOnly(t *testing.T) {
 	}
 	if got := parseCPUModel([]byte("cpu \u212Amodel\t: Spoofed\n")); got != "" {
 		t.Errorf("parseCPUModel with a Kelvin-signed key = %q, want no brand", got)
+	}
+}
+
+// The value of a /proc/cpuinfo brand string is firmware-written, so it is
+// kernelText's boundary exactly as the device-tree model beside it is. A
+// string in a Latin-1 or Shift-JIS byte has to reach the panel as U+FFFD
+// rather than as raw bytes, which the sanitizer downstream drops one byte
+// at a time and so loses characters.
+func TestParseCPUModelKernelText(t *testing.T) {
+	got := parseCPUModel([]byte("model name\t: Intel\xe9 Core i7\n"))
+	if !utf8.ValidString(got) {
+		t.Fatalf("parseCPUModel returned ill-formed UTF-8: %q", got)
+	}
+	if !strings.HasPrefix(got, "Intel") || !strings.Contains(got, "Core i7") {
+		t.Errorf("parseCPUModel = %q, want the brand with the bad byte replaced", got)
 	}
 }

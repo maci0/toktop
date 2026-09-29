@@ -290,12 +290,18 @@ func hostInfoLinux(s *core.SysSample) {
 // leading and trailing quote, so PRETTY_NAME=""" reads as no name at all. The
 // remote reader of the same file (internal/remote/stats.go trimQuotes) uses
 // the same call, so one file answers the same both ways.
+//
+// The bytes are a distribution's own text, written by its build rather than
+// the kernel, so they cross kernelText like every other vendor-written string
+// here: a PRETTY_NAME carrying a byte the build's encoding put there reaches
+// the system panel as U+FFFD instead of as ill-formed bytes the panel cannot
+// measure.
 func prettyOSName() string {
 	b, err := os.ReadFile("/etc/os-release")
 	if err != nil {
 		return ""
 	}
-	for line := range strings.SplitSeq(string(b), "\n") {
+	for line := range strings.SplitSeq(kernelText(b), "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok && k == "PRETTY_NAME" {
 			v = strings.TrimSpace(v)
 			if u, err := strconv.Unquote(v); err == nil {
@@ -422,9 +428,15 @@ func cpuModelLinux() string {
 // ASCII literals, and strings.ToLower would also fold a rune whose lowercase
 // is ASCII, so a key spelled with U+0130 or U+212A would reach a branch the
 // kernel never wrote that key for.
+//
+// The values are firmware-written too, so they cross kernelText like the
+// device-tree string beside them. A CPU string in a Latin-1 or Shift-JIS
+// byte reaches the system panel as text, and U+FFFD is what that panel
+// measures; left raw, the same bytes are dropped a byte at a time by the
+// sanitizer downstream and the model name loses characters.
 func parseCPUModel(b []byte) string {
 	var modelName, hardware, processor, cpuModel string
-	for line := range strings.SplitSeq(string(b), "\n") {
+	for line := range strings.SplitSeq(kernelText(b), "\n") {
 		k, v, ok := strings.Cut(line, ":")
 		if !ok {
 			continue

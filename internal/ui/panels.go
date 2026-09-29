@@ -9,6 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/maci0/toktop/internal/core"
+	unorm "golang.org/x/text/unicode/norm"
 )
 
 // providersBody renders whole engine blocks into the mid-row panel and reports
@@ -88,7 +89,13 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	// label that only repeats the badge adds nothing and is dropped.
 	room := w - lipgloss.Width(row) - 1
 	label := strings.TrimSpace(core.SingleLine(p.Label))
-	if !strings.EqualFold(label, strings.TrimSpace(p.Kind)) {
+	// The label is engine-supplied and the kind is a token, so they meet in
+	// both normalization forms: an engine naming itself "café" in NFD
+	// (e + combining acute) spells the same word as the kind's NFC "café",
+	// and comparing the raw bytes renders a label that only repeats the
+	// badge. ModelName composes at its own boundary, so this compares
+	// like with like.
+	if !strings.EqualFold(unorm.NFC.String(label), unorm.NFC.String(strings.TrimSpace(p.Kind))) {
 		label = shorten(label, min(labelCells, max(room, 0)))
 	} else {
 		label = ""

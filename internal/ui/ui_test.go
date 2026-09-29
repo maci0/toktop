@@ -3123,3 +3123,37 @@ func TestNewSeedsHeaderClockFromDemoOrigin(t *testing.T) {
 		t.Error("live header clock is zero")
 	}
 }
+
+// The engine label is engine-supplied and the kind badge is a token, so the
+// two meet in both normalization forms. An engine naming itself "café" in NFD
+// (e + combining acute) spells the same word as an NFC kind, and a raw byte
+// comparison renders a label that only repeats the badge next to it.
+func TestProviderBlockDropsLabelRepeatingKindInEitherForm(t *testing.T) {
+	const nfd = "cafe\u0301" // e + combining acute
+	const nfc = "caf\u00e9"  // precomposed
+	for _, label := range []string{nfd, nfc} {
+		row := strings.Join(providerBlock(core.ProviderSnapshot{
+			OK: true, Kind: nfc, Label: label,
+		}, 80), "\n")
+		// The badge carries the kind, so a dropped label leaves the stem
+		// "caf" once in the row and a kept one leaves it twice. Counting the
+		// ASCII stem covers both normalization forms, which counting either
+		// spelling would not.
+		if n := strings.Count(row, "caf"); n != 1 {
+			t.Errorf("label %q: row spells the kind %d times, want 1:\n%s", label, n, row)
+		}
+	}
+	// Case still folds, and a label that is not the kind is still shown.
+	rows := strings.Join(providerBlock(core.ProviderSnapshot{
+		OK: true, Kind: "vllm", Label: "VLLM",
+	}, 80), "\n")
+	if strings.Contains(rows, "VLLM") {
+		t.Errorf("case-folded label repeated the badge:\n%s", rows)
+	}
+	row := strings.Join(providerBlock(core.ProviderSnapshot{
+		OK: true, Kind: "vllm", Label: "production",
+	}, 80), "\n")
+	if !strings.Contains(row, "production") {
+		t.Errorf("a label that differs from the kind was dropped:\n%s", row)
+	}
+}
