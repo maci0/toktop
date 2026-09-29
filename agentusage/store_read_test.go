@@ -68,3 +68,40 @@ func TestMarkStoreFailedCapsAFullTableOfFailures(t *testing.T) {
 		}
 	}
 }
+
+// A sweep that has to evict more than once keeps the caller's key out of every
+// pass, and the index it passes on is the one each drop left it at. The table
+// is seeded past the cap so the insert below needs two evictions: a caller
+// reusing the index it started at excludes the key that has since shifted into
+// it, and this new key is the only quiet one in the table, so the second pass
+// takes the caller's own latch and hands back a *storeRead no table holds. The
+// audit line naming this store's corrupt database then repeats once per poll
+// for as long as the store stays broken.
+func TestMarkStoreFailedKeepsItsLatchAcrossTwoEvictions(t *testing.T) {
+	resetStoreReadState(t)
+	storeReadState.Lock()
+	for i := range maxStoreReads + 1 {
+		key := storeReadKey("agent", fmt.Sprintf("/store/%d.db", i))
+		storeReadState.states[key] = &storeRead{failed: true}
+		storeReadState.order = append(storeReadState.order, key)
+	}
+	storeReadState.Unlock()
+
+	key := storeReadKey("agent", "/store/new.db")
+	if first := markStoreFailed(key); !first {
+		t.Fatal("first failure of the newest store reported as already reported")
+	}
+	if first := markStoreFailed(key); first {
+		t.Error("second failure of the newest store reported as a new outage: its latch was evicted by the second eviction")
+	}
+
+	storeReadState.Lock()
+	size, held := len(storeReadState.states), storeReadState.states[key] != nil
+	storeReadState.Unlock()
+	if !held {
+		t.Error("the newest store has no latch in the table")
+	}
+	if size != maxStoreReads {
+		t.Errorf("latch table holds %d keys, want the cap %d", size, maxStoreReads)
+	}
+}

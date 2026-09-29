@@ -6,9 +6,10 @@ on:
 
 # Actions accepts permissions on the workflow or the job, not on a step.
 # The publish step uploads the release, so the job that contains it holds
-# contents: write.
-permissions:
-  contents: write
+# contents: write. The workflow sets none, so a job added beside this one starts
+# from the read-only default the other workflows' jobs run under rather than
+# inheriting the token this one needs.
+permissions: {}
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -16,6 +17,8 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     # vet-cross analyzes six platforms, the race tests run both sqlite halves,
     # the reproducibility gate builds two platforms twice from cold build
     # caches, and the restore step fetches every published asset back. 50

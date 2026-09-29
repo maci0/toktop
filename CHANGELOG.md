@@ -215,6 +215,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   poll opened a new outage and wrote the same line again. The sweep drops the
   oldest key that is not failing; every other entry is either failing too or
   has nothing left to lose.
+- A sweep that evicts more than one key from the outage latch table no longer
+  evicts the caller's own key on the second pass. The index that keeps the
+  caller's key out of the table was carried across the passes unchanged, so a
+  drop above it left the exclusion naming the key that had shifted into that
+  place, and the new key was the only quiet one left. The caller got back a
+  latch no table held, and every later failure of the same store read as a new
+  outage and logged the same line again.
+- The release workflow's `contents: write` now sits on the job that publishes
+  the release rather than on the workflow, so a job added beside it starts from
+  the read-only default the rest of the repository's workflows use.
 - A probe against a reasoning model that answers 400 to any `temperature` but
   its own default (o1, o3, gpt-5 and the gateways in front of them) now lands on
   a request that caps the generation and names no sampling value, instead of

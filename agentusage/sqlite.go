@@ -301,7 +301,7 @@ func storeReadForLocked(key string) *storeRead {
 	// again for as long as the store stays broken.
 	held := len(storeReadState.order) - 1
 	for len(storeReadState.order) > maxStoreReads {
-		evictStoreReadLocked(held)
+		held = evictStoreReadLocked(held)
 	}
 	return r
 }
@@ -326,7 +326,12 @@ func storeReadForLocked(key string) *storeRead {
 // is holding, so the oldest of the rest is taken: without the exclusion a full
 // table of failing stores evicted the caller's key instead, leaving a latch
 // that is in no table and a cap the sweep can no longer bring back under.
-func evictStoreReadLocked(held int) {
+//
+// The index the caller passed back is the one the drop left its key at, so a
+// second sweep in the same call still excludes the caller's key: a drop above
+// it shifts the key down one place, and a sweep that reuses the old index
+// excludes whatever moved into it.
+func evictStoreReadLocked(held int) int {
 	drop := -1
 	for i, key := range storeReadState.order {
 		if i != held && !storeReadState.states[key].failed {
@@ -349,6 +354,7 @@ func evictStoreReadLocked(held int) {
 	if drop < held {
 		held--
 	}
+	return held
 }
 
 // markStoreFailed latches one store's failure and reports whether this call
