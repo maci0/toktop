@@ -50,6 +50,22 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the version that was undone stopped being readable at the path the docs
   name. Both targets remove the directory instead, so the record is replaced
   rather than buried.
+- A remote target can no longer exhaust memory through its own stdout. The
+  peer's answer to a discovery sweep or a vitals poll landed in an unbounded
+  buffer, so a host that streamed for the length of the command exhausted the
+  dashboard. Output is capped at 16 MiB and an over-long answer is an error
+  rather than a truncated process list that reads as the real one.
+- `toktop update` no longer widens the installed binary's permissions. A
+  binary installed `0700` or `0750` came back world-readable and
+  world-executable after an update, silently. The replacement now carries the
+  mode already on disk forward.
+- Update recovery refuses to promote anything but a regular file onto the
+  install path. That path runs before the download and the checksum, so a
+  symlink or directory left at the displaced name is now an error rather than
+  an executable.
+- An ingest event's `note` is capped before the path walk that shortens it, not
+  after. A note the length of a full request body cost hundreds of path
+  resolutions per event on an endpoint that accepts unauthenticated posts.
 
 ## [0.22.0] - 2026-09-29
 

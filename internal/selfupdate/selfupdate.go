@@ -454,7 +454,7 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	if err := tmp.Close(); err != nil {
 		return "", fmt.Errorf("cannot close %s: %w", tmpName, err)
 	}
-	if err := os.Chmod(tmpName, 0o755); err != nil {
+	if err := os.Chmod(tmpName, installMode(self)); err != nil {
 		return "", fmt.Errorf("cannot make %s executable: %w", tmpName, err)
 	}
 	// Two `toktop update` runs are not hypothetical: an operator whose first
@@ -472,6 +472,31 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 		return "", err
 	}
 	return self, nil
+}
+
+// defaultInstallMode is the mode a replacement binary gets when the mode of
+// the one it replaces cannot be read.
+const defaultInstallMode fs.FileMode = 0o755
+
+// installMode is the permission set the downloaded binary is promoted to: the
+// bits the installed binary already carries, not a hardcoded 0755.
+//
+// An update is supposed to replace the bytes and nothing else. Overwriting
+// the mode reverts a choice the operator made, and reverts it toward wider
+// access: a build installed 0700 or 0750 because it carries a client name, or
+// because the host is shared and the binary is not for every account, comes
+// back world-readable and world-executable after the first update, with no
+// line in the output saying the mode changed. Carrying the mode forward makes
+// the update idempotent in the one respect beyond the bytes.
+func installMode(self string) fs.FileMode {
+	fi, err := os.Stat(self)
+	if err != nil {
+		return defaultInstallMode
+	}
+	if perm := fi.Mode().Perm(); perm != 0 {
+		return perm
+	}
+	return defaultInstallMode
 }
 
 // The install lock: one install of one binary at a time, across processes.
@@ -671,9 +696,20 @@ func installDisplacing(tmpName, self string) error {
 // and the displaced one is not: an update that never started, or one that
 // completed, leaves nothing to recover and must not have a stale file put
 // under a path that is already correct.
+//
+// The displaced file is one this package renamed aside, so it is always a
+// regular file. Anything else at that path is not a leftover of an update and
+// is refused rather than promoted: a symlink there would make the install
+// path a pointer to whatever it names, and a directory there would make the
+// install path unrunnable. This runs before the download and before the
+// checksum, so restoring here is the one place in the package that puts
+// content at the executable with no verification behind it.
 func restoreDisplaced(self, displaced string) error {
 	if _, err := os.Stat(self); !os.IsNotExist(err) {
 		return nil
+	}
+	if fi, err := os.Lstat(displaced); err == nil && !fi.Mode().IsRegular() {
+		return fmt.Errorf("refusing to restore %s: not a regular file (mode %s)", core.RedactHome(displaced), fi.Mode())
 	}
 	if err := os.Rename(displaced, self); err != nil {
 		if os.IsNotExist(err) {

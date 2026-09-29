@@ -7,6 +7,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -350,4 +351,83 @@ func TestTrustedReleaseURL(t *testing.T) {
 			t.Errorf("TrustedReleaseURL(%q) = true, want false", bad)
 		}
 	}
+}
+
+// An update replaces the bytes, not the permission bits. A binary installed
+// deliberately narrow (0700, a private build on a shared host) came back
+// world-executable under a hardcoded 0755, and nothing in the output said so.
+func TestInstallModeCarriesTheInstalledModeForward(t *testing.T) {
+	for _, perm := range []fs.FileMode{0o700, 0o750, 0o755} {
+		dir := t.TempDir()
+		self := filepath.Join(dir, "toktop")
+		if err := os.WriteFile(self, []byte("old"), perm); err != nil {
+			t.Fatalf("seed %s: %v", perm, err)
+		}
+		if err := os.Chmod(self, perm); err != nil {
+			t.Fatalf("chmod seed %s: %v", perm, err)
+		}
+		if got := installMode(self); got != perm {
+			t.Errorf("installMode(%s) = %o, want %o", perm, got, perm)
+		}
+	}
+}
+
+// A binary that cannot be stat'd (first install, or a path that vanished)
+// still has to end up executable.
+func TestInstallModeFallsBackWhenTheTargetIsGone(t *testing.T) {
+	got := installMode(filepath.Join(t.TempDir(), "absent"))
+	if got != defaultInstallMode {
+		t.Errorf("installMode(absent) = %o, want %o", got, defaultInstallMode)
+	}
+}
+
+// Recovery runs before the download and before the checksum, so it is the one
+// place content reaches the executable unverified. It must promote a leftover
+// of an update and refuse anything else.
+func TestRestoreDisplacedRefusesWhatAnUpdateDidNotLeave(t *testing.T) {
+	dir := t.TempDir()
+	self := filepath.Join(dir, "toktop")
+	displaced := self + displacedSuffix
+
+	t.Run("regular file is restored", func(t *testing.T) {
+		if err := os.WriteFile(displaced, []byte("binary"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := restoreDisplaced(self, displaced); err != nil {
+			t.Fatalf("restore: %v", err)
+		}
+		if _, err := os.Stat(self); err != nil {
+			t.Fatalf("not restored: %v", err)
+		}
+	})
+
+	t.Run("symlink is refused", func(t *testing.T) {
+		os.Remove(self)
+		target := filepath.Join(dir, "elsewhere")
+		if err := os.WriteFile(target, []byte("attacker"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, displaced); err != nil {
+			t.Skipf("symlinks unavailable: %v", err)
+		}
+		if err := restoreDisplaced(self, displaced); err == nil {
+			t.Fatal("restored a symlink onto the install path")
+		}
+		if _, err := os.Lstat(self); !os.IsNotExist(err) {
+			t.Error("install path exists after refusing the symlink")
+		}
+	})
+
+	t.Run("directory is refused", func(t *testing.T) {
+		os.Remove(displaced)
+		if err := os.Mkdir(displaced, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := restoreDisplaced(self, displaced); err == nil {
+			t.Fatal("restored a directory onto the install path")
+		}
+		if _, err := os.Lstat(self); !os.IsNotExist(err) {
+			t.Error("install path exists after refusing the directory")
+		}
+	})
 }

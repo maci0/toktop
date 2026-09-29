@@ -57,6 +57,66 @@ func (b *stderrBuf) String() string {
 	return string(b.buf[:b.n])
 }
 
+// stdoutCap bounds what a peer can make this process hold. The peer answers
+// the exec channel, not toktop: the scripts toktop sends are fixed, but the
+// bytes that come back are whatever the far end chose to write, for the whole
+// of runTimeout. Without a cap a host the operator points --target at
+// streams stdout at line rate until the operator's dashboard process is
+// killed, and the per-line cut the discovery sweep applies lands after the
+// whole thing has already been buffered.
+//
+// The value leaves headroom over a real sweep: procScanScript emits at most
+// procs.CmdlinePrefix bytes of command line per process, so 16 MiB covers a
+// host with thousands of processes before the cap can touch a healthy one.
+const stdoutCap = 16 << 20
+
+// errStdoutOverflow reports a peer that wrote past stdoutCap. It is distinct
+// from a command failure because the output it interrupted is incomplete, and
+// a caller that parsed the prefix anyway would report a short process table
+// as the real one.
+var errStdoutOverflow = errors.New("remote command produced more output than the cap allows")
+
+// stdoutBuf collects a remote command's stdout up to stdoutCap. Past the cap
+// Write fails instead of growing: the failure is what stops x/crypto/ssh's
+// copy loop, so an over-long answer is a loud error rather than a truncated
+// list that reads as a complete one. The prefix collected so far is still
+// returned, because it is what makes the overflow diagnosable.
+type stdoutBuf struct {
+	mu   sync.Mutex
+	buf  []byte
+	n    int
+	over bool
+}
+
+func (b *stdoutBuf) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.n+len(p) > stdoutCap {
+		if room := stdoutCap - b.n; room > 0 {
+			b.buf = append(b.buf, p[:room]...)
+			b.n = stdoutCap
+		}
+		b.over = true
+		return 0, errStdoutOverflow
+	}
+	b.buf = append(b.buf, p...)
+	b.n += len(p)
+	return len(p), nil
+}
+
+func (b *stdoutBuf) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
+}
+
+// Overflowed reports whether the peer wrote past the cap.
+func (b *stdoutBuf) Overflowed() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.over
+}
+
 // Run executes script in the remote login shell and returns stdout. On
 // failure the error carries the tail of stderr so problems are diagnosable.
 func (c *Client) Run(ctx context.Context, script string) (string, error) {
@@ -72,23 +132,29 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 	defer sess.Close()
 	var stderr stderrBuf
 	sess.Stderr = &stderr
+	// Run rather than Output, so stdout lands in the cap above. Output
+	// assigns a plain bytes.Buffer to Stdout with no bound, which is the
+	// peer-controlled growth this replaces.
+	var stdout stdoutBuf
+	sess.Stdout = &stdout
 
 	type result struct {
-		out string
 		err error
 	}
 	done := make(chan result, 1)
 	go func() {
-		out, oerr := sess.Output(script)
-		done <- result{string(out), oerr}
+		done <- result{sess.Run(script)}
 	}()
 
 	select {
 	case r := <-done:
 		if r.err != nil {
-			return r.out, c.redactPeerHome(fmt.Errorf("remote command failed: %w%s", r.err, stderrTail(stderr.String())))
+			if stdout.Overflowed() {
+				return stdout.String(), c.redactPeerHome(fmt.Errorf("remote command: %w", errStdoutOverflow))
+			}
+			return stdout.String(), c.redactPeerHome(fmt.Errorf("remote command failed: %w%s", r.err, stderrTail(stderr.String())))
 		}
-		return r.out, nil
+		return stdout.String(), nil
 	case <-ctx.Done():
 		sess.Close()
 		// Wait (inside Output) joins the goroutine that copies the remote

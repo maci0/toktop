@@ -1835,3 +1835,48 @@ func testHostKeyPub(t *testing.T) ssh.PublicKey {
 	}
 	return pk
 }
+
+// The peer answers the exec channel, so its stdout is attacker-shaped and
+// unbounded. A cap that truncates instead of failing would hand
+// parseProcScan a short process table that reads as the real one.
+func TestStdoutBufRefusesPastTheCapInsteadOfGrowing(t *testing.T) {
+	var b stdoutBuf
+	chunk := make([]byte, 64<<10)
+	for b.n < stdoutCap {
+		if _, err := b.Write(chunk); err != nil {
+			t.Fatalf("write under the cap: %v", err)
+		}
+	}
+	if got := len(b.String()); got != stdoutCap {
+		t.Fatalf("collected %d bytes, want %d", got, stdoutCap)
+	}
+	if b.Overflowed() {
+		t.Fatal("Overflowed before the cap was passed")
+	}
+	if _, err := b.Write([]byte("x")); !errors.Is(err, errStdoutOverflow) {
+		t.Fatalf("write past the cap = %v, want errStdoutOverflow", err)
+	}
+	if !b.Overflowed() {
+		t.Error("Overflowed() false after the cap was passed")
+	}
+	// The prefix survives so the overflow is diagnosable, and it is still
+	// capped: an over-long answer must not have been buffered in full.
+	if got := len(b.String()); got != stdoutCap {
+		t.Errorf("after overflow collected %d bytes, want %d", got, stdoutCap)
+	}
+}
+
+// A write that straddles the cap keeps the part that fits and still fails, so
+// the collected output never exceeds it.
+func TestStdoutBufClipsAStraddlingWrite(t *testing.T) {
+	var b stdoutBuf
+	if _, err := b.Write(make([]byte, stdoutCap-10)); err != nil {
+		t.Fatalf("write under the cap: %v", err)
+	}
+	if _, err := b.Write(make([]byte, 4096)); !errors.Is(err, errStdoutOverflow) {
+		t.Fatalf("straddling write = %v, want errStdoutOverflow", err)
+	}
+	if got := len(b.String()); got != stdoutCap {
+		t.Errorf("collected %d bytes, want %d", got, stdoutCap)
+	}
+}

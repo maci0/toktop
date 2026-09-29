@@ -63,7 +63,16 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// path under $HOME names the account. It reaches the feed, the live
 	// dashboard and the --once --plain report, which is often redirected
 	// into a file or a journal.
-	ev.Note = core.ClampField(core.RedactHome(shortNote(core.SingleLine(ev.Note))), core.AgentNoteMax)
+	//
+	// The cap comes before shortNote, not after: shortNote hands a bare path
+	// to core.ShortDir, whose resolvePath walks up to maxPathWalk ancestors
+	// with an EvalSymlinks at each level, and a note can be as long as the
+	// 1 MiB body allows. Clamping last capped the stored value and left the
+	// walk to run over the sender's full string, so one event cost hundreds of
+	// passes over a megabyte and the endpoint is unauthenticated. The retained
+	// value is the same either way: a path is shortened to two components,
+	// well under AgentNoteMax.
+	ev.Note = shortNote(core.ClampField(core.RedactHome(core.SingleLine(ev.Note)), core.AgentNoteMax))
 	// Token counts are unsigned quantities; negative or absurd values
 	// are junk from a misbehaving sender and must not enter the
 	// retained feed (summing MaxInt64 across events wraps the totals).
