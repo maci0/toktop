@@ -150,7 +150,13 @@ func lockStore(path string, fn func() error) (err error) {
 		// it an unremovable lock is reported as one another toktop holds,
 		// which is not true and leaves the operator with nothing to act on.
 		var breakErr error
-		if info, serr := os.Stat(lock); serr == nil && time.Since(info.ModTime()) > storeLockStale {
+		// core.Age, not time.Since: the mtime carries no monotonic reading,
+		// so this ages a wall clock, and a backward step (an NTP correction, a
+		// resumed laptop) makes the age negative. A negative age is not
+		// "older than storeLockStale", so the lock from a killed toktop is
+		// never broken and the give-up below names a peer that is not
+		// running.
+		if info, serr := os.Stat(lock); serr == nil && core.Age(time.Now(), info.ModTime()) > storeLockStale {
 			if breakErr = os.Remove(lock); breakErr == nil {
 				continue
 			}

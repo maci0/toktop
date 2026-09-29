@@ -192,6 +192,22 @@ func originStamp(at time.Time) string {
 	return at.UTC().Format(time.RFC3339Nano)
 }
 
+// stamp is how every instant in the report is rendered: UTC, RFC 3339, same
+// format, one zone.
+//
+// A stamp in a report is not one machine's clock reading. A pushed agent's
+// events keep the offset their sender wrote (ingest parses RFC 3339 and
+// collector.RecordAgent subtracts a clock lead, neither of which converts),
+// while probes and the frame's own `at` carry the local one, so a single
+// report can hold 14:02:03+05:30 beside 08:35:12-07:00 and a consumer that
+// reads the wall time out of the string without applying the offset places the
+// two five hours apart. UTC is the same instant, so this changes no reading
+// and leaves the offset in the string, where a conforming parser still finds
+// it.
+func stamp(t time.Time) time.Time {
+	return t.UTC()
+}
+
 func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 	now := frameNow(s, time.Time{})
 	sum := core.Summarize(s.Agents, now)
@@ -202,7 +218,7 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 		Demo:       cfg.Demo,
 		DemoSeed:   demoSeed(cfg),
 		DemoOrigin: originStamp(cfg.DemoOrigin),
-		At:         now,
+		At:         stamp(now),
 		UptimeSecs: s.Uptime.Seconds(),
 		OutTokPS:   outAgg,
 		InTokPS:    inAgg,
@@ -232,7 +248,7 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 			Prompt:    r.Prompt,
 			Thinking:  r.Thinking,
 			ViaEngine: core.SanitizeText(r.ViaEngine),
-			Last:      r.Last,
+			Last:      stamp(r.Last),
 		})
 	}
 	return rep
@@ -268,7 +284,7 @@ func jsonEngineOf(p core.ProviderSnapshot) jsonEngine {
 
 func jsonAgentOf(a core.AgentEvent) jsonAgent {
 	return jsonAgent{
-		At:             a.At,
+		At:             stamp(a.At),
 		ID:             core.SanitizeText(a.ID),
 		Agent:          core.SanitizeText(a.Agent),
 		Model:          core.SanitizeText(a.Model),
@@ -284,7 +300,7 @@ func jsonAgentOf(a core.AgentEvent) jsonAgent {
 
 func jsonProbeOf(p core.ProbeSample) jsonProbe {
 	return jsonProbe{
-		At:     p.At,
+		At:     stamp(p.At),
 		Addr:   core.SanitizeText(p.Addr),
 		Model:  core.SanitizeText(p.Model),
 		OK:     p.OK,

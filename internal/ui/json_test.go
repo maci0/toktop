@@ -113,3 +113,30 @@ func TestJSONSystemSanitizesDrivers(t *testing.T) {
 		}
 	}
 }
+
+// A pushed agent's events keep the offset their sender wrote, while the
+// frame's own stamps carry the local one. Both zones in one report means a
+// consumer reading the wall time out of the string places the two hours or
+// more apart, so every stamp is rendered in UTC.
+func TestJSONStampsAreUTCWhoseverTheZone(t *testing.T) {
+	kolkata := time.FixedZone("IST", 5*3600+1800)
+	now := time.Date(2026, 3, 29, 8, 35, 12, 0, time.UTC)
+	snap := core.Snapshot{
+		At:     now.Local(),
+		Agents: []core.AgentEvent{{At: now.In(kolkata), Agent: "coder", Kind: core.AgentKindTurn, OutputTokens: 10}},
+		Probes: []core.ProbeSample{{At: now.In(kolkata), Addr: "127.0.0.1:8080"}},
+	}
+	doc := decodeReport(t, snap)
+
+	if got := doc["at"].(string); got != "2026-03-29T08:35:12Z" {
+		t.Errorf("report at = %q, want UTC", got)
+	}
+	agent := doc["agents"].([]any)[0].(map[string]any)
+	if got := agent["at"].(string); got != "2026-03-29T08:35:12Z" {
+		t.Errorf("agents[0].at = %q, want the sender's instant in UTC", got)
+	}
+	probe := doc["probes"].([]any)[0].(map[string]any)
+	if got := probe["at"].(string); got != "2026-03-29T08:35:12Z" {
+		t.Errorf("probes[0].at = %q, want UTC", got)
+	}
+}
