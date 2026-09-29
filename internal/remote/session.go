@@ -29,7 +29,7 @@ const stderrBufferBytes = 4096
 const stderrDrainGrace = time.Second
 
 // stderrBuf collects a remote command's stderr. x/crypto/ssh copies it from
-// a background goroutine that is only drained when Session.Output's Wait
+// a background goroutine that is only drained when the session's Wait
 // finishes, so on the timeout and cancellation paths below that goroutine can
 // still be writing while this side reads. A bare bytes.Buffer has no internal
 // locking: reading it concurrently with a Write is a data race.
@@ -120,8 +120,10 @@ func (b *stdoutBuf) Overflowed() bool {
 	return b.over
 }
 
-// Run executes script in the remote login shell and returns stdout. On
-// failure the error carries the tail of stderr so problems are diagnosable.
+// Run executes script in the remote login shell and returns stdout. When the
+// command itself fails, the error carries the tail of stderr so problems are
+// diagnosable; a cancellation and an overflowed stdout cap report their own
+// reason instead, since neither is the remote command saying anything.
 func (c *Client) Run(ctx context.Context, script string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, runTimeout)
 	defer cancel()
@@ -160,8 +162,8 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 		return stdout.String(), nil
 	case <-ctx.Done():
 		sess.Close()
-		// Wait (inside Output) joins the goroutine that copies the remote
-		// stderr, so the tail below is only complete once Output has
+		// Wait (inside Run) joins the goroutine that copies the remote
+		// stderr, so the tail below is only complete once Run has
 		// returned. Closing the session is what makes it return; the grace
 		// bounds the wait so a wedged channel cannot hold Run past its own
 		// deadline, and costs nothing when the join is prompt.

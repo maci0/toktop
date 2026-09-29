@@ -469,8 +469,8 @@ func (w *Watcher) sameDir(cwd string) bool {
 	// symlink. Cached as false for the watcher's life it decides the project's
 	// fate on the first poll and keeps it: every session of that checkout goes
 	// uncounted for as long as the dashboard runs, with no line to say why.
-	// The retry window is the one the other memos here use for an unresolved
-	// value (cpuModelRetry, hostStaticRetry, kimiStoreEvery), and it costs one
+	// The retry window is the one the other memos use for an unresolved
+	// value (cpuModelRetry, hostStaticRetry), and it costs one
 	// symlink walk per distinct unresolvable cwd per window, against a walk of
 	// the whole store several times a second.
 	mine, decided := false, false

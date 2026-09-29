@@ -28,8 +28,8 @@ import (
 // are forward.go.
 
 // audit builds the process logger for the lines this package writes. A var so
-// a test can point it at a handler it can read; every call site is rare
-// (one connect, one drop), so building it per call costs nothing.
+// a test can point it at a handler it can read; no call site is on a per-token
+// or per-frame path, so building it per call costs nothing.
 var audit = logcfg.Logger
 
 // runTimeout bounds one remote command (discovery or vitals poll). Var so

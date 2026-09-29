@@ -201,8 +201,9 @@ func identify(ctx context.Context, base string) string {
 	case probeContains(ctx, base, "/api/extra/version", "koboldcpp"):
 		return core.KindKoboldCPP
 	// TGI matches /info on either needle, so the two cases are one fetch each;
-	// probeContains ANDs its needles. /readyz needs one probe: the needle is
-	// lowercased before the compare, so "ok" covers every spelling.
+	// probeContains ANDs its needles. /readyz costs the same single probe:
+	// probeContainsWord differs in how it compares, not in how many fetches
+	// it makes.
 	case probeContains(ctx, base, "/info", `"version"`),
 		probeContains(ctx, base, "/info", "text-generation"):
 		return core.KindTGI

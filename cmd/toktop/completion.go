@@ -12,8 +12,8 @@ import (
 // The `toktop completion <shell>` subcommand: it prints a shell script that
 // completes toktop's flags, subcommands and ssh:// targets, so the shell and
 // the binary cannot drift apart. Nothing here writes to the filesystem, so
-// installing is the operator's one command, shown at the bottom of every
-// script and in the subcommand's help.
+// installing is the operator's own redirect, the three examples in the
+// subcommand's help are the whole of it.
 
 // completionShells are the shells a script is published for, in the order the
 // help screen lists them.
@@ -50,8 +50,8 @@ in the examples are the directories those shells read on a POSIX system. On
 Windows the scripts are the same bytes and work under the bash, zsh or fish
 you installed (Git Bash, WSL, MSYS2, a package manager), but none of the
 example paths exists there: redirect to whatever directory that shell's
-completion setup already reads, the way the bash comment names
-~/.local/share/bash-completion/completions for a user install.
+completion setup already reads, such as
+~/.local/share/bash-completion/completions for a user install under bash.
 
 A missing or unknown shell is a usage error; 'bash' is the one that drops into
 a file wherever a completion belongs.
@@ -257,8 +257,10 @@ func zshList(words []string) string {
 	return strings.Join(quoted, " ")
 }
 
-// fishCompletion uses fish's own `complete`: -f says the flag takes no value,
-// -r that it takes one, and -F that the value is a path.
+// fishCompletion uses fish's own `complete`: -r says the flag takes a value
+// and its absence says it takes none, -F that the value is a path, and -f that
+// it is not, which is what keeps fish from offering a file list for every
+// flag the completion defines.
 func fishCompletion(fs *flag.FlagSet, flags []string) string {
 	var b strings.Builder
 	b.WriteString("# fish completion for toktop\n")

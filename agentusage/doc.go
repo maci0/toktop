@@ -31,12 +31,12 @@
 // transcripts of the one working in a directory, so a caller can take a
 // Sample on an interval without knowing which agent is underneath.
 //
-// Both of those, and Peers, need a process table to read: procfs on Linux,
-// ps(1) on macOS. Every other platform reports nothing, which is "cannot
-// tell" rather than an error, and a program that runs on more than one of
-// them should treat an empty Discover as no local agents there. Watch is
-// unaffected: it reads transcripts, and a caller that knows the agent name
-// and its working directory gets usage on any platform.
+// Discover and Peers need a process table to read: procfs on Linux, ps(1)
+// for Discover and lsof(8) for Peers on macOS. Every other platform reports
+// nothing, which is "cannot tell" rather than an error, and a program that
+// runs on more than one of them should treat an empty Discover as no local
+// agents there. Watch is unaffected: it reads transcripts, and a caller that
+// knows the agent name and its working directory gets usage on any platform.
 //
 // The agent registry is process-wide, since one process reports one set of
 // agents. RegisterSpec and UnregisterSpec add and remove an adapter, and
@@ -70,8 +70,9 @@
 // MatchingEndpoints and ConnectedTo answer whether an agent's tokens are
 // already being counted by an engine the program watches, matching a process's
 // connections against the endpoints an engine is advertised on. They read the
-// process table through Peers, and an unreadable one answers "not connected"
-// rather than raising an error. SetLogger sends the lines this package audits
+// process table in one pass on Linux and through Peers elsewhere, and an
+// unreadable one answers "not connected" rather than raising an error.
+// SetLogger sends the lines this package audits
 // (a transcript walk, read or database read that could not finish) to the
 // logger the embedding program already writes to,
 // defaulting to the one from log/slog. SameDir and DirKey answer whether two

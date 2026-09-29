@@ -97,7 +97,9 @@ alongside them would be a layer importing sideways into itself.
   concern per file: `client.go` is the connection and its keepalive, `session.go`
   the command sessions, `forward.go` the local listeners piping remote ports,
   `knownhosts.go` the host-key store, `target.go` the target spelling,
-  `discover.go` and `stats.go` the two samplers.
+  `auth.go` the key, agent and password order with the platform half beside it,
+  `restore_unix.go` and `restore_windows.go` the recovery command an operator
+  runs by hand, and `discover.go` and `stats.go` the two samplers.
 - `internal/selfreload`: watches the running executable for a rebuild and
   signals the process to restart.
 - `internal/selfupdate`: replaces the running binary with a newer release. One

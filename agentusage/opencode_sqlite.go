@@ -161,8 +161,8 @@ func usageQueryFor(n int) string {
 // the statement is one of a handful for the life of the process, while the
 // un-memoized form spent five Sprintf calls building it on every poll of
 // every opencode watcher. The cache is bounded by n, which is the number of
-// spellings dirSpellings produced (one to four), and a count above the bound
-// is built and discarded rather than retained.
+// spellings dirSpellings produced (one or two off macOS, up to ten on it),
+// and a count above the bound is built and discarded rather than retained.
 func usageQuery(n int, fold bool) string {
 	if n < 0 || n > maxCachedQuerySpellings {
 		return buildUsageQuery(n, fold)
@@ -179,8 +179,10 @@ func usageQuery(n int, fold bool) string {
 }
 
 // maxCachedQuerySpellings bounds the memo: dirSpellings yields the resolved
-// spelling, the caller's own, and on macOS the other normalization forms of
-// each, so a real watcher never reaches past four.
+// spelling and the caller's own, and on macOS the other normalization and case
+// forms of each, so a mixed-form accented path behind a symlinked working
+// directory reaches ten. A watcher over such a path rebuilds the statement
+// every poll, which costs one Sprintf per spelling and keeps no state.
 const maxCachedQuerySpellings = 8
 
 type queryKey struct {

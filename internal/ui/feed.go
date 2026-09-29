@@ -19,8 +19,8 @@ func (m Model) renderFeed() string {
 	rows := agentRows(rates, now)
 	statsN := 0
 	if len(rows) > 0 && feedIn > 0 {
-		// Half the feed, at least one row, so the stats never take the last
-		// line the feed has.
+		// Half the feed, at least one row, so the stats leave room for the
+		// event rows below them whenever the panel is tall enough for both.
 		statsN = min(len(rows), max(feedIn/2, 1))
 	}
 	var lines []string
@@ -35,10 +35,12 @@ func (m Model) renderFeed() string {
 		// dashboard reads as its own output.
 		lines = append(lines, styleBad.Render(clip(shorten(core.SingleLine(m.feedDown), w), w)))
 	}
-	// The stats take what the reason left and never the last row, so the feed
-	// below them keeps at least one line. statsN is the number actually drawn:
-	// the title counts against it, and a count it was not given is a "+N more"
-	// that names rows nobody can see.
+	// The stats take what the reason line left, and the event rows take what
+	// is left of that: the panel's shortest split is two lines, so a feed
+	// reporting a failure on a short frame shows the reason and no event row
+	// at all, which is why the reason is drawn first. statsN is the number
+	// actually drawn: the title counts against it, and a count it was not
+	// given is a "+N more" that names rows nobody can see.
 	if statsN > 0 {
 		if room := feedIn - len(lines); room > 0 {
 			statsN = min(statsN, room)
@@ -99,8 +101,8 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 // only on stderr, hidden under the alternate screen.
 //
 // The reason is rendered as it arrives. Every producer names its own
-// subsystem (main sends "ingest stopped: …" and "agent watch: …"), so a
-// prefix added here would name the ingest endpoint for a failure that has
+// subsystem (main sends "ingest stopped: …" and "agent watch failed: …"), so
+// a prefix added here would name the ingest endpoint for a failure that has
 // nothing to do with it, and send the operator to restart a dashboard whose
 // endpoint is answering.
 func (m Model) feedEmptyLines(w int) []string {

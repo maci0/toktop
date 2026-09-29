@@ -1,8 +1,10 @@
 // Package gpu samples accelerator telemetry across vendors.
 //
 // NVIDIA/AMD/Intel are read through their vendor CLIs (nvidia-smi,
-// rocm-smi, xpu-smi) where present; AMD falls back to amdgpu sysfs on Linux
-// and system_profiler/ioreg on macOS. We shell out deliberately: NVML and
+// rocm-smi, xpu-smi) where present; AMD falls back to amdgpu sysfs on Linux,
+// and on macOS the platform extras add the Apple devices system_profiler and
+// ioreg report, which no vendor CLI here reads. We shell out deliberately:
+// NVML and
 // Level Zero have
 // no stable in-process Go API without cgo-linking driver libraries, and the
 // vendor CLIs are their documented interfaces. A resolved path is reused
@@ -27,8 +29,8 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// platformExtras lets GOOS-specific files contribute devices (amdgpu sysfs
-// on Linux, system_profiler on macOS).
+// platformExtras lets GOOS-specific files contribute devices the vendor CLIs
+// do not report (amdgpu sysfs on Linux, system_profiler on macOS).
 var platformExtras func(ctx context.Context) []core.GPUDevice
 
 // nvidiaDecode reads nvidia-smi's headerless CSV once per poll and judges it

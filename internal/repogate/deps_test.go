@@ -821,9 +821,30 @@ func fetchedTools(t *testing.T) []fetchedTool {
 			}
 			// `$(GO) run` fetches through the module proxy. A bare `run` after
 			// an ordinary word is a recipe running something local, or the
-			// prose of a target's help line.
+			// prose of a target's help line. `go run` takes flags of its own
+			// before the package, and the recipes put them there: the module
+			// flags and the build tags the tree pins live in variables, and
+			// GOTAGS spells its value as `$(strip $(TAGS) $(ZONE_TAG))`, whose
+			// parens expandVars cannot close. A field still carrying one is a
+			// fragment of a function call rather than a word the recipe
+			// passes, so the coordinate is the first field after the flags
+			// with no paren in it. A field naming a path inside the module is
+			// the tree running its own code, and the rest of that line are its
+			// arguments.
 			if field == "run" && strings.HasPrefix(fields[i-1], "$(") {
-				fetched = append(fetched, fetchedTool{source: source, line: line, tool: fields[i+1]})
+				for _, next := range fields[i+1:] {
+					// A quoted word carries its quote with it (`-tags "..."`
+					// is one field), so the class is read off the word
+					// without it.
+					next = strings.Trim(next, `"`)
+					if strings.HasPrefix(next, "-") || strings.ContainsAny(next, "()") {
+						continue
+					}
+					if !strings.HasPrefix(next, "./") {
+						fetched = append(fetched, fetchedTool{source: source, line: line, tool: next})
+					}
+					break
+				}
 			}
 		}
 	}

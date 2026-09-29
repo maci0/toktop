@@ -328,8 +328,9 @@ func isNumberKey(lower string) bool {
 // package-level slice so trimming it costs no allocation per line.
 var utf8BOM = []byte{0xef, 0xbb, 0xbf}
 
-// assign records a counter, keeping the largest value seen for that field on
-// this line: agents sometimes repeat a total in a nested summary.
+// assign records a counter. Every field but Cache keeps the largest value
+// seen on this line, because an agent repeats a total in a nested summary;
+// Cache is summed instead, for the reason its field carries.
 func assign(ev *jsonEvent, lower string, val any) {
 	n, ok := asInt(val)
 	if !ok || n <= 0 {
