@@ -254,8 +254,14 @@ func storeReadForLocked(key string) *storeRead {
 	r := &storeRead{}
 	storeReadState.states[key] = r
 	storeReadState.order = append(storeReadState.order, key)
+	// The index the key just appended sits at, so the sweep below cannot pick
+	// it. Its latch is the one being handed out: evicting it would return a
+	// *storeRead no longer in the table, and every later failure of the same
+	// store would miss the latch, read as a new outage, and log the same line
+	// again for as long as the store stays broken.
+	held := len(storeReadState.order) - 1
 	for len(storeReadState.order) > maxStoreReads {
-		evictStoreReadLocked()
+		evictStoreReadLocked(held)
 	}
 	return r
 }
@@ -273,17 +279,36 @@ func storeReadForLocked(key string) *storeRead {
 // failing right now, whose next poll then reads as a new outage and logs the
 // same line again. Every other key in the table is either failing too or has
 // nothing to lose, so the oldest is the fallback when there is no quiet one.
-func evictStoreReadLocked() {
-	drop := 0
+//
+// held is the index of the caller's own key, appended before this runs and
+// never a candidate. A table where every other key is still failing has no
+// quiet one to drop, and the entry that must not be lost is the one the caller
+// is holding, so the oldest of the rest is taken: without the exclusion a full
+// table of failing stores evicted the caller's key instead, leaving a latch
+// that is in no table and a cap the sweep can no longer bring back under.
+func evictStoreReadLocked(held int) {
+	drop := -1
 	for i, key := range storeReadState.order {
-		if !storeReadState.states[key].failed {
+		if i != held && !storeReadState.states[key].failed {
 			drop = i
 			break
+		}
+	}
+	if drop < 0 {
+		for i := range storeReadState.order {
+			if i != held {
+				drop = i
+				break
+			}
 		}
 	}
 	key := storeReadState.order[drop]
 	delete(storeReadState.states, key)
 	storeReadState.order = append(storeReadState.order[:drop], storeReadState.order[drop+1:]...)
+	// The caller's key shifted down with everything above the drop.
+	if drop < held {
+		held--
+	}
 }
 
 // markStoreFailed latches one store's failure and reports whether this call
