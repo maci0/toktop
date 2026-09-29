@@ -63,14 +63,20 @@ func (w *procWalk) read(pid int, name string) (b []byte, truncated bool, err err
 	defer f.Close()
 	w.buf = w.buf[:cap(w.buf)]
 	n := 0
+	// truncated stays true until a read reports the end of the file: a file
+	// whose length is exactly the buffer's filled it, and the next read would
+	// have returned 0 bytes rather than more, so the fallback the flag buys
+	// re-reads a file that was not cut.
+	truncated = true
 	for n < len(w.buf) {
 		r, rerr := f.Read(w.buf[n:])
 		n += r
 		if rerr != nil || r == 0 {
+			truncated = false
 			break
 		}
 	}
-	return w.buf[:n], n == len(w.buf), nil
+	return w.buf[:n], truncated, nil
 }
 
 // listLinux walks /proc: everything from plain files, zero subprocesses.

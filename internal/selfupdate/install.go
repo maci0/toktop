@@ -117,7 +117,7 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 
 	sum, err := fetch(ctx, assetURL, tmp, maxAssetBytes)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("cannot fetch %s: %w", want, err)
 	}
 	if sum != expect {
 		return "", fmt.Errorf("checksum mismatch for %s: got %s, want %s", want, sum, expect)

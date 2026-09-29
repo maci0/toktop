@@ -154,6 +154,9 @@ func (w *Watcher) readSnapshot(path string, size int64, stamp fileStamp) {
 	defer f.Close()
 	v, ok, err := w.snapshotValue(f)
 	if !ok {
+		if err == nil {
+			err = errTranscriptUnread
+		}
 		w.auditRead(path, err)
 		return
 	}

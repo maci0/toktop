@@ -515,12 +515,18 @@ func (c *cmdline) joined() string {
 // argsFolded is the command line's arguments lowercased, folded once per
 // cmdline and drawn on the same matchJoinBytes budget anyArgContains spends,
 // so the matchers read no further into a command line than CmdlinePrefix
-// allows whichever of them runs first.
+// allows whichever of them runs first. The separator between two arguments
+// costs a byte of that budget here as it does in lowerJoinedArgs and in
+// ClipArgs: a budget one copy ignores is bytes a matcher reads past the
+// retained prefix the bound exists to keep.
 func (c *cmdline) argsFolded() []string {
 	c.argsOnce.Do(func() {
 		budget := matchJoinBytes
 		out := make([]string, 0, len(c.args))
-		for _, a := range c.args {
+		for i, a := range c.args {
+			if i > 0 {
+				budget--
+			}
 			if budget <= 0 {
 				break
 			}

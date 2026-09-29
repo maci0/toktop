@@ -296,11 +296,13 @@ func walk(node any, ev *jsonEvent, depth int) {
 				}
 			}
 		}
-		// Subtrees are descended in key order. Comparing the working
-		// directory across them picks whichever carries the smaller key, so a
-		// random walk order would let two subtrees that each name one
-		// alternate as the winner from line to line. The sort is bounded by
-		// inlineKids and allocates nothing.
+		// Subtrees are descended in key order, so ev.Cwd below is settled by
+		// the first one that names a directory: the subtree under the smaller
+		// key wins. The compared key is the subtree's own, not the working
+		// directory it carries (which is not known until it is walked), so the
+		// winner is fixed before any descent and cannot alternate the way Go's
+		// random map order would. The sort is bounded by inlineKids and
+		// allocates nothing.
 		for i := 1; i < len(kids); i++ {
 			for j := i; j > 0 && kkids[j-1] > kkids[j]; j-- {
 				kkids[j-1], kkids[j] = kkids[j], kkids[j-1]

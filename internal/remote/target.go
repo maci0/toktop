@@ -29,6 +29,9 @@ func foldHost(s string) string {
 	return core.FoldASCII(norm.NFC.String(s))
 }
 
+// portMax is the highest port a target or an ssh_config entry may name.
+const portMax = 65535
+
 // Target is one ssh-reachable host to monitor, fully resolved. Explicit URL
 // user, port and key win over ~/.ssh/config, which wins over defaults; a
 // HostName from config always replaces the URL host, as OpenSSH does.
@@ -146,7 +149,7 @@ func parseURLTarget(raw string) (Target, error) {
 	}
 	if p := u.Port(); p != "" {
 		t.Port, err = strconv.Atoi(p)
-		if err != nil || t.Port <= 0 || t.Port > 65535 {
+		if err != nil || t.Port <= 0 || t.Port > portMax {
 			return Target{}, fmt.Errorf("bad ssh port %q", p)
 		}
 	}
@@ -327,7 +330,7 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 					// Say which value was refused.
 					audit().Warn("toktop: ssh config Port is not a number; using the default port 22",
 						"port", core.RedactHome(core.Snippet([]byte(val))))
-				case p <= 0 || p >= 65536:
+				case p <= 0 || p > portMax:
 					audit().Warn("toktop: ssh config Port is out of range; using the default port 22",
 						"port", core.RedactHome(core.Snippet([]byte(val))))
 				default:

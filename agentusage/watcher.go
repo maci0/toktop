@@ -442,8 +442,8 @@ func openUnder(root, path string) (*os.File, error) {
 var errOutsideRoot = errors.New("path is outside the transcript root")
 
 // errTranscriptUnread names the one read failure that carries no error of
-// its own: a decode the reader rejected without surfacing a cause. Both
-// readNew and seedBaseline need it, so a path that never advances is latched
+// its own: a decode the reader rejected without surfacing a cause. Every
+// caller of snapshotValue needs it, so a path that never advances is latched
 // and logged under the same name.
 var errTranscriptUnread = errors.New("transcript body could not be decoded")
 

@@ -19,10 +19,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/bearer"
 	"github.com/maci0/toktop/internal/core"
+	"github.com/rivo/uniseg"
 )
 
 // PollTimeout bounds a single HTTP request, including a metrics scrape and
@@ -366,12 +366,13 @@ func extractVersionField(body string) string {
 	// Cheap reject for a body that is not a version at all: past this many
 	// characters the plain-text answer is not a version string either.
 	//
-	// Counted in characters, not bytes, because versionCap is a character cap
-	// everywhere else on this value and a byte count rejects strictly more:
-	// 128 CJK characters are 384 bytes, so a plain-text version written in any
-	// non-Latin script was dropped here while the same version in ASCII was
-	// kept, and capVersion's cluster cap never got the chance to bound it.
-	if trimmed == "" || utf8.RuneCountInString(trimmed) > versionCap {
+	// Counted in grapheme clusters, not bytes or runes, because that is the
+	// unit capVersion bounds this value in, and the two branches of
+	// extractVersionField must not disagree about the same length: counted in
+	// runes, 128 CJK characters are over the cap while 128 ASCII ones are not,
+	// and 100 accented or ZWJ-joined clusters (200 runes) were dropped here
+	// while capVersion would have kept all 100.
+	if trimmed == "" || uniseg.GraphemeClusterCount(trimmed) > versionCap {
 		return ""
 	}
 	if strings.HasPrefix(trimmed, "\"") && strings.HasSuffix(trimmed, "\"") {
