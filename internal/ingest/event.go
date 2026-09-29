@@ -54,9 +54,16 @@ func eventFromWire(wire agentEventWire) (core.AgentEvent, error) {
 	// stored and later rendered into a cell of a row.
 	// Defaults come after sanitization: a value the sanitizer empties
 	// (pure escape sequences) must not slip past the fallback.
-	ev.Agent = core.AgentNameField(ev.Agent)
-	ev.Model = core.ClampField(core.SingleLine(ev.Model), core.AgentModelMax)
-	ev.ViaEngine = core.ClampField(core.SingleLine(ev.ViaEngine), core.AgentViaMax)
+	//
+	// The home fold comes first on all three, the same one the note gets
+	// below: every one of these is sender-shaped text from a process that
+	// reaches this endpoint, and a client that names the directory or the
+	// session file it is reporting on writes the account that owns $HOME into
+	// whichever field it chose. They reach the feed, the live dashboard and
+	// the --once --plain report exactly as the note does.
+	ev.Agent = core.AgentNameField(core.RedactHome(ev.Agent))
+	ev.Model = core.ClampField(core.SingleLine(core.RedactHome(ev.Model)), core.AgentModelMax)
+	ev.ViaEngine = core.ClampField(core.SingleLine(core.RedactHome(ev.ViaEngine)), core.AgentViaMax)
 	// Free-form fields are capped so one giant event cannot dominate the
 	// retained feed, and the note gets the same treatment a locally watched
 	// working directory gets (core.ShortDir): a note naming a working
@@ -131,6 +138,12 @@ func pathNote(note string) bool {
 // is not an error: the endpoint derives one from the POST's Idempotency-Key,
 // and the handler only reaches here for an id the sender did write.
 //
+// The home fold is the note's, and for the same reason: an id a client
+// derived from its session file names the account that owns $HOME, and the
+// stored id rides the feed and the --json report beside the note. It is
+// deterministic, so a retry of the same POST folds to the same stored id and
+// is still recognized as a duplicate.
+//
 // A supplied id that cannot be stored whole is refused rather than clamped.
 // The id is the dedup key, so clamping one past the cap folds every key with
 // that prefix onto a single stored id, and the second event is dropped as a
@@ -143,7 +156,7 @@ func wireEventID(raw string) (string, error) {
 	if raw == "" {
 		return "", nil
 	}
-	line := core.SingleLine(raw)
+	line := core.RedactHome(core.SingleLine(raw))
 	// Clusters, not bytes or runes: the cap is a display cap the feed applies
 	// in clusters, so an id of 129 flags is over it and an id of 129 bytes of
 	// a two-byte rune is not.

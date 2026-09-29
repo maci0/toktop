@@ -82,7 +82,11 @@ any first contact is.
   when bound anywhere else. The `/v1/events` body is `id`, `agent`, `model`,
   `kind`, token counts, a timestamp, a `span_ms` duration, `via_engine` and
   a free-form note, all
-  of which are stored in memory and rendered on your terminal. A note that
+  of which are stored in memory and rendered on your terminal. Every
+  free-form field has the home directory folded to `~` on the way in, the
+  note among them: a client that names the session file or the directory
+  it reports on would otherwise put the account that owns the home into
+  whichever field it chose. A note that
   is nothing but a directory gets the same two components a locally
   watched working directory does, with the home folded to `~`; a note
   carrying any other text is stored as sent, with the home folded to `~`.

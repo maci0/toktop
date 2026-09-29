@@ -370,6 +370,13 @@ components:
       description: |
         Every field is optional. A field sent as `null` reads as one left out,
         and unknown fields are ignored.
+
+        Every free-form string field is stored with the home directory folded
+        to `~`, `id`, `agent`, `model`, `via_engine` and `note` alike: a sender
+        that names the session file or the directory it reports on would
+        otherwise put the account that owns the home into whichever field it
+        chose. The stored value is what the feed, the dashboard and the report
+        render.
       additionalProperties: true
       properties:
         id:
@@ -450,3 +457,4 @@ components:
           description: |
             Free text. A note that is nothing but a directory is reduced to
             its last two components, with a path under `$HOME` folded to `~`.
+            Any other text is stored as sent, past that fold.

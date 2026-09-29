@@ -1578,6 +1578,51 @@ func TestIngestFoldsHomeOutOfNote(t *testing.T) {
 	}
 }
 
+// Every free-form field a sender writes reaches the same feed, dashboard and
+// report the note does, so the fold the note gets is not the note's alone. A
+// client that names the session file or the directory it is reporting on puts
+// the account that owns $HOME into whichever field it chose.
+func TestIngestFoldsHomeOutOfEveryFreeTextField(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if got, err := os.UserHomeDir(); err != nil || got != home {
+		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
+	}
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	sep := string(filepath.Separator)
+	under := filepath.Join(home, "projects", "app")
+	body := fmt.Sprintf(`{"id":%q,"agent":%q,"model":%q,"via_engine":%q,"output_tokens":1}`,
+		filepath.Join(home, ".claude", "projects", "app", "a.jsonl"),
+		"coder"+sep+under,
+		under+sep+"model",
+		"http://"+under+":"+sep+"8080")
+	resp := post(t, "http://"+s.Addr()+"/v1/events", body)
+	if resp != http.StatusAccepted {
+		t.Fatalf("status = %d", resp)
+	}
+	awaitEvents(t, rec, 1)
+	ev := rec.evs[0]
+	for name, got := range map[string]string{
+		"id":         ev.ID,
+		"agent":      ev.Agent,
+		"model":      ev.Model,
+		"via_engine": ev.ViaEngine,
+	} {
+		if strings.Contains(got, "private-user") {
+			t.Errorf("%s = %q names the account", name, got)
+		}
+		if !strings.Contains(got, "~") {
+			t.Errorf("%s = %q, want the home folded", name, got)
+		}
+	}
+}
+
 // A note that is nothing but a working directory is shortened the way a
 // locally watched one is. Everything above the checkout is where a client's
 // name and a project index sit, and the feed only needs the checkout.
