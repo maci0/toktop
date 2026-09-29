@@ -152,13 +152,23 @@ const (
 	// shapeLegacy drops max_completion_tokens and stream_options for older
 	// llama.cpp and strict proxies that 400 on either.
 	shapeLegacy
+	// shapeReasoning drops temperature for the reasoning models (o1, o3,
+	// gpt-5 and the gateways fronting them) that answer any other value than
+	// their default with a 400 "unsupported_value". It is the last shape
+	// because it is the widest concession: a model that rejects a sampling
+	// parameter is refusing to be sampled at all, so the probe gives up the
+	// temperature it holds the rest of the walk to.
+	shapeReasoning
 )
 
 // openaiShapes is the order postOpenAI walks. The first shape is a superset of
 // the others, so a server that rejects one field it never needed is answered
 // by a shape carrying the field it does accept; a server needing both names
-// rejected shapeBoth, and gets a shape naming only its own.
-var openaiShapes = []openaiShape{shapeBoth, shapeCompletion, shapeLegacy}
+// rejected shapeBoth, and gets a shape naming only its own. A server that
+// refuses a sampling value as well rejects every shape before this one, and
+// without shapeReasoning the walk ended on a 400 for an engine that is
+// answering every other request.
+var openaiShapes = []openaiShape{shapeBoth, shapeCompletion, shapeLegacy, shapeReasoning}
 
 // postOpenAI POSTs the probe, walking the request shapes on a rejection. Only
 // 400 and 422 continue the walk: they are refused before any generation runs,
@@ -181,7 +191,9 @@ func postOpenAI(ctx context.Context, url, model string) (*http.Response, error) 
 }
 
 // openaiBody is the chat-completions probe in one of its shapes. Every shape
-// caps the generation; only the field naming that cap differs.
+// caps the generation and asks for a single choice; what differs is the field
+// naming that cap and, on shapeReasoning, whether a sampling value is sent at
+// all.
 func openaiBody(model string, shape openaiShape) []byte {
 	m := map[string]any{
 		"model": model,
@@ -198,6 +210,15 @@ func openaiBody(model string, shape openaiShape) []byte {
 		m["stream_options"] = map[string]bool{"include_usage": true}
 	case shapeLegacy:
 		m["max_tokens"] = probeTokens
+	case shapeReasoning:
+		m["max_completion_tokens"] = probeTokens
+		m["stream_options"] = map[string]bool{"include_usage": true}
+		// The model runs at whatever temperature it defaults to, so the probe
+		// reports the engine's own decode rate rather than a rate this request
+		// asked for. There is no field to drop and put back: a reasoning model
+		// that 400s on one value 400s on the default spelled out, and the walk
+		// has no shape left to fall back on.
+		delete(m, "temperature")
 	default:
 		m["max_tokens"] = probeTokens
 		m["max_completion_tokens"] = probeTokens

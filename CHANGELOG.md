@@ -144,6 +144,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A probe against a reasoning model that answers 400 to any `temperature` but
+  its own default (o1, o3, gpt-5 and the gateways in front of them) now lands on
+  a request that caps the generation and names no sampling value, instead of
+  failing every wave. The refusal walk covers that spelling too, and the shape
+  that drops it is last, so no request an engine already accepted moves.
 - A tagged release no longer fails after it has published. The release job
   uploads every file in `dist/`, so the license text added beside the SBOM went
   up as an asset, and the restore drill that runs last compared the published

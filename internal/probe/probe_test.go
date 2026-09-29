@@ -905,6 +905,55 @@ func TestRunOpenAIRetriesWithoutExtraFields(t *testing.T) {
 	}
 }
 
+// A reasoning model rejects any temperature but its default with a 400, and
+// rejects the legacy cap field as well. Every shape before the last one still
+// spells out a sampling value, so a walk without that shape ends on a refusal
+// for an engine that is answering every other request, and the model reads as
+// down for as long as it is probed that way.
+func TestRunOpenAIRetriesWithoutTemperature(t *testing.T) {
+	var n int
+	var retry map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode probe request: %v", err)
+		}
+		if _, ok := body["max_tokens"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":"unsupported parameter: max_tokens"}`)
+			return
+		}
+		if _, ok := body["temperature"]; ok {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprint(w, `{"error":{"message":"Unsupported value: 'temperature' does not support 0.2 with this model."}}`)
+			return
+		}
+		retry = body
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"))
+		w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindVLLM, Base: srv.URL, Model: "m"})
+	if n != len(openaiShapes) {
+		t.Fatalf("POSTs = %d, want %d (the whole walk, no more)", n, len(openaiShapes))
+	}
+	if !s.OK {
+		t.Fatalf("retry should succeed, got %+v", s)
+	}
+	if _, ok := retry["temperature"]; ok {
+		t.Error("retry still sent temperature")
+	}
+	if retry["max_completion_tokens"] != float64(probeTokens) {
+		t.Errorf("retry max_completion_tokens = %v, want %d", retry["max_completion_tokens"], probeTokens)
+	}
+	if retry["n"] != float64(1) {
+		t.Errorf("retry n = %v, want 1: a dropped shape must not widen the budget", retry["n"])
+	}
+}
+
 // A refusal at every shape ends the walk and reports the engine's own error,
 // rather than re-POSTing the same generation until the client timeout.
 func TestRunOpenAIGivesUpAfterRefusingEveryShape(t *testing.T) {
