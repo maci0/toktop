@@ -18,9 +18,17 @@ var (
 	cBase = lipgloss.Color("#0d1117")
 	// Secondary text must stay >= 4.5:1 on cBase (WCAG 1.4.3). Site --dim
 	// #7d8895 is 5.25:1 here; do not drop it back under the floor.
-	cDim    = lipgloss.Color("#7d8895")
-	cText   = lipgloss.Color("#d7dde5")
-	cBorder = lipgloss.Color("#4a5563")
+	cDim  = lipgloss.Color("#7d8895")
+	cText = lipgloss.Color("#d7dde5")
+	// The frame color carries the 3:1 non-text floor, not the 4.5:1 one
+	// (WCAG 1.4.11): a border is a UI component's boundary, and it is the only
+	// thing that says where one panel ends and the next begins. The charts
+	// stack with no blank row between them, so a low-vision reader meets one
+	// unbroken column of glyphs above and below a rule they cannot see. The
+	// former #4a5563 sat at 2.50:1, under the floor every chart mark in this
+	// package is held to; this is 3.49:1, still well under cDim so the frame
+	// stays quieter than the text it encloses.
+	cBorder = lipgloss.Color("#5f6b7a")
 	cRed    = lipgloss.Color("#e36d6d")
 	cGreen  = lipgloss.Color("#4cc38a") // --accent
 	cYellow = lipgloss.Color("#e3b341") // --warm

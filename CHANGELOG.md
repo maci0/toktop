@@ -38,8 +38,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   ignored, rather than as leaving the `--add` endpoints unauthenticated,
   on the runs where another source (the sibling variable or `--bearer`)
   supplies the token in force.
+- `--once --plain` reports the PROBES window the way it already reports the
+  THROUGHPUT one: the peak rate over the span the plot covers, and, for a run
+  with no probes at all, the flag that produces them. The PROBES braille plot
+  had no text alternative anywhere, and the report is the only surface a
+  screen reader has.
 
 ### Fixed
+
+- Panel borders were drawn in a color measuring 2.50:1 against the dashboard
+  background, under the 3:1 that identifies a component's edges. The two chart
+  panels stack with no blank row between them, so the frame was the only thing
+  marking where one panel ended and the next began. The border now measures
+  3.49:1, still quieter than the secondary text it encloses.
 
 - The system panel decoded kernel and firmware strings (uname release and
   sysname, the `/proc/device-tree/model` board string, the NVIDIA driver

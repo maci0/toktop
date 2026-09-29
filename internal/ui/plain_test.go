@@ -333,3 +333,44 @@ func TestEmptyFeedAdviceMatchesAcrossViews(t *testing.T) {
 		})
 	}
 }
+
+// The PROBES panel plots a braille history of measured rates, and the rows the
+// plain report lists below are the newest of them: nothing else names how the
+// window got. The peak is the same text alternative writeThroughputPlain gives
+// the two throughput charts (WCAG 1.1.1), and the panel title is clipped to a
+// column too narrow to carry it.
+func TestPlainProbePeakNamesThePlot(t *testing.T) {
+	now := time.Now()
+	engines := []core.ProviderSnapshot{{Label: "box", Kind: core.KindOpenAI, OK: true}}
+	out := PlainTextFrame(Config{Version: "t", PollEvery: time.Second}, core.Snapshot{
+		At:        now,
+		Providers: engines,
+		Probes: []core.ProbeSample{
+			{At: now.Add(-30 * time.Second), Model: "a", OK: true, TokPS: 12},
+			{At: now.Add(-20 * time.Second), Model: "a", OK: true, TokPS: 480},
+			{At: now, Model: "a", OK: true, TokPS: 30},
+		},
+	})
+	if want := "peak 480 tok/s over the last 30s"; !strings.Contains(out, want) {
+		t.Errorf("plain frame missing %q in:\n%s", want, out)
+	}
+
+	// A window that measured nothing has no peak to name, and a line reading
+	// "peak 0 tok/s" would be a measurement of nothing.
+	none := PlainTextFrame(Config{Version: "t", PollEvery: time.Second}, core.Snapshot{
+		At:        now,
+		Providers: engines,
+		Probes:    []core.ProbeSample{{At: now, Model: "a", Err: "timeout"}},
+	})
+	if strings.Contains(none, "peak") {
+		t.Errorf("plain frame names a peak for a window that measured nothing:\n%s", none)
+	}
+
+	// A run with no probes at all still says which knob produces them: the
+	// empty panel says it, and this report is the only surface a screen-reader
+	// user has.
+	empty := PlainTextFrame(Config{Version: "t"}, core.Snapshot{At: now, Providers: engines})
+	if want := "none yet: quit, re-run with --probe N"; !strings.Contains(empty, want) {
+		t.Errorf("plain frame missing %q in:\n%s", want, empty)
+	}
+}

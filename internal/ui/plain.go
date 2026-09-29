@@ -95,7 +95,7 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	writeThroughputPlain(&b, s, cfg)
 	writeEnginesPlain(&b, s)
 	writeSystemPlain(&b, s.Sys)
-	writeProbesPlain(&b, s)
+	writeProbesPlain(&b, s, cfg)
 	writeFeedPlain(&b, s, cfg, rates)
 	return b.String()
 }
@@ -123,30 +123,48 @@ func writeThroughputPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 }
 
 // historyWindow is the span the plotted samples actually cover, oldest sample
-// to newest across every engine. The buffer is sized for a full run, so
-// naming its capacity here would claim a three-minute window for a five-frame
-// `--once` render that measured four seconds. The stamps that travel with the
-// values are the real answer; a sample count on the collector cadence stands
-// in only for a caller that built a snapshot without them.
+// to newest across every engine.
 func historyWindow(s core.Snapshot, cad time.Duration) time.Duration {
-	var oldest, newest time.Time
+	var stamps []time.Time
 	plotted := 0
 	for i := range s.Providers {
 		for _, out := range [2]bool{true, false} {
-			vals, stamps := historyOf(s.Providers[i], out)
+			vals, series := historyOf(s.Providers[i], out)
 			plotted = max(plotted, len(vals))
 			for j := range vals {
-				at := sampleTime(stamps, j)
-				if at.IsZero() {
-					continue
-				}
-				if oldest.IsZero() || at.Before(oldest) {
-					oldest = at
-				}
-				if at.After(newest) {
-					newest = at
+				if at := sampleTime(series, j); !at.IsZero() {
+					stamps = append(stamps, at)
 				}
 			}
+		}
+	}
+	return spanOf(stamps, plotted, cad)
+}
+
+// probeWindow is historyWindow over the probe samples: the span the PROBES
+// plot covers, on the same terms.
+func probeWindow(s core.Snapshot, cad time.Duration) time.Duration {
+	stamps := make([]time.Time, 0, len(s.Probes))
+	for _, p := range s.Probes {
+		stamps = append(stamps, p.At)
+	}
+	return spanOf(stamps, len(stamps), cad)
+}
+
+// spanOf is what a plotted window spans, oldest stamp to newest. The sample
+// buffers are sized for a full run, so naming their capacity here would claim a
+// three-minute window for a five-frame `--once` render that measured four
+// seconds. The stamps that travel with the values are the real answer; plotted,
+// the number of samples on the collector cadence, stands in only for a caller
+// that built a snapshot without them.
+func spanOf(stamps []time.Time, plotted int, cad time.Duration) time.Duration {
+	var oldest, newest time.Time
+	for _, at := range stamps {
+		if oldest.IsZero() || at.Before(oldest) {
+			oldest = at
+		}
+		if at.After(newest) {
+			newest = at
 		}
 	}
 	if !oldest.IsZero() && newest.After(oldest) {
@@ -278,11 +296,29 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 
 // writeProbesPlain lists the most recent probe results newest-first, with the
 // ok/failed verdict spelled out and failure reasons attached.
-func writeProbesPlain(b *strings.Builder, s core.Snapshot) {
+//
+// The window peak is the text alternative for the PROBES panel's braille plot,
+// the same job writeThroughputPlain's peak does for the two throughput charts
+// (WCAG 1.1.1). The rows below carry the newest measurements; only the peak
+// says how the window got, and the panel title is clipped to a column too
+// narrow to hold it, so without this line the probe history has no account of
+// itself anywhere. A peak of 0 prints nothing: that is a measurement of
+// nothing.
+func writeProbesPlain(b *strings.Builder, s core.Snapshot, cfg Config) {
 	if len(s.Probes) == 0 {
+		// Same rule as the empty agent feed: the panel tells the reader which
+		// knob fills it, and this report is the only surface a screen-reader
+		// user has, so it carries the instruction. No key, unlike the panel:
+		// this frame is not interactive.
+		b.WriteString("\nPROBES\n")
+		b.WriteString("none yet: quit, re-run with --probe N\n")
 		return
 	}
 	b.WriteString("\nPROBES\n")
+	cad := cadenceOf(cfg.PollEvery)
+	if peak := seriesPeak(probeSeries(s, core.ProbeHistoryLen, cad)); peak > 0 {
+		fmt.Fprintf(b, "peak %s tok/s over the last %s\n", fmtRate(peak), fmtDur(probeWindow(s, cad)))
+	}
 	shown := 0
 	for i := len(s.Probes) - 1; i >= 0 && shown < maxProbeRows; i-- {
 		p := s.Probes[i]

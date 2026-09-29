@@ -56,7 +56,7 @@ FONT_ROOTS: tuple[str, ...] = (
 
 # The 16 ANSI colors as SGR 30-37/90-97, tuned to the dashboard's palette.
 ANSI16: dict[int, RGB] = {
-    0: (74, 85, 99),  # black-ish (cBorder)
+    0: (95, 107, 122),  # black-ish (cBorder)
     1: (227, 109, 109),  # red
     2: (76, 195, 138),  # green / accent
     3: (227, 179, 65),  # yellow / warm

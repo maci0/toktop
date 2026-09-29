@@ -62,6 +62,28 @@ func TestStatusTextMeetsAAContrastOnBase(t *testing.T) {
 	}
 }
 
+// The panel frame is a UI component boundary, so it answers to the non-text
+// floor rather than the text one (WCAG 1.4.11). It is the only cue for where
+// one panel ends and the next begins: the two chart panels stack with no blank
+// row between them, so a border that fails here leaves a low-vision reader one
+// unbroken column of glyphs. cBorder was #4a5563, 2.50:1.
+func TestPanelBorderMeetsNonTextContrastOnBase(t *testing.T) {
+	if got := contrastRatioT(t, cBorder, cBase); got < minGraphicContrast {
+		t.Errorf("cBorder on cBase = %.2f:1, want >= %.1f:1", got, minGraphicContrast)
+	}
+}
+
+// The frame has to stay quieter than the secondary text it encloses, or every
+// panel reads as a highlighted block and the text hierarchy inverts.
+func TestPanelBorderStaysBelowSecondaryText(t *testing.T) {
+	border := contrastRatioT(t, cBorder, cBase)
+	dim := contrastRatioT(t, cDim, cBase)
+	if border >= dim {
+		t.Errorf("cBorder on cBase = %.2f:1, cDim = %.2f:1; the frame must not outrank the text",
+			border, dim)
+	}
+}
+
 // Every heat-ramp color must survive the deepest age fade at or above the
 // WCAG 1.4.11 non-text floor: the oldest chart columns still carry history,
 // and before fadeClamped they measured ~1.3:1 against the background.
