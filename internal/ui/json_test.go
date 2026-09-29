@@ -45,6 +45,25 @@ func TestJSONReportNamesItsSchema(t *testing.T) {
 	}
 }
 
+// Every list in the report is published as an array, whether or not it holds
+// anything, so a consumer reads one shape from a quiet run and a busy one.
+// agent_rates is the one that carried an omitempty, which made the key vanish
+// on a fleet that reported nothing while engines, agents and probes stayed
+// present as [].
+func TestJSONReportPublishesEveryListAsAnArray(t *testing.T) {
+	doc := decodeReport(t, core.Snapshot{At: time.Now()})
+	for _, key := range []string{"engines", "agents", "probes", "agent_rates"} {
+		v, ok := doc[key]
+		if !ok {
+			t.Errorf("report has no %q on a snapshot with nothing in it: %v", key, doc)
+			continue
+		}
+		if _, isArray := v.([]any); !isArray {
+			t.Errorf("%q = %#v, want an array", key, v)
+		}
+	}
+}
+
 func TestJSONAgentCarriesTheSpanItsRateUses(t *testing.T) {
 	now := time.Now()
 	snap := core.Snapshot{

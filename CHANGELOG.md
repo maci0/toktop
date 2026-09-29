@@ -155,6 +155,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- `--once --json` now always publishes `agent_rates`, as an empty array when
+  no agent is in the window, like `engines`, `agents` and `probes` beside it.
+  It was the one list carrying an `omitempty`, so the key vanished from a
+  report where a fleet reported nothing and stayed for one where it did, and a
+  consumer decoding into a typed slice had one field whose absence meant
+  something other than the empty list the other three publish. No field is
+  removed, renamed or remeant, so `schema` stays at 1.
 - A `202` from `POST /v1/events` now says what `stored` is: the feed is the
   answering process's memory, so `stored` acknowledges receipt for display and
   is not a durable-write receipt. An event is gone when that process exits, is

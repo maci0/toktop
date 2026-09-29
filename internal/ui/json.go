@@ -58,7 +58,13 @@ type jsonReport struct {
 	Agents     []jsonAgent  `json:"agents"`
 	Probes     []jsonProbe  `json:"probes"`
 	System     *jsonSystem  `json:"system,omitempty"`
-	AgentRates []jsonRate   `json:"agent_rates,omitempty"`
+	// agent_rates is written like the three lists above it, never omitted: a
+	// report whose agent list is empty publishes the key as an empty array, so
+	// a consumer reads the same shape whether the fleet reported or not. The
+	// other three were already built that way, and a key that is present for
+	// one run and absent for the next is the kind of asymmetry a typed decoder
+	// turns into a nil-versus-empty bug on the consumer's side.
+	AgentRates []jsonRate `json:"agent_rates"`
 }
 
 type jsonEngine struct {
@@ -243,6 +249,7 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 		Engines:    make([]jsonEngine, 0, len(s.Providers)),
 		Agents:     make([]jsonAgent, 0, len(s.Agents)),
 		Probes:     make([]jsonProbe, 0, len(s.Probes)),
+		AgentRates: make([]jsonRate, 0, len(s.Agents)),
 		System:     jsonSystemOf(s.Sys),
 	}
 	for _, p := range s.Providers {
