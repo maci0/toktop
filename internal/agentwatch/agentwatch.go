@@ -24,6 +24,7 @@ package agentwatch
 import (
 	"cmp"
 	"context"
+	"errors"
 	"maps"
 	"slices"
 	"sync"
@@ -76,6 +77,9 @@ type Watcher struct {
 
 	mu      sync.Mutex
 	tracked map[int]*tracked
+	// running is a Run is live: see errRunInProgress. Guarded by mu, and
+	// written only while it is held.
+	running bool
 	// engineErr is the last parse failure engineEndpoints reported, so a
 	// permanent misconfiguration is surfaced once rather than every tick.
 	engineErr string
@@ -163,11 +167,32 @@ func (w *Watcher) instant() time.Time {
 	return fn()
 }
 
+// errRunInProgress is what a second concurrent Run is refused with. A watcher
+// is built for one run: the discovery ticker and the trackers it starts belong
+// to that one.
+var errRunInProgress = errors.New("agentwatch: already running")
+
 // Run follows agents until the context is canceled. Load the agent
 // definitions (agentusage.LoadDefinitions, as main does) before Run so a
 // malformed definitions file is reported where the operator can see it, not
 // swallowed inside a goroutine behind the alt screen.
-func (w *Watcher) Run(ctx context.Context) {
+//
+// A second Run while the first is live is refused with errRunInProgress and
+// starts nothing. Two loops over one watcher walk the process table twice as
+// often and run two passes of discover against the same tracker table, so every
+// agent is scanned twice per pass and the one store that may be followed is
+// claimed by whichever pass reached it first; both loops then stop every
+// tracker when either one returns, and the second stopAll reports a final
+// growth against a table the first has already cleared. This is the claim
+// internal/collector's Run takes, for the same reason and over the same state.
+//
+// The claim is released when the loop returns, so a restart after a finished
+// run is unaffected: what is refused is a second live loop, not a second run.
+func (w *Watcher) Run(ctx context.Context) error {
+	if !w.claimRun() {
+		return errRunInProgress
+	}
+	defer w.releaseRun()
 	if w.discoverEvery <= 0 {
 		w.discoverEvery = defaultDiscoverEvery
 	}
@@ -182,11 +207,31 @@ func (w *Watcher) Run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			w.stopAll()
-			return
+			return nil
 		case <-discover.C():
 			w.discover(ctx)
 		}
 	}
+}
+
+// claimRun takes the single live-run claim, reporting false when another Run
+// already holds it and having changed nothing.
+func (w *Watcher) claimRun() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.running {
+		return false
+	}
+	w.running = true
+	return true
+}
+
+// releaseRun hands the claim back, so a run started after the previous one
+// returned is not read as a second live loop.
+func (w *Watcher) releaseRun() {
+	w.mu.Lock()
+	w.running = false
+	w.mu.Unlock()
 }
 
 // SetPacer replaces what paces the discovery loop. Production leaves it on
