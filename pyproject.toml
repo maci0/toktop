@@ -52,6 +52,16 @@ select = [
 # and stays on.
 ignore = ["COM812"]
 
+# C90 in the list above is C901 alone, and C901 stays silent until this
+# threshold is set: ruff reports nothing above a default of no limit, so
+# selecting the group was a claim the analyzer never checked. The number is
+# the tree's own maximum, measured with the group forced on: main and render
+# are both at 9, the next function is 5. That is the strictest cap the tree
+# passes today, so the two sit at the line and a branch added to either of
+# them fails the gate instead of quietly growing.
+[tool.ruff.lint.mccabe]
+max-complexity = 9
+
 [tool.ruff.lint.pydocstyle]
 # The docstrings here use Google sections (Args:, Returns:, Raises:), which is
 # what the convention fixes. Without it ruff warns that D203/D211 and D212/D213
