@@ -20,6 +20,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   identifier and nothing else, and MIT, BSD-3-Clause and Apache-2.0 each ask
   the notice or the license itself to travel with the redistributed bytes.
 
+- A release now ships this project's own `LICENSE` too, as
+  `toktop_<version>_LICENSE.txt`. The dependency texts cover what the
+  dependencies ask for; MIT asks the same of toktop, and a downloaded binary
+  carried no notice of its own grant until now. It is checksummed and verified
+  by `make release-verify` like every other asset.
+
 - A host whose memory or load source cannot be read is now named in the audit
   log on macOS and Windows, the way a failed `/proc` read already was on Linux.
   `hw.memsize`, `kern.loadavg` and `GlobalMemoryStatusEx` failed silently, so

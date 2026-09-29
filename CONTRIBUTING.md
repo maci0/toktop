@@ -236,6 +236,7 @@ in day-to-day work:
 | `make check-release-source` | fail unless a non-dev VERSION builds from a clean, git-backed tree with a nonzero `SOURCE_DATE_EPOCH` (`make release` runs it; `ALLOW_DIRTY=1` overrides the tree check) |
 | `make check-deploy-source` | fail unless `site/` and `wrangler.jsonc` hold no uncommitted changes, so the Worker and the captures it serves are in a commit (`make site-deploy` runs it; `ALLOW_DIRTY=1` overrides the tree check, the same override the release path uses) |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
+| `make licenses` / `make license` | write the license text of every module the binary links, and this project's own LICENSE, into `dist/` (`make release` publishes and checksums both) |
 | `make host-dist` | print the path of this host's `VERSION` artifact in `dist/`, or fail when that platform is not in `PLATFORMS` (the release job smoke-tests this path) |
 | `make release-verify` | fetch every asset a published `VERSION` holds back from GitHub and re-verify each digest against that release's own `checksums.txt` (the restore drill the release job runs) |
 | `make repro-check` | build every release platform twice, from two different source paths and two different build caches, then diff |
@@ -403,11 +404,11 @@ not a leftover `0.1.0`.
 
 Push a tag `v*`: GitHub Actions tests (both halves of the sqlite tag gate),
 cross-compiles every platform, generates checksums, a buildinfo manifest, a
-CycloneDX SBOM and the license text of every module the binary links, and
-attaches binaries to the release. The buildinfo file
+CycloneDX SBOM, the license text of every module the binary links and this
+project's own LICENSE, and attaches binaries to the release. The buildinfo file
 records the commit, toolchain, and flags behind the bytes, so a rebuild
 attempt has something to match; it is listed in checksums.txt too, as is
-the SBOM and the license file. `make dist-clean` keeps only the files the current `VERSION`
+the SBOM and the two license files. `make dist-clean` keeps only the files the current `VERSION`
 publishes, so a leftover binary, SBOM, or tarball from an earlier local
 `make release` cannot be checksummed and shipped with this one. Versions with a prerelease suffix, such as
 `v0.6.0-rc.1`, are marked as prereleases and excluded from the stable
@@ -474,9 +475,9 @@ make release-verify VERSION=0.15.0
 ```
 
 The two globs are the whole asset set `release-verify` expects: the
-`toktop_<version>_*` binaries, buildinfo manifest, license file and checksums
-tarball, and the `toktop-sbom-<version>*` file, which is spelled with a dash
-and is therefore not in the first glob.
+`toktop_<version>_*` binaries, buildinfo manifest, third-party license texts,
+the project's own LICENSE and checksums tarball, and the `toktop-sbom-<version>*`
+file, which is spelled with a dash and is therefore not in the first glob.
 
 The rebuild is byte-identical to what was published, which is what makes this
 safe under the rule that forbids replacing a published version: the checksums

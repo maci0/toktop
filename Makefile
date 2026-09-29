@@ -7,14 +7,15 @@ VERSION ?= dev
 CHECK_VERSION = printf '%s' '$(VERSION)' | grep -qE '^[A-Za-z0-9._+-]+$$' || { echo "make: VERSION must match [A-Za-z0-9._+-]+ (got '$(VERSION)')" >&2; exit 1; }
 # The files a release publishes that are not per-platform binaries, named once.
 # Every recipe that writes one spells the name from here, and release-verify
-# reads the same four names when it compares the published asset list against
+# reads the same five names when it compares the published asset list against
 # what a VERSION produces: a name spelled in both places is a release that
 # uploads a file the restore drill then reports as unexpected.
 SBOM_ASSET      = $(BINARY)-sbom-$(VERSION).cdx.json
 BUILDINFO_ASSET = $(BINARY)_$(VERSION)_buildinfo.txt
 LICENSES_ASSET  = $(BINARY)_$(VERSION)_licenses.txt
+LICENSE_ASSET   = $(BINARY)_$(VERSION)_LICENSE.txt
 CHECKSUMS_ASSET = $(BINARY)_$(VERSION)_checksums.tar.gz
-RELEASE_ASSETS  = $(SBOM_ASSET) $(BUILDINFO_ASSET) $(LICENSES_ASSET) $(CHECKSUMS_ASSET)
+RELEASE_ASSETS  = $(SBOM_ASSET) $(BUILDINFO_ASSET) $(LICENSES_ASSET) $(LICENSE_ASSET) $(CHECKSUMS_ASSET)
 # A cut leaves an empty '## [Unreleased]' stub, and the stub is a heading
 # without a version. Only a versioned heading closes the section and names the
 # version the bump is compared against, so a stub anywhere below the new
@@ -654,6 +655,23 @@ licenses: buildinfo ## write the license text of every module the binary links i
 	} > $(DIST)/$(LICENSES_ASSET)
 	@test -s $(DIST)/$(LICENSES_ASSET) || \
 		{ echo "make licenses: wrote no module sections; the module list came back empty" >&2; exit 1; }
+
+# The project's own grant, the one the binaries above are covered by. The
+# `licenses` asset carries what every dependency asks for; MIT asks the same of
+# toktop, and a release publishes binaries carrying no notice otherwise, so
+# the text is copied beside them rather than left in the repository a user who
+# downloaded a binary may never see. Named with the `$(BINARY)_` prefix, so it
+# rides the toktop_* glob into checksums.txt and dist-clean's keep pattern like
+# the other text assets, and it takes buildinfo as a prerequisite for the same
+# ordering reason: test-dist opens by deleting every `$(BINARY)_*` in dist/.
+.PHONY: license
+license: buildinfo ## copy this project's own LICENSE into dist/ beside the third-party texts
+	@$(CHECK_VERSION)
+	@test -s LICENSE || { echo "make license: LICENSE is missing or empty at the tree root" >&2; exit 1; }
+	@mkdir -p $(DIST)
+	cp LICENSE $(DIST)/$(LICENSE_ASSET)
+	@cmp -s LICENSE $(DIST)/$(LICENSE_ASSET) || \
+		{ echo "make license: the copy in dist/ does not match LICENSE" >&2; exit 1; }
 
 # -tests=true turns on vet's tests analyzer, which is off by default. It reads
 # the _test.go files for a Test/Fuzz/Benchmark/Example whose name and signature
@@ -1425,7 +1443,7 @@ dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 # runs `sbom` first; run on its own, the glob matches nothing and the list is
 # the binaries alone.
 .PHONY: checksums
-checksums: sbom buildinfo licenses ## checksum the dist/ binaries into a byte-reproducible tarball
+checksums: sbom buildinfo licenses license ## checksum the dist/ binaries into a byte-reproducible tarball
 	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
 		{ echo "$(TAR) rejects --sort: deterministic packaging needs GNU tar (install it as gtar)" >&2; exit 1; }
 	@cd $(DIST) && \

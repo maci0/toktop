@@ -42,6 +42,12 @@ The list is read from the build tags the binaries carry, so a module only the
 sqlite half links is covered, and a module whose directory holds no license
 file fails the target instead of shipping a section that says nothing.
 
+The project's own grant travels the same way. The repository `LICENSE` is
+copied to `dist/toktop_<version>_LICENSE.txt` by `make license` and published
+and checksummed beside the third-party texts, so a downloaded binary carries
+the notice covering it rather than pointing at a repository the downloader may
+never open.
+
 ## Go, never linked into a release binary
 
 | Module | License | Why it is here |

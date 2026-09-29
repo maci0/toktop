@@ -39,8 +39,11 @@ UTC on a host with no zone files. `CGO_ENABLED=0`
 matches those artifacts too (pure-Go net resolver, no libc); a host with
 gcc would otherwise produce a cgo-linked binary. Or download a binary
 for linux, macOS, and Windows (amd64 + arm64) from the
-[releases](https://github.com/maci0/toktop/releases). An installed binary
-updates itself in place:
+[releases](https://github.com/maci0/toktop/releases); each release publishes a
+`checksums.tar.gz` to verify the download against, the license text of every
+module the binary links, and this project's own LICENSE, and
+[docs/RECOVERY.md](docs/RECOVERY.md) spells the verification steps. An
+installed binary updates itself in place:
 
 ```
 toktop update --check    # report the latest release, change nothing
@@ -843,7 +846,7 @@ down, leaving the `--add` endpoints queried unauthenticated.
 ```
 make help                          # every task, one line each
 make prereqs                       # check go, a C compiler, bun, uv against the pins
-make build                         # host binary, version-stamped
+make build                         # host binary; stamped with VERSION, `dev` unless set
 make demo                          # build, then run the simulated fleet
 make test                          # all tests, -race -shuffle=on
 make test RACE=0                   # full suite, no race detector
@@ -855,6 +858,11 @@ make test-pkg PKG=./internal/ui RACE=0   # faster loop, no race detector
 make install                    # install into PREFIX/bin (default ~/.local/bin)
 make uninstall                  # remove it again
 ```
+
+`make install` builds first, so the installed binary carries whatever
+`VERSION` says: `dev` unless it is set, which is what `--version` then reports
+and what `toktop update` replaces on the first run. A build that answers with a
+real version is `make install VERSION=x.y.z`.
 
 Cross-compiles (no cgo anywhere); `make test-dist` is the same flags the
 release uses (`-trimpath -buildvcs=false -mod=readonly -buildmode=pie`, plus
@@ -878,9 +886,10 @@ reads, sends and stores.
 
 Releases: push a tag `v*` and GitHub Actions attaches binaries for
 linux/amd64, linux/arm64, darwin/amd64, darwin/arm64, windows/amd64 and
-windows/arm64, plus a CycloneDX SBOM of every dependency (`make sbom`) and a
-buildinfo manifest naming the commit, toolchain, and flags behind those
-bytes.
+windows/arm64, plus a CycloneDX SBOM of every dependency (`make sbom`), the
+license text of every module the binary links and this project's own LICENSE
+(`make licenses`, `make license`), and a buildinfo manifest naming the commit,
+toolchain, and flags behind those bytes.
 Versions are 0.x: the CLI, the ingest `/v1/events` body, and the
 `agentusage` Go API may change without a major bump. Consumer-facing notes
 live in [CHANGELOG.md](CHANGELOG.md). CI
