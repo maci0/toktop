@@ -57,6 +57,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- The demo source, the agent watcher, the remote sampler and
+  `agentusage.Watcher` pace their loops through `core.Pacer` rather than a
+  `time.NewTicker` of their own, so a simulated run fires those passes itself.
+  The demo stamped its frames on a pinned timeline but took the number of
+  frames from how long the process happened to run, the watcher admitted
+  whichever agents the wall clock had reached, the transcript watcher read
+  whatever had been written in real time, and the remote sampler sampled a
+  box once per elapsed interval while stamping the sample on the injected
+  clock: four loops a replay could not step, feeding a run it could not
+  reproduce. `Watcher.SetPacer` is the transcript watcher's half and is
+  exported, since the package is importable and the loop is its public entry
+  point; the other three are set from the same process. Production is
+  unchanged on `core.WallPacer`, and a nil pacer restores it.
 - The site bar links the closing section, `#measured`, beside the other five.
   A section reachable only by scrolling past everything else is a section the
   bar does not describe. The phone view already wrapped the link list to a

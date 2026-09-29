@@ -133,6 +133,65 @@ func TestRunReplaysIdenticallyFromOneSeed(t *testing.T) {
 	})
 }
 
+// A driver steps the run loop itself, not only the unexported frame step:
+// Run is the path `toktop --demo` takes, and a wall-clock ticker in it made
+// how many frames a run emitted a function of how long the process happened
+// to take. The pacer seam is what lets a simulated run decide its own frame
+// count, and two steps of one seed must agree on every frame.
+func TestRunIsSteppableByADriver(t *testing.T) {
+	t0 := time.Unix(1_700_000_000, 0).UTC()
+	replay := func() []core.Snapshot {
+		s := NewSource(time.Second, 7)
+		s.SetOrigin(t0)
+		pace := core.NewVirtualPacer()
+		s.SetPacer(pace)
+		ch := make(chan core.Snapshot, 16)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); s.Run(ctx, ch) }()
+		out := make([]core.Snapshot, 0, 8)
+		take := func() {
+			t.Helper()
+			select {
+			case snap := <-ch:
+				out = append(out, snap)
+			case <-time.After(5 * time.Second):
+				t.Fatalf("source produced %d frames, want 8", len(out))
+			}
+		}
+		take() // the warm pass is not a tick
+		at := t0
+		for range 7 {
+			at = at.Add(time.Second)
+			pace.Fire(at)
+			take()
+		}
+		cancel()
+		<-done
+		return out
+	}
+	a, b := replay(), replay()
+	if len(a) != 8 {
+		t.Fatalf("driver stepped %d frames, want 8", len(a))
+	}
+	for i := range a {
+		if !reflect.DeepEqual(a[i], b[i]) {
+			t.Fatalf("driven replays diverged at frame %d:\n%+v\n%+v", i, a[i], b[i])
+		}
+	}
+	if !a[0].At.Equal(t0) || !a[7].At.Equal(t0.Add(7*time.Second)) {
+		t.Fatalf("driven frames ran %v..%v, want %v..%v", a[0].At, a[7].At, t0, t0.Add(7*time.Second))
+	}
+	// A nil pacer restores the wall clock rather than leaving the source
+	// silent, which is the state a driver that forgot to pass one would run
+	// into and read as a hung source.
+	if got := NewSource(time.Second, 7).pacer(); got != core.WallPacer {
+		t.Fatalf("pacer() = %#v, want core.WallPacer", got)
+	}
+	NewSource(time.Second, 7).SetPacer(nil)
+}
+
 // Auto-probe is a simulated schedule, not a wall-clock ticker: two sources
 // stepped at the same instants must run the same number of waves and stamp
 // them at the same simulated instants. Driven from the real clock the wave

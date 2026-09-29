@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1925,5 +1926,72 @@ func TestOwnedIdleTranscriptsAreCapped(t *testing.T) {
 		if off != fi.Size() {
 			t.Fatalf("skip position for %s is %d, want the file's end %d", filepath.Base(filepath.Dir(path)), off, fi.Size())
 		}
+	}
+}
+
+// Run's passes are paced by a seam, so a driver decides when the transcripts
+// are re-read. Left on a wall-clock ticker the watcher read whatever had been
+// written by the time each interval elapsed: two runs of the same inputs
+// reported different ledgers, and a replay could not reproduce the one it was
+// comparing against.
+func TestRunIsSteppableByADriver(t *testing.T) {
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	path := filepath.Join(store, "session.jsonl")
+	w := Watch("claude", work, time.Now())
+	if w == nil {
+		t.Fatal("claude should be supported")
+	}
+	append_(t, path, claudeLine(work, 40))
+	at := time.Unix(1_700_000_000, 0).UTC()
+	w.SetNow(func() time.Time { return at })
+	pace := core.NewVirtualPacer()
+	w.SetPacer(pace)
+
+	var mu sync.Mutex
+	var got []Sample
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	polled := make(chan struct{}, 8)
+	go w.Run(ctx, time.Hour, func(s Sample) {
+		mu.Lock()
+		got = append(got, s)
+		mu.Unlock()
+		polled <- struct{}{}
+	})
+	readOne := func() Sample {
+		t.Helper()
+		select {
+		case <-polled:
+		case <-time.After(30 * time.Second):
+			t.Fatal("the poll loop published no sample")
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		return got[len(got)-1]
+	}
+	// The warm pass runs before the first tick and publishes what is already
+	// on disk, so a sample means the loop is live and not merely started.
+	if s := readOne(); s.Output != 40 {
+		t.Fatalf("warm pass output = %d, want 40", s.Output)
+	}
+
+	// Written between two passes and counted only when the driver fires one.
+	append_(t, path, claudeLine(work, 30))
+	time.Sleep(100 * time.Millisecond)
+	if s := w.Sample(); s.Output != 40 {
+		t.Fatalf("a record was counted with no driven pass: %d", s.Output)
+	}
+	pace.Fire(at)
+	if s := readOne(); s.Output != 70 {
+		t.Fatalf("driven pass output = %d, want 70", s.Output)
+	}
+
+	// A nil pacer restores the wall clock rather than leaving the loop
+	// silent, which a caller that forgot to pass one would read as a watcher
+	// that had stopped reporting.
+	w.SetPacer(nil)
+	if got := w.pacer(); got != core.WallPacer {
+		t.Fatalf("pacer() = %#v after a nil pacer, want core.WallPacer", got)
 	}
 }

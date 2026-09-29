@@ -34,6 +34,13 @@ const probeStreamIncr = 0x70726f62655f7374
 type Source struct {
 	interval time.Duration
 	backends []backend
+	// pace paces the run loop. Always non-nil: NewSource sets
+	// core.WallPacer, SetPacer normalizes nil. It is the half of the seam
+	// SetOrigin and the seeded streams do not cover: a source whose frames
+	// are stamped on a pinned timeline but whose loop waits on the wall clock
+	// emits a number of frames that is a function of how long the process
+	// happened to take, so a driver cannot replay the run.
+	pace core.Pacer
 	// rng drives the frame timeline: histories, vitals, agent events and the
 	// background probes genProbe drops in. Its draw count is a function of
 	// the frames elapsed alone, so two sources stepped the same instants
@@ -101,6 +108,7 @@ func NewSource(interval time.Duration, seed int64) *Source {
 	}
 	return &Source{
 		interval: interval,
+		pace:     core.WallPacer,
 		rng:      rand.New(rand.NewPCG(uint64(seed), 0)),
 		probeRng: rand.New(rand.NewPCG(uint64(seed), probeStreamIncr)),
 		seed:     seed,
@@ -136,13 +144,13 @@ var notes = []string{
 	"final answer composed",
 }
 
-// Run blocks until ctx is done. The ticker only paces real time; each
+// Run blocks until ctx is done. The ticker paces the passes; each
 // frame's simulated instant starts at the first clock read (shared with
 // ProbeAll/RecordAgent/Now) and then advances by interval, so ticker jitter,
 // coalesced ticks, and a probe that wins the race with the first frame
 // cannot pull timestamps off the seeded trajectory.
 func (s *Source) Run(ctx context.Context, ch chan<- core.Snapshot) {
-	tick := time.NewTicker(s.interval)
+	tick := s.pacer().New(s.interval)
 	defer tick.Stop()
 	now := s.Now()
 	for {
@@ -155,10 +163,37 @@ func (s *Source) Run(ctx context.Context, ch chan<- core.Snapshot) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-tick.C:
+		case <-tick.C():
 			now = now.Add(s.interval)
 		}
 	}
+}
+
+// SetPacer replaces what paces the run loop. Production leaves it on
+// core.WallPacer. A simulated run passes a core.VirtualPacer and drives it:
+// the pass that usually waits out a wall-clock interval fires when the driver
+// says so, so the frame count and every frame's instant are a function of the
+// seed and the steps, not of how long the process ran. A nil pacer restores
+// the wall clock.
+//
+// Call it before Run. It is read once, when the loop's ticker is built.
+func (s *Source) SetPacer(p core.Pacer) {
+	if p == nil {
+		p = core.WallPacer
+	}
+	s.mu.Lock()
+	s.pace = p
+	s.mu.Unlock()
+}
+
+// pacer reads the timing source under the same lock the timeline is written
+// under, so a run cannot stamp its frames from one timeline and pace them
+// from another.
+func (s *Source) pacer() core.Pacer {
+	s.mu.Lock()
+	p := s.pace
+	s.mu.Unlock()
+	return p
 }
 
 // stepAt applies one simulated frame at now and returns the snapshot. Tests

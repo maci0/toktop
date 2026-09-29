@@ -621,3 +621,37 @@ func TestParseVitalsBoundsPeerSuppliedFields(t *testing.T) {
 		t.Errorf("CPUModel = %d characters, want the cap %d", len([]rune(s.CPUModel)), core.ModelNameMax)
 	}
 }
+
+// The remote sampler is paced by a seam, not by a ticker of its own, so a
+// simulated run decides which polls answer. Left on the wall clock it sampled
+// a remote once per elapsed interval while stamping the samples on the
+// injected clock, and the same seed merged a different number of remote
+// readings every time. A nil pacer restores the wall clock, and Run ends on
+// the context with either.
+func TestStatsRunIsSteppableByADriver(t *testing.T) {
+	s := &Stats{}
+	if got := s.pacer(); got != core.WallPacer {
+		t.Fatalf("pacer() = %#v, want core.WallPacer", got)
+	}
+	pace := core.NewVirtualPacer()
+	s.SetPacer(pace)
+	if got := s.pacer(); got != pace {
+		t.Fatalf("pacer() = %#v, want the pacer just set", got)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	returned := make(chan struct{})
+	go func() { defer close(returned); s.Run(ctx, time.Hour) }()
+	pace.Fire(time.Unix(1_700_000_000, 0))
+	cancel()
+	select {
+	case <-returned:
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after the context was canceled")
+	}
+
+	s.SetPacer(nil)
+	if got := s.pacer(); got != core.WallPacer {
+		t.Fatalf("pacer() = %#v after a nil pacer, want core.WallPacer", got)
+	}
+}

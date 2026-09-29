@@ -106,6 +106,13 @@ type Watcher struct {
 	// sample: SetNow and read run on different goroutines whenever a caller
 	// sets the clock after starting Run.
 	now func() time.Time
+	// pace paces Run's poll loop, guarded by mu for the same reason as now.
+	// A watcher whose samples are stamped on an injected clock but whose
+	// loop waits on the wall clock reads however many transcripts happened
+	// to be written in real time, so the same seed replays a different
+	// ledger. Always non-nil: Watch sets core.WallPacer, SetPacer
+	// normalizes nil.
+	pace core.Pacer
 
 	mu     sync.Mutex
 	sample Sample
@@ -141,7 +148,7 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 	tool = canonicalTool(tool)
 	if source, ok := sourceFor(tool); ok {
-		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since, now: time.Now}
+		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since, now: time.Now, pace: core.WallPacer}
 		if source.session != nil {
 			// A failed snapshot must not become an empty baseline: that
 			// would credit every pre-attach token the first time the store
@@ -164,7 +171,7 @@ func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 		ad.rootOwns = false
 	}
 	w := &Watcher{
-		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now,
+		ad: ad, tool: tool, dir: resolveDir(dir), since: since, now: time.Now, pace: core.WallPacer,
 		offsets: map[string]int64{}, preexisting: map[string]bool{}, stamps: map[string]fileStamp{},
 		zstdCarry: map[string][]byte{},
 		owner:     map[string]bool{}, dirVerdict: map[string]dirVerdict{},
@@ -579,6 +586,9 @@ func (w *Watcher) seedBaseline(path string) {
 //
 // every is how often the transcripts are re-read; a non-positive value uses
 // [DefaultPollInterval], which is also the value to pass for that default.
+// The passes are paced by the watcher's pacer: production waits out every on
+// the wall clock, and a caller replaying a run fires them itself through
+// [Watcher.SetPacer].
 func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sample)) {
 	if w == nil {
 		return
@@ -589,12 +599,12 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 	// A first read straight away: an agent that reports early should show a
 	// rate early, rather than waiting out a tick.
 	w.poll(onChange)
-	t := time.NewTicker(every)
+	t := w.pacer().New(every)
 	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
-		case <-t.C:
+		case <-t.C():
 		}
 		// The cancel branch reads once more, so the tail of a run is not lost.
 		// A tick that wins the race against the cancel is decided here rather
@@ -604,6 +614,39 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 			return
 		}
 	}
+}
+
+// SetPacer replaces what paces [Watcher.Run]. Production leaves it on
+// core.WallPacer, so the loop still waits out the interval it was given. A
+// caller replaying a run passes a core.VirtualPacer and fires it, and the
+// watcher reads the transcripts once per fire rather than once per elapsed
+// interval: with the loop on the wall clock the same seed read however many
+// records happened to be written while it waited, and the ledger it reported
+// was a function of real time. A nil pacer restores the wall clock.
+//
+// Call it before Run. Run reads it once, when the loop's ticker is built.
+func (w *Watcher) SetPacer(p core.Pacer) {
+	if w == nil {
+		return
+	}
+	if p == nil {
+		p = core.WallPacer
+	}
+	w.mu.Lock()
+	w.pace = p
+	w.mu.Unlock()
+}
+
+// pacer reads the timing source under the same lock now is, so a run cannot
+// stamp its samples from one timeline and pace its passes from another.
+func (w *Watcher) pacer() core.Pacer {
+	w.mu.Lock()
+	p := w.pace
+	w.mu.Unlock()
+	if p == nil {
+		return core.WallPacer
+	}
+	return p
 }
 
 // readSource is one reading from a non-file source. A sessionSource is

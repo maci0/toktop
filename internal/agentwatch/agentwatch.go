@@ -67,6 +67,11 @@ type Watcher struct {
 	// agent.
 	clockMu sync.Mutex
 	now     func() time.Time // always non-nil: New sets time.Now, SetNow normalizes nil
+	// pace paces the discovery loop, under the same lock and for the same
+	// reason as now: a run that stamps its events from an injected timeline
+	// has to step its passes off that timeline too. Always non-nil: New sets
+	// core.WallPacer, SetPacer normalizes nil.
+	pace core.Pacer
 	// onError surfaces a condition the operator must see that Run cannot
 	// return. Nil disables reporting.
 	onError func(error)
@@ -104,6 +109,7 @@ func New(rec core.AgentRecorder, engines Engines) *Watcher {
 		rec: rec, engines: engines,
 		discoverEvery: defaultDiscoverEvery, readEvery: defaultReadEvery,
 		now:     time.Now,
+		pace:    core.WallPacer,
 		tracked: map[int]*tracked{},
 	}
 }
@@ -196,7 +202,7 @@ func (w *Watcher) Run(ctx context.Context) {
 	if w.readEvery <= 0 {
 		w.readEvery = defaultReadEvery
 	}
-	discover := time.NewTicker(w.discoverEvery)
+	discover := w.pacer().New(w.discoverEvery)
 	defer discover.Stop()
 
 	w.discover(ctx)
@@ -205,10 +211,39 @@ func (w *Watcher) Run(ctx context.Context) {
 		case <-ctx.Done():
 			w.stopAll()
 			return
-		case <-discover.C:
+		case <-discover.C():
 			w.discover(ctx)
 		}
 	}
+}
+
+// SetPacer replaces what paces the discovery loop. Production leaves it on
+// core.WallPacer. A simulated run passes a core.VirtualPacer and drives it,
+// so the passes that discover agents are a function of the driver's steps
+// rather than of wall-clock time: a watcher whose events are stamped on an
+// injected clock but whose discovery wave fires on the wall clock admits an
+// agent whenever the process happened to get there first, and the same seed
+// then replays two different process tables. A nil pacer restores the wall
+// clock.
+//
+// Safe to call before Run; a call during one reaches the next tick, not the
+// pass in flight, which is why the loop reads it through pacer.
+func (w *Watcher) SetPacer(p core.Pacer) {
+	if p == nil {
+		p = core.WallPacer
+	}
+	w.clockMu.Lock()
+	w.pace = p
+	w.clockMu.Unlock()
+}
+
+// pacer reads the timing source under the same lock now is, so a run cannot
+// stamp its events from one timeline and pace its passes from another.
+func (w *Watcher) pacer() core.Pacer {
+	w.clockMu.Lock()
+	p := w.pace
+	w.clockMu.Unlock()
+	return p
 }
 
 func (w *Watcher) runningAgents() []agentusage.Process {

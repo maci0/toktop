@@ -35,6 +35,10 @@ type Stats struct {
 	// instead of the wall clock's, so a replayed run merges exactly what a
 	// live one would.
 	now func() time.Time
+	// pace paces Run, guarded by the same lock for the same reason: a run
+	// that stamps its samples on an injected timeline has to step its polls
+	// off that timeline too. nil means core.WallPacer.
+	pace core.Pacer
 	// err is the last poll failure, kept while it stays the reason the remote
 	// is not answering. A dropped connection would otherwise look like a host
 	// with no load, no memory and no GPU.
@@ -157,7 +161,7 @@ func (s *Stats) Run(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		every = DefaultPollEvery
 	}
-	t := time.NewTicker(every)
+	t := s.pacer().New(every)
 	defer t.Stop()
 	s.poll(ctx)
 	var lost <-chan struct{}
@@ -170,10 +174,38 @@ func (s *Stats) Run(ctx context.Context, every time.Duration) {
 			return
 		case <-lost:
 			return
-		case <-t.C:
+		case <-t.C():
 			s.poll(ctx)
 		}
 	}
+}
+
+// SetPacer replaces what paces Run. Production leaves it on core.WallPacer.
+// A simulated run passes a core.VirtualPacer and fires it, so the polls a
+// remote answers are a function of the driver's steps: with the ticker
+// hardwired, a run that stamped its samples on an injected clock still
+// measured them on real time, and the same seed merged a different number of
+// remote readings each time. A nil pacer restores the wall clock.
+//
+// Call it before Run. Run reads it once, when the loop's ticker is built.
+func (s *Stats) SetPacer(p core.Pacer) {
+	if p == nil {
+		p = core.WallPacer
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.pace = p
+}
+
+// pacer reads the timing source under the same lock now is, so a run cannot
+// stamp its samples from one timeline and pace its polls from another.
+func (s *Stats) pacer() core.Pacer {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pace == nil {
+		return core.WallPacer
+	}
+	return s.pace
 }
 
 func (s *Stats) poll(ctx context.Context) {

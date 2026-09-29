@@ -4,6 +4,7 @@
 package agentwatch
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net"
@@ -16,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1133,5 +1135,64 @@ func TestNoteKeepsItsOwnAttribution(t *testing.T) {
 	}
 	if want := "~/work/proj · 7 reasoning · counted by engine ollama"; got[0].Note != want {
 		t.Fatalf("note = %q, want %q", got[0].Note, want)
+	}
+}
+
+// The discovery loop is paced by a seam, not by a wall-clock ticker, so a
+// driver decides which processes exist on which step. With the ticker
+// hardwired, the process table a run read was whatever /proc held whenever
+// the process happened to get there, and two steps of one seed followed
+// different agents.
+func TestDiscoveryIsSteppableByADriver(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	pid := 5150
+	var present atomic.Bool
+	var passes atomic.Int64
+	w := New(&recorder{}, nil)
+	w.readEvery = time.Hour
+	w.listAgents = func() []agentusage.Process {
+		passes.Add(1)
+		if !present.Load() {
+			return nil
+		}
+		return []agentusage.Process{{PID: pid, Tool: "claude", Dir: t.TempDir(), Started: time.Unix(1, 0)}}
+	}
+	pace := core.NewVirtualPacer()
+	w.SetPacer(pace)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	go w.Run(ctx)
+	// The warm pass runs before the first tick, so the loop is live once the
+	// process table has been read once with nothing in it.
+	waitFor(t, waitCeiling, func() bool { return passes.Load() >= 1 })
+
+	// Nothing rediscovers the process until the driver fires a pass: a loop
+	// paced by the wall clock would have found it by now, and a run that
+	// discovered on its own could not be compared against a replay.
+	present.Store(true)
+	time.Sleep(100 * time.Millisecond)
+	if w.following(pid) {
+		t.Fatalf("process followed without a driven pass (%d discovery passes ran)", passes.Load())
+	}
+	pace.Fire(time.Unix(1_700_000_000, 0))
+	waitFor(t, waitCeiling, func() bool { return w.following(pid) })
+	if passes.Load() != 2 {
+		t.Fatalf("discovery passes = %d, want 2 (one warm, one driven)", passes.Load())
+	}
+}
+
+// A nil pacer restores the wall clock rather than leaving the loop silent,
+// which is the state a caller that forgot to pass one would read as a
+// watcher that stopped finding anything.
+func TestSetPacerNilRestoresWallClock(t *testing.T) {
+	w := New(&recorder{}, nil)
+	if got := w.pacer(); got != core.WallPacer {
+		t.Fatalf("pacer() = %#v, want core.WallPacer", got)
+	}
+	w.SetPacer(core.NewVirtualPacer())
+	w.SetPacer(nil)
+	if got := w.pacer(); got != core.WallPacer {
+		t.Fatalf("pacer() = %#v after a nil pacer, want core.WallPacer", got)
 	}
 }
