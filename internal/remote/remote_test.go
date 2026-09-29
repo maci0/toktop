@@ -1492,7 +1492,7 @@ func TestReadKnownHostsNamesTheCopyToRestoreFrom(t *testing.T) {
 	if !strings.Contains(msg, backupPath(path)) {
 		t.Errorf("error should name the copy that parses, got: %v", err)
 	}
-	wantCmd := "cp " + shellWord(backupPath(path)) + " " + shellWord(path)
+	wantCmd := restoreCommand(backupPath(path), path)
 	if !strings.Contains(msg, wantCmd) {
 		t.Errorf("error should carry the command that puts the copy back, got: %v", err)
 	}

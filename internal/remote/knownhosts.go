@@ -347,19 +347,8 @@ func withRecoveryHint(err error, path string) error {
 	if !ok {
 		return err
 	}
-	return fmt.Errorf("%w; %s still parses, so the pins this file held can be restored with: cp %s %s",
-		err, copy, shellWord(copy), shellWord(path))
-}
-
-// shellWord renders one path as a single POSIX shell word. Both paths here
-// come from $XDG_CONFIG_HOME or $HOME, so a home directory named
-// "/home/a b" reached the operator as a command that copied toktop.old to
-// /home/a, and a directory whose name carries a quote or a $() reached it as
-// something to paste. The hint is a command the operator is meant to run, so
-// it has to survive the shell it is printed into: single quotes cover every
-// byte but the single quote itself, which closes and reopens the word.
-func shellWord(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return fmt.Errorf("%w; %s still parses, so the pins this file held can be restored with: %s",
+		err, copy, restoreCommand(copy, path))
 }
 
 // freshestParsedCopy returns the copy beside the store that a read would
@@ -719,14 +708,17 @@ func displacedPath(path string) string { return path + displacedSuffix }
 
 // replaceFile renames tmpName over path.
 //
-// Unix rename replaces atomically and is tried first. Windows refuses to
-// clobber an existing destination, so the store is renamed aside and put back
-// if the replacement fails, rather than removed: a crash between the two
-// renames then leaves the previous pins on disk under the displaced name
-// instead of no store at all. Removing the destination outright would turn
-// that window into a total loss of pins, which is a silent re-TOFU for every
-// host the operator had ever connected to. readKnownHosts is what makes that
-// leftover recoverable rather than merely present.
+// Rename replaces the destination atomically and is tried first, on Windows
+// as much as on Unix: os.Rename is MoveFileEx with MOVEFILE_REPLACE_EXISTING
+// there. What it cannot do on Windows is replace a destination another
+// process holds open, which an indexer or an antivirus scanner does to a
+// config directory, so the store is renamed aside and put back when the
+// replacement fails, rather than removed: a crash between the two renames
+// then leaves the previous pins on disk under the displaced name instead of
+// no store at all. Removing the destination outright would turn that window
+// into a total loss of pins, which is a silent re-TOFU for every host the
+// operator had ever connected to. readKnownHosts is what makes that leftover
+// recoverable rather than merely present.
 //
 // Callers serialize writers (the store's mutex, taken inside lockStore).
 func replaceFile(tmpName, path string) error {

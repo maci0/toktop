@@ -71,9 +71,15 @@ func releaseChangelog(newVersion, prevVersion, heading string, stubFirst bool) s
 
 // runChangelogGate writes changelog into a temp tree beside a copy of the
 // tree's Makefile and runs the gate there, the way `make check-changelog
-// VERSION=...` does.
+// VERSION=...` does. The gate is a POSIX shell recipe over awk, so a host
+// without those on PATH skips rather than failing the whole package.
 func runChangelogGate(t *testing.T, version, changelog string) error {
 	t.Helper()
+	for _, tool := range []string{"sh", "awk"} {
+		if _, err := exec.LookPath(tool); err != nil {
+			t.Skipf("%s unavailable", tool)
+		}
+	}
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "CHANGELOG.md"), []byte(changelog), 0o644); err != nil {
 		t.Fatalf("write CHANGELOG.md: %v", err)
