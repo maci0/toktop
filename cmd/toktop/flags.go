@@ -59,7 +59,7 @@ func registerFlags() *cliFlags {
 		// usage string printed the default twice, in two spellings.
 		topFS.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (needs a build with -tags sqlite; --opencode-db=false skips it)")
 		topFS.BoolVar(&cli.once, "once", false, "render one frame and exit (non-interactive; use when piping)")
-		topFS.BoolVar(&cli.plain, "plain", false, "with --once: render a linear text report instead of the dashboard frame (screen-reader friendly; --json replaces it)")
+		topFS.BoolVar(&cli.plain, "plain", false, "render a linear text report instead of the dashboard frame (screen-reader friendly); with --once it prints one report and exits, without it the report stays live and keeps the keys; --json replaces it")
 		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once: print the final snapshot as JSON on stdout instead of a frame (for scripts; replaces the text report)")
 		// The plain and JSON reports render the last snapshot alone, so a count
 		// above one buys only the wait before rendering. Stated here because

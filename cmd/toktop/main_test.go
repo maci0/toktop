@@ -1094,7 +1094,10 @@ func TestWarnIgnoredFlags(t *testing.T) {
 		{name: "opencode-db without agents warns", set: map[string]bool{"opencode-db": true},
 			wantSub: "--opencode-db"},
 		{name: "opencode-db with agents silent", set: map[string]bool{"opencode-db": true}, agents: true},
-		{name: "plain outside once warns", set: map[string]bool{"plain": true}, wantSub: "--plain"},
+		// --plain on its own is the live text report, not a no-op: a flag that
+		// warned here would send a screen-reader user back to the drawn frame
+		// they cannot read.
+		{name: "plain outside once silent", set: map[string]bool{"plain": true}},
 		{name: "plain inside once silent", set: map[string]bool{"plain": true}, once: true},
 		{name: "hot-reload with once warns", set: map[string]bool{"no-hot-reload": true}, once: true,
 			wantSub: "--no-hot-reload"},

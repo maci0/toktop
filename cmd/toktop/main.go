@@ -418,6 +418,10 @@ func runMain() int {
 		Prober:     prober,
 		FeedErr:    feedErr,
 		Agents:     f.agents,
+		// --plain without --once is the live text report: the same words in
+		// the same order, redrawn in place every frame, so a screen-reader
+		// user gets the running dashboard rather than one frozen snapshot.
+		Plain: f.plain,
 	}
 	if demoSrc != nil {
 		cfg.DemoSeed = demoSrc.Seed()
@@ -480,7 +484,15 @@ func runTUI(ctx context.Context, cfg ui.Config, ch <-chan core.Snapshot, hotRelo
 	// their default dispositions, so without it a `kill` left the program on
 	// screen with every backend already canceled behind it: no input could
 	// reach it on a terminal that had scrolled away, and it never exited.
-	prog := tea.NewProgram(ui.New(cfg, ch), tea.WithAltScreen(), tea.WithContext(ctx))
+	opts := []tea.ProgramOption{tea.WithContext(ctx)}
+	if !cfg.Plain {
+		// The alt screen is what a screen reader cannot follow: every frame
+		// repaints the same rows in place, so the linear report would be
+		// announced as a wall of changed text on every poll. The plain view
+		// scrolls normally instead, which is how a terminal is read.
+		opts = append(opts, tea.WithAltScreen())
+	}
+	prog := tea.NewProgram(ui.New(cfg, ch), opts...)
 	mu.Lock()
 	current = prog
 	mu.Unlock()

@@ -374,3 +374,50 @@ func TestPlainProbePeakNamesThePlot(t *testing.T) {
 		t.Errorf("plain frame missing %q in:\n%s", want, empty)
 	}
 }
+
+// The live plain view is the screen-reader path into the running dashboard,
+// not only into a --once snapshot. It has to differ from the drawn frame in
+// the same two ways the --once report does (no chart glyphs, no column
+// layout) and it has to keep the key line, or the keys that made the live
+// view worth having are documented nowhere on it.
+func TestLivePlainViewIsTheReportPlusTheKeys(t *testing.T) {
+	cfg := Config{Version: "t", Plain: true}
+	m := New(cfg, nil)
+	m.snap = busySnap()
+	m.w, m.h = 100, 40
+	m.ready = true
+
+	out := strip(m.View())
+	report := strip(PlainTextFrame(cfg, m.snap))
+	if !strings.Contains(out, report) {
+		t.Errorf("live plain view is not the plain report:\n%s", out)
+	}
+	for _, want := range []string{"ENGINES", "q", "quit"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("live plain view missing %q:\n%s", want, out)
+		}
+	}
+	for name, re := range map[string]*regexp.Regexp{
+		"braille":      regexp.MustCompile(`[\x{2800}-\x{28FF}]`),
+		"box drawing":  regexp.MustCompile(`[\x{2500}-\x{257F}]`),
+		"ANSI escapes": regexp.MustCompile(`\x1b`),
+	} {
+		if re.MatchString(out) {
+			t.Errorf("live plain view contains %s glyph(s):\n%s", name, out)
+		}
+	}
+
+	// A frozen report with nothing on it saying so is a feed that stalled.
+	m.paused = true
+	if want := "PAUSED"; !strings.Contains(strip(m.View()), want) {
+		t.Errorf("paused live plain view carries no %q badge:\n%s", want, strip(m.View()))
+	}
+
+	// A degraded feed is announced in a panel of the drawn frame. The report
+	// has no panel titles to point at the message, so it names the subsystem.
+	m.paused = false
+	m.feedDown = "ingest endpoint closed"
+	if want := "feed: ingest endpoint closed"; !strings.Contains(strip(m.View()), want) {
+		t.Errorf("live plain view missing the degraded-feed line %q:\n%s", want, strip(m.View()))
+	}
+}

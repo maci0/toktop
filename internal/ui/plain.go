@@ -100,6 +100,33 @@ func PlainTextFrame(cfg Config, s core.Snapshot) string {
 	return b.String()
 }
 
+// renderPlain is the live counterpart to PlainTextFrame: the same report,
+// redrawn in place on every frame, with the key line under it. The two share
+// the renderer on purpose, so a number means the same thing in the live view
+// and in the --once report (WCAG 1.1.1).
+//
+// Nothing here is clipped to the pane. The report is prose-shaped: its
+// sections are a line each and the terminal wraps the few that run long,
+// which is how it reads. Clipping it to the frame width would cut a line at
+// the column the pane happens to be, which is the column-interleaving the
+// plain report exists to avoid.
+func (m Model) renderPlain() string {
+	body := strings.TrimSuffix(PlainTextFrame(m.cfg, m.snap), "\n")
+	// The report is frozen on a paused frame, so without a badge a paused
+	// plain view is indistinguishable from a feed that stalled. The drawn
+	// dashboard carries the same badge for the same reason.
+	if m.paused {
+		body += "\n" + styleWarn.Render("‖ PAUSED")
+	}
+	if m.feedDown != "" {
+		// The drawn frame puts the degraded-stream message in the feed panel.
+		// The plain report has no panel titles to point at it, so it says
+		// which subsystem failed on its own line.
+		body += "\n" + styleBad.Render("feed: "+core.SingleLine(m.feedDown))
+	}
+	return body + "\n" + m.renderFooter()
+}
+
 // writeThroughputPlain is the text alternative for the dashboard's two braille
 // charts: the status line above already carries the current output and input
 // rates, and this names the peaks those plots are scaled against and the window

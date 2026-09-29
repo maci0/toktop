@@ -568,13 +568,14 @@ technology:
   error text, probes show `✓`/`✗`, gauges print their percentage, and the
   engine count is spelled out numerically in the header.
 - **Non-visual output** - `--once` prints one static frame instead of running
-  the full-screen UI; a live-repainting dashboard defeats most screen readers,
-  so the static frame is the intended path. Pair it with
-  `TOKTOP_COLUMNS` / `TOKTOP_LINES` for a fixed size. `--once --plain` goes
-  further and prints the same numbers as a linear text report: no braille
-  chart glyphs (which screen readers announce as endless dot-pattern noise or
-  skip entirely), no box-drawing borders, no multi-column panels - just the
-  data in reading order.
+  the full-screen UI; pair it with `TOKTOP_COLUMNS` / `TOKTOP_LINES` for a
+  fixed size. `--plain` replaces the drawn frame with a linear text report:
+  no braille chart glyphs (which screen readers announce as endless
+  dot-pattern noise or skip entirely), no box-drawing borders, no
+  multi-column panels, just the data in reading order. On its own it stays
+  live and keeps every key, so the running dashboard is readable without
+  giving up the running dashboard; with `--once` it prints that report once
+  and exits.
 
   ```
   $ toktop --once --plain
@@ -658,8 +659,10 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
                   (default 127.0.0.1:8420; empty is rejected)
 --no-ingest       disable the event endpoint (`--ingest` is then ignored)
 --once            render one frame and exit (use when piping or redirecting)
---plain           with --once: linear text report instead of the dashboard
-                  frame (screen-reader friendly)
+--plain           linear text report instead of the dashboard frame
+                  (screen-reader friendly); with --once it prints one report
+                  and exits, without it the report stays live and keeps the
+                  keys
 --json            with --once: print the final snapshot as one JSON object on
                   stdout instead of a frame, for scripts (--plain has no
                   effect alongside it; TOKTOP_COLUMNS / TOKTOP_LINES have no

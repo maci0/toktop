@@ -143,6 +143,7 @@ Examples:
   toktop --agents --opencode-db=false   ...without opencode's session database
   toktop --once >frame.txt     render one static frame and exit
   toktop --once --plain        one frame as a linear text report (screen readers)
+  toktop --plain               the same live text report, still updating
   toktop --once --json         one snapshot as JSON, for scripts
   toktop --demo --seed 7 --origin 2026-01-01T00:00:00Z
                                demo run a seed reproduces byte for byte

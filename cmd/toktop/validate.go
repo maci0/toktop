@@ -48,9 +48,6 @@ func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 		}
 		fmt.Fprintf(os.Stderr, "toktop: --frames only sets how long --once waits with %s; %s renders the last snapshot\n", report, what)
 	}
-	if set["plain"] && !f.once {
-		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect without --once")
-	}
 	if set["json"] && !f.once {
 		fmt.Fprintln(os.Stderr, "toktop: --json has no effect without --once")
 	}

@@ -13,6 +13,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- `--plain` without `--once` now runs the linear text report live, with the
+  keys. The report was the screen-reader path into a finished run only, so a
+  screen-reader user had to choose between the dashboard, which announces
+  braille charts as dot-pattern noise, and giving up the live view. The live
+  report scrolls normally rather than repainting an alternate screen, and
+  `space`, `p` and `q` work as they do in the drawn frame.
+
 ### Changed
 
 - A footer notice no longer takes the key list with it. On a pane too narrow

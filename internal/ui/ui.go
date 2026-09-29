@@ -37,6 +37,13 @@ type Config struct {
 	// screen, so without this in-band signal the UI would advertise a dead
 	// endpoint forever, or silently double-count against a bad address.
 	FeedErr <-chan string
+	// Plain renders the live dashboard as the linear report PlainTextFrame
+	// prints for --once, instead of the drawn frame (--plain without --once).
+	// The drawn frame is braille charts, box-drawing panels and a side-by-side
+	// mid-row: a screen reader announces the charts as floods of "braille
+	// pattern dots" and reads the mid-row as interleaved column fragments, so
+	// the product's primary view has no accessible form without this.
+	Plain bool
 }
 
 // Model is the bubbletea dashboard: it holds the newest snapshot, the
@@ -414,6 +421,9 @@ func (m Model) View() string {
 	m.account()
 	if m.help {
 		return m.renderHelp()
+	}
+	if m.cfg.Plain {
+		return m.renderPlain()
 	}
 	if m.w < minDashW || m.h < minDashH {
 		return m.renderMinimal()
