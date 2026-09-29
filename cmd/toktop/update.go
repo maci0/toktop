@@ -116,7 +116,10 @@ func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	if err != nil {
 		return updateErr("update failed", err)
 	}
-	_, err = fmt.Fprintf(out, "Installed %s to %s\n", rel.TagName, path)
+	// Folded like every failure on this path: the install path is the
+	// running binary, usually under the operator's home, and this line
+	// lands on stdout, the stream a --check run is piped and pasted from.
+	_, err = fmt.Fprintf(out, "Installed %s to %s\n", rel.TagName, core.RedactHome(path))
 	return outputStatus(err)
 }
 

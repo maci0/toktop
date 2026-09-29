@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1277,5 +1278,32 @@ func TestRunOpenAINonStreamReasoningOnly(t *testing.T) {
 				t.Fatalf("reasoning-only completion reported %d tokens, want the generated frames", s.Tokens)
 			}
 		})
+	}
+}
+
+// An engine's own error text reaches the frame and both reports, which are
+// meant to be pasteable, and a model or config path is usually under the
+// operator's home. The sample folds it there, once, so every renderer
+// inherits the fold instead of remembering to apply it.
+func TestRunFoldsHomeOutOfEngineError(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("home", home)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		fmt.Fprintf(w, `{"error":"model not found: %s/models/m.gguf"}`+"\n", home)
+	}))
+	defer srv.Close()
+
+	s := Run(context.Background(), Request{Kind: core.KindOllama, Base: srv.URL, Model: "m"})
+	if s.OK || s.Err == "" {
+		t.Fatalf("engine error = %+v, want a failed sample carrying the message", s)
+	}
+	if strings.Contains(s.Err, "private-user") || strings.Contains(s.Err, home) {
+		t.Errorf("probe error carries the home directory: %q", s.Err)
+	}
+	if !strings.Contains(s.Err, filepath.Join("~", "models", "m.gguf")) {
+		t.Errorf("probe error = %q, want the model path with the home folded to ~", s.Err)
 	}
 }

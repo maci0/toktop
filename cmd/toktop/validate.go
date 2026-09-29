@@ -131,7 +131,7 @@ func warnIgnoredGauntletHome(agents bool) {
 		return
 	}
 	if !filepath.IsAbs(v) {
-		fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n", v)
+		fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n", core.RedactHome(v))
 		return
 	}
 	path := agentusage.DefinitionsPath()
@@ -158,8 +158,13 @@ func warnIgnoredUserHome() {
 	if agentusage.HomeDir() != "" {
 		return
 	}
-	if dir, err := os.UserHomeDir(); err == nil {
-		fmt.Fprintf(os.Stderr, "toktop: the home directory %q is not an absolute path; no built-in agent store is read\n", dir)
+	if _, err := os.UserHomeDir(); err == nil {
+		// The value is not quoted: a home is either an account name or a path
+		// under one, and this line is read over a stranger's shoulder and
+		// pasted into issues. Naming the directory is what tells the operator
+		// the variable to change; the account it holds is not theirs to
+		// publish.
+		fmt.Fprintln(os.Stderr, "toktop: the home directory is not an absolute path; no built-in agent store is read")
 		return
 	}
 	fmt.Fprintln(os.Stderr, "toktop: the home directory cannot be located; no built-in agent store is read")

@@ -13,6 +13,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- A probe failure no longer spells out the home directory. An engine's own
+  error text (`model not found: /home/<user>/models/m.gguf`) reached the
+  frame, `--json` and `--plain` unfolded, so a copy of a report named the
+  account. The sample folds it, once, where the engine's text enters.
+- `toktop update` prints the install path with the home folded to `~`, like
+  every failure on that path already did. The success line lands on stdout,
+  which is the stream a `--check` run is piped and pasted from.
+- The agent-watch banner, the `$GAUNTLET_HOME` warning and the unusable-home
+  warning no longer carry an unredacted error, path or account name.
+
 ### Changed
 
 - The host strip's overflow count now names the way out the panel titles

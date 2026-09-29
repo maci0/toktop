@@ -338,7 +338,7 @@ func runMain() int {
 			logcfg.Logger().Warn("toktop: agent watch failed",
 				"error", logcfg.Field(core.RedactHome(err.Error()), 256))
 			select {
-			case feedErr <- "agent watch: " + err.Error():
+			case feedErr <- "agent watch: " + core.RedactHome(err.Error()):
 			default:
 			}
 		})

@@ -134,7 +134,13 @@ func Run(ctx context.Context, r Request) core.ProbeSample {
 	}
 	total := time.Since(start)
 	if err != nil {
-		s.Err = err.Error()
+		// Folded for the same reason collector.foldErr folds an engine
+		// error: the text is engine-supplied and can echo a model or
+		// config path under the operator's home, and the sample reaches
+		// the frame and both reports, which are meant to be pasteable.
+		// Snippet bounds it too, since a decoder error embeds the whole
+		// offending literal.
+		s.Err = core.Snippet([]byte(core.RedactHome(err.Error())))
 		var se *httpStatusError
 		if errors.As(err, &se) {
 			s.RetryAfter = se.after
