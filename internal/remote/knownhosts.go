@@ -201,6 +201,7 @@ func tofu() (ssh.HostKeyCallback, error) {
 	// nothing but the tidiness, and a store that cannot be parsed at all is
 	// the probe's error to report, not this one's to swallow.
 	restoreStore(path)
+	checkStoreCopy(path)
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		if strings.ContainsAny(hostname, " \t\r\n\x00") {
 			return fmt.Errorf("invalid hostname %q: contains whitespace or newline", hostname)
@@ -547,6 +548,95 @@ func restoreStore(path string) {
 			"path", logcfg.RedactedField(core.RedactHome(path), 256),
 			"error", logcfg.RedactedField(err.Error(), 256))
 	}
+}
+
+// checkStoreCopy re-creates the copy the store is recovered from when that
+// copy is missing, damaged, or older than the store, and reports it.
+//
+// A copy that could not be written is warned about once, at the write, by
+// writeKnownHosts. That is the only word the operator gets: a run that never
+// connects again leaves the store with no copy beside it and nothing further
+// said about it, so the store silently becomes the only record of every pin
+// on the host. The gap is a state rather than a moment, and the next connect
+// is where it can be seen and closed.
+//
+// The store is the source, never a copy: it is the file readKnownHosts parsed
+// on this connect, so the pins copied are the pins in force, and copying it
+// is the one write that cannot lower the RPO. A copy that parses and is not
+// older than the store is left alone, which is the case every healthy run
+// takes and the only one that does no work.
+func checkStoreCopy(path string) {
+	why := staleStoreCopy(path)
+	if why == "" {
+		return
+	}
+	rebuilt := false
+	err := lockStore(path, func() error {
+		// Re-read the state under the lock: a peer toktop that rewrote the
+		// store and its copy between the check above and this write has
+		// already closed the gap, and saying so was not this run's finding.
+		if staleStoreCopy(path) == "" {
+			return nil
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		// A store that does not parse is readKnownHosts's error, and the
+		// connect has already failed by the time this runs, so there is
+		// nothing here to copy.
+		if _, err := parseKnownHosts(path, b); err != nil {
+			return nil
+		}
+		rebuilt = true
+		return writeBackup(path, string(b))
+	})
+	if err != nil {
+		audit().Warn("toktop: host key store backup not rewritten from the store",
+			"path", logcfg.RedactedField(core.RedactHome(path), 256),
+			"error", logcfg.RedactedField(err.Error(), 256))
+		return
+	}
+	if rebuilt {
+		audit().Warn("toktop: host key store backup rewritten from the store",
+			"path", logcfg.RedactedField(core.RedactHome(path), 256),
+			"reason", why)
+	}
+}
+
+// staleStoreCopy returns why the copy beside the store cannot recover it, and
+// an empty string when it can: missing, unreadable, not parsing, or older
+// than the store are all a store whose pins survive nothing.
+//
+// A store that is not there is not a stale copy: it is what restoreStore is
+// for, and there is nothing to copy from until it has been put back. The
+// backup copy is the one checked, since every write of the store refreshes it.
+// The displaced copy is not: only a Windows write leaves one, it is a
+// leftover of the replacement rather than a copy the store is written, and
+// warning about an absent one would fire on every platform but that one.
+func staleStoreCopy(path string) string {
+	store, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	bak, err := os.Stat(backupPath(path))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "the copy beside it is missing"
+		}
+		return "the copy beside it cannot be read"
+	}
+	if bak.ModTime().Before(store.ModTime()) {
+		return "the copy beside it is older than the store"
+	}
+	b, err := os.ReadFile(backupPath(path))
+	if err != nil {
+		return "the copy beside it cannot be read"
+	}
+	if _, err := parseKnownHosts(backupPath(path), b); err != nil {
+		return "the copy beside it does not parse"
+	}
+	return ""
 }
 
 // backupSuffix names the copy of the store kept beside it.

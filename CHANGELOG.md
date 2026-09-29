@@ -15,6 +15,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The host-key pin store is no longer left with no copy beside it. A
+  `known_hosts.bak` write that failed was warned about once, at the write,
+  and a run that never connected again left the store the only record of
+  every pin on the host. The next connect now finds a copy that is missing,
+  damaged, or older than the store, rewrites it from the store, and logs that
+  it did.
+
 - A probe failure no longer spells out the home directory. An engine's own
   error text (`model not found: /home/<user>/models/m.gguf`) reached the
   frame, `--json` and `--plain` unfolded, so a copy of a report named the

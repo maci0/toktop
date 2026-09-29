@@ -87,7 +87,11 @@ What is worth stealing, corrupting, or denying:
   beside it (`writeBackup`, internal/remote/knownhosts.go): a lost, truncated
   or emptied store is read back from that copy instead of being read as no
   pins at all, and a store found only under a copy is written back to its own
-  path on the next connect (`restoreStore`). The copy shares the store's
+  path on the next connect (`restoreStore`). A copy that is missing, damaged
+  or older than the store is rewritten from the store on the next connect and
+  logged (`checkStoreCopy`), so a copy write that failed once does not leave
+  the store unprotected for as long as nobody noticed. The copy shares the
+  store's
   directory, so it recovers a damaged, emptied or overwritten store, not a
   config directory that is gone: backing the directory up is the operator's
   half. A read that cannot be trusted still fails loudly rather than

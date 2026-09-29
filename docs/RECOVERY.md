@@ -14,7 +14,7 @@ somebody else's data.
 | State | Where | Written by |
 | --- | --- | --- |
 | ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts`; a config directory that is itself unusable names no store, and the run fails at connect (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
-| a copy of the store, refreshed by every write | the same path plus `.bak` (`writeBackup`) | `writeBackup` |
+| a copy of the store, refreshed by every write, and rewritten from the store by the next connect that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
 | the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`) | `replaceFile` |
 | the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
 | a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/selfupdate.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
@@ -69,7 +69,7 @@ installed binary with it:
 
 | Question | Answer |
 | --- | --- |
-| RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). An ignored warning is an RPO nobody is tracking. |
+| RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next connect: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
 | RPO for a bad release | the installed binary, and only the binary: it is the one file an update replaces. The pin store is a file beside it, not a record inside it, so no pin is lost with a bad release. |
@@ -79,12 +79,17 @@ installed binary with it:
 
 The copy beside the store is what a restore reads, and the one to read is the
 newer of the two, since a copy that predates the last write is missing the pins
-that write added:
+that write added. `store` below is the store's own directory, which is not
+always the default: an absolute `XDG_CONFIG_HOME` puts the store under
+`$XDG_CONFIG_HOME/toktop`, and every error, warning and `first use` line
+toktop prints names the path in force, so read it off the last run rather than
+assuming `~/.config`.
 
 ```sh
-ls -t --time-style=long-iso ~/.config/toktop/known_hosts.bak \
-                     ~/.config/toktop/known_hosts.displaced
-cp ~/.config/toktop/known_hosts.bak ~/.config/toktop/known_hosts
+store=~/.config/toktop        # or $XDG_CONFIG_HOME/toktop
+ls -t --time-style=long-iso "$store/known_hosts.bak" \
+                     "$store/known_hosts.displaced"
+cp "$store/known_hosts.bak" "$store/known_hosts"
 ```
 
 `known_hosts.bak` is the copy to copy unless the listing says otherwise: every
@@ -125,7 +130,7 @@ The error also names the copy that does parse, and the command to put it back,
 so the repair is the `cp` above against the file it names:
 
 ```sh
-cp ~/.config/toktop/known_hosts.bak ~/.config/toktop/known_hosts
+cp "$store/known_hosts.bak" "$store/known_hosts"
 ```
 
 Read the copy first if the store was hand-edited to something worth keeping,
@@ -145,7 +150,7 @@ naming a copy toktop would refuse fails there.
 A restored store is verified by what it refuses, not by what it accepts:
 
 ```sh
-ssh-keygen -l -f ~/.config/toktop/known_hosts
+ssh-keygen -l -f "$store/known_hosts"
 ```
 
 The last field of each printed line is the SHA-256 fingerprint, the same
@@ -162,6 +167,15 @@ read it back from each copy, and
 `TestReadKnownHostsRecoversFromTheFresherCopy` pins that the copy read is
 the freshest of the two, so a restore cannot hand back fewer pins than the
 operator had. `go test ./internal/remote/` runs them.
+
+The copy the store is recovered from is checked on every connect rather than
+only at the write that would have refreshed it:
+`TestCheckStoreCopyRewritesACopyItCannotRecoverTheStore` removes the copy,
+ages it behind the store and damages it in turn, and pins that each is
+rewritten from the store, logged, and not reported again once it is current;
+`TestCheckStoreCopyLeavesACurrentCopyAlone` pins that a backed-up store costs
+a connect nothing. A copy that is silently gone is therefore a state the next
+run repairs, not one that has to be noticed.
 
 Every write to the store is atomic (staged, fsynced, renamed, with the
 directory entry flushed afterwards) and cross-process serialized by a lock
@@ -186,6 +200,20 @@ answers differ:
 - Every other platform: rename replaces the file, which drops the name of the
   binary that was there, and nothing keeps a copy of it. A downgrade is not
   something the tree can do for itself.
+
+A Windows host killed between the two renames of an update is left with no
+binary at the installed path, and the only copy under the displaced name
+(`restoreDisplaced` puts it back, but only on a run of the binary that is
+missing). Put it back by hand:
+
+```sh
+mv toktop.exe.old toktop.exe
+toktop --version
+```
+
+The file is the previous release, verified the way `toktop update` verified
+it, so the fingerprint is not in question; what is missing is the name, and
+that is what the `mv` restores.
 
 On those platforms the previous release is installed by hand and verified the
 way `toktop update` verifies. A release publishes the asset

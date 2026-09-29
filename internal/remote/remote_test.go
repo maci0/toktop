@@ -1223,6 +1223,110 @@ func TestReadKnownHostsRecoversBackupStore(t *testing.T) {
 	}
 }
 
+func pinFor(host, label string) string {
+	return host + " " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey(label))))
+}
+
+// A copy that could not be written is warned about once, at the write, and a
+// run that never connects again leaves the store with no copy beside it and
+// nothing further said about it: the store becomes the only record of every
+// pin on the host, and the RPO the warning described stops being tracked. The
+// next connect is the only place that gap can be seen, so it closes it there
+// and says that it did.
+func TestCheckStoreCopyRewritesACopyItCannotRecoverTheStore(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		leave func(t *testing.T, path string)
+	}{
+		{"missing", func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.Remove(backupPath(path)); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		// What a copy write that could not land leaves behind: the store moved
+		// on, the copy did not.
+		{"older than the store", func(t *testing.T, path string) {
+			t.Helper()
+			past := time.Now().Add(-time.Hour)
+			if err := os.Chtimes(backupPath(path), past, past); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		// A copy that does not parse is a copy a restore could not use, so
+		// having one is not the same as having a backup.
+		{"damaged", func(t *testing.T, path string) {
+			t.Helper()
+			if err := os.WriteFile(backupPath(path), []byte("\n \n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "known_hosts")
+			store := map[string]string{"h:22": pinFor("h:22", "remembered")}
+			if err := writeKnownHosts(path, store); err != nil {
+				t.Fatal(err)
+			}
+			tc.leave(t, path)
+			log := captureAudit(t)
+
+			checkStoreCopy(path)
+
+			b, err := os.ReadFile(backupPath(path))
+			if err != nil {
+				t.Fatalf("the copy the store is recovered from was not rewritten: %v", err)
+			}
+			copied, err := parseKnownHosts(backupPath(path), b)
+			if err != nil {
+				t.Fatalf("the rewritten copy does not parse: %v", err)
+			}
+			if copied["h:22"] != store["h:22"] {
+				t.Fatalf("the rewritten copy lost the pinned key: %v", copied)
+			}
+			if !strings.Contains(log.String(), "backup rewritten from the store") {
+				t.Errorf("a store left without a usable copy was not reported: %s", log.String())
+			}
+			// The gap is closed, so the next connect finds the copy current and
+			// says nothing more about it.
+			log.Reset()
+			checkStoreCopy(path)
+			if log.String() != "" {
+				t.Errorf("a current copy was reported again: %s", log.String())
+			}
+		})
+	}
+}
+
+// The healthy case is the one every run takes, and it must cost nothing: the
+// copy a write leaves is not rewritten, so a connect cannot churn the file the
+// store is recovered from, and no warning is logged for a store that is
+// backed up.
+func TestCheckStoreCopyLeavesACurrentCopyAlone(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "known_hosts")
+	if err := writeKnownHosts(path, map[string]string{"h:22": pinFor("h:22", "remembered")}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(backupPath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	log := captureAudit(t)
+
+	checkStoreCopy(path)
+
+	after, err := os.Stat(backupPath(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(before, after) {
+		t.Error("a current copy was rewritten by a run that had nothing to fix")
+	}
+	if log.String() != "" {
+		t.Errorf("a backed-up store was reported: %s", log.String())
+	}
+}
+
 // A store recovered from a copy must come back whole. Reading a copy that
 // predates the last write hands back a shorter store than the operator had, and
 // every host it dropped is re-trusted on the next connect, so the copy read is
