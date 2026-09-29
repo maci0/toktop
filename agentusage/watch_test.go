@@ -651,6 +651,61 @@ func TestRunReportsGrowth(t *testing.T) {
 	}
 }
 
+// A watcher holds nothing a consumer has to release, and Run is the only
+// method that loops. This pins both halves: Run starts no goroutine of its
+// own, so a long-lived program can keep one watcher per agent for the life of
+// the process, and a poll that has read a store leaves no descriptor open
+// against it.
+func TestRunAndPollHoldNothingAfterTheyReturn(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the descriptor count reads /proc/self/fd")
+	}
+	store := withStore(t, "claude")
+	work := t.TempDir()
+	path := filepath.Join(store, "live.jsonl")
+
+	w := Watch("claude", work, time.Now())
+	append_(t, path, claudeLine(work, 120))
+	if s := w.Poll(); s.Output != 120 {
+		t.Fatalf("output tokens %d, want 120", s.Output)
+	}
+	if n := openDescriptorsUnder(t, store); n != 0 {
+		t.Errorf("Poll left %d descriptors open under the store, want 0", n)
+	}
+
+	// The count is only comparable once the watcher has stopped starting any.
+	// An already-canceled context is the whole shutdown there is: Run reads
+	// once, finds the context done, reads the tail and returns, so the count
+	// is taken against a Run that has finished rather than one still looping.
+	before := runtime.NumGoroutine()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	w.Run(ctx, DefaultPollInterval, nil)
+	if after := runtime.NumGoroutine(); after > before {
+		t.Errorf("Run left %d goroutines behind, want at most the %d it started with", after-before, before)
+	}
+}
+
+// openDescriptorsUnder counts this process's open descriptors naming a path
+// under dir, which is the handle count a poll that returned has to leave at
+// zero.
+func openDescriptorsUnder(t *testing.T, dir string) int {
+	t.Helper()
+	entries, err := os.ReadDir("/proc/self/fd")
+	if err != nil {
+		t.Fatalf("read /proc/self/fd: %v", err)
+	}
+	n := 0
+	for _, e := range entries {
+		target, err := os.Readlink(filepath.Join("/proc/self/fd", e.Name()))
+		if err != nil || !strings.HasPrefix(target, dir) {
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 func TestDefinedAgentTranscriptsAreReadGenerically(t *testing.T) {
 	// An agent gauntlet was never compiled to know about: its transcript is
 	// readable as long as the records carry recognizable counters and a cwd.

@@ -105,6 +105,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- `agentusage.Watcher` now says what a consumer has to release, which is
+  nothing. The type held no file handle between calls and `Run` started no
+  goroutine of its own, so there is no `Close` to find and none was added, but
+  neither fact was written down anywhere on the published surface and a
+  consumer had to read the implementation to learn it. `Run`'s comment also
+  spells out that it blocks the calling goroutine until its context is done,
+  and reads the tail of the run on the way out.
 - Two files in this tree no gate read are read by one. The bash completion
   script `toktop completion bash` prints carried a `# shellcheck disable` for a
   rule nothing ever ran, which reads as a check that passed; the script is now

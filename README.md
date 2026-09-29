@@ -237,6 +237,10 @@ func main() {
 The example watches the discovered processes concurrently for ten seconds.
 Only usage written after attachment is reported; existing transcript counts
 are skipped. Keep an agent generating during that window to see output.
+There is nothing to release afterwards: a `Watcher` opens and closes each
+transcript inside the poll that reads it, and `Run` is the only method that
+loops, in the goroutine that called it, so a long-lived program keeps one
+watcher per agent for the life of the process.
 
 Two rules the example follows, because both are easy to get wrong and neither
 is enforced by the types. `Watch` returns a nil `*Watcher` for an agent that

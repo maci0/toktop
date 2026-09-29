@@ -18,6 +18,13 @@ import (
 )
 
 // Watcher tails one agent's transcripts from the moment it attached.
+//
+// There is nothing to release. A watcher holds no file handle, no goroutine
+// and no channel between calls: a transcript is opened and closed inside the
+// poll that read it, and Run is the only method that loops, in the goroutine
+// that called it, returning when its context is done. So a consumer needs no
+// Close, and a long-lived program can keep one watcher per agent for the life
+// of the process.
 type Watcher struct {
 	// source is set for agents whose usage is not in files (opencode, crush).
 	// When it is present, every field below that describes file state is unused.
@@ -572,7 +579,11 @@ func (w *Watcher) seedBaseline(path string) {
 
 // Run polls until the context is canceled, calling onChange whenever the
 // observed usage changes, growth or the drop a rewritten transcript causes.
-// It is meant to run in its own goroutine.
+// It blocks the calling goroutine until then and starts none of its own, so a
+// consumer that wants the watch alongside other work calls it from a
+// goroutine of its own and cancels the context to stop it. The read the loop
+// finishes with runs whether the context was canceled or a tick came first, so
+// the tail of a run is not lost.
 //
 // onChange receives a [Sample], which holds the totals observed since the
 // watcher attached as the transcripts stand right now (a rewritten transcript
