@@ -526,9 +526,23 @@ func clearInterruptedWrite(path string) {
 		if e.IsDir() || !interruptedMark(e.Name(), displaced) {
 			continue
 		}
-		_ = os.Remove(filepath.Join(dir, e.Name()))
+		mark := filepath.Join(dir, e.Name())
+		// A mark this cannot delete is the one the re-pin gesture keys on, and
+		// readKnownHosts hands the store back from the displaced copy whenever
+		// the store is deleted on purpose. Reported, so the operator can clear
+		// it: the write that recovered the store reported success, and this is
+		// what it left behind.
+		if rerr := os.Remove(mark); rerr != nil && !os.IsNotExist(rerr) {
+			audit().Warn("toktop: interrupted-write mark not removed beside the host key store",
+				"path", logcfg.RedactedField(core.RedactHome(mark), logcfg.FieldCap),
+				"error", logcfg.RedactedField(rerr.Error(), logcfg.FieldCap))
+		}
 	}
-	core.SyncDir(dir)
+	if serr := core.SyncDir(dir); serr != nil {
+		audit().Warn("toktop: host key store recovery not durable",
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(serr.Error(), logcfg.FieldCap))
+	}
 }
 
 // restoreStore rewrites a store that an interrupted write left present only
@@ -709,7 +723,11 @@ func clearSupersededCopy(path string) {
 		}
 		return
 	}
-	core.SyncDir(filepath.Dir(path))
+	if serr := core.SyncDir(filepath.Dir(path)); serr != nil {
+		audit().Warn("toktop: removal of the superseded host key copy not durable",
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(serr.Error(), logcfg.FieldCap))
+	}
 }
 
 // staleStoreCopy returns why the copy beside the store cannot recover it, and
@@ -795,8 +813,7 @@ func displacedPath(path string) string { return path + displacedSuffix }
 func replaceFile(tmpName, path string) error {
 	err := os.Rename(tmpName, path)
 	if err == nil {
-		core.SyncDir(filepath.Dir(path))
-		return nil
+		return syncStoreDir(path)
 	}
 	displaced := displacedPath(path)
 	if derr := os.Remove(displaced); derr != nil && !os.IsNotExist(derr) {
@@ -824,7 +841,22 @@ func replaceFile(tmpName, path string) error {
 			"path", logcfg.RedactedField(core.RedactHome(displaced), logcfg.FieldCap),
 			"error", logcfg.RedactedField(rerr.Error(), logcfg.FieldCap))
 	}
-	core.SyncDir(filepath.Dir(path))
+	return syncStoreDir(path)
+}
+
+// syncStoreDir makes the rename that put the store at path durable, or reports
+// that it is not.
+//
+// A store write that reported success while the flush failed promised pins a
+// crash can take back, and the next connect re-TOFUs every host in it with no
+// line saying the pins were never saved. The write is not undone here: the
+// bytes are in place and every failure below it is reported. Returning the
+// error is what tells the operator the difference.
+func syncStoreDir(path string) error {
+	if err := core.SyncDir(filepath.Dir(path)); err != nil {
+		return fmt.Errorf("wrote %s, but the rename is not durable and a crash can lose it: %w",
+			core.RedactHome(path), err)
+	}
 	return nil
 }
 

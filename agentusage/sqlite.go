@@ -445,6 +445,21 @@ func auditStoreRead(agent, path string, err error) {
 		"error", redactStorePath(core.Snippet([]byte(err.Error()))))
 }
 
+// auditStoreLeak records a store handle the kernel did not take back. It is a
+// separate latch from the read outage because it is a different failure with a
+// different blast radius: nothing is unreadable, and the cost is one descriptor
+// per poll for as long as the process runs. The store is named for the same
+// reason a read failure names it, since nothing else does.
+func auditStoreLeak(agent, path string, err error) {
+	if !markStoreFailed("leak\x00" + storeReadKey(agent, path)) {
+		return
+	}
+	auditLogger().Warn("agent usage store handle not closed",
+		"agent", agent,
+		"path", redactStorePath(path),
+		"error", redactStorePath(core.Snippet([]byte(err.Error()))))
+}
+
 // noteStoreReadOK clears a recorded outage, so a store that reads again is
 // distinguishable on the log from one that never did, and a failure after it
 // is reported as the new thing it is.

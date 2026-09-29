@@ -52,7 +52,34 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodHead {
 		return
 	}
-	fmt.Fprint(w, body)
+	_, werr := fmt.Fprint(w, body)
+	s.auditHealthUnwritten(r, werr)
+}
+
+// auditHealthUnwritten records a probe whose body never reached the prober.
+//
+// Dropped, the write is a clean transition with no trace: the endpoint logged
+// a state change, the prober saw nothing, and the only evidence either side is
+// the missing line. Latched like auditHealth, because the peer that causes it
+// is the kind that keeps probing after it stopped reading.
+func (s *Server) auditHealthUnwritten(r *http.Request, werr error) {
+	if s.log == nil {
+		return
+	}
+	s.healthMu.Lock()
+	was := s.healthUnwritten
+	s.healthUnwritten = werr != nil
+	s.healthMu.Unlock()
+	if werr == nil || was {
+		return
+	}
+	s.log.Log(r.Context(), slog.LevelWarn, "toktop: health answer not delivered to the prober",
+		"req", s.requestID(r),
+		"method", logcfg.Field(r.Method, 16),
+		"path", logcfg.Field(r.URL.Path, 64),
+		"remote", logcfg.Remote(r.RemoteAddr),
+		"error", logcfg.RedactedField(werr.Error(), logcfg.FieldCap),
+	)
 }
 
 // auditHealth writes one line when the probe crosses into degraded and one

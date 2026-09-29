@@ -12,11 +12,12 @@ import (
 	"time"
 )
 
-// SyncDir is best effort by contract: a write that already renamed its file
-// into place must not be reported as failed because the directory could not
-// be flushed, or the caller would trade a durable write for none. A directory
-// that cannot be opened at all has to be a no-op rather than a panic.
-func TestSyncDirNeverFails(t *testing.T) {
+// SyncDir reports a directory it could not flush, because a caller that is
+// told its write succeeded on the strength of a rename the platform never
+// committed is worse off than one told the write did not stick. A directory
+// that cannot be opened at all comes back as an error rather than a panic, and
+// the file the caller renamed into place stays whole either way.
+func TestSyncDirReportsWhatItCouldNotFlush(t *testing.T) {
 	dir := t.TempDir()
 	// The caller's write is what the sync protects, so a directory whose
 	// entry is flushed still has to hold the file, byte for byte.
@@ -24,16 +25,22 @@ func TestSyncDirNeverFails(t *testing.T) {
 	if err := os.WriteFile(name, []byte(`{"ok":true}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	SyncDir(dir)
+	if err := SyncDir(dir); err != nil {
+		t.Errorf("on a writable directory: %v", err)
+	}
 	if b, err := os.ReadFile(name); err != nil || string(b) != `{"ok":true}` {
 		t.Fatalf("after SyncDir: %q, %v; want the file unchanged", b, err)
 	}
-	// Every shape that cannot be opened has to come back rather than panic,
-	// including a path whose parent does not exist and a file used as a
-	// directory.
-	SyncDir("")
-	SyncDir(filepath.Join(dir, "absent"))
-	SyncDir(name)
+	// Every shape that cannot be opened has to be named, not swallowed,
+	// including an empty path and one whose parent does not exist. A path
+	// naming a regular file opens on every platform, so it is not one of
+	// them: the sync of a file handle is the writer's own, not the directory
+	// entry's.
+	for _, bad := range []string{"", filepath.Join(dir, "absent")} {
+		if err := SyncDir(bad); err == nil {
+			t.Errorf("SyncDir(%q) reported no error; the caller would claim a durability it does not have", bad)
+		}
+	}
 }
 
 // ExpandHome is the shared tilde expansion for an ssh_config IdentityFile and
@@ -149,5 +156,24 @@ func TestDiscardStaged(t *testing.T) {
 	// nothing is reported.
 	if err := DiscardStaged(leaked, nil); err != nil {
 		t.Errorf("a succeeded write reported %v", err)
+	}
+}
+
+// A writer that decided not to rename hands DiscardStaged a staging file that
+// is still there under a write it reported as succeeded. A removal that then
+// fails is content the operator was never shown, at a path they were never
+// given, so the success is reported alongside it rather than on its own.
+func TestDiscardStagedReportsALeftoverAfterASuccess(t *testing.T) {
+	stuck := filepath.Join(t.TempDir(), "stage.tmp")
+	// A non-empty directory is the one staging path os.Remove refuses without
+	// needing a permission the test would have to run unprivileged to get.
+	if err := os.Mkdir(stuck, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stuck, "inner"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := DiscardStaged(stuck, nil); err == nil {
+		t.Error("a succeeded write left an undeleted staging file and reported nothing")
 	}
 }

@@ -120,18 +120,31 @@ const crushDBRel = ".crush/crush.db"
 // as a regular file. That refuses a crush.db or .crush directory whose
 // symlink target leaves the project, while still allowing the project path
 // itself to be a symlink (macOS /var).
+//
+// A store that is not there is the answer for most projects, so the opens
+// below stay silent. The closes do not: this runs on the poll path, and a
+// descriptor the kernel would not hand back is one per project per poll for
+// the life of the dashboard, which shows up as an EMFILE refusal on every other
+// store long before anything names this one.
 func crushDBIn(root string) string {
+	store := filepath.Join(root, filepath.FromSlash(crushDBRel))
 	r, err := os.OpenRoot(root)
 	if err != nil {
 		return ""
 	}
-	defer r.Close()
+	defer func() {
+		if cerr := r.Close(); cerr != nil {
+			auditStoreLeak("crush", store, cerr)
+		}
+	}()
 	f, err := r.Open(crushDBRel)
 	if err != nil {
 		return ""
 	}
 	fi, err := f.Stat()
-	f.Close()
+	if cerr := f.Close(); cerr != nil {
+		auditStoreLeak("crush", store, cerr)
+	}
 	if err != nil || !fi.Mode().IsRegular() {
 		return ""
 	}

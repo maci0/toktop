@@ -48,6 +48,11 @@ type Server struct {
 	// are logged; the steady state either way is not. Zero value is ready.
 	healthMu       sync.Mutex
 	healthDegraded bool
+	// healthUnwritten latches the same way for a probe whose answer never
+	// reached the prober. A peer that stopped reading costs one line per
+	// episode, not one per check, and the latch is what makes the line
+	// affordable the same way it is for the degraded crossing.
+	healthUnwritten bool
 	// Body bounds, fixed at construction. They were package vars the request
 	// path read directly, which put mutable state on that path: every body
 	// read and every error string read them while a test wrote them, and the

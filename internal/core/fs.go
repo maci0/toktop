@@ -45,16 +45,22 @@ func ExpandHome(p string) string {
 // rename durable (the ssh host-key pin store and the self-update install);
 // one helper is the only way those two cannot drift apart.
 //
-// Best effort by design. A directory that cannot be opened or synced (Windows,
-// some network filesystems) leaves the file whole either way, and failing the
-// write over it would cost the operator the write.
-func SyncDir(dir string) {
+// The reason it could not be flushed is returned, not dropped. A caller that
+// reported its write as successful while the flush failed reported a durability
+// it never had: the rename is what a crash loses, and the file the writer
+// fsynced is not the name the reader opens. Deciding what an unflushable
+// directory means belongs to the caller, because it differs per write: a
+// renamed binary that does not survive a boot leaves nothing to run, while a
+// store a peer can rebuild is a different problem. A platform with no
+// directory sync to call is the caller's to recognize, not this helper's to
+// hide.
+func SyncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
-		return
+		return err
 	}
 	defer d.Close()
-	_ = d.Sync()
+	return d.Sync()
 }
 
 // StaleTempAge is how old a leftover staging file has to be before the next
@@ -98,20 +104,21 @@ func SweepStaleTemps(dir, prefix string, now time.Time) {
 // where the operator looks for the real file, so a removal that fails is
 // reported alongside the failure that triggered it rather than swallowed: told
 // only that the write failed, the operator has no way to know the directory
-// now holds one. A write that succeeded leaves nothing at name, and the remove
-// is then a no-op.
+// now holds one. The same holds after a write that reported success. A rename
+// that landed is the common case and leaves nothing at name, but a writer that
+// decides on its own not to rename (an install whose target already carries the
+// release checksum) hands here a staging file that is still there, and one that
+// cannot be unlinked is content the operator was never shown, at a path they
+// were never given.
 //
 // It lives here because two packages stage a file next to its destination and
 // must both clean up the same way (the ssh host-key pin store and the
 // self-update install); one helper is the only way those two cannot drift.
 func DiscardStaged(name string, err error) error {
-	if err == nil {
-		_ = os.Remove(name)
-		return nil
+	rerr := os.Remove(name)
+	if rerr == nil || errors.Is(rerr, fs.ErrNotExist) {
+		return err
 	}
-	if rerr := os.Remove(name); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-		return errors.Join(err,
-			fmt.Errorf("left a staging file at %s that must be deleted: %w", name, rerr))
-	}
-	return err
+	return errors.Join(err,
+		fmt.Errorf("left a staging file at %s that must be deleted: %w", name, rerr))
 }

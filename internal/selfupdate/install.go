@@ -262,10 +262,28 @@ func install(tmpName, self string) error {
 		if err := os.Rename(tmpName, self); err != nil {
 			return err
 		}
-		core.SyncDir(filepath.Dir(self))
+		if err := flushInstallDir(filepath.Dir(self)); err != nil {
+			return fmt.Errorf("installed %s, but the rename is not durable and a crash can leave the previous version: %w",
+				core.RedactHome(self), err)
+		}
 		return nil
 	}
 	return installDisplacing(tmpName, self)
+}
+
+// flushInstallDir makes a rename into the install path durable, or reports why
+// it could not be made so.
+//
+// Windows is skipped because there is nothing to call: a directory handle
+// cannot be synced, and the platform journals the rename metadata itself, so
+// the error it would return names a durability the rename already has. Every
+// other platform's failure is real and is the one this install's doc comment
+// says must not be swallowed.
+func flushInstallDir(dir string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	return core.SyncDir(dir)
 }
 
 // displacedSuffix names the copy installDisplacing moves the installed binary
@@ -308,7 +326,10 @@ func installDisplacing(tmpName, self string) error {
 		}
 		return err
 	}
-	core.SyncDir(filepath.Dir(self))
+	if err := flushInstallDir(filepath.Dir(self)); err != nil {
+		return fmt.Errorf("installed %s, but the rename is not durable and a crash can leave the previous version: %w",
+			core.RedactHome(self), err)
+	}
 	return nil
 }
 
@@ -332,8 +353,14 @@ func installDisplacing(tmpName, self string) error {
 // this function exists to end. A downloaded release is checksummed before it
 // is renamed into place, so that path ends with something that runs.
 func restoreDisplaced(self, displaced string) error {
-	if _, err := os.Stat(self); !os.IsNotExist(err) {
+	// Only a path that is not there is restored over. A Stat that failed for
+	// any other reason (no permission on the directory, an immutable entry)
+	// says nothing about what is at self, and treating it as "not missing"
+	// let the rename below replace a binary whose state nobody had read.
+	if _, err := os.Stat(self); err == nil {
 		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("cannot tell whether %s is missing: %w", core.RedactHome(self), err)
 	}
 	if fi, err := os.Lstat(displaced); err == nil {
 		if !fi.Mode().IsRegular() {
@@ -349,6 +376,9 @@ func restoreDisplaced(self, displaced string) error {
 		}
 		return fmt.Errorf("cannot restore %s from %s: %w", core.RedactHome(self), core.RedactHome(displaced), err)
 	}
-	core.SyncDir(filepath.Dir(self))
+	if err := flushInstallDir(filepath.Dir(self)); err != nil {
+		return fmt.Errorf("restored %s, but the rename is not durable and a crash can lose the only copy: %w",
+			core.RedactHome(self), err)
+	}
 	return nil
 }
