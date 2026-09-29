@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
@@ -28,9 +29,12 @@ type Server struct {
 	// the handler stamping the event in flight.
 	nowMu sync.RWMutex
 	now   func() time.Time // event stamps; defaults to time.Now. I/O deadlines stay wall-clock.
-	srv   http.Server
-	ln    net.Listener
-	addr  string
+	// reqSeq names the requests that arrive without an X-Request-Id, so a
+	// replay of the same requests mints the same ids. Zero value is ready.
+	reqSeq atomic.Uint64
+	srv    http.Server
+	ln     net.Listener
+	addr   string
 	// hostGuard refuses a request whose Host names something other than the
 	// loopback interface, and is nil when the listener was bound wider (an
 	// explicit --ingest on a routable address), where the host is whatever

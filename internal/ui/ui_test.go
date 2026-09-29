@@ -2998,3 +2998,24 @@ func TestAgentRowNamesUnknownRecency(t *testing.T) {
 		t.Errorf("plain report drops the undated recency:\n%s", out)
 	}
 }
+
+// The header clock shows the launch time until the first tick lands, so a
+// demo run has to launch at its pinned origin: the frame a replay draws
+// before the first collector frame must read the same simulated time as every
+// frame after it.
+func TestNewSeedsHeaderClockFromDemoOrigin(t *testing.T) {
+	origin := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	m := New(Config{Version: "t", Demo: true, DemoSeed: 7, DemoOrigin: origin}, nil)
+	if !m.clock.Equal(origin) {
+		t.Errorf("header clock = %v, want the pinned demo origin %v", m.clock, origin)
+	}
+	if !m.tickAt.Equal(origin) {
+		t.Errorf("tick clock = %v, want the pinned demo origin %v", m.tickAt, origin)
+	}
+
+	// A live run has no origin to pin to and still starts on the wall clock.
+	live := New(Config{Version: "t"}, nil)
+	if live.clock.IsZero() {
+		t.Error("live header clock is zero")
+	}
+}

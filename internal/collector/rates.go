@@ -46,9 +46,15 @@ func (c *Collector) rates(key string, m *provider.Metrics, now time.Time) (outPS
 		// sleep). Elapsed time over this interval is negative, so no rate is
 		// defined, and holding the prior one would report it unchanged for as
 		// long as the step lasts. Report no throughput for the interval the
-		// step made, and keep the older baseline, as the dt == 0 branch does,
-		// so the next real interval accounts for these tokens too instead of
-		// dropping them and restarting the EMA from zero.
+		// step made and re-seed the baseline here: kept at the older sample,
+		// every later sample lands before it too, so the endpoint reads zero
+		// until the clock walks back past the step (minutes, on a real
+		// correction). The prior rate rides along so the re-seed restarts the
+		// interval, not the smoothing.
+		c.prev[key] = prevSample{
+			at: now, outTotal: m.OutTotal, inTotal: m.InTotal,
+			outEMA: pv.outEMA, inEMA: pv.inEMA,
+		}
 		return 0, 0
 	}
 	if dt == 0 {

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -21,6 +22,7 @@ import (
 	"github.com/rivo/uniseg"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 type memRecorder struct{ evs []core.AgentEvent }
@@ -3068,4 +3070,39 @@ func TestSetNowWhileServing(t *testing.T) {
 	}
 	close(stop)
 	<-set
+}
+
+// The minted id lands in the answer's headers and the audit line, so the same
+// request sequence against the same server twice has to produce the same
+// transcript. OS entropy cannot be replayed, and a run that cannot be
+// replayed cannot be diffed against a baseline.
+func TestIngestMintsRequestIDDeterministically(t *testing.T) {
+	// A server per pass, so the counter starts at the same place both times.
+	mint := func() []string {
+		s := startIngest(t, &memRecorder{})
+		base := "http://" + s.Addr() + "/healthz"
+		var ids []string
+		for range 3 {
+			resp, err := http.Get(base)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			ids = append(ids, resp.Header.Get("X-Request-Id"))
+		}
+		return ids
+	}
+
+	first, second := mint(), mint()
+	if !slices.Equal(first, second) {
+		t.Errorf("minted ids differ between identical runs: %q then %q", first, second)
+	}
+	if newSet := map[string]bool{first[0]: true, first[1]: true, first[2]: true}; len(newSet) != 3 {
+		t.Errorf("minted ids collided within one run: %q", first)
+	}
+	for _, id := range first {
+		if logcfg.Field(id, maxRequestID) != id {
+			t.Errorf("minted id %q does not survive the audit-line field filter", id)
+		}
+	}
 }

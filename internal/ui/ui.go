@@ -83,7 +83,13 @@ type Model struct {
 func New(cfg Config, ch <-chan core.Snapshot) Model {
 	// The header clock only advances on ticks, so until the first one lands
 	// (~1s in) it must show the launch time rather than a zero-value midnight.
+	// A demo run launches at the pinned origin: the first frame a replay
+	// draws has to read the same wall of simulated time as every frame after
+	// it, not the wall clock of whichever machine is running the replay.
 	now := time.Now()
+	if !cfg.DemoOrigin.IsZero() {
+		now = cfg.DemoOrigin
+	}
 	return Model{cfg: cfg, ch: ch, chartCompressed: chartCompressedDefault, clock: now, tickAt: now}
 }
 
