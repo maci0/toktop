@@ -35,25 +35,30 @@ func splitWindowsArgs(cmd string) []string {
 			started = false
 		}
 	}
-	for _, r := range cmd {
+	// Byte by byte, not rune by rune: only the four ASCII delimiters below are
+	// special, so ranging over the string would rewrite every byte a line
+	// carries that is not valid UTF-8 into U+FFFD and hand the matchers a
+	// program name or model path that is no longer the one on the machine.
+	for i := 0; i < len(cmd); i++ {
+		c := cmd[i]
 		switch {
-		case r == '\\':
+		case c == '\\':
 			slashes++
-		case r == '"':
+		case c == '"':
 			cur.WriteString(strings.Repeat(`\`, slashes/2))
 			if slashes%2 == 1 {
-				cur.WriteRune('"')
+				cur.WriteByte('"')
 			} else {
 				inQ = !inQ
 			}
 			slashes = 0
 			started = true
-		case (r == ' ' || r == '\t') && slashes == 0 && !inQ:
+		case (c == ' ' || c == '\t') && slashes == 0 && !inQ:
 			flush()
 		default:
 			cur.WriteString(strings.Repeat(`\`, slashes))
 			slashes = 0
-			cur.WriteRune(r)
+			cur.WriteByte(c)
 			started = true
 		}
 	}

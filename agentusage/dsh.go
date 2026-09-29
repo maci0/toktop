@@ -331,7 +331,10 @@ func pathSlug(dir string) string {
 	s = strings.TrimPrefix(s, "/")
 	s = strings.ReplaceAll(s, ":", "-")
 	s = strings.ReplaceAll(s, "/", "-")
-	if s == "" || s == "." {
+	// ".." is a working directory like any other, and a caller that joins the
+	// slug onto a store path would walk out of it, so it is dropped with "."
+	// rather than passed through as the one component that names a parent.
+	if s == "" || s == "." || s == ".." {
 		return ""
 	}
 	return s
