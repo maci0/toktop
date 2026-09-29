@@ -449,7 +449,9 @@ func joinBlocks(blocks ...string) string {
 // padded to its own width and the rows of all of them are zipped, with the
 // shorter blocks blank-filled at the bottom (lipgloss.Top). The width each
 // block is padded to is recorded while it is walked for the row count, so a
-// block list is measured once and copied once.
+// block list is measured once and copied once. The width of each row is
+// recorded beside its line, because the copy pass needs the gap under that
+// row, and measuring it there re-walked every row of the frame.
 //
 // The blocks here are panels of a known inner width, so this is the same
 // result lipgloss.JoinHorizontal produces without its per-row width walk.
@@ -461,15 +463,20 @@ func joinAcross(blocks ...string) string {
 		return blocks[0]
 	}
 	rows := make([][]string, len(blocks))
+	rowWidths := make([][]int, len(blocks))
 	widths := make([]int, len(blocks))
 	height := 0
 	for i, b := range blocks {
 		rows[i] = strings.Split(b, "\n")
-		for _, ln := range rows[i] {
-			if w := widthOf(ln); w > widths[i] {
+		ws := make([]int, len(rows[i]))
+		for j, ln := range rows[i] {
+			w := widthOf(ln)
+			ws[j] = w
+			if w > widths[i] {
 				widths[i] = w
 			}
 		}
+		rowWidths[i] = ws
 		height = max(height, len(rows[i]))
 	}
 	var out strings.Builder
@@ -484,7 +491,7 @@ func joinAcross(blocks ...string) string {
 				continue
 			}
 			out.WriteString(lines[row])
-			if gap := widths[i] - widthOf(lines[row]); gap > 0 {
+			if gap := widths[i] - rowWidths[i][row]; gap > 0 {
 				out.WriteString(strings.Repeat(" ", gap))
 			}
 		}

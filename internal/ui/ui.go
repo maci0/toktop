@@ -73,8 +73,31 @@ type Model struct {
 	// slice of it, and the feed holds up to AgentHistoryLen events, so
 	// walking it per consumer cost five groupings and five NFC-normalized
 	// maps a frame. View fills it; agentSum computes on demand for a
-	// consumer called outside a frame.
-	sum *core.AgentSummary
+	// consumer called outside a frame. sumAt is the "now" it was taken at:
+	// Summarize's window is relative to it, so a sum is only reusable while
+	// the frame's own instant is the same one.
+	sum   *core.AgentSummary
+	sumAt time.Time
+}
+
+// account summarizes the feed once and keeps the result with the instant it
+// was taken at, so the next reader of the same frame reuses it instead of
+// grouping and NFC-normalizing the feed again. A snapshot stamps its own At,
+// so the instant is stable for the life of the frame; one with a zero stamp
+// falls back to the UI clock, which ticks, and the sum is recomputed when it
+// does.
+func (m *Model) account() {
+	if m.sum != nil && m.sumAt.Equal(m.snapNow()) {
+		return
+	}
+	m.sum = nil
+	m.sumAt = m.snapNow()
+	if len(m.snap.Agents) == 0 {
+		m.sum = new(core.AgentSummary)
+		return
+	}
+	s := core.Summarize(m.snap.Agents, m.sumAt)
+	m.sum = &s
 }
 
 // New builds the dashboard model over a snapshot stream. ch carries the
@@ -126,7 +149,10 @@ func StaticFrame(cfg Config, s core.Snapshot, w, h int) string {
 	m.w, m.h = w, h
 	m.ready = true
 	m.clock = frameNow(s, time.Time{})
-	if agg := aggOutAt(s, m.clock); agg > 0 {
+	// One account of the feed serves both the aggregate below and the View
+	// about to be drawn, as the snapMsg path does.
+	m.account()
+	if agg, _ := aggBoth(s, m.agentSum()); agg > 0 {
 		m.aggLast = agg
 		m.aggMax = agg
 	}
@@ -239,12 +265,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if !m.paused {
-			agg := aggOutAt(in, frameNow(in, m.clock))
+			// Account the incoming frame's feed here, once: the aggregate
+			// below needs it, and the View drawn for this same snapshot
+			// needs it again for the header, charts, feed and agents view.
+			// Summarize groups and NFC-normalizes every event in the feed,
+			// so running it once per snapshot and handing View the result
+			// halves that walk.
+			sum := core.Summarize(in.Agents, frameNow(in, m.clock))
+			agg, _ := aggBoth(in, sum)
 			m.aggLast = agg
 			if agg > m.aggMax {
 				m.aggMax = agg
 			}
 			m.snap = in
+			m.sum, m.sumAt = &sum, frameNow(in, m.clock)
 		}
 		return m, waitSnap(m.ch)
 
@@ -377,11 +411,7 @@ func (m Model) View() string {
 		return "\n  " + styleWarn.Render("● toktop is warming up…")
 	}
 	// Account the agent feed once, before any consumer reads it.
-	m.sum = new(core.AgentSummary)
-	if len(m.snap.Agents) > 0 {
-		s := core.Summarize(m.snap.Agents, m.snapNow())
-		m.sum = &s
-	}
+	m.account()
 	if m.help {
 		return m.renderHelp()
 	}
@@ -492,11 +522,6 @@ func (m Model) agentSum() core.AgentSummary {
 
 // agentRates is the frame's per-agent list, busiest first.
 func (m Model) agentRates() []core.AgentRate { return m.agentSum().Rates }
-
-func aggOutAt(s core.Snapshot, now time.Time) float64 {
-	out, _ := aggBothAt(s, now)
-	return out
-}
 
 // aggBothAt sums provider rates with unattributed agent rates in one pass.
 // renderHeader and PlainTextFrame need both directions, and two separate

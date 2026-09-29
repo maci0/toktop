@@ -182,12 +182,37 @@ func nvidiaUsable(b []byte) error {
 	return nil
 }
 
+// nvidiaDecode is nvidiaUsable with its parse kept, so the sampler reads
+// nvidia-smi's CSV once per poll instead of once to judge it and again to
+// report it. Same shape as the xpu metrics decode below.
+func nvidiaDecode(devs *[]core.GPUDevice) func([]byte) error {
+	return func(b []byte) error {
+		*devs = ParseNvidiaSMI(b)
+		if len(*devs) == 0 {
+			return errors.New("no device rows in nvidia-smi CSV output")
+		}
+		return nil
+	}
+}
+
 // rocmUsable is nvidiaUsable for rocm-smi, whose output is JSON keyed by card.
 func rocmUsable(b []byte) error {
 	if len(ParseRocmSMI(b)) == 0 {
 		return errors.New("no cards in rocm-smi JSON output")
 	}
 	return nil
+}
+
+// rocmDecode is rocmUsable with its parse kept, for the same reason as
+// nvidiaDecode.
+func rocmDecode(devs *[]core.GPUDevice) func([]byte) error {
+	return func(b []byte) error {
+		*devs = ParseRocmSMI(b)
+		if len(*devs) == 0 {
+			return errors.New("no cards in rocm-smi JSON output")
+		}
+		return nil
+	}
 }
 
 // xpuUsable checks that xpu-smi answered in the JSON its -j flag promises. An
@@ -309,8 +334,9 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 	wg.Go(func() {
 		if p, ok := lookup("nvidia-smi"); ok {
-			if out, ok2 := run(ctx, "nvidia-smi", p, nvidiaUsable, NvidiaQuery, NvidiaFormat); ok2 {
-				add(ParseNvidiaSMI(out))
+			var devs []core.GPUDevice
+			if _, ok2 := run(ctx, "nvidia-smi", p, nvidiaDecode(&devs), NvidiaQuery, NvidiaFormat); ok2 {
+				add(devs)
 			}
 		}
 	})
@@ -335,8 +361,9 @@ func Sample(ctx context.Context) []core.GPUDevice {
 
 func sampleAMD(ctx context.Context) []core.GPUDevice {
 	if p, ok := lookup("rocm-smi"); ok {
-		if out, ok2 := run(ctx, "rocm-smi", p, rocmUsable, RocmArgs()...); ok2 {
-			if devs := ParseRocmSMI(out); len(devs) > 0 {
+		var devs []core.GPUDevice
+		if _, ok2 := run(ctx, "rocm-smi", p, rocmDecode(&devs), RocmArgs()...); ok2 {
+			if len(devs) > 0 {
 				return devs
 			}
 		}

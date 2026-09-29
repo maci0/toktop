@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -91,26 +92,37 @@ type headerSeg struct {
 	shed int
 }
 
+// headerSegWidth is the width of the dim separator every pair of surviving
+// segments is joined with. The separator is the same string on every pair, so
+// its styled width is measured once rather than inside the shed loop, which
+// re-rendered and re-walked it on every pass.
+var headerSegWidth = sync.OnceValue(func() int { return lipgloss.Width(dim(" │ ")) })
+
 // fitSegments sheds the highest-numbered segments (rightmost first) until
 // the dim-piped row fits avail cells. When nothing sheddable remains it hard
 // clips as a last resort: even one wrapping cell drags every later frame line
 // out of alignment on terminals narrower than the row.
+//
+// Each segment is measured once, when the row is first summed, and the running
+// total is adjusted as segments leave. The loop dropped one segment per pass,
+// so re-measuring the whole row each time walked every surviving label again
+// for an answer the sum already carried.
 func fitSegments(segs []headerSeg, avail int) string {
 	if avail <= 0 || len(segs) == 0 {
 		return ""
 	}
 	kept := slices.Clone(segs)
-	width := func(ss []headerSeg) int {
-		n := 0
-		for i, s := range ss {
-			if i > 0 {
-				n += lipgloss.Width(dim(" │ "))
-			}
-			n += lipgloss.Width(s.text)
+	sep := headerSegWidth()
+	widths := make([]int, len(kept))
+	total := 0
+	for i, s := range kept {
+		widths[i] = lipgloss.Width(s.text)
+		total += widths[i]
+		if i > 0 {
+			total += sep
 		}
-		return n
 	}
-	for len(kept) > 1 && width(kept) > avail {
+	for len(kept) > 1 && total > avail {
 		worst, idx := 0, -1
 		for i, s := range kept {
 			if s.shed >= worst && s.shed > 0 {
@@ -120,7 +132,16 @@ func fitSegments(segs []headerSeg, avail int) string {
 		if idx < 0 {
 			break
 		}
+		// The segment's own cells go, and one separator with it: the two
+		// separators on either side of a removed segment become the single
+		// one joining its neighbours, so a row of n segments always carries
+		// n-1 separators and losing one segment loses exactly one.
+		total -= widths[idx]
+		if len(kept) > 1 {
+			total -= sep
+		}
 		kept = append(kept[:idx], kept[idx+1:]...)
+		widths = append(widths[:idx], widths[idx+1:]...)
 	}
 	parts := make([]string, len(kept))
 	for i, s := range kept {

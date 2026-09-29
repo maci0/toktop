@@ -32,6 +32,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   of the bare count on its usual two-cell gap, and the count was dropped whole
   there: a panel that silently drew fewer engines than the fleet has. The gap
   closes before the wording does, and the bare number is the last form.
+- Several per-poll paths stopped repeating work the frame or the poll had
+  already done. A vendor GPU CLI's output is now parsed once per poll rather
+  than twice (once to judge the output readable, once to report it), an
+  amdgpu card's `product_name` is discovered with the card list instead of
+  re-read and re-sanitized every interval, and a transcript read takes its
+  64 KiB fill buffer from a pool instead of allocating one per file per poll.
+- The dashboard measures each rendered line once per frame rather than two or
+  three times. Block padding re-walks a line whose width it just computed, the
+  side-by-side join re-measures every row in the pass that only pads it, and
+  the header's shed loop re-measured the whole row (and re-rendered its styled
+  separator) once per segment it dropped. The agent feed is also accounted
+  once per snapshot instead of twice: the summary taken when the snapshot
+  arrived is the one the frame is drawn from.
 
 ### Added
 

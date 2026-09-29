@@ -141,16 +141,22 @@ func frame(block string, innerW, innerH int) string {
 // padded, because clip returns the ellipsis short of the cut it was given (a
 // wide glyph that will not fit half a cell), and a block whose rows are not
 // all the same width is a block whose right border does not line up.
+//
+// A line is measured once. Clipping rewrites the line, so its width is taken
+// again only in that branch; the common case, a line already inside the panel,
+// kept the width measured above it instead of re-walking the same bytes.
 func padBlock(content string, innerW, innerH int) string {
 	lines := strings.Split(content, "\n")
 	if len(lines) > innerH {
 		lines = lines[:innerH]
 	}
 	for i, ln := range lines {
-		if widthOf(ln) > innerW {
+		w := widthOf(ln)
+		if w > innerW {
 			ln = clip(ln, innerW)
+			w = widthOf(ln)
 		}
-		if gap := innerW - widthOf(ln); gap > 0 {
+		if gap := innerW - w; gap > 0 {
 			ln += strings.Repeat(" ", gap)
 		}
 		lines[i] = ln

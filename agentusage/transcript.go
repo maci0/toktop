@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -199,7 +200,9 @@ func (w *Watcher) consumeAppend(f *os.File, off int64) (recs []values, complete 
 		pos     = off
 	)
 	complete = off
-	br := bufio.NewReaderSize(f, appendReaderBytes)
+	br := appendReaderPool.Get().(*bufio.Reader)
+	br.Reset(f)
+	defer appendReaderPool.Put(br)
 	for {
 		chunk, rerr := br.ReadSlice('\n')
 		pos += int64(len(chunk))
@@ -263,6 +266,16 @@ const maxLineBytes = 8 << 20
 // appendReaderBytes is the bufio fill size for transcript reads. A typical
 // JSONL record fits; a giant one is assembled across fills until maxLineBytes.
 const appendReaderBytes = 64 << 10
+
+// appendReaderPool hands consumeAppend its fill buffer. A poll runs every
+// DefaultPollInterval over every transcript that changed, so a fresh 64 KiB
+// buffer per read is that much garbage four times a second on a host running
+// a few agents. The buffer is reset onto the next file, and nothing retains a
+// slice into it past the read: every chunk is appended out of it into line
+// before it is parsed, so the buffer can go straight back to the pool.
+var appendReaderPool = sync.Pool{
+	New: func() any { return bufio.NewReaderSize(nil, appendReaderBytes) },
+}
 
 func (w *Watcher) collect(recs []values, line []byte) []values {
 	line = bytes.TrimPrefix(line, utf8BOM)

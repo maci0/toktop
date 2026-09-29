@@ -25,44 +25,59 @@ func init() {
 // card cache; any other root (a test's fixture) is walked directly.
 const defaultDrmRoot = "/sys/class/drm"
 
-// amdCards caches which /sys/class/drm cards are amdgpu-bound. The set of
-// cards a host has changes only when a GPU is added, while the poll runs
-// every interval: without this, a machine with no AMD GPU (every NVIDIA or
-// Intel one, where rocm-smi is absent and this path is the fallback) globs
-// /sys/class/drm and stats each card for an answer that is permanently empty.
-// A cached empty list is retried on the same spacing a missing vendor CLI is,
-// so a GPU added mid-session is still found.
-var amdCards struct {
-	sync.Mutex
-	dirs []string
-	at   time.Time
+// amdCard is one amdgpu-bound card and the board name its sysfs reports.
+// The name is fixed hardware identity, so it is discovered and cached with
+// the card list rather than re-read per poll.
+type amdCard struct {
+	dir  string
+	name string
 }
 
-func amdCardDirs() []string {
+// amdCards caches which /sys/class/drm cards are amdgpu-bound, and each one's
+// board name. The set of cards a host has and the name of a card it has
+// change only when a GPU is added, while the poll runs every interval:
+// without this, a machine with no AMD GPU (every NVIDIA or Intel one, where
+// rocm-smi is absent and this path is the fallback) globs /sys/class/drm and
+// stats each card for an answer that is permanently empty, and a machine
+// with one re-opens that card's product_name and re-sanitizes a constant
+// string every second. A cached empty list is retried on the same spacing a
+// missing vendor CLI is, so a GPU added mid-session is still found.
+var amdCards struct {
+	sync.Mutex
+	cards []amdCard
+	at    time.Time
+}
+
+func amdCardDirs() []amdCard {
 	amdCards.Lock()
 	defer amdCards.Unlock()
 	if core.Age(instant(), amdCards.at) < toolRetry {
-		return amdCards.dirs
+		return amdCards.cards
 	}
-	amdCards.dirs = findAmdCards(defaultDrmRoot)
+	amdCards.cards = findAmdCards(defaultDrmRoot)
 	amdCards.at = instant()
-	return amdCards.dirs
+	return amdCards.cards
 }
 
-// findAmdCards is the discovery half of the sysfs walk: the directories under
-// drmRoot that carry amdgpu's VRAM accounting.
-func findAmdCards(drmRoot string) []string {
+// findAmdCards is the discovery half of the sysfs walk: the cards under
+// drmRoot that carry amdgpu's VRAM accounting, each with the board name its
+// product_name file holds.
+func findAmdCards(drmRoot string) []amdCard {
 	cards, err := filepath.Glob(filepath.Join(drmRoot, "card[0-9]*"))
 	if err != nil {
 		return nil
 	}
-	out := make([]string, 0, len(cards))
+	out := make([]amdCard, 0, len(cards))
 	for _, card := range cards {
 		dev := filepath.Join(card, "device")
 		if _, err := os.Stat(filepath.Join(dev, "mem_info_vram_used")); err != nil {
 			continue // not an amdgpu-bound card
 		}
-		out = append(out, card)
+		c := amdCard{dir: card}
+		if b, err := os.ReadFile(filepath.Join(dev, "product_name")); err == nil {
+			c.name = core.ModelName(string(b))
+		}
+		out = append(out, c)
 	}
 	return out
 }
@@ -74,16 +89,13 @@ func scanAmdSysfs(drmRoot string) []core.GPUDevice {
 	return readAmdCards(findAmdCards(drmRoot))
 }
 
-func readAmdCards(cards []string) []core.GPUDevice {
+func readAmdCards(cards []amdCard) []core.GPUDevice {
 	var devs []core.GPUDevice
 	for _, card := range cards {
-		dev := filepath.Join(card, "device")
-		d := core.GPUDevice{Vendor: "amd"}
-		if _, rest, ok := strings.Cut(filepath.Base(card), "card"); ok {
+		dev := filepath.Join(card.dir, "device")
+		d := core.GPUDevice{Vendor: "amd", Name: card.name}
+		if _, rest, ok := strings.Cut(filepath.Base(card.dir), "card"); ok {
 			d.Index, _ = strconv.Atoi(rest)
-		}
-		if b, err := os.ReadFile(filepath.Join(dev, "product_name")); err == nil {
-			d.Name = core.ModelName(string(b))
 		}
 		if u, err := readU64(dev, "mem_info_vram_used"); err == nil {
 			d.MemUsed = u
