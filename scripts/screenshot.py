@@ -27,12 +27,17 @@ integer). The written path and its size go to stdout; everything else
 goes to stderr.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import string
 import sys
 from pathlib import Path
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
+
+if TYPE_CHECKING:
+    from PIL.ImageFont import FreeTypeFont
 
 RGB = tuple[int, int, int]
 
@@ -102,7 +107,11 @@ def resolve_fonts() -> tuple[str, str]:
     Raises:
         SystemExit: no usable regular-weight face was found.
     """
-    if override := os.environ.get("TOKTOP_SCREENSHOT_FONT"):
+    # Stripped, the rule $TOKTOP_SSH_PASSWORD and $GITHUB_TOKEN follow on the
+    # Go side: `export TOKTOP_SCREENSHOT_FONT=$(cat font.path)` keeps the
+    # newline, and a path carrying one names no file, so the check below
+    # reports a file the operator can see does exist.
+    if override := os.environ.get("TOKTOP_SCREENSHOT_FONT", "").strip():
         pinned = Path(override)
         if not pinned.is_file():
             print(
@@ -127,6 +136,32 @@ def resolve_fonts() -> tuple[str, str]:
         raise SystemExit(1)
     bold = _search("Meslo*Nerd*[Bb]old*.ttf") or regular
     return regular[0], bold[0]
+
+
+def load_fonts(regular: str, bold: str, size: int) -> tuple[FreeTypeFont, FreeTypeFont]:
+    """Open both faces at size, naming the path a face fails to load from.
+
+    Existence is all resolve_fonts can check, so a pinned file that is not a
+    face, a Bold sibling that is a truncated download, and a file the caller
+    cannot read all fail here. Uncaught they are a traceback out of a
+    renderer, naming neither the variable nor the path. pillow's own message
+    names no path either, so the role and the path are printed here.
+
+    Raises:
+        SystemExit: a face could not be opened.
+    """
+    # Imported here for the same reason render imports pillow: the module has
+    # to answer --help with no dependency installed.
+    from PIL import ImageFont  # noqa: PLC0415
+
+    loaded: list[FreeTypeFont] = []
+    for role, path in (("regular", regular), ("bold", bold)):
+        try:
+            loaded.append(ImageFont.truetype(path, size))
+        except OSError as e:
+            print(f"screenshot.py: {role} font {path}: {e}", file=sys.stderr)
+            raise SystemExit(1) from e
+    return loaded[0], loaded[1]
 
 
 def usage(out: TextIO) -> None:
@@ -214,7 +249,7 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
         # Imported here, not at module scope, so `screenshot.py --help` works
         # without pyte/pillow and the except branch below reports them by name.
         import pyte  # noqa: PLC0415
-        from PIL import Image, ImageDraw, ImageFont  # noqa: PLC0415
+        from PIL import Image, ImageDraw  # noqa: PLC0415
     except ImportError as e:
         print(f"screenshot.py: missing dependency ({e})", file=sys.stderr)
         print(
@@ -252,8 +287,7 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
     cell_h = 19 * scale
     font_size = 16 * scale
     font_path, font_bold_path = resolve_fonts()
-    font = ImageFont.truetype(font_path, font_size)
-    font_bold = ImageFont.truetype(font_bold_path, font_size)
+    font, font_bold = load_fonts(font_path, font_bold_path, font_size)
 
     img = Image.new("RGB", (cols * cell_w, rows * cell_h), BG)
     draw = ImageDraw.Draw(img)

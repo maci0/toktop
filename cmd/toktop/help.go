@@ -195,6 +195,9 @@ Environment (a flag always wins over the variable it mirrors):
                           set but blank is named, and carries no token
   SSH_AUTH_SOCK           ssh-agent socket for ssh:// targets
   NO_COLOR                recognized by the terminal renderer, as usual
+  TOKTOP_SCREENSHOT_FONT  read by scripts/screenshot.py, not by this binary;
+                          recognized here so an export of it is not reported
+                          as a typo
 An unrecognized TOKTOP_* name is reported as a typo at startup, and one that
 cannot take effect in the chosen mode is named rather than silently ignored.
 See README.md for the full environment reference.

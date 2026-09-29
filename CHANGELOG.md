@@ -41,6 +41,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `fetch` is the one failure on the site nobody can reproduce: the request
   belongs to a visitor and the isolate is gone by the time the line is read, so
   a message alone named neither the call nor the deploy it came from.
+- `toktop --help` names `$TOKTOP_SCREENSHOT_FONT`, the one variable the binary
+  recognizes but never reads: the typo warning exempts it, so the screen that
+  lists what a run honors said nothing about the name it exempts.
+  `scripts/screenshot.py` trims the value the way every other variable is
+  trimmed, so `export TOKTOP_SCREENSHOT_FONT=$(cat font.path)` no longer fails
+  on a file that is there, and it names the path a face fails to open from
+  rather than answering an unreadable font with a traceback.
 
 ### Added
 

@@ -716,6 +716,7 @@ func TestUsageDocumentsEveryEnvVar(t *testing.T) {
 		"GITHUB_TOKEN",
 		"SSH_AUTH_SOCK",
 		"NO_COLOR",
+		"TOKTOP_SCREENSHOT_FONT",
 	} {
 		if !strings.Contains(got, name) {
 			t.Errorf("usage() Environment block does not document $%s", name)
