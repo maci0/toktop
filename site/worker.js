@@ -348,6 +348,12 @@ const HTML = htmlForWire(`<!doctype html>
     h1 { font-size: 2rem; }
     .hero { padding-top: 2rem; }
     .grid { grid-template-columns: 1fr; }
+    /* The bar wraps to two rows at this width, so it is taller than the 4rem
+       the desktop rule clears: an anchor jump landed the section heading
+       under the bar it was meant to clear, and on a phone the heading was
+       the only thing naming the section. Two rows of .7rem padding over the
+       brand line and the micro-step nav come to about 4.6rem. */
+    section { scroll-margin-top: 6rem; }
   }
 </style>
 </head>

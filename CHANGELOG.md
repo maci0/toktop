@@ -258,6 +258,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   read-back now starts at 2^53 and covers every count, not only the ones near
   an `int64` extreme.
 
+- The section links in the sticky bar on toktop.ai no longer land a heading
+  under the bar itself on a phone. The bar wraps to two rows below 640px, so it
+  is taller than the 4rem the anchor offset cleared, and the one line naming
+  the section a reader had just chosen was the line the bar covered.
+- The AGENT FEED title spells a paused frame `‖ PAUSED`, the badge the header,
+  the compact strip, the setup card and the plain report all print. It read
+  `(paused)`, so one state had two spellings and the title's was the only one
+  without the glyph the rest of the dashboard uses for it.
 - `docs/openapi.yaml` names the toktop release it describes in
   `info.version`, which is the field a client generator pins. It said `0.1.0`
   through every change to the answers `/healthz` gives, to the `X-Request-Id`

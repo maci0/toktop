@@ -324,7 +324,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4492);
+    expect(bytes.byteLength).toBe(4500);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1184,9 +1184,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13026);
-  expect(gzipped).toBe(4492);
-  expect(brotli).toBe(3799);
+  expect(identity).toBe(13072);
+  expect(gzipped).toBe(4500);
+  expect(brotli).toBe(3804);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1217,7 +1217,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_376);
+  expect(visit[0][1]).toBe(14_381);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
@@ -1270,7 +1270,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_376);
+  expect(visit).toBe(14_381);
   expect(visit).toBeLessThan(25_000);
 });
 

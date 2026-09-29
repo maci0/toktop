@@ -70,7 +70,12 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 		}
 	}
 	if m.paused {
-		add("  " + styleWarn.Render("(paused)"))
+		// The badge every other view prints, glyph included: the header, the
+		// compact strip, the empty card and the plain report all spell a paused
+		// frame "‖ PAUSED", and this title spelled it a fourth way in
+		// parentheses. Two spellings of one state is a state a reader has to
+		// learn twice.
+		add("  " + styleWarn.Render("‖ PAUSED"))
 	}
 	if m.feedDown != "" {
 		// Not "ingest down": the feed channel carries whatever took the agent
