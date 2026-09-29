@@ -1148,18 +1148,13 @@ func FuzzReadEngineJSON(f *testing.F) {
 		f.Add([]byte(seed))
 	}
 	f.Fuzz(func(t *testing.T, body []byte) {
-		sample := core.ProbeSample{At: time.Now()}
-		before := sample
 		reader := bytes.NewReader(body)
-		tokens, ttft, err := readOpenAIJSON(reader, &sample)
+		tokens, ttft, err := readOpenAIJSON(reader)
 		if len(body)-reader.Len() > probeLineMax+1 {
 			t.Fatal("decoder exceeded the response byte limit and overflow check")
 		}
 		if len(body) > probeLineMax && err == nil {
 			t.Fatal("decoder accepted an oversized response")
-		}
-		if sample != before {
-			t.Fatal("decoder modified the input sample")
 		}
 		if err == nil {
 			if tokens <= 0 || tokens > probeTokenTrust || ttft < 0 {
@@ -1169,7 +1164,7 @@ func FuzzReadEngineJSON(f *testing.F) {
 			t.Fatalf("failed decode returned a measurement: tokens=%d ttft=%v", tokens, ttft)
 		}
 		fragmented := iotest.OneByteReader(bytes.NewReader(body))
-		tokens2, _, err2 := readOpenAIJSON(fragmented, &sample)
+		tokens2, _, err2 := readOpenAIJSON(fragmented)
 		if tokens2 != tokens || fmt.Sprint(err2) != fmt.Sprint(err) {
 			t.Fatalf("fragmentation changed result: %d/%v then %d/%v", tokens, err, tokens2, err2)
 		}

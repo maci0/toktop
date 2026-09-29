@@ -301,7 +301,7 @@ func TestFrameMatchesLipglossBorder(t *testing.T) {
 				} {
 					block := padBlock(content, innerW, innerH)
 					want := panelStyle.Render(block)
-					if got := frame(block, innerW, innerH); got != want {
+					if got := frame(block, innerW); got != want {
 						t.Fatalf("profile %v, %dx%d, content %q:\n got %q\nwant %q",
 							prof, innerW, innerH, content, got, want)
 					}

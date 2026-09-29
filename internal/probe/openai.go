@@ -25,7 +25,7 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 	}
 	defer resp.Body.Close()
 	if jsonNotStream(resp.Header.Get("Content-Type")) {
-		return readOpenAIJSON(resp.Body, s)
+		return readOpenAIJSON(resp.Body)
 	}
 	sc := bufio.NewScanner(io.LimitReader(resp.Body, probeStreamMax))
 	sc.Buffer(make([]byte, 0, probeBufInit), probeLineMax)
@@ -259,7 +259,7 @@ func jsonNotStream(ct string) bool {
 // when it ignores stream:true. It always reports a ttft of 0: there is no
 // first-token instant in a body that arrives in one piece, and Run accounts
 // for that by measuring throughput over the full exchange.
-func readOpenAIJSON(body io.Reader, s *core.ProbeSample) (tokens int, ttft time.Duration, err error) {
+func readOpenAIJSON(body io.Reader) (tokens int, ttft time.Duration, err error) {
 	b, err := io.ReadAll(io.LimitReader(body, probeLineMax+1))
 	if err != nil {
 		return 0, 0, fmt.Errorf("read response: %w", err)

@@ -99,7 +99,7 @@ var (
 // innerW x innerH with plain spaces; the padding is ours rather than
 // lipgloss's, whose wrapping mishandles densely styled chart cells.
 func panel(title, content string, innerW, innerH int) string {
-	return styleTitle.Render(title) + "\n" + frame(padBlock(content, innerW, innerH), innerW, innerH)
+	return styleTitle.Render(title) + "\n" + frame(padBlock(content, innerW, innerH), innerW)
 }
 
 // frame draws the rounded border around a block padBlock has already cut to
@@ -115,7 +115,7 @@ func panel(title, content string, innerW, innerH int) string {
 // expands tabs into spaces before measuring. A tab should not reach a frame
 // (clip and shorten fold them away), and deferring keeps that a rendering
 // question rather than a silent one.
-func frame(block string, innerW, innerH int) string {
+func frame(block string, innerW int) string {
 	if strings.ContainsRune(block, '\t') {
 		return panelStyle.Render(block)
 	}

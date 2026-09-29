@@ -95,13 +95,11 @@ func (m Model) renderSystem() string {
 	// The identity row counts the temperatures its cap never turned into
 	// segments together with the ones the pack shed, so one "+N more" covers
 	// the whole row.
-	rows := 1
 	content := padBlock(packSegs(vitals, w, 0), w, 1)
 	if len(ident) > 0 && m.stripTwoRows() { // must match systemStripRows' budget
 		content += "\n" + padBlock(packSegs(ident, w, len(cpuTemps)-shownTemps), w, 1)
-		rows = 2
 	}
-	return frame(content, w, rows)
+	return frame(content, w)
 }
 
 // packSegs fits segs into w cells and, when some do not fit, ends the row with

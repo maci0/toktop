@@ -272,10 +272,10 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 		// zero it is on, and the answer is the 400 the positive side already
 		// gets below. It cannot be left to the float branch: every such value
 		// rounds to the nearest float64, and a count just under -2^63 rounds
-		// to -2^63 exactly, which the int64 bound would then read as a value
-		// inside the range. The documented promise is a 400 for anything
-		// outside it.
-		return 0, fmt.Errorf("bad json: %s is out of range", field)
+		// to -2^63 exactly, which then passes the MinInt64 bound and is
+		// stored as an in-range number. The documented promise is a 400 for
+		// anything outside the range.
+		return 0, outOfRange(field)
 	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) && math.Trunc(f) == f {
@@ -290,12 +290,12 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 		// half an ulp of it, and the integer form of such a count is out of
 		// range, so the two spellings have to agree.
 		if f >= math.MaxInt64 || f <= math.MinInt64 {
-			return 0, fmt.Errorf("bad json: %s is out of range", field)
+			return 0, outOfRange(field)
 		}
 		return int64(f), nil
 	}
 	if isNumRangeError(err) {
-		return 0, fmt.Errorf("bad json: %s is out of range", field)
+		return 0, outOfRange(field)
 	}
 	return 0, fmt.Errorf("bad json: %s must be an integer", field)
 }
@@ -366,6 +366,12 @@ func isJSONNumber(s string) bool {
 		}
 	}
 	return i == len(s)
+}
+
+// outOfRange is the one answer for a number that does not fit int64, whichever
+// spelling of it the sender used.
+func outOfRange(field string) error {
+	return fmt.Errorf("bad json: %s is out of range", field)
 }
 
 // isNumRangeError reports whether a strconv parse failed because the value
