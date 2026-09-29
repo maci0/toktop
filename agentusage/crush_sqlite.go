@@ -236,15 +236,29 @@ func readCrushSessions(path string, since time.Time) (_ map[string]sessionCounts
 
 	out := map[string]sessionCounts{}
 	for rows.Next() {
-		var id string
+		// Every column is read as nullable, and a row missing any of them is
+		// skipped rather than failing the statement. This is another program's
+		// store, opened read-only and unconstrained, so one row toktop cannot
+		// repair must not cost every reading of the agent for as long as it
+		// survives. The id is the case that bites: a PRIMARY KEY column in a
+		// rowid table may hold NULL unless it is declared NOT NULL, crush does
+		// not declare its session id so, and scanning an absent id into a
+		// string raises and takes the whole statement with it. The two counter
+		// columns are nullable for the same reason, and a session with no id
+		// cannot be named into the baseline map, so it is dropped and the rest
+		// of the store still reads.
+		var id sql.NullString
 		var n, in sql.NullInt64
 		if err := rows.Scan(&id, &n, &in); err != nil {
 			auditStoreRead("crush", path, err)
 			return nil, false
 		}
+		if !id.Valid {
+			continue
+		}
 		c := sessionCounts{output: counter(n.Int64), input: counter(in.Int64)}
 		if c.output > 0 || c.input > 0 {
-			out[id] = c
+			out[id.String] = c
 		}
 	}
 	if err := rows.Err(); err != nil {

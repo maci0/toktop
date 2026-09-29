@@ -141,6 +141,27 @@ func TestCrushSourceAcceptsSecondsAndMilliseconds(t *testing.T) {
 	}
 }
 
+// A row whose id is NULL is a row the schema permits: SQLite lets any PRIMARY
+// KEY other than INTEGER PRIMARY KEY hold NULL unless it is declared NOT NULL,
+// which crush's sessions table does not. The other two columns are already read
+// as nullable, so this one NULL must not be what fails the statement and leaves
+// the store reporting nothing for as long as the row survives.
+func TestCrushSourceSkipsSessionWithoutID(t *testing.T) {
+	dir := t.TempDir()
+	since := time.Now()
+	crushDB(t, dir, map[string][3]int64{"s": {40, 0, since.Add(time.Minute).UnixMilli()}})
+	execSQL(t, filepath.Join(dir, ".crush", "crush.db"),
+		`INSERT INTO sessions (id, completion_tokens, prompt_tokens, updated_at) VALUES (NULL, 900, 700, ?)`,
+		since.Add(time.Minute).UnixMilli())
+	out, in, ok := crushSessionSum([]string{dir}, since)
+	if !ok {
+		t.Fatal("a session row with no id failed the whole read of the store")
+	}
+	if out != 40 || in != 0 {
+		t.Fatalf("output %d input %d, want the 40 of the identified session", out, in)
+	}
+}
+
 // crush resolves the project root, so a worktree under the project reads the
 // project's database rather than reporting nothing.
 func TestCrushSourceFindsTheProjectDatabase(t *testing.T) {

@@ -87,14 +87,6 @@ func (m *memRecorder) wait(n int, budget time.Duration) bool {
 	}
 }
 
-// snapshot returns a copy of the recorded events, for a test that reads the
-// slice without having waited on a signal.
-func (m *memRecorder) snapshot() []core.AgentEvent {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return append([]core.AgentEvent(nil), m.evs...)
-}
-
 // post sends body and returns the status code, draining the response so
 // keep-alive connections are reusable.
 func post(t *testing.T, url, body string) int {
