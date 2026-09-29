@@ -33,7 +33,11 @@ alongside them would be a layer importing sideways into itself.
   `internal/core` for the string helpers and the cadence types; a consumer
   outside the module never writes an `internal/` import path, since
   `agentusage` re-exports the core types it needs (`Pacer`, `Ticker`,
-  `VirtualPacer`) as aliases under its own names.
+  `VirtualPacer`) as aliases under its own names. An alias is the only spelling
+  that reaches the surface: `internal/repogate/public_test.go` fails the build
+  when an exported declaration names an `internal/` type in a signature, a
+  struct field or a variable's type, and holds the list of published packages
+  to the one the Makefile's `PUBLIC_PKGS` names.
 - `cmd/toktop`: flag parsing, validation and warnings (`flags.go`,
   `validate.go`), the startup config record and its two renderings (`config.go`),
   endpoint and target wiring (`attach.go`, `endpoints.go`), the

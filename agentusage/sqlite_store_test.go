@@ -15,11 +15,16 @@ import (
 	"time"
 )
 
-// resetOpenStores empties the shared handle table between tests, closing every
+// resetOpenStores empties the shared handle table around a test, closing every
 // handle in it: a test that leaves one open holds a file descriptor and a lock
-// on a database a later test writes to. It empties the table now and again at
-// the end of the test, because the table is process-global and a watcher test
-// that ran earlier leaves its polled store cached for every test that follows.
+// on a database a later test writes to.
+//
+// The table is cleared on the way in as well as on the way out. The table is
+// package state, so a test that opens a handle without calling this leaves it
+// for whichever test runs next, and a test that asserts the table is empty then
+// fails on a handle it never opened. Which test that is depends on the shuffle
+// seed, so the failure arrives and goes with the seed and names a table no one
+// in that test wrote to.
 func resetOpenStores(t *testing.T) {
 	t.Helper()
 	emptyOpenStores()
