@@ -140,9 +140,14 @@ last and a subject before it: `internal/procs/procs_linux_root.go` is the
 root-only half of the linux walk, `internal/procs/procs_tooling.go` the half
 darwin and windows share, and `internal/sysmon/sysmon_utsfield.go` the
 `linux || darwin` field reader. The same shape covers build tags that are not
-platforms at all: `agentusage/source_off.go` and `agentusage/crush_sqlite.go`
-are the halves of the `sqlite` tag, and `agentusage/opencode_sqlite.go` is the
-third, the half that reads opencode's machine-wide store.
+platforms at all: the `sqlite` tag splits the two source hooks `agentusage`
+decides an agent is readable through.
+`agentusage/source_off.go` (`!sqlite`) stubs both of them, `builtinSource` and
+`setOpenCodeDB`; `agentusage/crush_sqlite.go` (`sqlite`) is the first reading
+crush's database; and `agentusage/opencode_sqlite.go` (`sqlite`) is the second,
+the half that reads opencode's machine-wide store.
+`agentusage/sqlite.go` carries the `sqlite` half of the runtime source registry
+those two register into.
 
 `internal/sysmon` is the one place that goes further: `sysmon_darwin_host.go`
 and `sysmon_windows_host.go` pair a platform with its host-reading half,
