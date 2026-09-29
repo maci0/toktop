@@ -8,7 +8,6 @@ package provider
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"maps"
@@ -66,21 +65,6 @@ type Provider struct {
 
 var httpClient = &http.Client{Timeout: PollTimeout, CheckRedirect: bearer.CheckRedirect}
 
-func httpStatus(url string, resp *http.Response) error {
-	b, rerr := io.ReadAll(io.LimitReader(resp.Body, 4*core.SnippetCap))
-	msg := fmt.Sprintf("%s: http %s", url, core.HTTPStatus(resp.Status))
-	if s := core.Snippet(b); s != "" {
-		msg += ": " + s
-	}
-	if rerr != nil {
-		// A body that stopped partway is a fragment, not what the engine
-		// said. The cause is wrapped, not spelled into the text, so a
-		// caller can still tell a truncated transfer from a bad payload.
-		return fmt.Errorf("%s: %w", msg, rerr)
-	}
-	return errors.New(msg)
-}
-
 // get issues one authorized GET and returns a 200 response whose body the
 // caller must close. A redirect error carries the last response along, so
 // that body is closed here rather than leaked to the caller's error path.
@@ -98,39 +82,21 @@ func get(ctx context.Context, c *http.Client, url string) (*http.Response, error
 		return nil, fmt.Errorf("%s: %w", url, err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		err := httpStatus(url, resp)
-		// httpStatus stops after the snippet it puts in the message, so the
+		err := bearer.StatusError(url, resp)
+		// StatusError stops after the snippet it puts in the message, so the
 		// body is left unread. Closing it there returns the connection to
 		// TIME_WAIT rather than the idle pool, and the paths that hit this
 		// most are the ones an engine in trouble takes: every refused or
-		// failing poll paid a fresh dial, forever. drainAndClose finishes
-		// the transfer so the next request reuses the socket.
-		drainAndClose(resp.Body)
+		// failing poll paid a fresh dial, forever. The drain finishes the
+		// transfer so the next request reuses the socket. Discovery does the
+		// same on a dozen requests per candidate port: every decodeScanJSON
+		// caller abandons the body at the end of the JSON value, and the body
+		// of a /metrics exposition is read whole, so without the drain every
+		// probe pays a fresh dial and leaves a socket in TIME_WAIT.
+		bearer.DrainAndClose(resp.Body)
 		return nil, err
 	}
 	return resp, nil
-}
-
-// drainCap bounds the tail drainAndClose and getJSON throw away so a
-// connection can be reused. The bytes go to io.Discard, so this bounds time
-// rather than memory:
-// an endpoint streaming an endless body would otherwise hold the call on a read
-// that answers nothing. Past the cap the connection is simply not reused, which
-// is what closing an undrained body did anyway.
-const drainCap = 64 << 10
-
-// drainAndClose reads out the tail of a body the caller stopped reading and
-// then closes it. net/http only returns a connection to the idle pool when its
-// body is closed at EOF (the reason getJSON drains), so a decode that stops at
-// the end of the JSON value has to finish the transfer here.
-//
-// Discovery does exactly that on a dozen requests per candidate port: every
-// decodeScanJSON caller abandons the body at the end of the JSON value, and the
-// body of a /metrics exposition is read whole, so without the drain every probe
-// pays a fresh dial and leaves a socket in TIME_WAIT.
-func drainAndClose(body io.ReadCloser) {
-	_, _ = io.Copy(io.Discard, io.LimitReader(body, drainCap))
-	body.Close()
 }
 
 func getJSON(ctx context.Context, url string, out any) error {
@@ -146,11 +112,12 @@ func getJSON(ctx context.Context, url string, out any) error {
 	// Decode stops at the end of the JSON value, not at EOF, and net/http
 	// only returns a connection to the idle pool when the body is closed at
 	// EOF. Without the drain every poll pays a fresh dial and leaves a
-	// socket in TIME_WAIT. Bounded by the same cap as the discovery drain, and
-	// for the same reason: this copy runs on the poll path, so an engine that
-	// answers and then keeps the body open would otherwise cost every poll
-	// the full client timeout instead of the cap.
-	_, _ = io.Copy(io.Discard, io.LimitReader(io.MultiReader(dec.Buffered(), resp.Body), drainCap))
+	// socket in TIME_WAIT. The decoder's own buffer is drained with the body,
+	// so the cap has to cover both. Bounded by the same cap as the discovery
+	// drain, and for the same reason: this copy runs on the poll path, so an
+	// engine that answers and then keeps the body open would otherwise cost
+	// every poll the full client timeout instead of the cap.
+	_, _ = io.Copy(io.Discard, io.LimitReader(io.MultiReader(dec.Buffered(), resp.Body), bearer.DrainCap))
 	return nil
 }
 

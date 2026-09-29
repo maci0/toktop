@@ -298,7 +298,7 @@ func sglangInfoOK(ctx context.Context, base string) bool {
 	if err != nil {
 		return false
 	}
-	defer drainAndClose(resp.Body)
+	defer bearer.DrainAndClose(resp.Body)
 	var body struct {
 		ModelPath string `json:"model_path"`
 	}
@@ -333,7 +333,7 @@ func isOmniRoute(ctx context.Context, base string) bool {
 		}
 		return false
 	}
-	drainAndClose(resp.Body)
+	bearer.DrainAndClose(resp.Body)
 	return resp.Header.Get("X-OmniRoute-Route-Class") != ""
 }
 
@@ -342,7 +342,7 @@ func isOllama(ctx context.Context, base string) bool {
 	if err != nil {
 		return false
 	}
-	defer drainAndClose(resp.Body)
+	defer bearer.DrainAndClose(resp.Body)
 	var body struct {
 		Models []json.RawMessage `json:"models"`
 	}
@@ -360,7 +360,7 @@ func getOpenAIModels(ctx context.Context, base string) *modelsResp {
 	if err != nil {
 		return nil
 	}
-	defer drainAndClose(resp.Body)
+	defer bearer.DrainAndClose(resp.Body)
 	var mr modelsResp
 	// A well-formed empty listing is an answer, not a silence: an engine
 	// serving no model yet still speaks the API, and the switch in identify
@@ -378,6 +378,6 @@ func healthOK(ctx context.Context, base, path string) bool {
 	if err != nil {
 		return false
 	}
-	drainAndClose(resp.Body)
+	bearer.DrainAndClose(resp.Body)
 	return true
 }
