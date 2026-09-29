@@ -440,6 +440,18 @@ func TestPatternMatch(t *testing.T) {
 		{"host?", "host12", false},
 		{"exact", "exact", true},
 		{"a*b*c", "axxbyyc", true},
+		// path.Match would answer true for both of the first pair and false
+		// for the second: a block written for one machine must not answer
+		// for two, and a backslash in a host name is a literal byte.
+		{"box[12]", "box1", false},
+		{"box[12]", "box2", false},
+		{"box[12]", "box[12]", true},
+		{`web\1`, "web1", false},
+		{`web\1`, `web\1`, true},
+		{"*", "", true},
+		{"a*b", "b", false},
+		{"?a", "a", false},
+		{"*a*b*c*", "xxaxxbxxcxx", true},
 	}
 	for _, c := range cases {
 		if got := patternMatch(c.pat, c.s); got != c.want {

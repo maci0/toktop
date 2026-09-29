@@ -335,6 +335,16 @@ func TestTrustedReleaseURL(t *testing.T) {
 		"https://github.com.evil.example/x",
 		"javascript:alert(1)",
 		"https://user:pass@github.com/x",
+		// The release page lands in the operator's shell through
+		// url=$(toktop update --check), so a byte the shell reads as
+		// anything but part of the word is refused even on a trusted host.
+		"https://github.com/o/r/releases/tag/v1 x$(id)",
+		"https://github.com/o/r/releases/tag/v1;id",
+		"https://github.com/o/r/releases/tag/v1`id`",
+		"https://github.com/o/r/releases/tag/v1'x'",
+		"https://github.com/o/r/releases/tag/v1\"x\"",
+		"https://github.com/o/r/releases/tag/v1\\x",
+		"https://github.com/o/r/releases/tag/v1é",
 	} {
 		if TrustedReleaseURL(bad) {
 			t.Errorf("TrustedReleaseURL(%q) = true, want false", bad)

@@ -187,12 +187,44 @@ func githubDownloadHost(host string) bool {
 // release download and redirect hop is held to it, and so is the release page
 // `toktop update --check` prints for a shell expansion: that page is never
 // fetched, but it is release data landing in the caller's shell.
+//
+// A URL that survives that second job carries no byte a shell would read as
+// anything but itself. url.Parse only refuses C0 and DEL, and the space it
+// admits ends the word: a release page spelled
+// "https://github.com/o/r/releases/tag/v1 x$(id)" parses, names a trusted
+// host, and reaches the operator as two words with a command substitution in
+// the second. Every character a release URL is built from is kept, and
+// anything else is refused; none of the refused bytes appear in a real
+// GitHub URL, so nothing legitimate stops working.
 func TrustedReleaseURL(raw string) bool {
+	if raw == "" || strings.ContainsFunc(raw, func(r rune) bool {
+		return !isReleaseURLByte(byte(r)) && r > 0x7f
+	}) {
+		return false
+	}
 	u, err := url.Parse(raw)
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 		return false
 	}
 	return githubDownloadHost(u.Hostname())
+}
+
+// isReleaseURLByte reports whether a byte can appear in a release URL that is
+// safe to paste into a shell unquoted: the unreserved set of RFC 3986 plus
+// the path, query and fragment punctuation a GitHub URL uses, and the percent
+// sign its escapes are built from. Every other byte is refused, which covers
+// the space, both quote characters, the backtick, the dollar sign, the
+// history-expansion bang and every shell metacharacter. A GitHub release URL
+// is none of them, so nothing real is turned away.
+func isReleaseURLByte(c byte) bool {
+	if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' {
+		return true
+	}
+	switch c {
+	case '-', '.', '_', '~', ':', '/', '?', '#', '[', ']', '@', '%':
+		return true
+	}
+	return false
 }
 
 // maxReleaseJSON bounds the release metadata body. It is a few hundred bytes
@@ -380,10 +412,16 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 		// Already this release, so nothing is downloaded or installed. The
 		// leftover .old a killed or locked install leaves is still cleared
 		// here, because install is the only other place that removes it and
-		// this path never reaches install. Best effort: the .old holds a
-		// running image on the platform that has one, so a refusal to delete
-		// it is a condition the next install retries, not a failed update.
-		_ = os.Remove(self + displacedSuffix)
+		// this path never reaches install. Only on the platform whose install
+		// displaces: the file is written by installDisplacing, which only
+		// Windows reaches, so clearing it everywhere else removes a path
+		// beside the binary that toktop never created and never owned. Best
+		// effort: the .old holds a running image there, so a refusal to
+		// delete it is a condition the next install retries, not a failed
+		// update.
+		if runtime.GOOS == "windows" {
+			_ = os.Remove(self + displacedSuffix)
+		}
 		return self, nil
 	}
 

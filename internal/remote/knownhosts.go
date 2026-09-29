@@ -348,7 +348,18 @@ func withRecoveryHint(err error, path string) error {
 		return err
 	}
 	return fmt.Errorf("%w; %s still parses, so the pins this file held can be restored with: cp %s %s",
-		err, copy, copy, path)
+		err, copy, shellWord(copy), shellWord(path))
+}
+
+// shellWord renders one path as a single POSIX shell word. Both paths here
+// come from $XDG_CONFIG_HOME or $HOME, so a home directory named
+// "/home/a b" reached the operator as a command that copied toktop.old to
+// /home/a, and a directory whose name carries a quote or a $() reached it as
+// something to paste. The hint is a command the operator is meant to run, so
+// it has to survive the shell it is printed into: single quotes cover every
+// byte but the single quote itself, which closes and reopens the word.
+func shellWord(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // freshestParsedCopy returns the copy beside the store that a read would

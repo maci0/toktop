@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"os"
-	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -237,7 +236,7 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 			// The pattern is folded the same way the name is. Folding only
 			// the name left an accented Host pattern the macOS editor wrote
 			// decomposed ("e" plus U+0301) compared against a composed name,
-			// and path.Match compares runes, so the block never matched: its
+			// and the matcher compares runes, so the block never matched: its
 			// HostName, User, Port and IdentityFile were all skipped and the
 			// dial went to the default port with the default key.
 			want := foldHost(name)
@@ -382,12 +381,66 @@ func validTargetField(s string) error {
 	return nil
 }
 
-// patternMatch implements ssh_config glob matching ('*' and '?') through
-// path.Match, whose character-class and escape extensions real host patterns
-// do not use.
+// patternMatch matches an ssh_config Host pattern against a host name. The
+// pattern language is exactly '*' (any run of characters) and '?' (one
+// character), matched against the whole name, and nothing else.
+//
+// path.Match is not that language, and the difference decides which host
+// toktop dials. Its '[' opens a character class and its '\' escapes, so
+// `Host box[12]` would match box1 and box2, and `Host web\1` would match
+// web1: a block the operator wrote for one machine would answer for two
+// others, and the block's HostName, User, Port and IdentityFile would be
+// applied to a host ssh itself would not have picked. The wrong host's
+// IdentityFile is offered to it and the wrong host's key is pinned on
+// first use, both silently.
+//
+// Every other byte in a pattern is a literal, including a '[', a '\' and
+// a '*' that is not a wildcard, so only the two wildcards below are
+// special.
 func patternMatch(pat, s string) bool {
-	matched, err := path.Match(pat, s)
-	return err == nil && matched
+	// Iterative backtracking: two wildcards, so the state is a slice of
+	// (pattern index, name index) pairs and the memory is bounded by the
+	// name's length.
+	type cursor struct{ pat, name int }
+	frontier := []cursor{{0, 0}}
+	backing := []cursor(nil)
+	for len(frontier) > 0 {
+		backing = backing[:0]
+		for _, c := range frontier {
+			for {
+				if c.pat == len(pat) {
+					if c.name == len(s) {
+						return true
+					}
+					break
+				}
+				switch pat[c.pat] {
+				case '*':
+					// The wildcard can stand for the empty run, or for one
+					// more character. Both are queued: the empty run moves
+					// the pattern on without consuming the name, so '*name'
+					// still matches name, and the consuming arm lets 'a*b'
+					// match ab.
+					backing = append(backing, cursor{c.pat + 1, c.name})
+					c.pat++
+				case '?':
+					if c.name == len(s) {
+						break
+					}
+					c.pat++
+					c.name++
+				default:
+					if c.name == len(s) || s[c.name] != pat[c.pat] {
+						break
+					}
+					c.pat++
+					c.name++
+				}
+			}
+		}
+		frontier, backing = backing, frontier
+	}
+	return false
 }
 
 // ResolveKeyFile expands a leading tilde in file and checks that the result
