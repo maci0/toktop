@@ -59,22 +59,40 @@ const maxEventSkew = 2 * time.Minute
 // says and ignores the other retries faster than the slots free.
 const retryAfterSeconds = 1
 
+// bodyBounds returns the per-read idle window, the whole-POST lifetime and
+// the response-write bound, each falling back to its default. The fields are
+// the server's own (see Server), read once per request, so a request path
+// never sees a value another goroutine is writing and a test that wants other
+// bounds builds a different server. A Server built as a literal rather than
+// through newServer carries none of them, and a zero lifetime would put the
+// first read's deadline in the past and answer every POST with a 408.
+func (s *Server) bodyBounds() (idle, life, write time.Duration) {
+	idle, life, write = s.bodyIdleTimeout, s.maxEventLifetime, s.responseWriteTimeout
+	if idle <= 0 {
+		idle = defaultBodyIdle
+	}
+	if life <= 0 {
+		life = defaultMaxEventLife
+	}
+	if write <= 0 {
+		write = defaultResponseWrite
+	}
+	return
+}
+
 // progressBody arms the read deadline before every read: no progress within
 // idle, or past the absolute end, surfaces as an i/o timeout from Decode.
-// Deadline setting is best effort; on ResponseWriters without support the body
-// degrades to volume-only capping.
-//
-// idle and life are this server's bodyIdleTimeout and maxEventLifetime,
-// carried here rather than read from a package var, so the deadlines a
-// request is held to and the bound its 408 names are the same two values the
-// server was built with.
+// The bounds travel with the body, read from the server that is handling the
+// request rather than from package state every request shares, so a 408 names
+// the ones that applied here. Deadline setting is best effort; on
+// ResponseWriters without support the body degrades to volume-only capping.
 type progressBody struct {
 	io.ReadCloser
 	rc    *http.ResponseController
-	idle  time.Duration
-	life  time.Duration
-	until time.Time
-	last  time.Time // the deadline the read that failed was armed with
+	idle  time.Duration // no progress for this long reaps the body
+	life  time.Duration // the whole POST's lifetime, named by the 408
+	until time.Time     // the absolute end, until the lifetime
+	last  time.Time     // the deadline the read that failed was armed with
 	// armed records whether a deadline of ours was ever accepted. It is false
 	// on a ResponseWriter that does not support them, and then the i/o
 	// timeout that reaches the decoder is the server's own, not one of the
@@ -165,6 +183,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// would never come back. Same reason handleHealth binds it, to read len and
 	// cap of one channel.
 	slots := eventSlots
+	idle, life, write := s.bodyBounds()
 	reqID := s.requestID(r)
 	state, _ := r.Context().Value(ctxRequest{}).(*requestState)
 	// keyAttrs is the request's replay key on the audit line, hashed into the
@@ -204,7 +223,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// the way progressBody.armed records whether a read deadline was accepted.
 	var writeArm []any
 	armWrite := func() {
-		if err := rc.SetWriteDeadline(time.Now().Add(s.responseWriteTimeout)); err != nil {
+		if err := rc.SetWriteDeadline(time.Now().Add(write)); err != nil {
 			writeArm = []any{"write_deadline_unarmed", logcfg.RedactedField(err.Error(), 256)}
 		} else {
 			writeArm = nil
@@ -233,8 +252,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			append([]any{"in_flight", len(slots), "slot_cap", cap(slots)}, writeArm...)...)
 		return
 	}
-	until := time.Now().Add(s.maxEventLifetime)
-	progress := &progressBody{ReadCloser: r.Body, rc: rc, idle: s.bodyIdleTimeout, life: s.maxEventLifetime, until: until}
+	until := time.Now().Add(life)
+	progress := &progressBody{ReadCloser: r.Body, rc: rc, idle: idle, life: life, until: until}
 	_ = progress.arm(until) // covers reads before the first progress extension
 	r.Body = http.MaxBytesReader(w, progress, maxEventBody)
 	br := bufio.NewReader(r.Body)

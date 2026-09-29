@@ -28,12 +28,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   per-server counter instead of OS entropy. The minted id lands in the
   answer's header and on the audit line, so the same request sequence against
   a fresh server now produces the same transcript twice, which is what lets a
-  run be diffed against a baseline.
+  run be diffed against a baseline. Ids are still distinct per attempt and
+  still read as correlation only.
 - The POST body bounds are the per-server values the server was built with.
   The handler read package-level durations while the server carried its own
   fields, so a server built with tighter bounds still held a stalled body for
   the full minute idle window and the full 10 minute stream lifetime, and the
-  `408` it finally wrote named those bounds rather than the ones in force.
+  `408` it finally wrote named those bounds rather than the ones in force. A
+  `Server` built as a literal rather than through `newServer` carries none of
+  them, and a zero lifetime would put the first read's deadline in the past
+  and answer every POST with a `408`, so each bound falls back to its
+  default.
 - A degraded agent feed names its reason on a frame that still has feed rows.
   The `✗ feed error` badge said the condition and nothing else, and the reason
   that says which subsystem to fix exists only on stderr, under the alternate

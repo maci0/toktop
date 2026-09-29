@@ -63,7 +63,6 @@ type Server struct {
 // to that end, so slow-but-alive NDJSON streams keep working while silent ones
 // are reaped. Tests shrink these per server, not per process.
 const (
-	defaultIdleTimeout   = 2 * time.Minute
 	defaultMaxEventLife  = 10 * time.Minute
 	defaultBodyIdle      = time.Minute
 	defaultResponseWrite = 30 * time.Second

@@ -185,6 +185,9 @@ func (s *Server) incomingRequestID(r *http.Request) string {
 	return fmt.Sprintf("toktop-%012d", s.reqSeq.Add(1))
 }
 
+// requestID is the id this request is answered and logged under: the one the
+// wrap chain stamped into its context, or one minted now for a handler
+// driven outside that chain.
 func (s *Server) requestID(r *http.Request) string {
 	if state, ok := r.Context().Value(ctxRequest{}).(*requestState); ok && state.id != "" {
 		return state.id
