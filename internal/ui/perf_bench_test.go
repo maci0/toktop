@@ -75,13 +75,17 @@ func perfSnap() core.Snapshot {
 var perfFrameSizes = [][2]int{{120, 40}, {200, 50}}
 
 // allocBudget is the garbage one full frame at perfSnap's scale may create.
-// Measured at 2601 (120x40) and 3072 (200x50) once the frame stopped handing
-// measurement back to lipgloss (see below); the budget leaves ~8% headroom so a
-// benign allocation shift does not fail the gate but a regression that
-// reinstates per-cell parse/format churn does.
+// Measured at 1344 (120x40) and 1364 (200x50) once the gauge bars, the sys
+// strip and the rate labels stopped handing a foreground color to
+// lipgloss.Style.Render per call (Style.Render resolves the color against the
+// active termenv profile every time, which allocated on every frame) and
+// compressSeries kept its per-engine bucket tables flat instead of
+// materializing a row per occupied bucket; the budget leaves ~8% headroom so
+// a benign allocation shift does not fail the gate but a regression that
+// reinstates per-cell, per-bucket or per-render churn does.
 var allocBudget = map[[2]int]float64{
-	{120, 40}: 2850,
-	{200, 50}: 3350,
+	{120, 40}: 1450,
+	{200, 50}: 1500,
 }
 
 // TestStaticFrameAllocBudget is the deterministic gate for the render path.

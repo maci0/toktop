@@ -134,6 +134,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   consumer had to read the implementation to learn it. `Run`'s comment also
   spells out that it blocks the calling goroutine until its context is done,
   and reads the tail of the run on the way out.
+- A dashboard frame allocates about a fifth fewer objects, and the opencode
+  usage query is no longer rebuilt on every poll. `lipgloss.Style.Render`
+  resolves a foreground color against the active terminal profile on each
+  call, and the gauge bars, the SYS strip and the rate labels asked it for the
+  same handful of palette colors on every frame; each of those now renders the
+  color's escape run once and substitutes its own text into it, the way the
+  braille chart already did. The compressed timescale kept one small slice per
+  occupied bucket where a flat table answers the same thing, and the opencode
+  source rebuilt its whole SQL statement (five `Sprintf` calls) per poll of per
+  watcher, where the statement is one of a handful for the life of the
+  process. Rendered bytes are unchanged.
 - Two files in this tree no gate read are read by one. The bash completion
   script `toktop completion bash` prints carried a `# shellcheck disable` for a
   rule nothing ever ran, which reads as a check that passed; the script is now

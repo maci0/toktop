@@ -123,6 +123,44 @@ func (m *colorMemo[T]) load(key string, build func() T) T {
 // being split and re-parsed a few hundred times a frame.
 var hexRGB colorMemo[rgb]
 
+// fgRuns memoizes the escape runs a foreground color resolves to. A
+// Style.Render resolves the color against the active termenv profile on every
+// call, and that resolution allocates: the gauge bars, the sys strip and the
+// rate labels between them were a ninth of every object a frame makes, and
+// all of them ask for the same handful of palette colors on every frame. Keyed
+// by the color's own spelling, so a palette entry's run is rendered once.
+//
+// One memo per base style, because a Style.Render reads every property it
+// carries: a bold foreground is a different render from a plain one, and
+// sharing a memo between them would hand back whichever was built first.
+var (
+	plainFore colorMemo[[2]string]
+	boldFore  colorMemo[[2]string]
+	valueFore colorMemo[[2]string]
+)
+
+// fgRun is a plain foreground: the gauge bars and the swap meter.
+func fgRun(c lipgloss.Color) [2]string {
+	return plainFore.load(string(c), func() [2]string {
+		return styleSides(lipgloss.NewStyle().Foreground(c))
+	})
+}
+
+// boldFgRun is the bold foreground the temperature readings are drawn in.
+func boldFgRun(c lipgloss.Color) [2]string {
+	return boldFore.load(string(c), func() [2]string {
+		return styleSides(lipgloss.NewStyle().Bold(true).Foreground(c))
+	})
+}
+
+// valueFgRun is the value style's own foreground, which the header and the
+// per-agent rates take a heat color on.
+func valueFgRun(c lipgloss.Color) [2]string {
+	return valueFore.load(string(c), func() [2]string {
+		return styleSides(styleValue.Foreground(c))
+	})
+}
+
 // fadeClamped blends c toward black by factor f, but never past the darkest
 // point that still meets min contrast against the dashboard background, so
 // the age fade cannot melt data past legibility. Colors that cannot reach
@@ -254,8 +292,8 @@ func GaugeBar(pct float64, w int, heat func(float64) lipgloss.Color) string {
 	}
 	pct = clamp01(pct/100) * 100
 	filled := min(int(pct/100*float64(w)), w)
-	st := lipgloss.NewStyle().Foreground(heat(pct))
-	bar := st.Render(strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", w-filled))
+	sides := fgRun(heat(pct))
+	bar := wrap(sides, strings.Repeat("━", filled)) + styleDim.Render(strings.Repeat("─", w-filled))
 	return bar + " " + fmt.Sprintf("%.0f%%", pct)
 }
 

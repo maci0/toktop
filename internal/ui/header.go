@@ -45,7 +45,7 @@ func (m Model) renderHeader() string {
 		}
 	}
 
-	outV := styleValue.Foreground(heatColor(norm(m.aggLast, m.aggMax))).Render("▲ " + fmtRate(m.aggLast))
+	outV := wrap(valueFgRun(heatColor(norm(m.aggLast, m.aggMax))), "▲ "+fmtRate(m.aggLast))
 	inV := styleInfo.Render("▼ " + fmtRate(m.aggIn()))
 	segs = append(segs,
 		headerSeg{text: outV + " " + dim("tok/s out"), shed: 10},

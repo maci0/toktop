@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -155,7 +156,44 @@ func usageQueryFor(n int) string {
 // statement built folded against a flat argument list, or the reverse, binds a
 // directory where the timestamp belongs and reads another directory's usage as
 // this one's.
+//
+// Memoized on (n, fold): the two are a directory-spelling count and a bool, so
+// the statement is one of a handful for the life of the process, while the
+// un-memoized form spent five Sprintf calls building it on every poll of
+// every opencode watcher. The cache is bounded by n, which is the number of
+// spellings dirSpellings produced (one to four), and a count above the bound
+// is built and discarded rather than retained.
 func usageQuery(n int, fold bool) string {
+	if n < 0 || n > maxCachedQuerySpellings {
+		return buildUsageQuery(n, fold)
+	}
+	key := queryKey{n: n, fold: fold}
+	queryCacheMu.Lock()
+	defer queryCacheMu.Unlock()
+	if q, ok := queryCache[key]; ok {
+		return q
+	}
+	q := buildUsageQuery(n, fold)
+	queryCache[key] = q
+	return q
+}
+
+// maxCachedQuerySpellings bounds the memo: dirSpellings yields the resolved
+// spelling, the caller's own, and on macOS the other normalization forms of
+// each, so a real watcher never reaches past four.
+const maxCachedQuerySpellings = 8
+
+type queryKey struct {
+	n    int
+	fold bool
+}
+
+var (
+	queryCacheMu sync.Mutex
+	queryCache   = map[queryKey]string{}
+)
+
+func buildUsageQuery(n int, fold bool) string {
 	return fmt.Sprintf(usageQueryFormat,
 		jsonToken("$.tokens.output"),
 		jsonToken("$.tokens.reasoning"),

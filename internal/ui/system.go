@@ -47,9 +47,8 @@ func (m Model) renderSystem() string {
 		if sy.SwapTotal > 0 {
 			swPct := float64(sy.SwapUsed) / float64(sy.SwapTotal) * 100
 			mb := memBand(swPct)
-			st := lipgloss.NewStyle().Foreground(mb.color())
 			vitals = append(vitals, dim("swp ")+
-				st.Render(mb.markPrefix()+fmt.Sprintf("%.0f%%", swPct)))
+				wrap(fgRun(mb.color()), mb.markPrefix()+fmt.Sprintf("%.0f%%", swPct)))
 		}
 		if sy.Load1 > 0 || sy.Load5 > 0 {
 			vitals = append(vitals, dim("ld ")+styleValue.Render(fmt.Sprintf("%.2f", sy.Load1)))
@@ -74,8 +73,7 @@ func (m Model) renderSystem() string {
 		label := shorten(core.SanitizeText(cpuTempLabel(t.Label)), tempLabelWidth)
 		tb := tempBand(float64(t.MilliC) / 1000)
 		ident = append(ident, dim(label+" ")+
-			lipgloss.NewStyle().Bold(true).Foreground(tb.color()).
-				Render(tb.markPrefix()+fmtTempC(t.MilliC)))
+			wrap(boldFgRun(tb.color()), tb.markPrefix()+fmtTempC(t.MilliC)))
 		shownTemps++
 	}
 	switch {
@@ -217,8 +215,7 @@ func gpuSegment(g core.GPUDevice) string {
 	b.WriteString(dim(shortVendor(g.Vendor) + strconv.Itoa(g.Index) + " "))
 	if g.MilliC > 0 {
 		tb := tempBand(float64(g.MilliC) / 1000)
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(tb.color()).
-			Render(tb.markPrefix()+fmtTempC(g.MilliC)) + " ")
+		b.WriteString(wrap(boldFgRun(tb.color()), tb.markPrefix()+fmtTempC(g.MilliC)) + " ")
 	}
 	if g.UtilPct > 0 {
 		b.WriteString(styleInfo.Render(fmt.Sprintf("%.0f%%", g.UtilPct)) + " ")

@@ -79,7 +79,7 @@ func (m Model) throughputTitle(w int, peak float64) string {
 	if len(m.snap.Providers) == 0 {
 		kind = dim("  output")
 	}
-	title := "THROUGHPUT " + styleValue.Foreground(heatColor(norm(m.aggLast, m.aggMax))).Render("▲ "+fmtRate(m.aggLast)+" tok/s") + kind
+	title := "THROUGHPUT " + wrap(valueFgRun(heatColor(norm(m.aggLast, m.aggMax))), "▲ "+fmtRate(m.aggLast)+" tok/s") + kind
 	// Advertise the toggle in both modes: the hint only showing while
 	// compressed hid how to get back to the uniform timescale. Brackets mark
 	// the key so "compressed [t]" reads as mode plus switch rather than one
@@ -227,15 +227,24 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 		return nil, nil
 	}
 	end := tv[len(tv)-1].at
-	spans := make([]time.Duration, w)
+	// cum[j] is the age of bucket j's newest edge, cum[0] = 0. It is built
+	// in one pass rather than through a separate spans slice: the per-column
+	// span has no other reader, and materializing it cost a second w-sized
+	// allocation every frame.
+	//
+	// The linear scan this replaces kept the first bucket with offset >= e[j+1],
+	// i.e. the smallest j with cum[j+1] >= total-offset; the binary search
+	// below tests exactly that predicate, so bucketing is unchanged while
+	// the per-sample walk drops from O(w) to O(log w).
+	cum := make([]time.Duration, w+1)
 	total := time.Duration(0)
 	maxLevel := spanCap(w)
 	for j := range w { // j=0 oldest … w-1 newest
 		level := min((w-1-j)/block,
 			// wider shifts would overflow the span sums
 			maxLevel)
-		spans[j] = time.Second << level
-		total += spans[j]
+		total += time.Second << level
+		cum[j+1] = total
 	}
 
 	bounds := map[int]bool{}
@@ -249,19 +258,16 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 	for _, sample := range tv {
 		nEngines = max(nEngines, sample.engine+1)
 	}
-	// cum[j] is the age of bucket j's newest edge, cum[0] = 0. The linear
-	// scan this replaces kept the first bucket with offset >= e[j+1],
-	// i.e. the smallest j with cum[j+1] >= total-offset; the binary search
-	// below tests exactly that predicate, so bucketing is unchanged while
-	// the per-sample walk drops from O(w) to O(log w).
-	cum := make([]time.Duration, w+1)
-	for j := range w {
-		cum[j+1] = cum[j] + spans[j]
-	}
-	// Per-engine bucket sums and counts; rows materialize only for buckets
-	// samples actually land in.
-	sums := make([][]float64, w)
-	cnts := make([][]int, w)
+	// Per-engine bucket sums and counts, one flat row per table indexed
+	// j*nEngines+e. A row of slices materialized each occupied bucket
+	// instead, which is two allocations per bucket with samples: at 200
+	// columns that was several hundred allocations a frame from this one
+	// function, a quarter of everything the frame allocated. The table is
+	// w*nEngines wide, and nEngines is the engine count plus one for the
+	// agent feed, so the flat form is the smaller of the two by the width
+	// of a chart rather than the depth of a store.
+	sums := make([]float64, w*nEngines)
+	cnts := make([]int, w*nEngines)
 	for _, sample := range tv {
 		offset := end.Sub(sample.at)
 		if offset < 0 || offset >= total {
@@ -271,18 +277,16 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 		// x is in (0, total] and cum[w] == total, so the predicate holds at
 		// j = w-1 and Search cannot return w.
 		j := sort.Search(w, func(j int) bool { return cum[j+1] >= x })
-		if sums[j] == nil {
-			sums[j] = make([]float64, nEngines)
-			cnts[j] = make([]int, nEngines)
-		}
-		sums[j][sample.engine] += sample.rate
-		cnts[j][sample.engine]++
+		at := j*nEngines + sample.engine
+		sums[at] += sample.rate
+		cnts[at]++
 	}
 	grid := make([]float64, w)
 	for j := range grid {
-		for e, cnt := range cnts[j] { // nil row for empty buckets: loop body skipped
-			if cnt > 0 {
-				grid[j] += sums[j][e] / float64(cnt)
+		row := j * nEngines
+		for e := range nEngines {
+			if cnt := cnts[row+e]; cnt > 0 {
+				grid[j] += sums[row+e] / float64(cnt)
 			}
 		}
 	}

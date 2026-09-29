@@ -135,8 +135,8 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 		case r.ViaEngine != "":
 			rate = dim("via " + shorten(core.SingleLine(r.ViaEngine), 18))
 		case r.TokPS > 0:
-			rate = styleValue.Foreground(heatColor(clamp01(r.TokPS / 60))).
-				Render("▲ " + fmtRate(r.TokPS) + " tok/s")
+			rate = wrap(valueFgRun(heatColor(clamp01(r.TokPS/60))),
+				"▲ "+fmtRate(r.TokPS)+" tok/s")
 		}
 		tok := dim("▲" + fmtCount(r.Tokens))
 		if r.Prompt > 0 {
