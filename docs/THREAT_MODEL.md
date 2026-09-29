@@ -395,7 +395,17 @@ Every externally reachable input, with its code location:
     deployment whoever shipped it, so a deploy that reported success records
     `dist/site.deployed` and a rollback moves it to `dist/site.rolled-back`:
     a second rollback has nothing of this tree's to undo and exits 0 without
-    calling wrangler. The poll is a presence-and-binding check, not an
+    calling wrangler. The marker a deploy leaves behind holds a
+    `manifest` naming the commit, the `wrangler` and `bun` pins, and the
+    digests of `worker.js` and of the captures, so the version that reached
+    production is on record without reading the Cloudflare dashboard; a
+    rollback moves it with the directory. A deploy also refuses to run
+    while `site/` or `wrangler.jsonc` holds uncommitted changes
+    (`check-deploy-source`, `ALLOW_DIRTY=1` overrides), the rule
+    `check-release-source` already applies to a release, because an
+    uncommitted Worker or capture reaches the live site held by no commit and
+    a rollback undoes the upload rather than the edit. The poll is a
+    presence-and-binding check, not an
     identity check: `/health` answers 503 rather than `ok` while the worker's
     asset binding is unbound (site/worker.js, the `/health` branch inside
     `handle`), so a
@@ -515,14 +525,18 @@ Deployment surface:
   event name.
   Deployment is a local make target, not a CI job: `make site-deploy`
   takes `dist/site.lock`, runs `bunx wrangler@4.126.0 deploy` with ambient
-  Cloudflare credentials, records `dist/site.deployed`, polls
+  Cloudflare credentials, records `dist/site.deployed` and the manifest of
+  what it uploaded, polls
   `https://toktop.ai/health` 6 times at 10s,
   and points at `make site-rollback` on failure. It depends on `site-lint`,
-  `site-check`, and `check-wrangler-doc` (Makefile, the `site-deploy`
+  `site-check`, `check-wrangler-doc`, and `check-deploy-source` (Makefile,
+  the `site-deploy`
   prerequisite list; `check-wrangler-doc` fails the deploy when
   the WRANGLER pin in CONTRIBUTING.md and the one this document names have
-  drifted apart), so the same biome lint and
-  `bun test` the CI workflow runs gate a local deploy too; `site-rollback`
+  drifted apart; `check-deploy-source` fails it when the Worker or a capture
+  it uploads is in no commit), so the same biome lint and
+  `bun test` the CI workflow runs gate a local deploy too, and the bytes a
+  deploy uploads are ones a checkout can rebuild; `site-rollback`
   has no such dependency, deliberately, so a broken worker can still be
   undone. The lock, the poll and
   the failure exit are shared with `make site-rollback`, so a rollback

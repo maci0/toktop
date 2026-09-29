@@ -16,6 +16,19 @@ Deploy credentials come from the environment (`CLOUDFLARE_API_TOKEN`, or a
 `wrangler` login already on the machine); nothing about them is written to
 this repo.
 
+`make site-deploy` also refuses to run while `site/` or `wrangler.jsonc` holds
+an uncommitted change (`make check-deploy-source`), the rule a release already
+applies to the binaries. A rollback undoes an upload, not the edit behind it,
+so a Worker or a capture that is only on the operator's machine would come
+back on the next deploy and go to production held by no commit. Pass
+`ALLOW_DIRTY=1` to deploy anyway, and the deploy says so in the manifest
+below rather than passing it over. What a deploy uploaded is recorded in
+`dist/site.deployed/manifest`: the commit, the `wrangler` and `bun` pins, and
+the digests of `worker.js` and of the captures. A rollback moves that
+directory to `dist/site.rolled-back` with the manifest still in it, so the
+version that was undone is on record too. Both are under `dist/`, so
+`make clean` takes them.
+
 `make site-rollback` runs once. `wrangler rollback` with no version undoes
 whichever deployment is most recent, whoever shipped it, so running the undo
 twice rolls back a rollback and puts the version that broke back on the site.

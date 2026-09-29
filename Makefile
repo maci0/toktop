@@ -174,7 +174,9 @@ SITE_LOCK         := $(DIST)/site.lock
 # the second rollback finds nothing of this tree's to undo and says so.
 # Directories, like the lock: dist-clean deletes the top-level files a release
 # must not ship and leaves these alone, and `make clean` takes them with
-# dist/.
+# dist/. The one a deploy leaves behind holds a manifest of what it uploaded
+# (SITE_DEPLOYINFO), and a rollback moves it with the directory, so the
+# version that was undone is still on record.
 SITE_DEPLOYED     := $(DIST)/site.deployed
 SITE_ROLLED_BACK  := $(DIST)/site.rolled-back
 # -bindnow is the Go spelling of -Wl,-z,now: without it the linux ELF ships
@@ -735,7 +737,10 @@ site-fmt: require-bun ## rewrite the included files with the BIOME formatter, th
 # alike: two of these running at once would leave whichever upload reached the
 # platform last, and a rollback racing a deploy restores whichever version
 # the platform happened to serve. mkdir is the portable lock (flock is not on
-# macOS); it lives under dist/, so `make clean` releases a stale one.
+# macOS); it lives under dist/, and `make clean` refuses to run while the
+# directory is there, since a lock nobody holds is not a lock and a `rm -rf
+# dist` beside a running deploy would free one. A lock left by a dead process
+# is removed by hand, which is what the refusal says.
 #
 # $(SITE_GUARD) opens the recipe: one shell takes the lock, arms the trap that
 # releases it, and defines wait_for_site for the recipe to call once the
@@ -761,6 +766,29 @@ wait_for_site() { \
 	echo "$(SITE_HEALTH_URL) never answered ok" >&2; \
 	return 1; \
 };
+endef
+
+# What the deploy uploaded, written beside the marker that says one is waiting
+# to be undone. A release ships the same facts in buildinfo.txt; the site has
+# no artifact, so without this the only record of what is serving is a
+# timestamp in the Cloudflare dashboard. `dirty: true` is the ALLOW_DIRTY=1
+# case, recorded the way buildinfo records it rather than dropped: those bytes
+# came from a tree no commit holds, which is the fact an operator needs first.
+#
+# The captures line hashes a listing of per-file digests rather than the files
+# concatenated, so a renamed capture changes it and the manifest still says
+# which files were uploaded. sha256sum and shasum are the same fork the
+# checksums target makes, and the function form takes a file or stdin.
+define SITE_DEPLOYINFO
+if command -v sha256sum >/dev/null 2>&1; then sha256() { sha256sum "$$@"; }; else sha256() { shasum -a 256 "$$@"; }; fi; \
+{ \
+	echo "commit: $$(git rev-parse HEAD 2>/dev/null || echo unknown)"; \
+	if [ -n "$$(git status --porcelain -- site wrangler.jsonc 2>/dev/null)" ]; then echo "dirty: true"; else echo "dirty: false"; fi; \
+	echo "wrangler: $(WRANGLER)"; \
+	echo "bun: $$(tr -d '[:space:]' < .bun-version 2>/dev/null || echo unknown)"; \
+	echo "worker: $$(sha256 site/worker.js | cut -d' ' -f1)"; \
+	echo "captures: $$(find site/public -type f | LC_ALL=C sort | while IFS= read -r f; do printf '%s  %s\n' "$$(sha256 "$$f" | cut -d' ' -f1)" "$$f"; done | sha256 | cut -d' ' -f1)"; \
+} > $(SITE_DEPLOYED)/manifest
 endef
 
 # CONTRIBUTING.md spells the wrangler version out in the login command an
@@ -941,12 +969,43 @@ check-wrangler-doc: ## fail unless CONTRIBUTING.md's login command and docs/THRE
 		exit 1; \
 	}
 
+# The release path will not package a tree with uncommitted changes
+# (check-release-source, override ALLOW_DIRTY=1), so shipped bytes always match
+# the commit buildinfo names. Nothing reaches site-deploy: it uploads the
+# working tree, so an uncommitted edit to worker.js or to a capture under
+# site/public goes to production and is held by no branch, no tag and no
+# commit. `make site-rollback` undoes the upload, not the edit, and the next
+# deploy by anyone else puts those bytes back.
+#
+# Scoped to what wrangler uploads. A contributor with Go work in progress can
+# still deploy the site; what must not ship is a Worker or a capture that
+# exists only on this machine. Without a checkout there is no commit to
+# compare, so the deploy is refused by the same rule and the same named
+# override the release path uses.
+.PHONY: check-deploy-source
+check-deploy-source: ## fail unless the files 'make site-deploy' uploads are committed
+	@if ! git rev-parse HEAD >/dev/null 2>&1; then \
+		echo "make site-deploy: no git checkout here, so the Worker that would go to production is in no commit:" >&2; \
+		echo "  deploy from the repository, or pass ALLOW_DIRTY=1 to deploy this tree as it stands" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$(ALLOW_DIRTY)" != "1" ]; then \
+		dirty=$$(git status --porcelain -- site wrangler.jsonc); \
+		if [ -n "$$dirty" ]; then \
+			echo "make site-deploy: site/ or wrangler.jsonc has uncommitted changes, so production would be serving bytes no branch holds:" >&2; \
+			printf '%s\n' "$$dirty" | sed 's/^/  /' >&2; \
+			echo "  commit them, or pass ALLOW_DIRTY=1 to deploy the tree as it stands" >&2; \
+			exit 1; \
+		fi; \
+	fi
+
 .PHONY: site-deploy
-site-deploy: require-bun site-lint site-check check-wrangler-doc ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
+site-deploy: require-bun site-lint site-check check-wrangler-doc check-deploy-source ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
 	@$(SITE_GUARD) \
 	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
 	rmdir $(SITE_ROLLED_BACK) 2>/dev/null || true; \
 	mkdir -p $(SITE_DEPLOYED) || { echo "deployed, but cannot record $(SITE_DEPLOYED); the next 'make site-rollback' would find nothing to undo" >&2; exit 1; }; \
+	$(SITE_DEPLOYINFO) || { echo "deployed, but cannot write the manifest in $(SITE_DEPLOYED); the audit trail of what is serving is in the Cloudflare deployment log instead" >&2; exit 1; }; \
 	wait_for_site || { echo "deploy finished but the site is not serving; roll back with 'make site-rollback'" >&2; exit 1; }
 
 .PHONY: site-rollback

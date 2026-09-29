@@ -6,12 +6,27 @@ updates:
     schedule:
       interval: weekly
 
+  # Every action is pinned to a commit SHA, so dependabot proposes a SHA and a
+  # version comment per action. Left ungrouped, a week of action releases is a
+  # week of single-bump pull requests, and each one is a full three-platform
+  # run of the merge gate. The gates are per-commit, not per-action, so one
+  # pull request for the set is verified exactly as much as five of them, and
+  # an unrelated action's release cannot hold back the one that matters.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
 
+  # The two requirements files have to move together: requirements-dev.txt
+  # includes requirements.txt with `-r`, and both are hash-pinned, so a bump
+  # to one alone lands a tool whose closure does not install.
   - package-ecosystem: pip
     directory: /scripts
     schedule:
       interval: weekly
+    groups:
+      scripts-tooling:
+        patterns: ["*"]
