@@ -236,7 +236,12 @@ for one `event` in an isolate the Worker writes one more line, carrying
 `dropped_after` instead of the request fields, and then stops: a client can
 repeat a 405 or a 406 one request at a time, and an unearned line per request
 buries the few lines an operator reads. The answer is unchanged, so the cap
-costs the log nothing a client can act on. A `405` or a
+costs the log nothing a client can act on. `health-degraded` is the one event
+the cap skips: a probe drives it, not a client, so its volume is the probe
+interval rather than traffic. It is also the only line a site shipping without
+its captures writes (no image traffic, no errors, every page a 200), so capped
+it would report the first minutes of every isolate and go quiet for the rest
+of a day-long outage. A `405` or a
 `406` is rare next to the served requests and names a client the edge cannot
 serve, which is a report an operator gets rather than a broken deploy, so
 both are logged; the served page, its 304s and its images are the ones that

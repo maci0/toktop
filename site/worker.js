@@ -794,13 +794,27 @@ function serverTiming(started) {
   return `edge;dur=${edgeElapsedMs(started)}`;
 }
 
-// How many lines one isolate writes for one event before it stops writing
-// them. The refusals a client can repeat at will (a wrong method, an
-// Accept-Encoding it refuses) are one request away from a log stream nobody
-// sent, and a line per request buries the asset-missing and unhandled lines an
-// operator reads. Honest traffic never reaches the cap: a 405 or a 406 next to
-// served traffic is one line, and one line still says it.
+// How many lines one isolate writes for one request-driven event before it
+// stops writing them. The refusals a client can repeat at will (a wrong
+// method, an Accept-Encoding it refuses, a missing image on a hot path) are one
+// request away from a log stream nobody sent, and a line per request buries
+// the unhandled lines an operator reads. Honest traffic never reaches the cap:
+// a 405 or a 406 next to served traffic is one line, and one line still says
+// it.
 const REFUSAL_LOG_CAP = 20;
+
+// The one event a client cannot drive: /health logs it from a probe on a
+// timer, not from a request, so its volume is the probe interval rather than
+// traffic. It is the deploy-level line an operator reads when a site ships
+// without its captures, and on such a site it is often the only line written
+// at all (no image traffic, no errors, every page a 200). Capping it spends
+// the whole budget in the first few minutes of every isolate and then reports
+// a day-long broken deploy for the minutes before the isolate recycles, which
+// is the blind spot the cap exists to prevent: the cap is here to keep a
+// request flood from burying a state, and applying it to the state itself
+// buries it. Every other event is request-driven or fault-driven and stays
+// capped; this one is neither, and one line per probe interval is not a flood.
+const UNCAPPED_EVENTS = new Set(["health-degraded"]);
 
 // Lines written per event in this isolate. Keyed by event name, of which there
 // is a fixed handful, so the map does not grow with traffic.
@@ -814,17 +828,26 @@ const loggedPerEvent = new Map();
 //
 // Past the cap the line is written once more, without the request fields, and
 // it says the rest are dropped: a total nobody will read is not reported, and
-// a count that stopped counting would be worse than none.
+// a count that stopped counting would be worse than none. An event in
+// UNCAPPED_EVENTS skips that budget and is written every time it happens.
 function logFailure(request, event, fields) {
+  if (UNCAPPED_EVENTS.has(event)) {
+    writeLine({ event, ray: request.headers.get("cf-ray") ?? "", ...fields });
+    return;
+  }
   const seen = (loggedPerEvent.get(event) ?? 0) + 1;
   loggedPerEvent.set(event, seen);
   if (seen > REFUSAL_LOG_CAP + 1) {
     return;
   }
-  const line =
+  writeLine(
     seen > REFUSAL_LOG_CAP
       ? { event, dropped_after: REFUSAL_LOG_CAP }
-      : { event, ray: request.headers.get("cf-ray") ?? "", ...fields };
+      : { event, ray: request.headers.get("cf-ray") ?? "", ...fields },
+  );
+}
+
+function writeLine(line) {
   // biome-ignore lint/suspicious/noConsole: Workers Logs is the only place a failure reaches an operator.
   console.error(JSON.stringify(line));
 }
@@ -1055,9 +1078,11 @@ async function handle(request, env, started) {
     //
     // A degraded answer is a failure, so it is logged like one: the missing
     // binding or the missing files are deploy-level things, and on a site
-    // taking no image traffic the 503 is the only thing that says it. The
-    // per-isolate cap covers the probe, which would otherwise write a line
-    // per check. The healthy answer logs nothing, as every served answer does.
+    // taking no image traffic the 503 is the only thing that says it. This
+    // event is the one in UNCAPPED_EVENTS, so the probe's own interval bounds
+    // the volume and a site broken for hours keeps saying so instead of
+    // spending the refusal budget in the first minutes of every isolate. The
+    // healthy answer logs nothing, as every served answer does.
     const reason = await captureUnavailable(request, env);
     const degraded = reason !== null;
     if (degraded) {

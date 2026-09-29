@@ -1831,3 +1831,43 @@ test("a repeated refusal stops writing lines and says so once", async () => {
     logs.restore();
   }
 });
+
+// The cap exists to keep a request flood from burying a line an operator
+// reads, so it applies to what a client drives. A deploy that shipped without
+// the captures is the opposite: the probe's 503 is the only line such a site
+// writes, and it is the line that says why every image is a 404. Capped, it
+// spends the whole budget in the first minutes of every isolate and the rest
+// of a day-long outage reports nothing. The probe's own interval bounds the
+// volume, so this event skips the cap and keeps saying so.
+test("a degraded health probe keeps logging past the refusal cap", async () => {
+  // A fresh isolate so the per-isolate counters start at zero.
+  const { default: cappedWorker } = await import("./worker.js?health-cap");
+  const logs = captureLogs();
+  const checks = REFUSAL_LOG_CAP * 2;
+  try {
+    for (let i = 0; i < checks; i += 1) {
+      const res = await cappedWorker.fetch(
+        new Request(`${ORIGIN}/health`, { headers: { "cf-ray": "health-TOK" } }),
+        {},
+      );
+      // The answer does not change: what is under test is the log line, not
+      // the probe. A site in this state keeps answering 503 every time.
+      expect(res.status).toBe(503);
+    }
+    const lines = logs.parse();
+    expect(lines).toHaveLength(checks);
+    for (const line of lines) {
+      expect(line).toEqual({
+        event: "health-degraded",
+        ray: "health-TOK",
+        method: "GET",
+        path: "/health",
+        status: 503,
+        duration_ms: expect.any(Number),
+        reason: "no asset binding",
+      });
+    }
+  } finally {
+    logs.restore();
+  }
+});
