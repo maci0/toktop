@@ -131,16 +131,28 @@ var (
 
 func cpuModelCached() string {
 	cpuModelMu.Lock()
-	defer cpuModelMu.Unlock()
-	if cpuModelVal != "" {
-		return cpuModelVal
+	if cpuModelVal != "" || (!cpuModelAt.IsZero() && core.Age(instant(), cpuModelAt) < cpuModelRetry) {
+		v := cpuModelVal
+		cpuModelMu.Unlock()
+		return v
 	}
-	if !cpuModelAt.IsZero() && core.Age(instant(), cpuModelAt) < cpuModelRetry {
-		return cpuModelVal
+	cpuModelMu.Unlock()
+	// The probe reads /proc/cpuinfo and /proc/device-tree/model, and neither
+	// read is bounded by anything toktop holds: a mount that stops answering
+	// keeps the kernel in the read for as long as it takes. It runs with the
+	// lock released so one such sample does not pin every other one behind
+	// it, which is what a memo miss on the vitals poller and on the emit
+	// loop's cold fallback looks like at once. Two samples may walk at the
+	// same time; the store below keeps the first answer, so the slower walk
+	// cannot blank a name the faster one found.
+	val := cpuModelProbe()
+	cpuModelMu.Lock()
+	if cpuModelVal == "" {
+		cpuModelVal, cpuModelAt = val, instant()
 	}
-	cpuModelVal = cpuModelProbe()
-	cpuModelAt = instant()
-	return cpuModelVal
+	out := cpuModelVal
+	cpuModelMu.Unlock()
+	return out
 }
 
 func sampleMemoryLinux(s *core.SysSample) {
@@ -189,14 +201,27 @@ var (
 
 func hostStaticInfo() hostStatic {
 	hostStaticMu.Lock()
-	defer hostStaticMu.Unlock()
-	if hostStaticAt.IsZero() || (hostStaticFill < hostStaticTries && core.Age(instant(), hostStaticAt) >= hostStaticRetry) {
-		hostStaticVal = mergeHostStatic(hostStaticVal, loadHostStatic())
+	stale := hostStaticAt.IsZero() ||
+		(hostStaticFill < hostStaticTries && core.Age(instant(), hostStaticAt) >= hostStaticRetry)
+	res := hostStaticVal
+	hostStaticMu.Unlock()
+	if stale {
+		// The load reads /etc/os-release, uname and the driver version files,
+		// none of it bounded by a deadline. It runs with the lock released so
+		// a mount that stops answering cannot hold every other sample on
+		// this memo, and so the vitals poller and the emit loop's cold
+		// fallback do not queue behind each other on a missing field. The
+		// merge is by first answer, so overlapping loads cannot lose a
+		// reading a slower one found.
+		fresh := loadHostStatic()
+		hostStaticMu.Lock()
+		hostStaticVal = mergeHostStatic(hostStaticVal, fresh)
 		hostStaticAt = instant()
 		hostStaticFill++
+		res = hostStaticVal
+		hostStaticMu.Unlock()
 	}
-	res := hostStaticVal
-	res.npus = slices.Clone(hostStaticVal.npus)
+	res.npus = slices.Clone(res.npus)
 	return res
 }
 
@@ -486,9 +511,8 @@ var (
 )
 
 func sensorLayout(key, root string, build func(string) []sensorInput) []sensorInput {
-	sensorLayoutMu.Lock()
-	defer sensorLayoutMu.Unlock()
 	at := instant()
+	sensorLayoutMu.Lock()
 	for k, c := range sensorLayouts {
 		if core.Age(at, c.at) >= sensorLayoutTTL {
 			delete(sensorLayouts, k)
@@ -496,13 +520,24 @@ func sensorLayout(key, root string, build func(string) []sensorInput) []sensorIn
 	}
 	// The sweep above already dropped every entry past its TTL, so anything
 	// still in the map is fresh.
-	if c, ok := sensorLayouts[key]; ok {
+	c, ok := sensorLayouts[key]
+	sensorLayoutMu.Unlock()
+	if ok {
 		return c.inputs
 	}
-	// Build under the lock so concurrent samples share one walk and a
-	// slower empty result cannot overwrite a newer fill.
+	// The walk globs /sys/class/hwmon and reads every chip's name and label
+	// labels, on a mount that can stop answering, so it runs with the lock
+	// released: one stalled layout must not pin every other sample behind
+	// it. Two walks can overlap, and the store below keeps the first answer
+	// to land, so a slower walk cannot overwrite a newer layout.
 	inputs := build(root)
-	sensorLayouts[key] = cachedSensors{inputs: inputs, at: at}
+	sensorLayoutMu.Lock()
+	if c, ok := sensorLayouts[key]; ok {
+		inputs = c.inputs
+	} else {
+		sensorLayouts[key] = cachedSensors{inputs: inputs, at: at}
+	}
+	sensorLayoutMu.Unlock()
 	return inputs
 }
 

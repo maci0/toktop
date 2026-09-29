@@ -160,6 +160,13 @@ func (c *Collector) ProbeAll() {
 
 	now := c.instant()
 	c.probeMu.Lock()
+	// Run is joining the fan-out, or already has: launching now would Add
+	// against a Wait in progress, which is a panic, and a generation that
+	// starts past the join records into a collector a later Run already owns.
+	if c.probeClosing {
+		c.probeMu.Unlock()
+		return
+	}
 	if core.Age(now, c.lastProbeWave) < probeWaveGap {
 		c.probeMu.Unlock()
 		return
@@ -191,13 +198,15 @@ func (c *Collector) ProbeAll() {
 	if examined > 0 {
 		c.probeCursor = (c.probeCursor + examined) % len(targets)
 	}
+	// Claimed here, under the latch Run reads: an Add outside this section
+	// could land between the latch being taken and the Wait that follows it.
+	c.probeWG.Add(len(live))
 	c.probeMu.Unlock()
 
 	// One stamp for the whole wave: probe.Run measures TTFT against the
 	// wall clock (real I/O), but the sample's At must follow the collector
 	// clock or a frozen/seeded replay would carry a second timeline.
 	for _, t := range live {
-		c.probeWG.Add(1)
 		go func(t probeTarget) {
 			defer c.probeWG.Done()
 			defer func() {

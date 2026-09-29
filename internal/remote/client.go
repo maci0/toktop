@@ -403,6 +403,12 @@ func (c *Client) probe(wait time.Duration) bool {
 // either way, here or by watchClose. It waits for the keepalive goroutine so
 // no client goroutine outlives the call (and none can observe pacing changes
 // made after teardown).
+//
+// The connection goes down before the relays are joined, not after. A relay
+// parked in a dial through the ssh transport holds its slot until that dial
+// returns, and the only thing that makes it return is the connection closing:
+// sequenced the other way, Close waits out forwardDialTimeout on a client it
+// is holding the one release for.
 func (c *Client) Close() {
 	c.closeMu.Lock()
 	select {
@@ -413,9 +419,10 @@ func (c *Client) Close() {
 	}
 	c.closeMu.Unlock()
 
+	c.conn.Close()
+
 	c.closeListeners()
 
-	c.conn.Close()
 	<-c.keepaliveDone
 }
 

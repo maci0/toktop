@@ -111,7 +111,13 @@ type Collector struct {
 	// distinct error rather than once per poll per engine.
 	errFold map[string]foldedErr
 
-	probeMu       sync.Mutex // guards the probe fan-out state below
+	probeMu sync.Mutex // guards the probe fan-out state below
+	// probeClosing latches once Run has decided to join the fan-out. It is
+	// taken under probeMu, and probeWG.Add is made under the same lock, so an
+	// Add can never land after the Wait that follows: the WaitGroup misuse
+	// check turns that pair into a panic, and a generation started past the
+	// join would record into a collector a later Run already owns.
+	probeClosing  bool
 	probeWG       sync.WaitGroup
 	lastProbeWave time.Time // wave gate: see probeWaveGap
 	probeCursor   int       // rotation offset into the wave's targets: see probeWaveMax
@@ -301,7 +307,16 @@ func (c *Collector) Run(ctx context.Context, out chan<- core.Snapshot) error {
 	// audit line after Run returned and released the claim, into a collector a
 	// later run already owns. Cancellation bounds the wait: every generation
 	// reads baseCtx, so probe.Run returns as soon as ctx is done.
-	defer c.probeWG.Wait()
+	//
+	// The latch is taken under probeMu before the Wait, which is what makes
+	// the pair safe: a ProbeAll still racing this return finds it, launches
+	// nothing, and never calls Add against a Wait in progress.
+	defer func() {
+		c.probeMu.Lock()
+		c.probeClosing = true
+		c.probeMu.Unlock()
+		c.probeWG.Wait()
+	}()
 	procDone := c.startProcPoller(ctx)
 	defer func() { <-procDone }()
 	// Warm the vitals cache before the first emit so that frame is a cache
@@ -328,6 +343,11 @@ func (c *Collector) claimRun(ctx context.Context) bool {
 	}
 	c.running = true
 	c.baseCtx = ctx
+	// A run started after a finished one is a fresh join: the previous run's
+	// latch is released here, under the same lock the fan-out reads it under.
+	c.probeMu.Lock()
+	c.probeClosing = false
+	c.probeMu.Unlock()
 	return true
 }
 

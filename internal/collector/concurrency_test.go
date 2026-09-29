@@ -3,7 +3,11 @@ package collector
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -123,4 +127,111 @@ func TestInjectedClockRunsWithNoCollectorLockHeld(t *testing.T) {
 	if held != 0 {
 		t.Errorf("the injected clock ran with a collector lock held, %d of %d reads", held, reads)
 	}
+}
+
+// A run that is shutting down joins the probe fan-out while a --probe ticker
+// or a held 'p' can still be calling ProbeAll. The Add and the Wait have to be
+// ordered, not merely unlikely to meet: an Add landing after the Wait is a
+// WaitGroup misuse panic, and a generation that starts past the join records
+// into a collector a later run already owns.
+func TestProbeAllRacingRunShutdown(t *testing.T) {
+	oldGap := probeWaveGap
+	probeWaveGap = 0
+	defer func() { probeWaveGap = oldGap }()
+
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		io.WriteString(w, "{\"response\":\"one\",\"done\":true,\"eval_count\":1,\"eval_duration\":1000000}\n")
+	}))
+	defer srv.Close()
+
+	c := New([]provider.Provider{(&fakeProvider{label: "p", addr: srv.URL}).asProvider()}, time.Millisecond)
+	c.SetSysFn(func() core.SysSample { return core.SysSample{CPUModel: "x"} })
+	c.mu.Lock()
+	c.lastModel[srv.URL] = "m"
+	c.mu.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	out := make(chan core.Snapshot, 8)
+	var wg sync.WaitGroup
+	for range 4 {
+		wg.Go(func() {
+			for ctx.Err() == nil {
+				c.ProbeAll()
+			}
+		})
+	}
+	done := make(chan struct{})
+	go func() { defer close(done); c.Run(ctx, out) }()
+
+	cancel()
+	wg.Wait()
+	<-done // Run's join is the point: it must not race the ProbeAll calls above
+
+	// Every generation the fan-out launched has been joined by Run, so the
+	// inflight set is empty rather than naming a backend whose goroutine is
+	// still recording into this collector.
+	waitFor(t, func() bool {
+		c.probeMu.Lock()
+		defer c.probeMu.Unlock()
+		return len(c.probeInflight) == 0
+	}, "Run returned with a probe generation still in flight")
+
+	// A trigger that lands after the join is refused rather than launched:
+	// the generation it would start is one Run did not wait for.
+	// The join latch is what makes that join sound, so it is asserted rather
+	// than inferred: a probe launched past it is one Run never waited for,
+	// and the canceled baseCtx hides it (the generation returns before it
+	// makes a request), so the request count cannot see it.
+	c.probeMu.Lock()
+	latched := c.probeClosing
+	c.probeMu.Unlock()
+	if !latched {
+		t.Error("Run returned without latching the probe fan-out closed")
+	}
+	c.mu.Lock()
+	c.lastModel[srv.URL] = "m"
+	c.mu.Unlock()
+	before := hits.Load()
+	for range 5 {
+		c.ProbeAll()
+	}
+	waitStay(t, 100*time.Millisecond, func() bool { return hits.Load() == before },
+		"ProbeAll started a generation after Run had returned")
+
+	// The gate itself, on a live context where a launched generation would
+	// reach the engine: with the fan-out latched closed the wave is dropped,
+	// and with a model known to the collector, so a no-op is the gate and
+	// not an empty target list.
+	live := New([]provider.Provider{(&fakeProvider{label: "p", addr: srv.URL}).asProvider()}, time.Second)
+	live.SetSysFn(func() core.SysSample { return core.SysSample{CPUModel: "x"} })
+	live.mu.Lock()
+	live.lastModel[srv.URL] = "m"
+	live.probeMu.Lock()
+	live.probeClosing = true
+	live.probeMu.Unlock()
+	live.mu.Unlock()
+	gate := hits.Load()
+	live.ProbeAll()
+	waitStay(t, 100*time.Millisecond, func() bool { return hits.Load() == gate },
+		"ProbeAll launched a wave with the fan-out latched closed")
+
+	// A later run is a fresh join: the latch does not outlive the run that
+	// set it, or probing would be dead for the rest of the process.
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	run2 := make(chan struct{})
+	go func() { defer close(run2); _ = c.Run(ctx2, out) }()
+	waitFor(t, func() bool {
+		c.mu.Lock()
+		defer c.mu.Unlock()
+		return c.running
+	}, "the restarted run never started")
+	waitFor(t, func() bool {
+		c.ProbeAll()
+		return hits.Load() > before
+	}, "the restarted run never probed again")
+	cancel2()
+	<-run2
 }
