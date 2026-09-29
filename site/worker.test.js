@@ -592,6 +592,35 @@ test("/health reports degraded when the store cannot serve the share card", asyn
   }
 });
 
+// The cap on a folded line counts code points, not UTF-16 code units. A store
+// message long enough to reach the cap with an astral character astride the
+// cut used to lose half of it, and the line then carried a lone surrogate: it
+// reads as U+FFFD in the answer and as an escape in the log. The padding puts
+// the high surrogate exactly on the boundary the old unit-counting cut fell on.
+test("a folded reason caps on code points, never between the halves of one", async () => {
+  const padding = "x".repeat(164);
+  const broken = { ASSETS: { fetch: () => Promise.reject(new Error(`${padding}😀tail`)) } };
+  const logs = captureLogs();
+  try {
+    const res = await call({}, { path: "/health", env: broken });
+    expect(res.status).toBe(503);
+    const body = await res.text();
+    expect(body).toContain("😀");
+    expect(body).not.toContain("�");
+    // 35 characters of prefix plus 164 of padding is 199 units, so the emoji's
+    // high surrogate is unit 200 and the low one is past the old cut.
+    expect(body).toBe(
+      `degraded: the asset store could not be read: ${padding}😀; ` +
+        "the dashboard captures are not served\n",
+    );
+    const reason = logs.parse().at(-1).reason;
+    expect(reason).toBe(`the asset store could not be read: ${padding}😀`);
+    expect(reason).not.toContain("�");
+  } finally {
+    logs.restore();
+  }
+});
+
 // A coding the runtime cannot build is a fallback, not a failed request: the
 // next acceptable coding answers, and the client sees a page. It is logged
 // anyway, because the slot then holds that failure for the isolate's life and

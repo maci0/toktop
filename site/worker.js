@@ -845,8 +845,23 @@ const captureProbePath = SHARE_CARD_PATH;
 // biome-ignore lint/suspicious/noControlCharactersInRegex: matching the control characters is the point.
 const CONTROL_CHARS_RE = /[\u0000-\u001f\u007f]+/g;
 
+// capCodePoints cuts text to at most max code points, never between the two
+// halves of one. String.prototype.slice counts UTF-16 code units, and every
+// astral character (an emoji in an error message, a CJK extension ideograph)
+// is two of them, so a cut at the cap can land between the halves and leave a
+// line holding a lone surrogate: it prints as U+FFFD, and JSON.stringify emits
+// it as an escape an operator reads as mojibake in the store's own words. The
+// length test comes first because a code point is one or two units, so a
+// string already within the cap in units is within it in points and the array
+// is never built for a line that fits.
+function capCodePoints(text, max) {
+  if (text.length <= max) return text;
+  const points = Array.from(text);
+  return points.length <= max ? text : points.slice(0, max).join("");
+}
+
 function reasonLine(text) {
-  return text.replace(CONTROL_CHARS_RE, " ").trim().slice(0, 200);
+  return capCodePoints(text.replace(CONTROL_CHARS_RE, " ").trim(), 200);
 }
 
 // How much of a stack one line carries. Bounded like the reason beside it and
@@ -863,7 +878,7 @@ const maxStackLength = 2048;
 // JSON object per line, which a raw multi-line stack would split.
 function stackLine(err) {
   if (typeof err?.stack !== "string") return "";
-  return err.stack.replace(CONTROL_CHARS_RE, " ").trim().slice(0, maxStackLength);
+  return capCodePoints(err.stack.replace(CONTROL_CHARS_RE, " ").trim(), maxStackLength);
 }
 
 // captureUnavailable names why the captures are not being served, or null
