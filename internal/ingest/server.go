@@ -48,8 +48,9 @@ type Server struct {
 	// the OpenAPI spec test wrote one against a live server. Per-server fields
 	// written before Serve leave the handler goroutines reading an immutable
 	// value, and a test that wants different bounds builds a different server.
+	// The keep-alive idle bound is not one of them: it never varied per
+	// server, so it stays the package constant the http.Server is built with.
 	// Absolute deadlines, so they stay on the wall clock and not on now.
-	idleTimeout          time.Duration
 	maxEventLifetime     time.Duration
 	bodyIdleTimeout      time.Duration
 	responseWriteTimeout time.Duration

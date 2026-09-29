@@ -237,11 +237,12 @@ func TestClipUTF8PrefixDoesNotSplitUTF8(t *testing.T) {
 func TestAnyArgContainsSharesByteBudget(t *testing.T) {
 	// A match must never depend on anything past CmdlinePrefix bytes, so the
 	// budget is spent across arguments, not reset per argument.
-	args := []string{strings.Repeat("x", matchJoinBytes), "vllm.entrypoints"}
-	if anyArgContains(args, "vllm.entrypoints") {
+	beyond := cmdline{args: []string{strings.Repeat("x", matchJoinBytes), "vllm.entrypoints"}}
+	if beyond.anyArgContains("vllm.entrypoints") {
 		t.Fatal("anyArgContains matched past the shared byte budget")
 	}
-	if !anyArgContains([]string{"python", "-m", "vllm.entrypoints"}, "vllm.entrypoints") {
+	within := cmdline{args: []string{"python", "-m", "vllm.entrypoints"}}
+	if !within.anyArgContains("vllm.entrypoints") {
 		t.Fatal("anyArgContains missed a match inside the budget")
 	}
 }

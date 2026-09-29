@@ -5,6 +5,7 @@ package procs
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -58,6 +59,59 @@ func TestSamplerLinuxTree(t *testing.T) {
 		if p.PID == 789 {
 			t.Error("unrelated process leaked into engine listing")
 		}
+	}
+}
+
+// The walk reads each command line into a buffer of CmdlinePrefix bytes, so
+// a process whose command line is longer than that is read to its prefix. The
+// engine it is must still be found (its name and module path sit at the
+// front), and nothing past the prefix may reach a match, since that is the
+// same bound ClipArgs puts on every other lister's listing.
+func TestSamplerLinuxLongCmdlineIsBounded(t *testing.T) {
+	root := t.TempDir()
+	write := func(rel, content string) {
+		p := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A browser's shape: the engine-looking flag is at the front and a
+	// --disable-features blob of tens of kilobytes trails it.
+	write("321/cmdline", "python\x00-m\x00vllm.entrypoints\x00--disable-features\x00"+
+		strings.Repeat("X", 64*1024)+"\x00")
+	write("321/stat", "321 (python) S 1 1 0 0 -1 0 0 0 0 0 100 50 0 0 0 0 1 0 0 0 512")
+	// The same engine named only past the prefix: no match, and no port.
+	write("654/cmdline", "browser\x00"+strings.Repeat("Y", CmdlinePrefix)+"\x00--port\x0011434\x00")
+
+	oldRoot := procRoot
+	procRoot = root
+	defer func() { procRoot = oldRoot }()
+
+	first := NewSampler().Snapshot()
+	var found *Info
+	for i := range first {
+		if first[i].PID == 321 {
+			found = &first[i]
+		}
+		if first[i].PID == 654 {
+			t.Error("a match past the prefix reached the listing")
+		}
+	}
+	if found == nil {
+		t.Fatal("engine with an over-long command line missing from the sample")
+	}
+	if found.Engine != "vllm" {
+		t.Errorf("engine = %q, want vllm", found.Engine)
+	}
+	joined := 0
+	for _, a := range found.Args {
+		joined += len(a) + 1
+	}
+	if joined > CmdlinePrefix+1 {
+		t.Errorf("retained %d command-line bytes, cap is %d", joined, CmdlinePrefix)
 	}
 }
 

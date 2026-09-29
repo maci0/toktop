@@ -7,6 +7,8 @@ package agentusage
 
 import (
 	"cmp"
+	"errors"
+	"io"
 	"math"
 	"os"
 	"path/filepath"
@@ -31,6 +33,7 @@ func Discover() []Process {
 		return nil
 	}
 	known := knownNames()
+	r := procReader{path: make([]byte, 0, 64)}
 
 	var out []Process
 	for _, e := range entries {
@@ -41,14 +44,14 @@ func Discover() []Process {
 		if err != nil {
 			continue
 		}
-		dir := filepath.Join("/proc", strconv.Itoa(pid))
+		r.pid = pid
 
 		var comm string
-		if name, err := os.ReadFile(filepath.Join(dir, "comm")); err == nil {
+		if name, err := r.read(procCommFile); err == nil {
 			comm = strings.TrimSpace(string(name))
 		}
 
-		raw, err := os.ReadFile(filepath.Join(dir, "cmdline"))
+		raw, err := r.read(procCmdlineFile)
 		if err != nil || len(raw) == 0 {
 			continue
 		}
@@ -57,7 +60,7 @@ func Discover() []Process {
 		if tool == "" {
 			continue
 		}
-		cwd, err := os.Readlink(filepath.Join(dir, "cwd"))
+		cwd, err := os.Readlink(r.procPath(procCwdFile))
 		if err != nil {
 			continue // exited, or another user's process
 		}
@@ -69,6 +72,83 @@ func Discover() []Process {
 	slices.SortFunc(out, func(a, b Process) int { return cmp.Compare(a.PID, b.PID) })
 	return out
 }
+
+// The files one process contributes to a walk.
+const (
+	procCommFile    = "comm"
+	procCmdlineFile = "cmdline"
+	procCwdFile     = "cwd"
+	procStatFile    = "stat"
+)
+
+// procReader carries the scratch one /proc walk needs: the path it is opening
+// and the buffer that file is read into. One of each per walk, and neither
+// outlives it.
+//
+// The buffer replaces os.ReadFile, whose size hint comes from the stat: every
+// file under /proc reports st_size 0, so it cannot size a buffer from it and
+// grows one from 512 bytes, reallocating and copying the whole file several
+// times over. Over a walk of every process on the host that was the largest
+// single source of garbage, repeated on every discovery pass.
+//
+// What comes back aliases the buffer, so it is consumed before the next read:
+// the string it is turned into is a copy, which is what the arguments and the
+// comm are cut from.
+type procReader struct {
+	pid  int
+	path []byte
+	buf  []byte
+}
+
+// procPath builds /proc/PID/<name> in the reader's own buffer. The result is
+// only valid until the next call, so it is consumed by the read or the
+// Readlink that follows and never retained.
+func (r *procReader) procPath(name string) string {
+	r.path = append(r.path[:0], "/proc"...)
+	r.path = append(r.path, '/')
+	r.path = strconv.AppendInt(r.path, int64(r.pid), 10)
+	r.path = append(r.path, '/')
+	r.path = append(r.path, name...)
+	return string(r.path)
+}
+
+// read reads one of this process's files into the reader's buffer and returns
+// the bytes, which alias it and are valid until the next call.
+func (r *procReader) read(name string) ([]byte, error) {
+	f, err := os.Open(r.procPath(name))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	// The buffer keeps whatever capacity the widest file so far needed, so the
+	// walk grows it once instead of once per file.
+	if cap(r.buf) == 0 {
+		r.buf = make([]byte, procReadInit)
+	}
+	r.buf = r.buf[:0]
+	for {
+		if len(r.buf) == cap(r.buf) {
+			r.buf = append(r.buf, 0)[:len(r.buf)]
+		}
+		n, err := f.Read(r.buf[len(r.buf):cap(r.buf)])
+		r.buf = r.buf[:len(r.buf)+n]
+		if err != nil {
+			if errors.Is(err, io.EOF) {
+				return r.buf, nil
+			}
+			return r.buf, err
+		}
+		if n == 0 {
+			return r.buf, nil
+		}
+	}
+}
+
+// procReadInit is the first size the walk's buffer is allocated at. A comm is
+// 16 bytes and a stat line a few hundred; a command line runs to kilobytes, so
+// this covers the common file without a grow and the walk's widest one costs
+// one.
+const procReadInit = 512
 
 // linuxClkTck is USER_HZ. The Linux ABI fixes it at 100; /proc/PID/stat
 // starttime is in these ticks since boot.

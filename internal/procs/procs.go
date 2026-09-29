@@ -374,18 +374,13 @@ func baseName(n string) string {
 }
 
 // anyArgContains reports whether any argument holds one of subs. The
-// arguments draw on one matchJoinBytes budget, not one per argument, so the
-// matchers read no further into a command line than CmdlinePrefix allows.
-// Clipping per argument matters on its own: a Chrome --disable-features blob
-// is tens of kilobytes and never an engine module path.
-func anyArgContains(args []string, subs ...string) bool {
-	budget := matchJoinBytes
-	for _, a := range args {
-		if budget <= 0 {
-			return false
-		}
-		la := core.FoldASCII(clipUTF8Prefix(a, budget))
-		budget -= len(la)
+// arguments are read through the cmdline's memoized fold, which draws on the
+// matchJoinBytes budget, so the matchers read no further into a command line
+// than CmdlinePrefix allows. Clipping per argument matters on its own: a
+// Chrome --disable-features blob is tens of kilobytes and never an engine
+// module path.
+func (c *cmdline) anyArgContains(subs ...string) bool {
+	for _, la := range c.argsFolded() {
 		for _, sub := range subs {
 			if strings.Contains(la, sub) {
 				return true
@@ -497,20 +492,46 @@ func lowerJoinedArgs(args []string) string {
 // cmdline is what an engine matcher reads: the process name, its argv, and
 // the argv folded into one lowercased line.
 //
-// The fold is built on first use. Most matchers decide on the name alone, and
-// folding the line for every process on every /proc poll was a per-process
-// allocation paid for a match that never reads it.
+// The folds are built on first use. Most matchers decide on the name alone,
+// and folding the line for every process on every /proc poll was a per-process
+// allocation paid for a match that never reads it. The per-argument fold is
+// separate from the joined one and memoized the same way: four matchers test
+// arguments by substring, and folding the same argv once per matcher was four
+// times the fold for one answer.
 type cmdline struct {
-	name   string
-	args   []string
-	once   sync.Once
-	folded string
+	name       string
+	args       []string
+	once       sync.Once
+	folded     string
+	argsOnce   sync.Once
+	foldedArgs []string
 }
 
 // joined is the lowercased command line, folded once per cmdline.
 func (c *cmdline) joined() string {
 	c.once.Do(func() { c.folded = lowerJoinedArgs(c.args) })
 	return c.folded
+}
+
+// argsFolded is the command line's arguments lowercased, folded once per
+// cmdline and drawn on the same matchJoinBytes budget anyArgContains spends,
+// so the matchers read no further into a command line than CmdlinePrefix
+// allows whichever of them runs first.
+func (c *cmdline) argsFolded() []string {
+	c.argsOnce.Do(func() {
+		budget := matchJoinBytes
+		out := make([]string, 0, len(c.args))
+		for _, a := range c.args {
+			if budget <= 0 {
+				break
+			}
+			la := core.FoldASCII(clipUTF8Prefix(a, budget))
+			budget -= len(la)
+			out = append(out, la)
+		}
+		c.foldedArgs = out
+	})
+	return c.foldedArgs
 }
 
 // has reports whether the folded command line contains s.
@@ -528,13 +549,13 @@ var engineMatchers = []engineMatcher{
 		return c.has("koboldcpp")
 	}},
 	{"vllm", 8000, func(c *cmdline) bool {
-		return anyArgContains(c.args, "vllm.entrypoints", "/vllm") ||
+		return c.anyArgContains("vllm.entrypoints", "/vllm") ||
 			baseNameEq(c.args, "vllm")
 	}},
 	{"sglang", 30000, func(c *cmdline) bool {
 		// python -m sglang.launch_server / sglang.srt.*, and the
 		// `sglang serve` CLI (same shape as `vllm serve`).
-		return anyArgContains(c.args, "sglang.launch_server", "sglang.srt") ||
+		return c.anyArgContains("sglang.launch_server", "sglang.srt") ||
 			baseNameEq(c.args, "sglang")
 	}},
 	{"triton", 8000, func(c *cmdline) bool { return c.name == "tritonserver" }},
@@ -549,7 +570,7 @@ var engineMatchers = []engineMatcher{
 		return c.name == "localai" || c.name == "local-ai"
 	}},
 	{"litellm", 4000, func(c *cmdline) bool {
-		return baseNameEq(c.args, "litellm") || anyArgContains(c.args, "litellm.proxy")
+		return baseNameEq(c.args, "litellm") || c.anyArgContains("litellm.proxy")
 	}},
 	{"mlx", 8080, func(c *cmdline) bool {
 		return c.has("mlx_lm.server") || c.has("mlx-lm")
@@ -559,7 +580,7 @@ var engineMatchers = []engineMatcher{
 			strings.Contains(c.name, "lm studio")
 	}},
 	{"gpustack", 80, func(c *cmdline) bool {
-		return anyArgContains(c.args, "gpustack.start")
+		return c.anyArgContains("gpustack.start")
 	}},
 	{"lemonade", 8000, func(c *cmdline) bool { return c.name == "lemonade-server" || c.name == "lemond" }},
 	{"gpt4all", 4891, func(c *cmdline) bool { return c.name == "gpt4all" }},
