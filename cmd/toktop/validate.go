@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,8 +17,9 @@ import (
 	"github.com/maci0/toktop/internal/remote"
 )
 
-// Mode and environment validation, and the warnings for flags and env vars
-// that were set but cannot take effect.
+// Mode and environment validation, the resolution of the inputs that come from
+// the environment, and the warnings for flags and env vars that were set but
+// cannot take effect.
 
 func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	if set["opencode-db"] && !f.agents {
@@ -577,4 +579,111 @@ func validateOnceEnv() error {
 		}
 	}
 	return nil
+}
+
+// toktopEnvVars are the TOKTOP_* names this process recognizes. Most are
+// read here; TOKTOP_SCREENSHOT_FONT is used only by scripts/screenshot.py
+// and is listed so a developer export is not reported as a typo.
+// See also OMNIROUTE_API_KEY, SSH_AUTH_SOCK and the ssh defaults.
+var toktopEnvVars = map[string]bool{
+	"TOKTOP_BEARER":          true,
+	"TOKTOP_SSH_PASSWORD":    true,
+	"TOKTOP_COLUMNS":         true,
+	"TOKTOP_LINES":           true,
+	logcfg.LevelEnv:          true,
+	"TOKTOP_SCREENSHOT_FONT": true, // scripts/screenshot.py; this binary ignores it
+}
+
+// warnUnknownEnv reports unrecognized TOKTOP_* variables once at startup:
+// a misspelled knob would otherwise be ignored silently and look like a
+// no-op feature. Sorted, so the same set of names reads the same way in
+// every capture of the startup output.
+func warnUnknownEnv() {
+	var unknown []string
+	for _, kv := range os.Environ() {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || !strings.HasPrefix(name, "TOKTOP_") || toktopEnvVars[name] {
+			continue
+		}
+		unknown = append(unknown, name)
+	}
+	if len(unknown) > 0 {
+		slices.Sort(unknown)
+		fmt.Fprintf(os.Stderr, "toktop: ignoring unknown environment variable(s): %s\n",
+			strings.Join(reportedNames(unknown), ", "))
+	}
+}
+
+// maxReportedName caps one externally supplied name printed in a startup
+// warning. The names come from a definitions file and from the environment,
+// so a wrapper or a supervisor can put a megabyte-long key in one, and the
+// startup output is read in a terminal and pasted into issues.
+const maxReportedName = 64
+
+// reportedField makes one externally supplied name safe to print on stderr.
+// Both name sets are text this program did not write: a key out of
+// ~/.gauntlet/agents.json and a name out of the environment. Untreated, an
+// escape sequence in either reaches the operator's terminal, and an
+// unknown-key warning is the first thing a run prints, so it is the cheapest
+// place in the tree to plant a clipboard write or a title change. SanitizeText
+// drops the sequences, the bidi controls and the zero-width marks that render
+// one key as another, and the cap bounds what one name can spend, both
+// cutting between grapheme clusters so a name ending in an emoji or a
+// decomposed accent is never sliced mid-character.
+func reportedField(s string) string {
+	return core.TruncateClusters(core.SingleLine(s), maxReportedName)
+}
+
+// loadAgentDefs pulls in ~/.gauntlet/agents.json so --agents can follow
+// agents toktop was not built to know (in-house wrappers, the pi family),
+// including where they keep their transcripts. A missing file is the normal
+// case; a malformed or unreadable one is returned so the caller can refuse to
+// start: agents silently missing from the watch look exactly like agents
+// doing nothing.
+//
+// An empty path is the home directory lookup failing inside DefinitionsPath.
+// It is an error, not an absent file: without the path no agents file is read
+// at all, and a startup that says nothing about it leaves the operator looking
+// at a watch that reports no in-house agents for the whole run.
+func loadAgentDefs() error {
+	path := agentusage.DefinitionsPath()
+	if path == "" {
+		return errors.New("cannot locate agents.json: no home directory and no absolute GAUNTLET_HOME")
+	}
+	if err := agentusage.LoadDefinitions(path); err != nil {
+		return err
+	}
+	warnUnknownUsageKeys(path)
+	return nil
+}
+
+// warnUnknownUsageKeys names the usage keys a definitions file spells that
+// agentusage has no field for. The file is gauntlet's, so an unrecognized key
+// is a version this build is older than rather than an error, and refusing to
+// start over one would break a run on a newer gauntlet than this build. It is
+// still named, because a key nobody reads is usually a key nobody spelled: one
+// with no counterpart in the known set leaves the agent with whatever the rest
+// of its block said, and a block naming only that key registers no transcripts
+// at all, which on the dashboard is an agent that used no tokens.
+//
+// One line, on stderr with the rest of the startup warnings, with the home
+// folded out of the path the way every other line naming the file folds it.
+func warnUnknownUsageKeys(path string) {
+	unknown := agentusage.UnknownUsageKeys()
+	if len(unknown) == 0 {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "toktop: %s: ignoring unknown usage key(s) %s (this build reads %s)\n",
+		core.RedactHome(path), strings.Join(reportedNames(unknown), ", "),
+		strings.Join(agentusage.UsageKeyNames(), ", "))
+}
+
+// reportedNames is reportedField over a list, so both startup warnings read
+// one sorted list of names the same way.
+func reportedNames(names []string) []string {
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = reportedField(name)
+	}
+	return out
 }
