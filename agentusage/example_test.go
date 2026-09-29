@@ -453,3 +453,87 @@ func ExampleDefinition_roundTrip() {
 	fmt.Println(string(data))
 	// Output: {"myagent":{"launch":["myagent","--serve"],"usage":{"roots":["{dir}/.myagent/logs"]}}}
 }
+
+// A usage key this build has no field for is reported rather than refused: the
+// file belongs to gauntlet, and a newer gauntlet can name a key an older
+// build does not read yet. A misspelled key is the case worth reporting, since
+// "root" leaves the agent with nothing to read and it then looks like an agent
+// that never produces tokens. UsageKeyNames is the known set to name beside
+// the offending key, so a consumer writing the message does not repeat the
+// list and let it drift.
+func ExampleUnknownUsageKeys() {
+	dir, err := os.MkdirTemp("", "agentusage-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	path := filepath.Join(dir, "agents.json")
+	if err := os.WriteFile(path,
+		[]byte(`{"myagent": {"usage": {"roots": ["~/.myagent/sessions"], "sufixes": [".jsonl"]}}}`), 0o644); err != nil {
+		fmt.Println(err)
+		return
+	}
+	if err := agentusage.LoadDefinitions(path); err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer agentusage.ResetDefinitions()
+
+	for _, entry := range agentusage.UnknownUsageKeys() {
+		agent, key, _ := strings.Cut(entry, ": ")
+		fmt.Printf("%s: unknown usage key %q, known keys are %q\n",
+			agent, key, agentusage.UsageKeyNames())
+	}
+	// The roots beside the typo still register, so the agent is readable and
+	// the one misspelled key is a warning rather than a broken definition.
+	_, registered := agentusage.SpecFor("myagent")
+	fmt.Println("myagent registered:", registered)
+	// Output:
+	// myagent: unknown usage key "sufixes", known keys are ["cumulative" "header_cwd" "roots" "suffix" "suffixes"]
+	// myagent registered: true
+}
+
+// A dashboard following several agent processes has to decide which of them it
+// is already following, and key its map so one directory holds one entry. Both
+// answers are per-platform questions this package settles, because two
+// spellings of one directory differ byte for byte on macOS and Windows and name
+// two directories on Linux: a caller spelling out filepath.Clean gets the
+// first two platforms wrong. What holds on every platform is shown here; a
+// caller wanting the macOS and Windows spellings of one directory asked for
+// them, and they are one directory.
+func ExampleSameDir() {
+	fmt.Println(agentusage.SameDir("/home/me/project", "/home/me/project"))
+	fmt.Println(agentusage.SameDir("/home/me/project", "/home/me/other"))
+	// Output:
+	// true
+	// false
+}
+
+// DirKey is the same comparison as a map key, for a caller tracking one
+// process per directory. Two spellings SameDir calls equal fold to one key, so
+// the map holds a single entry rather than one per spelling, and two it calls
+// different stay separate entries. The paths here are the same on every
+// platform, since a platform that folds them together would be asserting
+// something the example cannot also assert.
+func ExampleDirKey() {
+	followers := map[string]int{}
+	for _, dir := range []string{"/home/me/project", "/home/me/project", "/home/me/other"} {
+		followers[agentusage.DirKey(dir)]++
+	}
+	fmt.Println(len(followers))
+	// Output: 2
+}
+
+// Agents lists every name this package knows, whether or not it can be read
+// here. Supported is the separate question, and the two are asked together
+// because a name alone is not a promise: the only built-ins nothing can read
+// are the two database agents, and opencode needs this build to carry the
+// sqlite tag on top of EnableOpenCodeDB.
+func ExampleAgents() {
+	fmt.Println(agentusage.Supported("claude"))
+	fmt.Println(agentusage.Supported("no-such-agent"))
+	// Output:
+	// true
+	// false
+}

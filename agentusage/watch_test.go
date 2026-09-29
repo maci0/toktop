@@ -529,6 +529,57 @@ func TestRateMethodsMatchTheFunctions(t *testing.T) {
 	}
 }
 
+// Delta.At documents itself as the current Sample.At rather than a per-poll
+// reading timestamp, which is a claim about a watcher's clock as much as about
+// the arithmetic: a poll that observed nothing must leave the stamped instant
+// where it was, or an interval a caller dates from d.At would be measured
+// against a tick that never read anything.
+func TestDeltaAtIsTheSampleInstantAndAQuietPollDoesNotMoveIt(t *testing.T) {
+	dir := t.TempDir()
+	if err := RegisterSpec("atprobe", Spec{Roots: []string{dir}}); err != nil {
+		t.Fatalf("RegisterSpec: %v", err)
+	}
+	t.Cleanup(func() { UnregisterSpec("atprobe") })
+
+	stamp := time.Unix(1_000_000, 0)
+	clock := func() time.Time { return stamp }
+	w := Watch("atprobe", dir, stamp)
+	if w.Err() != nil {
+		t.Fatalf("Watch: %v", w.Err())
+	}
+	w.SetNow(clock)
+
+	first := w.Poll()
+	if !first.At.IsZero() && !first.Empty() {
+		t.Fatalf("an empty first poll stamped %v", first.At)
+	}
+	record := []byte(`{"usage":{"input_tokens":30,"output_tokens":12}}` + "\n")
+	if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), record, 0o644); err != nil {
+		t.Fatalf("write transcript: %v", err)
+	}
+	grown := w.Poll()
+	if grown.Empty() {
+		t.Fatal("the appended record was not read")
+	}
+	if !grown.At.Equal(stamp) {
+		t.Fatalf("Sample.At = %v, want the injected instant %v", grown.At, stamp)
+	}
+
+	// A poll with nothing new must not advance the instant, or the next
+	// growth would be dated from a reading that never happened.
+	stamp = stamp.Add(time.Hour)
+	if quiet := w.Poll(); !quiet.At.Equal(grown.At) {
+		t.Fatalf("a poll that observed nothing moved At to %v, want %v", quiet.At, grown.At)
+	}
+	d, ok := grown.Delta(first)
+	if !ok {
+		t.Fatal("the appended record reported no growth")
+	}
+	if !d.At.Equal(grown.At) {
+		t.Fatalf("Delta.At = %v, want the current sample's At %v", d.At, grown.At)
+	}
+}
+
 // A delta is the interval a caller reports, so a rewrite under the watcher
 // (counts that went down) must not read as growth, and reasoning on its own
 // is growth a caller would otherwise drop.

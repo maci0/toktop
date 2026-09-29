@@ -124,6 +124,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   closer to two of them than to either alone is left to whatever program reads
   it.
 
+- Runnable examples for the `agentusage` surface that had documentation but no
+  example: `UnknownUsageKeys` and `UsageKeyNames` together, the pair that names
+  a misspelled `usage` key beside the set this build does read; `SameDir` and
+  `DirKey`, the directory identity and map-key pair a dashboard following
+  several agent processes needs; and `Agents` beside `Supported`, since a name
+  this package knows is not a promise that it can be read here.
+
 ### Security
 
 - The request path on an ingest audit line now folds the home of whichever
@@ -307,6 +314,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the connect cannot disagree, and `--help` now says the same of the variable.
 
 ### Fixed
+
+- `agentusage.Delta.At` documented itself as the instant the current sample
+  was read, "whether or not anything grew", which contradicts `Sample.At` on
+  the same reading: a poll that observed nothing does not move the sample's
+  instant, so a delta reporting no growth carries the instant the sample before
+  it did. A caller dating an interval from `d.At` therefore took the end from
+  a field that advances only when the counters did. The field is documented as
+  the current sample's `At` copied across, and a test pins both halves of the
+  claim against a real watcher.
 
 - A session store that cannot be read is no longer opened once per poll. The
   handle table caches the read-only connection a poll reuses, but the

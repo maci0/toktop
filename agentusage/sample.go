@@ -66,8 +66,12 @@ type Delta struct {
 	// when the transcript recorded it. Zero means it did not, and the rate
 	// for the interval is the growth over the time between the two samples.
 	Span time.Duration
-	// At is when the current sample was read, whether or not anything grew, so
-	// a caller can stamp the interval the samples span.
+	// At is the current sample's own [Sample.At] copied across: when the
+	// counters last changed, not when this interval was measured. A poll that
+	// observed nothing does not move it, so a delta reporting no growth
+	// carries the same instant the sample before it did. A caller stamping an
+	// interval reads the start from the previous sample's At and the end from
+	// here; [Rate] and its siblings take both samples and do that themselves.
 	At time.Time
 }
 
