@@ -938,6 +938,117 @@ func TestAnswerPasswordPromptSingleSecret(t *testing.T) {
 	}
 }
 
+// An "IdentityFile none" block names no key file and turns the ~/.ssh
+// defaults off, so the target carries the flag rather than a path spelled
+// "none" that no dial could load.
+func TestSSHConfigIdentityFileNone(t *testing.T) {
+	useSSHConfig(t, "Host gpu\n  User dev\n  IdentityFile none\n")
+	tgt, err := ParseTarget("ssh://gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !tgt.NoIdentityFiles {
+		t.Errorf("IdentityFile none left NoIdentityFiles false: %+v", tgt)
+	}
+	if tgt.KeyFile != "" {
+		t.Errorf("IdentityFile none resolved to key file %q, want none", tgt.KeyFile)
+	}
+
+	// A path in the same position leaves the defaults in force.
+	useSSHConfig(t, "Host gpu\n  IdentityFile ~/.ssh/gpu_key\n")
+	tgt, err = ParseTarget("ssh://gpu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tgt.NoIdentityFiles || tgt.KeyFile == "" {
+		t.Errorf("a path-valued IdentityFile changed the defaults: %+v", tgt)
+	}
+}
+
+// A config toktop does not act on is named, once per run rather than once per
+// target: an Include it does not follow drops every value the included file
+// defines, and a relative IdentityFile is read against the working directory.
+func TestSSHConfigWarnsOnIncludeAndRelativeKey(t *testing.T) {
+	buf := captureAudit(t)
+	oldInc, oldRel := warnSSHConfigInclude, warnSSHConfigRelativeKey
+	t.Cleanup(func() { warnSSHConfigInclude, warnSSHConfigRelativeKey = oldInc, oldRel })
+	warnSSHConfigInclude = sync.OnceFunc(func() {
+		audit().Warn("toktop: ssh config uses Include; the included files are not read, so the values they define are not applied")
+	})
+	warnSSHConfigRelativeKey = sync.OnceFunc(func() {
+		audit().Warn("toktop: ssh config IdentityFile is a relative path; it is resolved against the working directory, so the key it names depends on where toktop was started")
+	})
+
+	useSSHConfig(t, "Include conf.d/*.conf\nHost gpu\n  User dev\n  IdentityFile keys/gpu\n")
+	for range 2 {
+		if _, err := ParseTarget("ssh://gpu"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(linesWith(buf, "Include")); n != 1 {
+		t.Errorf("Include warning written %d times, want 1:\n%s", n, buf)
+	}
+	if n := len(linesWith(buf, "relative path")); n != 1 {
+		t.Errorf("relative-key warning written %d times, want 1:\n%s", n, buf)
+	}
+
+	// An absolute path and no Include: neither warning.
+	buf.Reset()
+	useSSHConfig(t, "Host gpu\n  IdentityFile /etc/ssh/gpu_key\n")
+	if _, err := ParseTarget("ssh://gpu"); err != nil {
+		t.Fatal(err)
+	}
+	if s := buf.String(); strings.Contains(s, "Include") || strings.Contains(s, "relative path") {
+		t.Errorf("warned for a config with neither case:\n%s", s)
+	}
+}
+
+// The ~/.ssh defaults stay out of the chain when the config turned them off,
+// which is what keeps an unloadable default key from failing the run.
+func TestNoIdentityFilesSkipsDefaultKeys(t *testing.T) {
+	disableAgent(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if err := os.MkdirAll(filepath.Join(home, ".ssh"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// Present but not a key: the defaults case audits a warning per file and
+	// moves on, the none case never looks at it.
+	for _, n := range []string{"id_ed25519", "id_ecdsa", "id_rsa"} {
+		if err := os.WriteFile(filepath.Join(home, ".ssh", n), []byte("not a key"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tgt := Target{Host: "box", Port: 22, NoIdentityFiles: true}
+	methods, cleanup, err := tgt.authMethods()
+	cleanup()
+	if err != nil {
+		t.Fatalf("authMethods with the defaults off: %v", err)
+	}
+	if len(methods) != 0 {
+		t.Errorf("chain offered %d methods with IdentityFile none, want 0", len(methods))
+	}
+}
+
+// A relative home places ~/.ssh/config and the default identities under the
+// working directory, where a missing config is not an error and a missing key
+// is not either. It names no path, the same rule the pin store and the agent
+// stores follow, and says so once so the connect that fails has a cause in it.
+func TestHomeRelativeNamesNoSSHPaths(t *testing.T) {
+	t.Setenv("HOME", "relative/home")
+	t.Setenv("USERPROFILE", "relative/home") // os.UserHomeDir on windows
+	if got := homeDir(); got != "" {
+		t.Fatalf("homeDir() = %q, want no home for a relative value", got)
+	}
+	if got := sshConfigPath(); got != "" {
+		t.Errorf("sshConfigPath() = %q, want no config for a relative home", got)
+	}
+	if got := defaultKeyPaths(); len(got) != 0 {
+		t.Errorf("defaultKeyPaths() = %v, want none for a relative home", got)
+	}
+}
+
 func TestExplicitKeyFileFailureAborts(t *testing.T) {
 	disableAgent(t)
 	home := t.TempDir()

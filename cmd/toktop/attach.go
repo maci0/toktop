@@ -60,6 +60,10 @@ func attachTarget(ctx context.Context, tgt remote.Target, sshKey string, sysFn f
 	// ~/.ssh/config by ParseTarget.
 	if sshKey != "" {
 		tgt.KeyFile = sshKey
+		// A key named on the command line is the operator's choice for this
+		// run, so it lifts the "IdentityFile none" the config carried: the
+		// flag overrides the config, as --help says it does.
+		tgt.NoIdentityFiles = false
 	}
 	rp, rsys, err := attachRemote(ctx, tgt)
 	if err != nil {

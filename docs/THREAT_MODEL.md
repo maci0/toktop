@@ -92,6 +92,13 @@ What is worth stealing, corrupting, or denying:
   auth_windows.go, both bounded by `agentDialTimeout` 2s, auth.go), and the
   password
   from `TOKTOP_SSH_PASSWORD` or the terminal prompt (auth.go).
+  Three `~/.ssh/config` values are read differently from ssh and say so in
+  the audit log rather than passing silently: `Include` is not followed, so a
+  Host block in an included file never steers anything;
+  `IdentityFile none` drops the default key set above (`NoIdentityFiles`,
+  target.go, applied in `authMethods`); and a relative `IdentityFile`
+  resolves against the working directory, so the identity offered depends on
+  where the run was started.
 - **Host-key pin store**: `$XDG_CONFIG_HOME/toktop/known_hosts` when that
   variable is set, otherwise `os.UserConfigDir()/toktop/known_hosts`
   (`defaultKnownHostsPath`, internal/remote/knownhosts.go). The env var is
@@ -422,7 +429,9 @@ Every externally reachable input, with its code location:
    silently watching a reduced agent set (cmd/toktop/main.go, the
    `loadAgentDefs` call, and `agentusage.LoadDefinitions`).
 9. **Config files read at startup**: `~/.ssh/config` (HostName/User/Port/
-   IdentityFile override target fields, internal/remote/target.go),
+   IdentityFile override target fields, internal/remote/target.go, which also
+   names the three values it reads differently from ssh: `Include`, a relative
+   `IdentityFile` and `IdentityFile none`),
    the known_hosts store (knownhosts.go), and
    `$GAUNTLET_HOME/agents.json` or `~/.gauntlet/agents.json`
    (agentusage/definitions.go). `XDG_CONFIG_HOME` relocates the

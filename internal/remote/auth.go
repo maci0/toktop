@@ -18,10 +18,12 @@ import (
 )
 
 // defaultKeyPaths lists the per-user private keys tried after any explicitly
-// configured one, approximating ssh's default identities.
+// configured one, approximating ssh's default identities. A home that is
+// unset or not absolute names no path, the rule homeDir states for
+// ~/.ssh/config.
 func defaultKeyPaths() []string {
-	home, err := os.UserHomeDir()
-	if err != nil {
+	home := homeDir()
+	if home == "" {
 		return nil
 	}
 	names := []string{"id_ed25519", "id_ecdsa", "id_rsa"}
@@ -271,20 +273,26 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 	if m != nil {
 		methods = append(methods, m)
 	}
-	for _, p := range defaultKeyPaths() {
-		m, err := keyFileAuth(p, false)
-		if err != nil {
-			// The reason is folded to "~" before it is written, like every
-			// other audit line here: a read failure carries the path it failed
-			// on in full, and a path under $HOME names the account the line
-			// is otherwise careful not to.
-			audit().Warn("toktop: default ssh key unusable, continuing without it",
-				"key", core.RedactHome(p),
-				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
-			continue
-		}
-		if m != nil {
-			methods = append(methods, m)
+	// The ~/.ssh defaults are skipped for a config that wrote "IdentityFile
+	// none", which is the file form of IdentitiesOnly: the operator turned the
+	// default identities off for this host, and offering them anyway would put
+	// a key in front of it that the configuration refused.
+	if !t.NoIdentityFiles {
+		for _, p := range defaultKeyPaths() {
+			m, err := keyFileAuth(p, false)
+			if err != nil {
+				// The reason is folded to "~" before it is written, like every
+				// other audit line here: a read failure carries the path it failed
+				// on in full, and a path under $HOME names the account the line
+				// is otherwise careful not to.
+				audit().Warn("toktop: default ssh key unusable, continuing without it",
+					"key", core.RedactHome(p),
+					"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
+				continue
+			}
+			if m != nil {
+				methods = append(methods, m)
+			}
 		}
 	}
 	if sock := agentSock(); sock != "" {

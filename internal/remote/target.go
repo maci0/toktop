@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
@@ -37,6 +38,11 @@ type Target struct {
 	Port int // 22 when unset
 	// KeyFile optionally names a private key used ahead of agent/default keys.
 	KeyFile string
+	// NoIdentityFiles records that the matching ~/.ssh/config block wrote
+	// "IdentityFile none", which turns the ~/.ssh default identities off. The
+	// agent is still consulted, the way ssh consults it unless IdentitiesOnly
+	// is set, so this suppresses the default key files alone.
+	NoIdentityFiles bool
 }
 
 // ParseTarget parses ssh://[user@]host[:port] and applies ~/.ssh/config
@@ -66,6 +72,7 @@ func ParseTarget(raw string) (Target, error) {
 			}
 			if t.KeyFile == "" {
 				t.KeyFile = cfg.IdentityFile
+				t.NoIdentityFiles = cfg.NoIdentityFiles
 			}
 			if cfg.HostName != "" {
 				t.Host = cfg.HostName
@@ -100,7 +107,7 @@ func ParseTargets(raws []string) (targets, duplicates []Target, err error) {
 		if err != nil {
 			return nil, nil, err
 		}
-		key := foldHost(t.Host) + "\x00" + t.User + "\x00" + strconv.Itoa(t.Port) + "\x00" + t.KeyFile
+		key := foldHost(t.Host) + "\x00" + t.User + "\x00" + strconv.Itoa(t.Port) + "\x00" + t.KeyFile + "\x00" + strconv.FormatBool(t.NoIdentityFiles)
 		if seen[key] {
 			duplicates = append(duplicates, t)
 			continue
@@ -187,11 +194,50 @@ type sshConfigEntry struct {
 	HostName     string
 	Port         int
 	IdentityFile string
+	// NoIdentityFiles records an "IdentityFile none" line, the keyword
+	// argument that turns the default identities off rather than naming one.
+	NoIdentityFiles bool
 }
 
-var sshConfigPath = func() string {
-	home, err := os.UserHomeDir()
+// warnOncePerRun makes a configuration warning fire once for the process
+// rather than once per ssh:// target that reads the same config file. Vars so
+// a test can install its own and read the line it wrote.
+var (
+	warnSSHConfigInclude = sync.OnceFunc(func() {
+		audit().Warn("toktop: ssh config uses Include; the included files are not read, so the values they define are not applied")
+	})
+	warnSSHConfigRelativeKey = sync.OnceFunc(func() {
+		audit().Warn("toktop: ssh config IdentityFile is a relative path; it is resolved against the working directory, so the key it names depends on where toktop was started")
+	})
+)
+
+// homeDir is the home directory the home-relative paths here are built from:
+// ~/.ssh/config and the default identity files. It carries the absolute-only
+// rule agentusage.HomeDir and defaultKnownHostsPath already apply: a relative
+// $HOME would place both under the directory the run started in, where a
+// missing config is not an error and a missing key is not either, so the
+// connection would use the wrong port with the wrong identity and name
+// neither. An unusable home names no path at all, and is said once so the
+// cause is not a connect failure with nothing in it.
+func homeDir() string {
+	dir, err := os.UserHomeDir()
 	if err != nil {
+		return ""
+	}
+	if !filepath.IsAbs(dir) {
+		warnRelativeHome()
+		return ""
+	}
+	return dir
+}
+
+var warnRelativeHome = sync.OnceFunc(func() {
+	audit().Warn("toktop: the home directory is not an absolute path; ~/.ssh/config and the default ssh keys are not read")
+})
+
+var sshConfigPath = func() string {
+	home := homeDir()
+	if home == "" {
 		return ""
 	}
 	return filepath.Join(home, ".ssh", "config")
@@ -228,6 +274,10 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 	entry := &sshConfigEntry{}
 	matched := false
 	inBlock := false
+	// The first IdentityFile in the matching block decides, as OpenSSH's
+	// first-obtained-value rule does: "none" is one of the values, so it has
+	// to be remembered alongside the path form rather than as a path.
+	identitySeen := false
 	for line := range strings.SplitSeq(string(b), "\n") {
 		key, val, ok := cutConfigField(line)
 		if !ok {
@@ -285,9 +335,28 @@ func parseSSHConfig(b []byte, name string) *sshConfigEntry {
 				}
 			}
 		case "identityfile":
-			if inBlock && entry.IdentityFile == "" {
+			if inBlock && !identitySeen {
+				identitySeen = true
+				if core.FoldASCII(val) == "none" {
+					// The keyword argument ssh_config documents for "load no
+					// identity files". Read as a path it is a file named "none",
+					// which is missing, and a missing required key aborts the
+					// whole auth chain: every connection to this host fails
+					// with a key error naming a file the operator never wrote.
+					entry.NoIdentityFiles = true
+					break
+				}
+				if !filepath.IsAbs(core.ExpandHome(val)) {
+					warnSSHConfigRelativeKey()
+				}
 				entry.IdentityFile = core.ExpandHome(val)
 			}
+		case "include":
+			// Include names other files this reader does not open. The Host
+			// block it defines is then absent from this run: the user, port,
+			// hostname and key in it are not applied, and the connect fails or
+			// lands on the wrong one with nothing naming the cause.
+			warnSSHConfigInclude()
 		}
 	}
 	if !matched {

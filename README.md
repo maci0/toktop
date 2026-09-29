@@ -580,7 +580,14 @@ keys, ssh-agent, and finally a password prompt when stdin is a terminal
 (or set `TOKTOP_SSH_PASSWORD` for headless runs). `ssh://user:pass@host`
 is rejected: the password would sit in argv, and is not how auth is
 configured. A path, query, or fragment on the URL is rejected rather than
-ignored. Host keys use trust-on-first-use, stored at
+ignored. Three values in `~/.ssh/config` are read differently from ssh and
+say so in the audit log: `Include` is not followed, so a Host block in an
+included file is not applied; `IdentityFile none` turns the default
+`~/.ssh` keys off (ssh-agent is still tried); and a relative
+`IdentityFile` is resolved against the working directory, not the config's
+own directory. A home directory that is not an absolute path names no config
+and no default key rather than placing either under the working directory. Host
+keys use trust-on-first-use, stored at
 `$XDG_CONFIG_HOME/toktop/known_hosts` when that is an absolute path, and
 otherwise at `toktop/known_hosts` under the platform's user config directory
 (`~/.config` on Linux, `~/Library/Application Support` on macOS,

@@ -230,7 +230,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `TestOpenAPIVersionNamesTheReleaseItDescribes` in `internal/repogate` holds
   the field to the release the file's last change shipped in, so a contract
   change cannot move without it.
-
+- `IdentityFile none` in `~/.ssh/config` no longer breaks every connection to
+  that host. It was read as a path, so the required key was a file named
+  `none`, and the missing file aborted the auth chain with a key error naming
+  a file nobody wrote. The keyword now turns the default `~/.ssh` identities
+  off the way ssh does, and the agent is still tried.
+- `~/.ssh/config` values toktop does not act on are named in the audit log
+  instead of passing silently: `Include`, whose files are not read, so a Host
+  block in one of them steers nothing, and a relative `IdentityFile`, which
+  resolves against the working directory rather than the config's own.
+  `--ssh-key` still overrides the config's `none`.
+- A home directory that is not an absolute path no longer places `~/.ssh/config`
+  and the default ssh keys under the working directory, where a missing config
+  and a missing key are both silent. It names no path and says so once in the
+  audit log, the rule the host-key store and the agent stores already followed.
 - An empty `--bearer` no longer reports overriding a bearer variable that
   holds only whitespace. `resolveBearer` skips such a value, so nothing was
   overridden; the warning read the variable untrimmed, named the fallback, and
