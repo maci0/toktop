@@ -46,8 +46,10 @@ func (m Model) renderSystem() string {
 				" "+dim(humanBytesShort(sy.MemUsed)+"/"+humanBytesShort(sy.MemTotal)))
 		if sy.SwapTotal > 0 {
 			swPct := float64(sy.SwapUsed) / float64(sy.SwapTotal) * 100
-			st := lipgloss.NewStyle().Foreground(memHeat(swPct))
-			vitals = append(vitals, dim("swp ")+st.Render(fmt.Sprintf("%.0f%%", swPct)))
+			mb := memBand(swPct)
+			st := lipgloss.NewStyle().Foreground(mb.color())
+			vitals = append(vitals, dim("swp ")+
+				st.Render(mb.markPrefix()+fmt.Sprintf("%.0f%%", swPct)))
 		}
 		if sy.Load1 > 0 || sy.Load5 > 0 {
 			vitals = append(vitals, dim("ld ")+styleValue.Render(fmt.Sprintf("%.2f", sy.Load1)))
@@ -70,9 +72,10 @@ func (m Model) renderSystem() string {
 		// tooling output; they pass the terminal sanitizer like every other
 		// externally sourced string.
 		label := shorten(core.SanitizeText(cpuTempLabel(t.Label)), tempLabelWidth)
-		c := tempColor(float64(t.MilliC) / 1000)
+		tb := tempBand(float64(t.MilliC) / 1000)
 		ident = append(ident, dim(label+" ")+
-			lipgloss.NewStyle().Bold(true).Foreground(c).Render(fmtTempC(t.MilliC)))
+			lipgloss.NewStyle().Bold(true).Foreground(tb.color()).
+				Render(tb.markPrefix()+fmtTempC(t.MilliC)))
 		shownTemps++
 	}
 	switch {
@@ -213,8 +216,9 @@ func gpuSegment(g core.GPUDevice) string {
 	var b strings.Builder
 	b.WriteString(dim(shortVendor(g.Vendor) + strconv.Itoa(g.Index) + " "))
 	if g.MilliC > 0 {
-		c := tempColor(float64(g.MilliC) / 1000)
-		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(c).Render(fmtTempC(g.MilliC)) + " ")
+		tb := tempBand(float64(g.MilliC) / 1000)
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(tb.color()).
+			Render(tb.markPrefix()+fmtTempC(g.MilliC)) + " ")
 	}
 	if g.UtilPct > 0 {
 		b.WriteString(styleInfo.Render(fmt.Sprintf("%.0f%%", g.UtilPct)) + " ")
@@ -274,9 +278,18 @@ func sysCPUTemps(sy *core.SysSample) []core.TempReading {
 	return sy.Temps
 }
 
-func tempColor(celsius float64) lipgloss.Color { return heatBand(celsius, 60, 80) }
+// tempBand and memBand are the ramps these readings are classified on, and
+// the color each one draws with. A bare reading (a temperature, a swap
+// percentage) is prefixed with its band's mark, so its severity survives a
+// monochrome terminal and a colorblind reader; the gauge meters carry a bar
+// and a number already and are left alone.
+func tempBand(celsius float64) band { return bandOf(celsius, tempWarnC, tempCritC) }
 
-func memHeat(v float64) lipgloss.Color { return heatBand(v, 70, 90) }
+func tempColor(celsius float64) lipgloss.Color { return tempBand(celsius).color() }
+
+func memBand(v float64) band { return bandOf(v, memWarnPct, memCritPct) }
+
+func memHeat(v float64) lipgloss.Color { return memBand(v).color() }
 
 func fmtTempC(milliC int) string {
 	return fmt.Sprintf("%.0f°", float64(milliC)/1000)

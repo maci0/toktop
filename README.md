@@ -616,7 +616,7 @@ technology:
 
   SYSTEM
   memory 64% (248G/384G) · swap 17% · load 5.06
-  gpu nv0 A100-SXM4-80GB 82° 69% util vram 57G/80G 397W
+  gpu nv0 A100-SXM4-80GB 82° critical 69% util vram 57G/80G 397W
 
   PROBES
   ok meta-llama/Llama-3.3-70B-Instruct-engine ttft 113ms 135 tok/s
@@ -635,7 +635,11 @@ technology:
   colors at >= 4.5:1 on the background, and chart marks at >= 3:1 even at
   the deepest point of the age fade (`internal/ui/theme_test.go`).
 - **No color** - `NO_COLOR` strips styling as usual; layout and text carry
-  the same information without it.
+  the same information without it. A reading over a threshold also says so
+  without it: a temperature at or above 80° is prefixed `!!` in the strip and
+  spelled `critical` in the plain report, where a screen reader meets the
+  whole dashboard. Below the critical step, `!` and `high`. The gauge meters
+  keep their bar and their percentage and are left alone.
 
 ## Flags
 

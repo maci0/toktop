@@ -74,9 +74,11 @@ func TestPlainFrameCarriesTheData(t *testing.T) {
 		// engines: status as a word, error text attached to the down one
 		"up   ollama", "down vllm", "connection refused", "kv cache 7%",
 		"running 2", "waiting 3",
-		// system strip content survives as text
-		"memory 50%", "swap 12%", "load 1.52", "gpu nv0 A100", "71°",
-		"vram 20G/80G", "310W", "Test CPU", "temp package 64°",
+		// system strip content survives as text, and a reading on the warn or
+		// crit band names its severity: this report has no color, so a word is
+		// the only channel a hot reading has (WCAG 1.4.1)
+		"memory 50%", "swap 12%", "load 1.52", "gpu nv0 A100", "71° high",
+		"vram 20G/80G", "310W", "Test CPU", "temp package 64° high",
 		// probes: verdict words, failure reason kept, no empty metrics
 		"failed gone", "error: timeout", "ok llama3", "ttft 97ms", "340 tok/s",
 		// feed: kind words and token counts instead of icons
@@ -85,6 +87,42 @@ func TestPlainFrameCarriesTheData(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("plain frame missing %q in:\n%s", want, out)
 		}
+	}
+}
+
+// The plain report has no color to spend on a reading, so a reading over a
+// ramp's warn or crit threshold has to say so in words. Both steps, on both
+// a temperature and a percentage, and an OK-band reading says nothing: a
+// healthy machine reads the same as it always did.
+func TestPlainFrameNamesSeverityInWords(t *testing.T) {
+	snap := core.Snapshot{
+		At:        time.Now(),
+		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
+		Sys: &core.SysSample{
+			MemTotal: 1000, MemUsed: 500, SwapTotal: 1000, SwapUsed: 800,
+			Temps: []core.TempReading{
+				{Label: "cool", MilliC: 40000}, // ok
+				{Label: "warm", MilliC: 65000}, // warn
+				{Label: "hot", MilliC: 95000},  // crit
+			},
+			GPUs: []core.GPUDevice{{Vendor: "nvidia", Index: 0, MilliC: 85000}},
+		},
+	}
+	out := PlainTextFrame(Config{Version: "t"}, snap)
+	for _, want := range []string{
+		"temp cool 40°\n",
+		"temp warm 65° high",
+		"temp hot 95° critical",
+		"swap 80% high",
+		"gpu nv0 85° critical",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plain frame missing %q in:\n%s", want, out)
+		}
+	}
+	// memory is at 50%, on the OK band, so it carries no word
+	if !strings.Contains(out, "memory 50% (") {
+		t.Errorf("OK-band memory should read bare, got:\n%s", out)
 	}
 }
 

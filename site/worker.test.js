@@ -29,6 +29,18 @@ const README_SIZES_RE = /([\d,]+) bytes identity \/ ([\d,]+) gzip \/\s*([\d,]+) 
 const README_VISIT_RE =
   /whole visit is those ([\d,]+) bytes[\s\S]*?([\d,]+) bytes in two requests/g;
 const thousandsStripped = (value) => Number(value.replaceAll(",", ""));
+// The h1 cursor's animation rule, and the parts of it that say whether the
+// blink ever stops. Named apart from the tests that read them so a rule
+// rewritten under them is a readable failure rather than a silent pass.
+const BLINK_CURSOR_BLOCK_RE = /h1 \.cursor \{[^}]*animation:[^}]*\}/;
+const INFINITE_RE = /\binfinite\b/;
+const BLINK_CYCLES_RE = /step-end\s+(\d+)/;
+const BLINK_PERIOD_RE = /blink\s+([\d.]+)s/;
+const NAV_BLOCK_RE = /<nav\b[\s\S]*?<\/nav>/;
+const NAV_LABELED_RE = /<nav aria-label="[^"]+">/;
+const ANCHOR_TAG_RE = /<a\b[^>]*>/g;
+const ARIA_LABEL_ATTR_RE = /aria-label=/;
+const ARIA_LABELLEDBY_ATTR_RE = /aria-labelledby=/;
 // A rule that takes the focus indicator off the skip link's target, and the
 // shell prompt in the capture caption, which is decoration rather than part
 // of the command it introduces.
@@ -312,7 +324,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4528);
+    expect(bytes.byteLength).toBe(4492);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1025,6 +1037,47 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
   expect(identityBody.includes('<html lang="en">')).toBe(true);
 });
 
+// The blink has to stop, not just be skippable by preference. A user who
+// never set prefers-reduced-motion faces a page that blinks for as long as
+// they read it, with nothing on the page to stop it, which 2.2.2 does not
+// allow (WCAG). The animation is therefore bounded, and a rule that reopens
+// it as an infinite loop is a test failure.
+test("the blinking cursor stops instead of looping forever", () => {
+  const block = identityBody.match(BLINK_CURSOR_BLOCK_RE)?.[0];
+  expect(block).toBeDefined();
+  expect(block).not.toMatch(INFINITE_RE);
+  // The bound is a cycle count on the animation, not a duration elsewhere.
+  const cycles = Number(block?.match(BLINK_CYCLES_RE)?.[1]);
+  expect(cycles).toBeGreaterThan(0);
+  // Under five seconds of motion at the declared period.
+  const period = Number(block?.match(BLINK_PERIOD_RE)?.[1]);
+  expect(cycles * period).toBeLessThanOrEqual(5);
+});
+
+// A nav link's accessible name has to contain the text it shows, because a
+// voice-control user says what they see and the page must answer to it
+// (WCAG 2.5.3). The section headings the labels used to repeat are already
+// reachable, so overriding the visible text bought nothing.
+test("nav links are named by their visible text, not an aria-label", () => {
+  const nav = identityBody.match(NAV_BLOCK_RE)?.[0];
+  expect(nav).toBeDefined();
+  // The nav landmark keeps its own label; the links inside it carry none,
+  // so each one is named by the text it shows.
+  expect(nav).toMatch(NAV_LABELED_RE);
+  const links = [...nav.matchAll(ANCHOR_TAG_RE)].map((match) => match[0]);
+  expect(links.length).toBeGreaterThan(0);
+  for (const link of links) {
+    expect(link).not.toMatch(ARIA_LABEL_ATTR_RE);
+    expect(link).not.toMatch(ARIA_LABELLEDBY_ATTR_RE);
+  }
+  for (const [href, text] of [
+    ["#shows", "Shows"],
+    ["#measured", "Measured"],
+  ]) {
+    expect(nav).toContain(`<a href="${href}">${text}</a>`);
+  }
+});
+
 // The skip link is only useful if the reader can see where it put them. main
 // takes focus from that key press, and a rule that removed the outline there
 // left a keyboard user with no focus indicator at all (WCAG 2.4.7), so the
@@ -1102,9 +1155,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13180);
-  expect(gzipped).toBe(4528);
-  expect(brotli).toBe(3838);
+  expect(identity).toBe(13026);
+  expect(gzipped).toBe(4492);
+  expect(brotli).toBe(3799);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1135,7 +1188,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_415);
+  expect(visit[0][1]).toBe(14_376);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
@@ -1188,7 +1241,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_415);
+  expect(visit).toBe(14_376);
   expect(visit).toBeLessThan(25_000);
 });
 

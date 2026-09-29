@@ -206,11 +206,15 @@ const HTML = htmlForWire(`<!doctype html>
      the top of the scale only, and only there; every level below the h1 is
      still size alone, so the section structure reads without it. */
   h1 { font-size: var(--fs-h1); font-weight: 700; margin: 0; }
-  /* Blinking content that starts automatically must be pausable/stoppable
-     (WCAG 2.2.2); honoring prefers-reduced-motion is the static-page remedy,
-     so the cursor only blinks for users who have not asked for stillness. */
+  /* The blinking cursor is decorative, so it stops rather than looping
+     (WCAG 2.2.2). A preference is not a control: a user who never set
+     prefers-reduced-motion would otherwise face a page that blinks at them
+     for as long as they read it, with nothing on the page to stop it. Four
+     cycles is under five seconds of motion, and the cursor is still there
+     afterwards, solid, which is the state the wordmark above it already
+     uses. */
   @media (prefers-reduced-motion: no-preference) {
-    h1 .cursor { color: var(--accent); animation: blink 1.2s step-end infinite; }
+    h1 .cursor { color: var(--accent); animation: blink 1.2s step-end 4; }
     @keyframes blink { 50% { opacity: 0; } }
   }
   .tag { color: var(--dim); margin: .6rem 0 2rem; font-size: var(--fs-lead); max-width: 62ch; }
@@ -354,10 +358,10 @@ const HTML = htmlForWire(`<!doctype html>
   <nav aria-label="Sections">
     <a href="#install">Install</a>
     <a href="#run">Run</a>
-    <a href="#shows" aria-label="What it shows">Shows</a>
+    <a href="#shows">Shows</a>
     <a href="#keys">Keys</a>
     <a href="#feed">Feed</a>
-    <a href="#measured" aria-label="Measured, or nothing">Measured</a>
+    <a href="#measured">Measured</a>
   </nav>
 </header>
 <main id="top" tabindex="-1">
@@ -377,7 +381,7 @@ const HTML = htmlForWire(`<!doctype html>
       <source type="image/avif" srcset="${HERO_AVIF_SRCSET}" sizes="${HERO_SIZES}">
       <source type="image/webp" srcset="${HERO_WEBP_SRCSET}" sizes="${HERO_SIZES}">
       <img src="/dashboard.png" width="3240" height="1900"
-           alt="toktop dashboard: five local inference engines with throughput, context length and KV-cache pressure, probe time-to-first-token beside them, a GPU and host strip, and an agent feed reporting two coding agents"
+           alt="The toktop terminal dashboard: a row of inference engines, two throughput charts, a GPU and host strip, and an agent feed."
            fetchpriority="high">
     </picture>
   </figure>

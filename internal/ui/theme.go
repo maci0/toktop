@@ -215,17 +215,79 @@ func heatColor(f float64) lipgloss.Color {
 	}
 }
 
-// heatBand is the three-band ramp the percentage meters share: green below
-// warn, amber below crit, red above. A NaN reading is green, since it carries
-// no value to alarm on.
-func heatBand(v, warn, crit float64) lipgloss.Color {
-	if math.IsNaN(v) || v < warn {
-		return cGreen
+// The three-band ramps and where they break. Named because the drawn color,
+// the drawn mark and the plain report's word are read from one classifier, and
+// a threshold spelled twice is a threshold that can disagree with itself.
+const (
+	tempWarnC, tempCritC   = 60, 80
+	memWarnPct, memCritPct = 70, 90
+	kvWarnPct, kvCritPct   = 60, 85
+)
+
+// band is one step of a three-band ramp. A reading's severity is a band, not a
+// color: the drawn frame spends color on it, but color alone leaves a
+// colorblind reader, a monochrome terminal and every screen-reader user with
+// no way to tell a cool reading from a critical one (WCAG 1.4.1). The same
+// step carries all three channels, so no two can report a different band for
+// one reading.
+type band int
+
+const (
+	bandOK band = iota
+	bandWarn
+	bandCrit
+)
+
+// bandOf classifies v against a ramp's two thresholds. A NaN reading is
+// bandOK: it carries no value to alarm on.
+func bandOf(v, warn, crit float64) band {
+	switch {
+	case math.IsNaN(v) || v < warn:
+		return bandOK
+	case v < crit:
+		return bandWarn
 	}
-	if v < crit {
+	return bandCrit
+}
+
+// color is the band on the drawn frame. Repetition, not hue, is what separates
+// the two steps here: a reader who cannot see amber still sees two marks.
+func (b band) color() lipgloss.Color {
+	switch b {
+	case bandWarn:
 		return cYellow
+	case bandCrit:
+		return cRed
 	}
-	return cRed
+	return cGreen
+}
+
+// markPrefix is the non-color channel the drawn frame puts in front of a
+// reading, carrying its own trailing space so a caller concatenates it onto
+// the value with nothing to trim. The OK band prefixes nothing: the common
+// case is a cool reading, and a mark on every row would be one more glyph
+// between the reader and the number they came for.
+func (b band) markPrefix() string {
+	switch b {
+	case bandWarn:
+		return "! "
+	case bandCrit:
+		return "!! "
+	}
+	return ""
+}
+
+// word is the severity spelled out for the plain report, which has no color at
+// all. Named for the reading rather than the ramp: 92% memory and 92 degrees
+// are both "critical", and "hot" would be wrong for the first.
+func (b band) word() string {
+	switch b {
+	case bandWarn:
+		return "high"
+	case bandCrit:
+		return "critical"
+	}
+	return ""
 }
 
 // wordmark is TOKTOP in the site accent. Static: built once, reused every frame.

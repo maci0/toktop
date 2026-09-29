@@ -870,17 +870,42 @@ func TestStaticFrameSystemStrip(t *testing.T) {
 	}
 	out := StaticFrame(Config{Version: "t"}, snap, 110, 34)
 	plain := strip(out)
+	// A reading at or above the warn band is prefixed with its mark, so its
+	// severity does not rest on hue alone (WCAG 1.4.1). The 55C second GPU and
+	// the 50% memory meter sit on the OK band and carry no mark.
 	for _, want := range []string{"SYS", "mem ", "50%", "swp ", "ld ",
-		"nv0 71°", "42%", "20G/80G", "310W"} {
+		"nv0 ! 71°", "42%", "20G/80G", "310W"} {
 		if !strings.Contains(plain, want) {
 			t.Errorf("system strip missing %q in:\n%s", want, plain)
 		}
 	}
 	// wider terminals fit the second GPU and CPU temps too
 	wide := strip(StaticFrame(Config{Version: "t"}, snap, 170, 34))
-	for _, want := range []string{"amd0 55°", "8.0G/64G", "64°"} {
+	for _, want := range []string{"amd0 55°", "8.0G/64G", "! 64°"} {
 		if !strings.Contains(wide, want) {
 			t.Errorf("wide strip missing %q in:\n%s", want, wide)
+		}
+	}
+}
+
+// A reading over the critical band is prefixed with two marks, so the two
+// steps are told apart by glyph count and not only by hue.
+func TestSystemStripMarksCriticalTwice(t *testing.T) {
+	snap := core.Snapshot{
+		At:        time.Now(),
+		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
+		Sys: &core.SysSample{
+			MemTotal: 32 << 30, MemUsed: 16 << 30,
+			Temps: []core.TempReading{
+				{Label: "Tctl", MilliC: 66000}, // warn
+				{Label: "edge", MilliC: 95000}, // crit
+			},
+		},
+	}
+	out := strip(StaticFrame(Config{Version: "t"}, snap, 110, 34))
+	for _, want := range []string{"edge !! 95°", "Tctl ! 66°"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("strip missing %q in:\n%s", want, out)
 		}
 	}
 }
@@ -903,7 +928,7 @@ func TestSystemStripSuppressesHwmonGPUDupes(t *testing.T) {
 	if strings.Contains(out, "edge") {
 		t.Errorf("hwmon GPU temp leaked into strip:\n%s", out)
 	}
-	if !strings.Contains(out, "nv0 70°") || !strings.Contains(out, "66°") {
+	if !strings.Contains(out, "nv0 ! 70°") || !strings.Contains(out, "! 66°") {
 		t.Errorf("expected nv GPU seg + cpu temp:\n%s", out)
 	}
 }
@@ -992,18 +1017,34 @@ func TestSystemStripCountsShedSegments(t *testing.T) {
 // The host strip drops readings for want of width, so its count names the way
 // out the same way the panel titles do, and sheds the sentence on a row too
 // narrow to carry it.
+//
+// The width is searched rather than fixed: the row spends its cells between
+// two competing wants, another GPU and the long sentence, and a hardcoded
+// width only holds while both stay as they are. Every hot reading also spends
+// two more cells on its severity mark (WCAG 1.4.1), which moves the seam.
+// The contract is that some overflowing pane names the way out, not which one.
 func TestSystemStripOverflowNamesTheWayOut(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	m.snap = fourGPUs()
-	m.w, m.h, m.ready = 120, 40, true
-	got := strip(m.renderSystem())
-	if !strings.Contains(got, "more (enlarge window)") {
-		t.Errorf("strip = %q, want the overflow count to name the way out", got)
+	m.h, m.ready = 40, true
+	named := false
+	for w := minDashW; w <= 200; w++ {
+		m.w = w
+		got := strip(m.renderSystem())
+		if !strings.Contains(got, "more") {
+			continue
+		}
+		if n := strings.Count(got, "more"); n != 1 {
+			t.Errorf("w=%d: strip = %q, want one overflow count, got %d", w, got, n)
+		}
+		if strings.Contains(got, "more (enlarge window)") {
+			named = true
+		}
 	}
-	if n := strings.Count(got, "more"); n != 1 {
-		t.Errorf("strip = %q, want one overflow count, got %d", got, n)
+	if !named {
+		t.Error("no overflowing pane width names the way out")
 	}
-	m.w = 62
+	m.w = minDashW
 	if got := strip(m.renderSystem()); !strings.Contains(got, "more") {
 		t.Errorf("strip = %q, want the bare count the narrowest row has room for", got)
 	}

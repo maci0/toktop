@@ -270,11 +270,11 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 		b.WriteString("memory n/a\n")
 	} else {
 		memPct := float64(sy.MemUsed) / float64(sy.MemTotal) * 100
-		line := fmt.Sprintf("memory %.0f%% (%s/%s)", memPct,
+		line := fmt.Sprintf("memory %.0f%%%s (%s/%s)", memPct, severityWord(memBand(memPct)),
 			humanBytesShort(sy.MemUsed), humanBytesShort(sy.MemTotal))
 		if sy.SwapTotal > 0 {
 			swPct := float64(sy.SwapUsed) / float64(sy.SwapTotal) * 100
-			line += fmt.Sprintf(" · swap %.0f%%", swPct)
+			line += fmt.Sprintf(" · swap %.0f%%%s", swPct, severityWord(memBand(swPct)))
 		}
 		if sy.Load1 > 0 || sy.Load5 > 0 {
 			line += fmt.Sprintf(" · load %.2f", sy.Load1)
@@ -287,7 +287,8 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 			line += " " + shorten(core.SanitizeText(g.Name), 30)
 		}
 		if g.MilliC > 0 {
-			line += " " + fmtTempC(g.MilliC)
+			line += " " + fmtTempC(g.MilliC) +
+				severityWord(tempBand(float64(g.MilliC)/1000))
 		}
 		if g.UtilPct > 0 {
 			line += fmt.Sprintf(" %.0f%% util", g.UtilPct)
@@ -314,11 +315,26 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 		if shown >= shownCPUTemps {
 			break
 		}
-		b.WriteString(fmt.Sprintf("temp %s %s\n",
+		b.WriteString(fmt.Sprintf("temp %s %s%s\n",
 			core.SanitizeText(cpuTempLabel(t.Label)),
-			fmtTempC(t.MilliC)))
+			fmtTempC(t.MilliC),
+			severityWord(tempBand(float64(t.MilliC)/1000))))
 		shown++
 	}
+}
+
+// severityWord is a band spelled out for a report that has no color to spend on
+// it, with the leading space that separates it from the reading. The OK band
+// adds nothing, so a healthy machine reads the same as it always did.
+//
+// The drawn frame prefixes the same bands with a mark instead (WCAG 1.4.1), and
+// both read one classifier, so the two surfaces cannot report different
+// severities for one reading.
+func severityWord(b band) string {
+	if w := b.word(); w != "" {
+		return " " + w
+	}
+	return ""
 }
 
 // writeProbesPlain lists the most recent probe results newest-first, with the
