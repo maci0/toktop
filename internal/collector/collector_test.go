@@ -1851,8 +1851,6 @@ func TestEmitSysSampleDoesNotPinMu(t *testing.T) {
 	close(release)
 }
 
-// waitFor polls cond until it holds or the deadline passes; probe completion
-// is asynchronous, so tests must wait rather than sleep-and-hope.
 // drain empties a buffered snapshot channel, so a check on what arrives next
 // is a check on the run that starts next and not on what a stopped one left.
 func drain(ch chan core.Snapshot) {
@@ -1861,6 +1859,8 @@ func drain(ch chan core.Snapshot) {
 	}
 }
 
+// waitFor polls cond until it holds or the deadline passes; probe completion
+// is asynchronous, so tests must wait rather than sleep-and-hope.
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

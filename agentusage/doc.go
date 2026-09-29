@@ -45,7 +45,7 @@
 //
 // The registry calls and Watch are safe to call from several goroutines at
 // once, and a Watcher is safe to use while its Run is going: Poll takes the
-// read lock a running Run also takes, so a final read after the agent exits
+// same lock a running Run holds, so a final read after the agent exits
 // is a call like any other rather than a race. A definitions file reloaded
 // after a watcher started reaches it on the next poll, and a source
 // withdrawn by EnableOpenCodeDB(false) stops being read the same way; an

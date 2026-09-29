@@ -158,9 +158,13 @@ func panel(title, content string, innerW, innerH int) string {
 // walk over the block answers nothing the caller has not already decided.
 //
 // A block carrying a tab is the exception lipgloss handles differently: it
-// expands tabs into spaces before measuring. A tab should not reach a frame
-// (clip and shorten fold them away), and deferring keeps that a rendering
-// question rather than a silent one.
+// expands tabs into spaces before measuring, and the block is measured by
+// cluster count here, so the two disagree and the frame's right edge drifts.
+// Nothing upstream strips a tab: sanitize keeps \n and \t, and clip and
+// shorten only trim, so a provider name or a probe label carrying one reaches
+// this. Handing the whole block to lipgloss keeps the fallback a rendering
+// question rather than a silent one, at the cost of the fast path for a frame
+// that has one.
 func frame(block string, innerW int) string {
 	if strings.ContainsRune(block, '\t') {
 		return panelStyle.Render(block)

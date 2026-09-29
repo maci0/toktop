@@ -171,10 +171,10 @@ func runMain() int {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db needs a build with -tags sqlite; opencode will report no tokens")
 	}
 	warnUnknownEnv()
-	// targets, not remoteTargets, in every remote count below: see the note by
-	// logActiveConfig. ParseTargets only collapses repeats, so no branch here
-	// changes answer, but a count that means "ssh connections this run opens"
-	// has to come from one place.
+	// targets, not remoteTargets, in every remote count below and at the
+	// logActiveConfig call: ParseTargets only collapses repeats, so no branch
+	// here changes answer, but a count that means "ssh connections this run
+	// opens" has to come from one place.
 	warnIgnoredFlags(explicit, f, len(f.adds), len(targets))
 	warnIgnoredFrameEnv(f.once, f.plain, f.jsonOut)
 	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, f.agents, len(f.adds), len(targets))
@@ -340,8 +340,10 @@ func runMain() int {
 		if demoSrc != nil {
 			aw.SetNow(demoSrc.Now)
 		}
-		// Run has no error return, so an engine address that will not parse
-		// is reported here. Left unreported it silently double counts every
+		// Run's only error is a second concurrent Run, which this one call
+		// site cannot make, so every condition an operator has to see comes
+		// through here instead. An engine address that will not parse is the
+		// one that matters: left unreported it silently double counts every
 		// agent's tokens against the engine it is already generating through.
 		// The UI shows the condition; the audit log keeps it, because the
 		// banner is gone with the run and a watch that stopped following an

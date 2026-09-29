@@ -68,7 +68,7 @@ func openapiSection(t *testing.T, path string) string {
 // operation's responses.
 var openapiCodeRE = regexp.MustCompile(`(?m)^ +"([0-9]{3})":`)
 
-// openapiMethods lists the operations one path's block declares, which sit at
+// openapiMethodRE lists the operations one path's block declares, which sit at
 // the same indent under the path heading and nowhere else in it.
 var openapiMethodRE = regexp.MustCompile(`(?m)^    ([a-z]+):$`)
 

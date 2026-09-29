@@ -128,12 +128,13 @@ func (m *colorMemo[T]) load(key string, build func() T) T {
 // being split and re-parsed a few hundred times a frame.
 var hexRGB colorMemo[rgb]
 
-// fgRuns memoizes the escape runs a foreground color resolves to. A
-// Style.Render resolves the color against the active termenv profile on every
-// call, and that resolution allocates: the gauge bars, the sys strip and the
-// rate labels between them were a ninth of every object a frame makes, and
-// all of them ask for the same handful of palette colors on every frame. Keyed
-// by the color's own spelling, so a palette entry's run is rendered once.
+// plainFore, boldFore and valueFore memoize the escape runs a foreground color
+// resolves to. A Style.Render resolves the color against the active termenv
+// profile on every call, and that resolution allocates: the gauge bars, the sys
+// strip and the rate labels between them were a ninth of every object a frame
+// makes, and all of them ask for the same handful of palette colors on every
+// frame. Keyed by the color's own spelling, so a palette entry's run is
+// rendered once.
 //
 // One memo per base style, because a Style.Render reads every property it
 // carries: a bold foreground is a different render from a plain one, and

@@ -927,7 +927,7 @@ down, leaving the `--add` endpoints queried unauthenticated.
 
 ```
 make help                          # every task, one line each
-make prereqs                       # check go, a C compiler, bun, uv against the pins
+make prereqs                       # check go, a C compiler, bun, uv, shellcheck, zsh, fish against the pins
 make build                         # host binary; stamped with VERSION, `dev` unless set
 make demo                          # build, then run the simulated fleet
 make test                          # all tests, -race -shuffle=on

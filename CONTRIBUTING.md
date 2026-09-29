@@ -78,7 +78,7 @@
 
 ```
 git clone https://github.com/maci0/toktop && cd toktop
-make prereqs     # check go, a C compiler, bun and uv against the pins above
+make prereqs     # check go, a C compiler, bun, uv, shellcheck, zsh and fish against the pins above
 make test        # all tests, race detector, shuffled order
 make demo        # build and run against a simulated fleet
 ```
@@ -209,7 +209,7 @@ in day-to-day work:
 | target | what it does |
 |---|---|
 | `make build` | host binary with version stamping |
-| `make prereqs` | check go, a C compiler, bun and uv against the pins, naming every gap at once |
+| `make prereqs` | check go, a C compiler, bun, uv, shellcheck, zsh and fish against the pins, naming every gap at once |
 | `make demo` / `make run` | build, then launch |
 | `make test` | all tests, `-race -shuffle=on` (same flags as CI); `RACE=0` skips `-race` |
 | `make test-asan` | all tests again under `-asan` (both sqlite tag halves); the go command refuses `-race -asan` together, so this is a second run and not a flag on `make test`. It skips `TestStaticFrameAllocBudget` by name, because an instrumented allocator makes an exact allocation count meaningless; `make test` still asserts that budget. Linux CI and `make ci` run it; it needs a C compiler and does not enter the edit-test loop |
@@ -239,7 +239,7 @@ in day-to-day work:
 | `make check-shell` | fail unless `shellcheck` (at or above the Makefile's `SHELLCHECK_MIN`) clears the bash completion script and `zsh -n` / `fish --no-execute` parse the zsh and fish ones; all three are generated, so a copy kept beside the Go source cannot go stale (`make check` runs it, on the Linux CI leg) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make check-changelog-structure` | fail unless no `CHANGELOG.md` section repeats an impact heading, so the entries a second `### Added` collected do not ship unlabelled (`make check` runs it) |
-| `make check-changelog-covers` | fail unless `CHANGELOG.md` moved since the last release tag whenever `README.md`, `cmd/toktop/help.go`, `docs/openapi.yaml`, `agentusage/`, `site/worker.js` or `site/README.md` did. Every other changelog gate reads the file's shape, not the diff it describes, so this is the one that notices a change shipping under notes written for other commits (`make check` and `make release` run it) |
+| `make check-changelog-covers` | fail unless `CHANGELOG.md` moved since the last release tag whenever `README.md`, `cmd/toktop/help.go`, `docs/openapi.yaml`, `agentusage/`, `internal/ui/json.go`, `site/worker.js` or `site/README.md` did. Every other changelog gate reads the file's shape, not the diff it describes, so this is the one that notices a change shipping under notes written for other commits (`make check` and `make release` run it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
@@ -389,10 +389,11 @@ looks for.
 
 That guard reads commit subjects, so it asks what was committed and not what
 was read. `make check-changelog-covers` asks the other half: `README.md`,
-`cmd/toktop/help.go`, `docs/openapi.yaml`, `agentusage/`, `site/worker.js` and
-`site/README.md` are what a consumer reads rather than compiles, and one of
-them moving since the last tag with CHANGELOG.md untouched is a change whose
-commit subject (`chore: update dsh.go`) says nothing about what a reader meets.
+`cmd/toktop/help.go`, `docs/openapi.yaml`, `agentusage/`,
+`internal/ui/json.go`, `site/worker.js` and `site/README.md` are what a
+consumer reads rather than compiles, and one of them moving since the last tag
+with CHANGELOG.md untouched is a change whose commit subject
+(`chore: update dsh.go`) says nothing about what a reader meets.
 It runs on the merge gates and again on the cut, where the Go guard does not
 run at all. The rest of `docs/` is not watched: `ARCHITECTURE.md` is a map of
 the tree and `RECOVERY.md` a set of procedures, both correctable without a

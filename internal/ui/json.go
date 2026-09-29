@@ -149,8 +149,7 @@ type jsonSystem struct {
 	// Drivers are the accelerator driver versions the host strip names, keyed
 	// by vendor. They are not the per-device jsonGPU driver: this map carries
 	// the runtime versions (cuda, amdgpu, the nvidia driver) and the ones read
-	// from a remote host, which the dashboard and --plain both print and this
-	// report is the only rendering that dropped.
+	// from a remote host, which the dashboard and --plain both print.
 	Drivers    map[string]string `json:"drivers,omitempty"`
 	RemoteHost string            `json:"remote_host,omitempty"`
 	RemoteErr  string            `json:"remote_error,omitempty"`

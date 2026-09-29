@@ -23,8 +23,6 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// crushDB writes a database shaped like crush's own, with the sessions given.
-// Each value is {completion_tokens, prompt_tokens, updated_at}.
 // skipIfCrushAbove skips when a crush database sits in an ancestor of dir.
 // crushDBPath walks up to the project root, and a t.TempDir tree's ancestors
 // end at the system temp directory, so a crush install anywhere above it (a
@@ -46,6 +44,8 @@ func skipIfCrushAbove(t *testing.T, dir string) {
 	}
 }
 
+// crushDB writes a database shaped like crush's own, with the sessions given.
+// Each value is {completion_tokens, prompt_tokens, updated_at}.
 func crushDB(t *testing.T, dir string, sessions map[string][3]int64) {
 	t.Helper()
 	path := filepath.Join(dir, ".crush", "crush.db")

@@ -98,7 +98,7 @@ func TestAgentIDLedgerHoldsTheHorizonAtPeakRate(t *testing.T) {
 	l.Add("turn-1", base)
 
 	// A fleet posting agentIDPeakRate events a second for the whole horizon
-	// behind it: peakRate * the horizon's seconds is the arrival the cap has
+	// behind it: agentIDPeakRate * the horizon's seconds is the arrival the cap has
 	// to absorb before the horizon, not the cap, decides what is a duplicate.
 	step := time.Second / agentIDPeakRate
 	for i := 1; time.Duration(i)*step < AgentIDHorizon; i++ {

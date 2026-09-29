@@ -37,9 +37,9 @@ func norm(v, vMax float64) float64 {
 // a count or rate reads 1.0M rather than 1000.0k, and the same magnitude does
 // not change spelling across a boundary.
 //
-// Both are thresholds on the scaled value, not on the number the caller
-// passed: k and ms/1000, never the tok/s or millisecond count itself. That
-// distinction is the whole rule, and reading one against the other is what
+// Both are compared in the unit the rendering is about to use: fmtRate and
+// fmtCount have already computed k, and fmtMs compares the millisecond value
+// on its way to seconds. Comparing in the caller's own unit instead is what
 // puts a k on a rate below a thousand.
 const (
 	unitRound   = 999.95

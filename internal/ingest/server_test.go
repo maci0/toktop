@@ -1067,7 +1067,7 @@ func TestIngestClampsNegativeTokenCounts(t *testing.T) {
 }
 
 // A sender claiming MaxInt64 tokens would wrap the agent totals when two
-// such events are summed. Anything past maxEventTokens is junk, same as
+// such events are summed. Anything past core.MaxEventTokens is junk, same as
 // a negative.
 func TestIngestDropsAbsurdTokenCounts(t *testing.T) {
 	rec := &memRecorder{}

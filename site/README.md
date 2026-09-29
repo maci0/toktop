@@ -61,11 +61,13 @@ the page writes a size, one per level from `--fs-micro` to `--fs-h1`, and
 its own rems (the h1's bare `2rem` inside the `max-width: 640px` query
 is the one exemption it allows). The page has no uppercase, no tracking and
 no color change on a level, so size is what marks one; a step out of order or
-a size written in a rule is a heading the eye can no longer find. The h1 is
-the one weight on the page: the terminal draws its own title bold
-(`internal/ui/theme.go`), and at the default weight the largest type on the
-page read lighter than the wordmark directly above it. Every level below the
-h1 is size alone.
+a size written in a rule is a heading the eye can no longer find. Weight marks
+the top of the scale and nothing below it: the h1 and the wordmark are the
+page's only 700, because the terminal draws its own title bold
+(`internal/ui/theme.go`) and at the default weight the largest type on the
+page read lighter than the wordmark directly above it. Every rule below the h1
+is one weight down, 600, so weight says which band of the scale a rule is in
+rather than repeating what its size already says.
 
 The page is set in one family, `--mono`, and that token names a family for
 every script the page can be read in, not only the Latin ones. A run no family
@@ -98,7 +100,7 @@ dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). `/favicon.ico` is the one exception, and it has to be: a crawler, a
 bookmark or a client that ignored the `<link rel="icon">` data URI asks for
-that path blind, and the catch-all answered it with the whole page, 13,024 bytes
+that path blind, and the catch-all answered it with the whole page, 13,093 bytes
 of `text/html` for a request that wants an image. The Worker answers it with
 the icon the page already carries inline, from the same bytes, with no asset
 binding and no second request, and a browser that reads the `<link>` still
@@ -118,9 +120,9 @@ request from outside the page always fetches, and a `404`, a `5xx` or a store
 that throws is the same `degraded` with the reason named in the body and the
 line. The read is one `HEAD` per probe, against a store that answers it from
 the edge cache. That degraded answer is a failure, so it is logged as one
-(`health-degraded`, capped like the rest): the missing binding or the missing
-files are deploy-level faults, and on a site taking no image traffic the
-probe's own answer is the only thing naming it. The healthy answer logs
+(`health-degraded`, the one event the refusal cap skips): the missing binding
+or the missing files are deploy-level faults, and on a site taking no image
+traffic the probe's own answer is the only thing naming it. The healthy answer logs
 nothing, as every served answer does.
 Image paths
 without an asset binding, and 404/5xx from the asset store, are `no-store`
@@ -217,7 +219,8 @@ a line per visit would bury the few that name a broken deploy.
 | --- | --- |
 | `unhandled` | a throw reached the top of `fetch`; the client gets a plain 500 instead of the edge's opaque 1101 page. The `error` names the throw and the `stack`, when the thrown value carries one, is folded onto the same line: the request that caused it is a visitor's on an isolate that is gone by the time anyone reads the line, so the frames are the only thing that says which deploy threw |
 | `asset-missing` | the asset store answered 404 or 410 for a capture, the client gets the same `not found` either way |
-| `asset-store-error` | the asset store answered 5xx |
+| `asset-store-error` | the asset store answered 4xx other than 404/410, or 5xx |
+| `asset-store-unreadable` | the asset store threw instead of answering, and the client gets a `text/plain` reason. The `error` names the throw and the `stack` says where, the way `unhandled`'s does: the store's own exception text names the deploy's internals, so it goes to the log and the response carries the sanitized reason only. This is the one event that names no `status`: the store never gave one |
 | `assets-unbound` | an image path was requested with no asset binding, so every capture is a 404 and `/health` reports `degraded` |
 | `coding-dropped` | one compression format failed to build; the page is served at its uncompressed size, and the `stack` says where the build died |
 | `health-degraded` | `/health` answered 503 because the captures are not served: no binding, or the store cannot produce the share card. The `reason` field says which; the healthy answer logs nothing |
@@ -228,10 +231,12 @@ Every request line carries the same fields: `event`, the request's ray under
 `ray` (empty off Cloudflare), its `method` and `path`, the `duration_ms` the
 edge spent getting there, the `status` the client was given, and whatever
 reason the event adds. A filter on method, path or status works across every
-event, `coding-dropped` excepted: that one names the build that failed rather
-than the answer the client was given, so it carries no status (the fallback
-coding decides it afterwards), and the request that asked for it is the first
-one on the line, so the ray and the fields filter on. That is
+event but two. `coding-dropped` names the build that failed rather than the
+answer the client was given, so it carries no status (the fallback coding
+decides it afterwards), and the request that asked for it is the first one on
+the line, so the ray and the fields filter on. `asset-store-unreadable` is
+logged from the catch that would have answered, so it carries the `path` that
+was being read and neither `method`, `duration_ms` nor `status`. That is
 the pivot from a failure
 a visitor reports to the edge request behind it: filter Workers Logs on
 `event`, then search the ray in the visitor's response headers. Past 20 lines

@@ -44,7 +44,7 @@ func (c *connCounter) count() int {
 	return c.n
 }
 
-// paddedJSON serves a listing followed by trailing bytes, flushed separately,
+// paddedJSONSrv serves a listing followed by trailing bytes, flushed separately,
 // so a decode that stops at the end of the JSON value leaves the transfer
 // unfinished. That is the shape every engine listing has: a document the probe
 // reads, and whatever the server wrote after it.
@@ -124,8 +124,8 @@ func TestDrainAndCloseStopsAtCap(t *testing.T) {
 // the client closes. A gateway in trouble answers this way on every poll, so
 // the connection has to come back to the pool here too.
 //
-// The padding has to clear 4*core.SnippetCap, which is where httpStatus stops
-// reading. A body shorter than that is consumed whole by the read that builds
+// The padding has to clear 4*core.SnippetCap, which is where bearer.StatusError
+// stops reading. A body shorter than that is consumed whole by the read that builds
 // the message, reaches EOF on its own, and would be reusable with or without
 // a drain, so it pins nothing.
 func errorBodySrv(t *testing.T, cc *connCounter) *httptest.Server {

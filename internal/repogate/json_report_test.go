@@ -43,7 +43,7 @@ const (
 //
 // A missing key is the shape of the failure worth catching. encoding/json does
 // not error on a key the struct does not carry: a report that stopped
-// publishing mem_total_mb decodes into a consumer's struct with that field at
+// publishing mem_total_mib decodes into a consumer's struct with that field at
 // zero, silently, and the consumer reads an idle machine's memory as none at
 // all. That is the whole reason the revision is published.
 func TestJSONReportSchemaCoversRemovedFields(t *testing.T) {

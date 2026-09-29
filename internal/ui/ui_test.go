@@ -3428,8 +3428,10 @@ func TestPackSegsMatchesRowAtATimePacking(t *testing.T) {
 	}
 }
 
-// joinSpreadLeftRows is the packing packSegs replaced, kept here as the
-// reference the prefix-sum version is checked against.
+// joinSpreadLeftRows fits as many segments into a row of width w as it can,
+// in order, and reports how many it took. It carries none of the measure-and-
+// shed logic: packSegsRows in the test above is the row-at-a-time packing
+// packSegs replaced, and this is the greedy prefix it runs on every round.
 func joinSpreadLeftRows(segs []string, w int) (string, int) {
 	var b strings.Builder
 	used, kept := 0, 0

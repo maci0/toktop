@@ -25,9 +25,10 @@ var flagAliases = map[string]string{
 }
 
 // flagPlaceholders overrides the argument word the flag package would print.
-// Its type-derived words are accurate but generic ("--add value", "--seed
-// int64"), which reads as a different CLI from the words the README's flag
-// table already commits to ("--add URL", "--seed N").
+// What the type can give is accurate but generic ("--seed int64", "--frames
+// int"), which reads as a different CLI from the words the README's flag table
+// already commits to ("--seed N", "--frames N"), and a flag registered as a
+// func (--add) has no type word at all.
 var flagPlaceholders = map[string]string{
 	"add":      "URL",
 	"bearer":   "TOKEN",
@@ -437,9 +438,9 @@ func runVersion(out io.Writer, args []string) int {
 	return outputStatus(err)
 }
 
-// interpretArgs classifies leftovers after flag.Parse. help/version cover
-// `toktop --once help` (the first-arg dispatch already handled `toktop help`);
-// everything else is an ssh:// target or a usage error.
+// interpretArgs classifies leftovers after flag.Parse. help/version/completion
+// cover `toktop --once help` (the first-arg dispatch already handled a bare
+// `toktop help`); everything else is an ssh:// target or a usage error.
 func interpretArgs(args []string) (cmd string, remotes []string, err error) {
 	if len(args) == 0 {
 		return "", nil, nil

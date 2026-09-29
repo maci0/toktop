@@ -16,7 +16,7 @@ import (
 
 // perfSnap is a full-scale dashboard: history at its retention cap, the agent
 // feed at its cap, and the probe ring at its cap. A frame that renders this
-// without allocating is the budget TestStaticFrameAllocs asserts.
+// without allocating is the budget TestStaticFrameAllocBudget asserts.
 func perfSnap() core.Snapshot {
 	now := time.Unix(1789581724, 0)
 	out := make([]float64, core.HistoryLen)
