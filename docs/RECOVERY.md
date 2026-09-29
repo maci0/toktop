@@ -247,7 +247,8 @@ is the other side: a store that is missing keeps the copy a restore is about to
 read, because a copy is only superseded by a store that is there.
 
 Every write to the store is atomic (staged, fsynced, renamed, with the
-directory entry flushed afterwards) and cross-process serialized by a lock
+directory entry flushed afterwards, which Windows has no call for and where
+the journal makes the rename durable) and cross-process serialized by a lock
 file beside the store (`lockStore`), so a store that exists is a whole one.
 The reads that can find it damaged say so: an unparsable record, a host
 recorded twice with different keys, and a file holding no records at all

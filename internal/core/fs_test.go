@@ -7,6 +7,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -35,7 +36,10 @@ func TestSyncDirReportsWhatItCouldNotFlush(t *testing.T) {
 	// including an empty path and one whose parent does not exist. A path
 	// naming a regular file opens on every platform, so it is not one of
 	// them: the sync of a file handle is the writer's own, not the directory
-	// entry's.
+	// entry's. Windows has no call to make, so it has no shape to name.
+	if runtime.GOOS == "windows" {
+		return
+	}
 	for _, bad := range []string{"", filepath.Join(dir, "absent")} {
 		if err := SyncDir(bad); err == nil {
 			t.Errorf("SyncDir(%q) reported no error; the caller would claim a durability it does not have", bad)
