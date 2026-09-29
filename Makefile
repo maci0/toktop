@@ -1609,7 +1609,7 @@ dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 # the binaries alone.
 .PHONY: checksums
 checksums: sbom buildinfo licenses license ## checksum the dist/ binaries into a byte-reproducible tarball
-	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
+	@$(TAR) --sort=name -cf /dev/null --files-from /dev/null 2>/dev/null || \
 		{ echo "$(TAR) rejects --sort: deterministic packaging needs GNU tar (install it as gtar)" >&2; exit 1; }
 	@cd $(DIST) && \
 		set -- $(BINARY)_* && \
@@ -1622,7 +1622,31 @@ checksums: sbom buildinfo licenses license ## checksum the dist/ binaries into a
 		else \
 			shasum -a 256 "$$@" > checksums.txt && shasum -a 256 -c checksums.txt; \
 		fi
-	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > $(CHECKSUMS_ASSET) && rm checksums.txt
+	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > $(CHECKSUMS_ASSET)
+# The GNU tar probe above runs the flag rather than asking for the version:
+# `tar --sort=name --version` exits 0 on bsdtar as well, since --version
+# short-circuits before the unknown option is read, so the guard it was written
+# for never fired and a bsdtar packing step failed later with a tar diagnostic
+# instead. The check has to make tar use the option.
+#
+# Pack the same file a second time after stamping its mtime to the epoch, and
+# compare. TAR_REPRO promises the archive's metadata comes from
+# SOURCE_DATE_EPOCH and the sorted member list, not from the filesystem; two
+# packs seconds apart only prove that by accident, whereas moving the input's
+# mtime is the exact leak TAR_REPRO exists to close. repro-check covers the
+# binaries, and the tarball is the one published asset carrying archive metadata
+# of its own, so nothing else would catch a --mtime that stopped applying.
+# checksums.txt outlives the pack above for this, and is removed here.
+	@cd $(DIST) && \
+		touch -t 197001010000 checksums.txt && \
+		$(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > $(CHECKSUMS_ASSET).recheck && \
+		if cmp -s $(CHECKSUMS_ASSET) $(CHECKSUMS_ASSET).recheck; then \
+			rm -f $(CHECKSUMS_ASSET).recheck; \
+		else \
+			echo "make checksums: $(CHECKSUMS_ASSET) is not the same bytes when the same input is packed again with a different mtime, so the archive is still carrying filesystem metadata:" >&2; \
+			rm -f $(CHECKSUMS_ASSET).recheck; exit 1; \
+		fi
+	@rm -f $(DIST)/checksums.txt
 
 # Binaries of any earlier version are dropped first: leftovers would
 # otherwise ride the toktop_* glob into checksums.txt and the release.
