@@ -52,7 +52,13 @@ alongside them would be a layer importing sideways into itself.
 - `internal/gpu`: accelerator telemetry across vendors.
 - `internal/ingest`: a tiny localhost HTTP endpoint (`POST /v1/events`) that
   harnesses and agents post usage into, plus the `GET`/`HEAD` `/healthz`
-  liveness probe.
+  liveness probe. One concern per file: `server.go` is the listener, its
+  timeouts and the event clock, `endpoints.go` the route table behind the
+  404 and 405 answers, `middleware.go` the chain every request passes
+  (security headers, request id, panic recovery, the audit line), `post.go`
+  the POST handler and the bounds on its body, `stream.go` the decode loop,
+  and `health.go` the probe. `event.go` is the wire format those decode into
+  `core.AgentEvent`.
 - `internal/logcfg`: the audit-log vocabulary every other package that logs
   builds its logger from.
 - `internal/probe`: small streaming generations at backends, to measure
@@ -97,6 +103,14 @@ platforms. `internal/core/procattr_unix.go` uses it for the stricter `unix`
 constraint Go provides, pairing with `procattr_other.go` on `!unix`. A file
 whose tag names a subset of the POSIX platforms takes no suffix, because a
 suffix would claim more than the tag delivers.
+
+A file built for a tag that is not one platform carries the build-tag name
+last and a subject before it: `internal/procs/procs_linux_root.go` is the
+root-only half of the linux walk, `internal/procs/procs_tooling.go` the half
+darwin and windows share, and `internal/sysmon/sysmon_utsfield.go` the
+`linux || darwin` field reader. The same shape covers build tags that are not
+platforms at all: `agentusage/source_off.go` and `agentusage/crush_sqlite.go`
+are the halves of the `sqlite` tag.
 
 `internal/sysmon` is the one place that goes further: `sysmon_darwin_host.go`
 and `sysmon_windows_host.go` pair a platform with its host-reading half,
