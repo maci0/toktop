@@ -15,6 +15,7 @@ import (
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/remote"
+	"github.com/maci0/toktop/internal/selfupdate"
 )
 
 // Mode and environment validation, the resolution of the inputs that come from
@@ -657,10 +658,58 @@ func knownToktopEnv() map[string]bool {
 	return m
 }
 
+// foreignEnvVars are the environment variables this build reads that carry no
+// TOKTOP_ prefix, and so the prefix rule above cannot reach: the ones an
+// operator exports in a shell profile or a wrapper, where a typo has the same
+// consequence it has everywhere else. Derived from the constants the readers
+// use, so a name the code stops reading cannot stay listed as its
+// misspelling, and a new reader cannot start without being covered.
+//
+// Only variables a run reads are listed. HOME, USER and USERNAME are read too,
+// but they are named by the platform, a typo in one is the shell's own to
+// report, and a near-miss rule over names this short fires on ordinary
+// variables (Path, TERM, ProgramFiles) rather than on a misspelling.
+var foreignEnvVars = knownForeignEnv()
+
+func knownForeignEnv() []string {
+	names := []string{
+		agentusage.GauntletHomeEnv,
+		agentusage.KimiHomeEnv,
+		agentusage.XDGDataHomeEnv,
+		remote.XDGConfigHomeEnv,
+		remote.AgentSockEnv,
+		selfupdate.TokenEnv,
+	}
+	// The bearer chain's other name is OMNIROUTE_API_KEY: the program reads
+	// it, it is the first source a token is resolved from, and a misspelling
+	// of it falls through to the next source with nothing naming the cause.
+	for _, name := range bearerEnvVars {
+		if !strings.HasPrefix(name, "TOKTOP_") {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
+}
+
+// nearMissMaxDist is how far a name may sit from a name this build reads and
+// still be reported as its misspelling. Two is the width a mistyped variable
+// has: a dropped or doubled character in a long name, and a transposition of
+// two adjacent ones, which is what a hand-typed XDG_DATA_HOM or GITHUB_TOKN
+// usually is. Wider than that and the nearest name is a coincidence.
+const nearMissMaxDist = 2
+
+// nearMissMinLen keeps short names out. A name of one or two edits from
+// GITHUB_TOKEN at eight characters is already a match, and a name of one edit
+// from a shorter variable belongs to whatever program owns it.
+const nearMissMinLen = 8
+
 // warnUnknownEnv reports unrecognized TOKTOP_* variables once at startup:
 // a misspelled knob would otherwise be ignored silently and look like a
 // no-op feature. Sorted, so the same set of names reads the same way in
-// every capture of the startup output.
+// every capture of the startup output. A misspelling of a name outside that
+// prefix is reported by the second pass below, which is the only way the same
+// failure is caught for a variable this program does not own the prefix of.
 func warnUnknownEnv() {
 	var unknown []string
 	for _, kv := range os.Environ() {
@@ -675,6 +724,116 @@ func warnUnknownEnv() {
 		fmt.Fprintf(os.Stderr, "toktop: ignoring unknown environment variable(s): %s\n",
 			strings.Join(reportedNames(unknown), ", "))
 	}
+	warnMisspelledEnv()
+}
+
+// nearMissNames is every name warnMisspelledEnv resolves a variable against:
+// the ones outside the TOKTOP_ prefix and the prefixed ones warnUnknownEnv
+// already claims, so a suggestion can name either and the two passes cannot
+// disagree about what this build reads.
+func nearMissNames() []string {
+	known := append([]string(nil), foreignEnvVars...)
+	for name := range toktopEnvVars {
+		known = append(known, name)
+	}
+	slices.Sort(known)
+	return known
+}
+
+// warnMisspelledEnv names an environment variable set in the environment that
+// no reader in this build consults, when it is within an edit or two of one
+// they do. The TOKTOP_* pass above cannot cover these: they belong to other
+// specifications, so nothing in the code claims their prefix, and a typo in
+// one is not a name this program reports as unknown. Each is read through a
+// reader that falls back to a default on an unusable value, so the failure is
+// the silent kind: a GAUNTLET_HOM typo leaves in-house agents unwatched, a
+// XDG_CONFIG_HOM one puts the host-key pin store in a directory the operator
+// did not name, and an OMNIROUTE_API_KY one queries a gateway with no token.
+//
+// One line per name, sorted, naming the variable that would have been read. A
+// name the operator did not mistype is never within two edits of one this
+// build reads, and a name that is closer to two of them than to either alone
+// is left alone rather than guessed at.
+func warnMisspelledEnv() {
+	known := nearMissNames()
+	var reported []string
+	for _, kv := range os.Environ() {
+		name, _, ok := strings.Cut(kv, "=")
+		if !ok || len(name) < nearMissMinLen {
+			continue
+		}
+		if want, isMisspelling := nearestName(name, known); isMisspelling {
+			reported = append(reported, fmt.Sprintf("$%s is not read; did you mean $%s?", reportedField(name), want))
+		}
+	}
+	if len(reported) > 0 {
+		slices.Sort(reported)
+		fmt.Fprintln(os.Stderr, "toktop: "+strings.Join(reported, "\ntoktop: "))
+	}
+}
+
+// nearestName returns the known name name is a misspelling of, and whether it
+// is one. A name this build reads is not a misspelling of itself. A name
+// within nearMissMaxDist of a single known name is that name's misspelling;
+// one that is equally close to two is not a misspelling of either, so nothing
+// is reported and the variable is left to whatever program reads it.
+func nearestName(name string, known []string) (string, bool) {
+	if slices.Contains(known, name) {
+		return "", false
+	}
+	best, bestDist, tied := -1, 0, false
+	for i, k := range known {
+		d := editDistance(name, k)
+		if d > nearMissMaxDist {
+			continue
+		}
+		switch {
+		case best < 0 || d < bestDist:
+			best, bestDist, tied = i, d, false
+		case d == bestDist:
+			// A second name at the same distance: no unique nearest.
+			tied = true
+		}
+	}
+	if best < 0 || tied {
+		return "", false
+	}
+	return known[best], true
+}
+
+// editDistance is the optimal string alignment distance between two variable
+// names: the fewest single-character edits (insert, delete, substitute) plus
+// the transposition of two adjacent characters, which is one more edit than
+// plain Levenshtein counts and the shape a mistyped name usually takes
+// (XDG_DATA_HMOE). Case is significant, because the readers compare the name
+// exactly: on Windows the lookup folds case and a name spelled in another case
+// is read, so folding here would report a variable that is in force.
+func editDistance(a, b string) int {
+	ar, br := []rune(a), []rune(b)
+	if len(ar) == 0 {
+		return len(br)
+	}
+	prev := make([]int, len(br)+1)
+	prev2 := make([]int, len(br)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(ar); i++ {
+		cur := make([]int, len(br)+1)
+		cur[0] = i
+		for j := 1; j <= len(br); j++ {
+			cost := 1
+			if ar[i-1] == br[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if i > 1 && j > 1 && ar[i-1] == br[j-2] && ar[i-2] == br[j-1] {
+				cur[j] = min(cur[j], prev2[j-2]+1)
+			}
+		}
+		prev, prev2 = cur, prev
+	}
+	return prev[len(br)]
 }
 
 // maxReportedName caps one externally supplied name printed in a startup

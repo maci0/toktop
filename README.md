@@ -891,7 +891,13 @@ legitimate setup, but it is named at startup: the endpoint authenticates
 nothing, so every reachable peer can post events. Unknown `TOKTOP_*` variables
 are reported at startup, so a typo fails loudly instead of doing nothing
 (`TOKTOP_SCREENSHOT_FONT` is recognized so a developer export is not reported
-as a typo). `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without `--add` (or set to a
+as a typo). A name outside that prefix is reported the same way when it is
+within two edits of one this build reads, naming the variable it was meant to
+be: `GAUNTLET_HOM` is a definitions file in a directory nobody reads, and
+`OMNIROUTE_API_KY` is a gateway queried with no token, both with nothing in
+the output until now. The names checked are the seven in the table above that
+an operator exports, plus the `TOKTOP_*` ones; a name closer to two of them
+than to either alone is left alone rather than guessed at. `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` without `--add` (or set to a
 blank value, which is named as ignored where another source supplies the
 token and as sending no token at all where none does),
 `$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and `$TOKTOP_LOG_LEVEL` with

@@ -196,7 +196,12 @@ Environment (a flag always wins over the variable it mirrors):
                           recognized here so an export of it is not reported
                           as a typo
 An unrecognized TOKTOP_* name is reported as a typo at startup, and one that
-cannot take effect in the chosen mode is named rather than silently ignored.
+cannot take effect in the chosen mode is named rather than silently ignored. A
+name outside that prefix that is within two edits of one this build reads
+(GAUNTLET_HOME, KIMI_CODE_HOME, XDG_DATA_HOME, XDG_CONFIG_HOME, GITHUB_TOKEN,
+SSH_AUTH_SOCK, OMNIROUTE_API_KEY) is named with the variable it was meant to
+be, since nothing claims the prefix of those and a typo in one falls back to
+a default with nothing saying so.
 See README.md for the full environment reference.
 
 Exit codes:

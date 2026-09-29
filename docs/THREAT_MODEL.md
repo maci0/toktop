@@ -1104,11 +1104,13 @@ reads as a claim about the code when it is not one.
 - M47's two callers are the only paths that print an untrusted name:
   `reportedNames(unknown)` in `warnUnknownEnv` and in `warnUnknownUsageKeys`
   (both in cmd/toktop/main.go), and `reportedField` is reached from
-  `reportedNames` alone. The cap is 64 grapheme clusters and the test
-  pins both the folding and the cut (cmd/toktop/reported_field_test.go). The
-  known-key list beside the unknown one is `agentusage.UsageKeyNames()`,
-  which is the build's own vocabulary rather than file text, so it is
-  printed without the fold.
+  `reportedNames` alone, plus the near-miss line `warnMisspelledEnv` writes
+  for a misspelled variable outside the `TOKTOP_*` prefix, which is a name out
+  of the environment and goes through `reportedField` on its own. The cap is
+  64 grapheme clusters and the test pins both the folding and the cut
+  (cmd/toktop/reported_field_test.go). The known-key list beside the unknown
+  one is `agentusage.UsageKeyNames()`, which is the build's own vocabulary
+  rather than file text, so it is printed without the fold.
 
 Other claims checked against code on this pass, all of which hold as written:
 

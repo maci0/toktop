@@ -389,6 +389,100 @@ func TestWarnUnknownEnv(t *testing.T) {
 	})
 }
 
+func TestWarnMisspelledEnv(t *testing.T) {
+	isolateToktopEnv(t)
+	t.Run("a dropped character is named with the variable it should have been", func(t *testing.T) {
+		t.Setenv("GAUNTLET_HOM", "/srv/gauntlet")
+		got := captureWarnUnknownEnv(t)
+		want := "$GAUNTLET_HOM is not read; did you mean $GAUNTLET_HOME?"
+		if !strings.Contains(got, want) {
+			t.Fatalf("warnUnknownEnv() printed %q, want %q", got, want)
+		}
+	})
+	t.Run("a transposed pair is named", func(t *testing.T) {
+		t.Setenv("XDG_DATA_HMOE", "/data")
+		got := captureWarnUnknownEnv(t)
+		if !strings.Contains(got, "$XDG_DATA_HMOE is not read; did you mean $XDG_DATA_HOME?") {
+			t.Fatalf("warnUnknownEnv() printed %q, want the XDG_DATA_HOME suggestion", got)
+		}
+	})
+	t.Run("a secret read by another program is named too", func(t *testing.T) {
+		t.Setenv("OMNIROUTE_API_KY", "secret")
+		got := captureWarnUnknownEnv(t)
+		// The suggestion names the variable, never the value: this is a line
+		// read over a stranger's shoulder and pasted into an issue.
+		if !strings.Contains(got, "$OMNIROUTE_API_KY is not read; did you mean $OMNIROUTE_API_KEY?") {
+			t.Fatalf("warnUnknownEnv() printed %q, want the OMNIROUTE_API_KEY suggestion", got)
+		}
+		if strings.Contains(got, "secret") {
+			t.Fatalf("warnUnknownEnv() printed %q, which carries the token's value", got)
+		}
+	})
+	t.Run("every variable this build reads passes silently", func(t *testing.T) {
+		for _, name := range nearMissNames() {
+			t.Setenv(name, "x")
+		}
+		if got := captureWarnUnknownEnv(t); got != "" {
+			t.Fatalf("warnUnknownEnv() printed %q, want silence", got)
+		}
+	})
+	t.Run("unrelated names are left to the program that reads them", func(t *testing.T) {
+		// The names a shell, a CI runner or a desktop session exports. A
+		// near-miss rule that reached any of them would train an operator to
+		// ignore the line that names a real misspelling.
+		for _, name := range []string{
+			"PATH", "HOME", "EDITOR", "TERM", "LANG", "PWD", "USER", "SHELL",
+			"CI", "GITHUB_ACTIONS", "GITHUB_WORKFLOW", "GITHUB_RUN_ID",
+			"SSH_AGENT_PID", "SSH_CONNECTION", "COLUMNS", "LINES",
+			"XDG_SESSION_TYPE", "XDG_RUNTIME_DIR", "XDG_CURRENT_DESKTOP",
+			"LD_LIBRARY_PATH", "NO_PROXY", "HTTP_PROXY", "GIT_COMMITTER_NAME",
+		} {
+			t.Setenv(name, "x")
+		}
+		if got := captureWarnUnknownEnv(t); got != "" {
+			t.Fatalf("warnUnknownEnv() printed %q, want silence", got)
+		}
+	})
+	t.Run("a name equally close to two variables is not guessed at", func(t *testing.T) {
+		// ALPHA and ALHPA differ from both names below by one edit, so there
+		// is no single variable the name is a misspelling of.
+		if got, ok := nearestName("ALHPA", []string{"ALPHA", "ALHHA"}); ok {
+			t.Fatalf("nearestName() = %q, true; want no name for an ambiguous near-miss", got)
+		}
+	})
+	t.Run("the closest of several candidates wins", func(t *testing.T) {
+		got, ok := nearestName("GITHUB_TOKE", []string{"GITHUB_TOKEN", "TOKTOP_BEARER"})
+		if !ok || got != "GITHUB_TOKEN" {
+			t.Fatalf("nearestName() = %q, %t; want GITHUB_TOKEN, true", got, ok)
+		}
+		if _, ok := nearestName("SOMETHING_ELSE", []string{"GITHUB_TOKEN"}); ok {
+			t.Fatal("nearestName() reported a near-miss for an unrelated name")
+		}
+	})
+}
+
+func TestEditDistance(t *testing.T) {
+	for _, tt := range []struct {
+		a, b string
+		want int
+	}{
+		{a: "XDG_DATA_HOME", b: "XDG_DATA_HOME", want: 0},
+		{a: "GAUNTLET_HOME", b: "GAUNTLET_HOM", want: 1},
+		{a: "XDG_DATA_HOME", b: "XDG_DATA_HMOE", want: 1}, // transposition is one edit
+		{a: "XDG_DATA_HOME", b: "XDG_DATAHOM", want: 2},   // two dropped characters
+		{a: "XDG_DATA_HOME", b: "XDG_DAT_HOME", want: 1},
+		{a: "GITHUB_TOKEN", b: "GITHUB_TOKN", want: 1},
+		{a: "GITHUB_TOKEN", b: "GITHUB_TOKENN", want: 1},
+		{a: "GITHUB_TOKEN", b: "GITHUB_TOKE", want: 1},
+		{a: "", b: "ABC", want: 3},
+		{a: "ABC", b: "", want: 3},
+	} {
+		if got := editDistance(tt.a, tt.b); got != tt.want {
+			t.Errorf("editDistance(%q, %q) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
 func TestFrameEnv(t *testing.T) {
 	t.Run("trimmed value is used", func(t *testing.T) {
 		t.Setenv("TOKTOP_COLUMNS", " 120 ")

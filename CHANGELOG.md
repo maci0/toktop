@@ -111,6 +111,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   whatever ran in that terminal before; the alternate screen repaints in
   place, so nothing inside the frame says which program it belongs to either.
 
+- A misspelled environment variable outside the `TOKTOP_*` prefix is now named
+  at startup with the variable it was meant to be, the way a misspelled
+  `TOKTOP_*` name already was. `GAUNTLET_HOM`, `KIMI_CODE_HOM`,
+  `XDG_DAT_HOME`, `XDG_CONFIG_HOM`, `GITHUB_TOKN`, `SSH_AUTH_SOCK` and
+  `OMNIROUTE_API_KY` are seven names nothing claims a prefix of, so a typo in
+  one was read by no reader at all: the definitions file went unread, the
+  host-key pin store landed under a directory the operator did not name, the
+  update ran against the anonymous rate limit and the `--add` endpoints were
+  queried with no token, each with nothing in the output saying so. A name
+  within two edits of one of them, and of no other, is reported; a name
+  closer to two of them than to either alone is left to whatever program reads
+  it.
+
 ### Security
 
 - The request path on an ingest audit line now folds the home of whichever
