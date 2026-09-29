@@ -40,8 +40,9 @@ matches those artifacts too (pure-Go net resolver, no libc); a host with
 gcc would otherwise produce a cgo-linked binary. Or download a binary
 for linux, macOS, and Windows (amd64 + arm64) from the
 [releases](https://github.com/maci0/toktop/releases); each release publishes a
-`checksums.tar.gz` to verify the download against, the license text of every
-module the binary links, and this project's own LICENSE, and
+`checksums.tar.gz` to verify the download against, a provenance attestation
+per file to verify it against GitHub's transparency log, the license text of
+every module the binary links, and this project's own LICENSE, and
 [docs/RECOVERY.md](docs/RECOVERY.md) spells the verification steps. An
 installed binary updates itself in place:
 

@@ -116,12 +116,12 @@ func coversRepo(t *testing.T, files map[string]string, tag string) string {
 }
 
 // runCoversGate runs the gate in dir and reports whether it refused.
-func runCoversGate(t *testing.T, dir string) (error, string) {
+func runCoversGate(t *testing.T, dir string) (string, error) {
 	t.Helper()
 	cmd := exec.Command("sh", "-c", changelogCoversRecipe(t))
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
-	return err, string(out)
+	return string(out), err
 }
 
 // TestChangelogCoversGate pins the gate to the change it exists for: a surface
@@ -143,7 +143,7 @@ func TestChangelogCoversGate(t *testing.T) {
 			t.Fatalf("write README.md: %v", err)
 		}
 		commitAll(t, dir, "edit the README")
-		err, out := runCoversGate(t, dir)
+		out, err := runCoversGate(t, dir)
 		if err == nil {
 			t.Fatalf("gate passed a README change with no CHANGELOG.md edit; a consumer reads that file and not the commit:\n%s", out)
 		}
@@ -161,7 +161,7 @@ func TestChangelogCoversGate(t *testing.T) {
 			t.Fatalf("write CHANGELOG.md: %v", err)
 		}
 		commitAll(t, dir, "edit the README and the changelog")
-		if err, out := runCoversGate(t, dir); err != nil {
+		if out, err := runCoversGate(t, dir); err != nil {
 			t.Fatalf("gate refused a documented change:\n%s", out)
 		}
 	})
@@ -172,7 +172,7 @@ func TestChangelogCoversGate(t *testing.T) {
 			t.Fatalf("write internal/ui/x.go: %v", err)
 		}
 		commitAll(t, dir, "change an internal package")
-		if err, out := runCoversGate(t, dir); err != nil {
+		if out, err := runCoversGate(t, dir); err != nil {
 			t.Fatalf("gate asked for an entry for a change no reader sees:\n%s", out)
 		}
 	})
@@ -192,7 +192,7 @@ func TestChangelogCoversGate(t *testing.T) {
 			t.Fatalf("write README.md: %v", err)
 		}
 		commitAll(t, dir, "edit the README")
-		if err, out := runCoversGate(t, dir); err != nil {
+		if out, err := runCoversGate(t, dir); err != nil {
 			t.Fatalf("gate refused a tree with no released tag to compare against:\n%s", out)
 		}
 	})

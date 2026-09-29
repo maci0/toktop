@@ -15,6 +15,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- Every published release file now carries a SLSA provenance attestation
+  signed with this repository's identity and recorded in GitHub's public
+  transparency log, so a downloaded binary can be checked against a log entry
+  instead of against the `checksums.txt` that sits on the same page as the
+  bytes. `gh attestation verify toktop_<version>_<goos>_<goarch> --repo
+  maci0/toktop` is the whole check. `toktop update` still verifies
+  `checksums.txt` and does not read the attestation.
+
 - A release now ships the license text of every module the binary links, as
   `toktop_<version>_licenses.txt` beside the SBOM. The SBOM records a license
   identifier and nothing else, and MIT, BSD-3-Clause and Apache-2.0 each ask

@@ -74,6 +74,20 @@ hold both halves of it: the version and the reason.
 | `BIOME` | `@biomejs/biome` | MIT OR Apache-2.0 | Formats and lints the Worker. The Rust binary, not a JS tree, so the Worker keeps no manifest. |
 | `WRANGLER` | `wrangler` | MIT OR Apache-2.0 | Publishes and rolls back the Worker. The only thing here that talks to Cloudflare. |
 
+## Actions run by a workflow
+
+An action is a package too: it runs with the job's token and its network. Every
+`uses:` in `.github/workflows/` is pinned to a 40-character commit id, and
+`TestWorkflowActionsAreCommitPinned` is what holds that line. All six are MIT.
+
+- `actions/checkout` fetches the tree every job builds from.
+- `actions/setup-go` resolves the Go version from go.mod and restores the module cache.
+- `oven-sh/setup-bun` installs the pinned bun for the Worker lint.
+- `astral-sh/setup-uv` installs the uv the Python tool env is built with.
+- `softprops/action-gh-release` uploads the release assets.
+- `actions/attest-build-provenance` writes one SLSA provenance entry per published
+  file into the transparency log, from the `attest` job in release.yml.
+
 The two `go run` tools are pinned outside the module graph on purpose: their x/tools
 requirement is newer than the shipped build's, so joining the module graph would drag
 every released binary up with them.
@@ -163,6 +177,12 @@ unanalyzed; neither shell is covered by shellcheck.
   name the publisher can move, and the action runs with the job's token and
   network, so a moved ref changes what CI executes with no review in the tree.
 
-A release ships the checksums file and the SBOM, not a sigstore attestation, so
-a downloaded binary is verified against the checksum its own release page
-publishes rather than against a transparency-log entry.
+A release ships the checksums file, the SBOM, and one SLSA provenance entry per
+published file. The `attest` job in release.yml downloads what the release job
+published and hands those exact bytes to `actions/attest-build-provenance`, so
+`gh attestation verify` checks a downloaded binary against a transparency-log
+entry rather than against a checksum file sitting on the same page as the
+bytes. It runs as its own job because `id-token: write` mints an OIDC token for
+every step it is granted to, and the job that builds the bytes runs `go run`
+against the module proxy. `internal/selfupdate` still verifies `checksums.txt`
+and does not read the attestation.

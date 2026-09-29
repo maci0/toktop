@@ -55,7 +55,7 @@ targets, the static site worker at site/worker.js). Out of scope: the
 |---|------|----------|-------|-------|
 | 1 | Ingest endpoint accepts unauthenticated events from any local process (any network peer if bound non-loopback via `--ingest`); forged telemetry renders as real agents | local processes -> ingest, network -> ingest | internal/ingest/post.go, internal/ingest/middleware.go, cmd/toktop/main.go | No authentication; both browser sender classes refused (cross-origin by M21, DNS rebinding by M45), plus DoS, injection, mixed-script names, and timestamp forgery mitigated (M3-M7, M21, M26, M30, M45) |
 | 2 | Trust-on-first-use accepts a first-contact MITM by design; only key *changes* are refused | operator -> ssh target | internal/remote/knownhosts.go | Documented residual risk (README "Auth" section) |
-| 3 | Self-update installs whatever binary the named GitHub repo published: integrity rests on the release's own checksums.txt over TLS; no external signature exists | runtime -> update channel | internal/selfupdate/release.go, internal/selfupdate/checksum.go, internal/selfupdate/install.go, .github/workflows/release.yml | Checksum + size + GitHub-host URL verification present; owner/name validated (M18); signing absent |
+| 3 | Self-update installs whatever binary the named GitHub repo published: integrity rests on the release's own checksums.txt over TLS, and nothing in the updater reads the provenance attestation | runtime -> update channel | internal/selfupdate/release.go, internal/selfupdate/checksum.go, internal/selfupdate/install.go, .github/workflows/release.yml | Checksum + size + GitHub-host URL verification present; owner/name validated (M18); a SLSA provenance entry per published file exists in the transparency log (release.yml, `attest` job) but the updater does not read it |
 | 4 | SSH engine relays bind loopback listeners (`127.0.0.1:0`); any local process can reach the remote engines those listeners front | local processes -> remote engines | internal/remote/client.go | Bound loopback-only; no listener auth |
 | 5 | Hot-reload re-execs whatever binary occupies the exe path when its identity changes (Unix); PATH-based vendor CLI lookup executes tools from `$PATH` | build -> runtime, host -> process | internal/selfreload/exec_unix.go; internal/gpu/run.go | Windows Restart does not exec (exec_windows.go); `--no-hot-reload` exists |
 | 6 | Low: ingest poisoning cannot be reconstructed from retained payloads; raising the log floor also hides successful submissions | B1, response readiness | internal/ingest/middleware.go; internal/collector/collector.go | Request metadata logs at info by default; warn/error suppress successes. No authenticated sender identity or durable event store |
@@ -494,8 +494,14 @@ Deployment surface:
   Dependabot updates modules, actions, and `scripts/` pip deps
   (.github/dependabot.yml); tag pushes build release binaries for six
   platforms plus a CycloneDX SBOM (.github/workflows/release.yml, Makefile
-  `release` and `sbom`). Release artifacts ship SHA-256 checksums only; no
-  signature step exists. Tag names that reach ldflags and dist filenames are
+  `release` and `sbom`). Release artifacts ship SHA-256 checksums and a
+  GitHub artifact attestation per published file: the `attest` job fetches
+  what the release job published and writes an SLSA provenance entry for
+  each file into the transparency log (release.yml, `attest` job). It runs
+  as its own job so `id-token: write` never reaches the steps that build the
+  bytes. `internal/selfupdate` still verifies `checksums.txt` and does not
+  read the attestation, so a downloader has the log and the automatic updater
+  does not. Tag names that reach ldflags and dist filenames are
   refused unless they are a safe identifier (release.yml), and a non-dev
   `VERSION` cannot be cut from a dirty or non-git tree at all (M37,
   Makefile `check-release-source`). The
@@ -1184,7 +1190,9 @@ stderr at startup, and `loopbackHostGuard` (M45) is the only one on the
 rebinding sender class, which `Origin` refusal structurally cannot see. The
 TOFU callback is the only ssh
 authentication-of-host control. The release checksums.txt is the only
-integrity anchor for the entire update channel. Each carries several
+integrity anchor the automatic update channel itself checks, and the
+transparency-log attestation the `attest` job publishes sits beside it
+without anything in the tree reading it. Each carries several
 high-impact threats alone.
 
 ## Abuse cases (documented, not demonstrated)
@@ -1252,8 +1260,12 @@ Recorded as threats with locations; fixes do not happen in this document:
    tradeoff, documented in README; candidate improvements (verification
    prompt, SSHFP/known_hosts import) belong to sec-review.
 3. **Unsigned release artifacts** (risk 3, Medium-Low): checksums.txt is
-   self-published within the same release; no Sigstore/GPG signature ties
-   binaries to a key independent of the release pipeline
+   self-published within the same release, so a compromise of the release
+   pipeline would rewrite it along with the binaries. The `attest` job
+   publishes an SLSA provenance entry per file into the transparency log,
+   which gives a downloader an anchor outside the release pipeline; nothing
+   here verifies that entry for them, and `internal/selfupdate` does not read
+   it at all
    (.github/workflows/release.yml, internal/selfupdate). Repo path
    traversal and off-GitHub asset URLs are closed (M18); the remaining gap
    is the repo as trust anchor.

@@ -286,6 +286,19 @@ The listing holds an entry for all six platform binaries and the other five
 are not on this host, which is why the digest is computed for the one file
 rather than checked with `sha256sum -c`.
 
+The listing lives on the same release page as the bytes it covers, so a
+compromised release pipeline could rewrite both together. Each published file
+also carries a SLSA provenance attestation, signed with this repository's
+identity and recorded in GitHub's public transparency log, which is an anchor
+outside that pipeline. It is optional, needs `gh`, and runs on the file you
+already downloaded:
+
+```sh
+gh attestation verify toktop_<version>_<goos>_<goarch> --repo maci0/toktop
+```
+
+`toktop update` does not read the attestation; it checks `checksums.txt`.
+
 On Windows, the same steps in PowerShell (`tar` is bsdtar and ships with
 Windows 10 and later, and no host has either digest tool by that name):
 
