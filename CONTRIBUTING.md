@@ -350,6 +350,20 @@ its `[Unreleased]:` compare link have to survive the move too, since the next
 release is written under them. Run it locally with
 `make check-changelog VERSION=0.15.0` before you tag.
 
+That gate reads CHANGELOG.md against the version being cut, so it says whether
+the last cut was written down, never whether the work since it was. The
+`TestChangelogRecordsWorkSinceLastRelease` guard in `internal/repogate` covers
+the other half and runs with the rest of the merge gates: a tree that has
+moved past the last tag without CHANGELOG.md moving with it, and whose
+commits since that tag are not all of the `docs`, `build`, `ci`, `test`,
+`chore`, `merge` and `refactor` types, has left those commits unrecorded, and
+the test fails and names them. A `perf` commit is owed an entry, since what it
+makes faster is what a user times. Write the entry as the change lands; an
+entry found at the next cut is one the next author had to reverse-engineer
+from a diff. The guard lets a tree with no tag, no git, or a CHANGELOG.md that
+moved since the tag past it, so the release cut itself is not the omission it
+looks for.
+
 `make check-api` runs beside it on the tag push. It reads the exported
 declarations `agentusage` carries now and the ones it carried at the last
 release, and refuses a version that drops one, since a Go caller meets that as

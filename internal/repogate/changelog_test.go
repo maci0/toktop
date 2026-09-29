@@ -6,6 +6,7 @@ package repogate
 import (
 	"bufio"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -194,4 +195,137 @@ func TestChangelogIntegrity(t *testing.T) {
 			t.Errorf("[%s] link %q want suffix %q", cur, curLink, wantSuffix)
 		}
 	}
+}
+
+// gitRuns runs one read-only git command in the module root and reports
+// whether it answered. A source export, a tagless checkout or a host without
+// git is not a failure here: what this guards is a tree with a release to
+// compare against, and a tree without one has nothing to compare to.
+func gitRuns(args ...string) ([]string, bool) {
+	cmd := exec.Command("git", args...)
+	cmd.Dir = moduleRoot
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, false
+	}
+	trimmed := strings.TrimRight(string(out), "\n")
+	if trimmed == "" {
+		return nil, true
+	}
+	return strings.Split(trimmed, "\n"), true
+}
+
+// nonConsumerTypes are the Conventional Commit types whose work this file
+// does not describe: a change to the source's shape, to its tests, or to the
+// tree it is built and documented from. A perf commit is deliberately not one
+// of them, since its result is something a user times.
+var nonConsumerTypes = map[string]bool{
+	"build": true, "chore": true, "ci": true,
+	"docs": true, "merge": true, "refactor": true, "test": true,
+}
+
+// owedToChangelog returns the subjects of the commits after ref that an entry
+// is owed for. The rule is the commit subject's own type, falling back to
+// owing an entry for anything it does not name: a subject spelled without a
+// type is more likely a change a user meets than a change to the tree.
+func owedToChangelog(ref string) []string {
+	lines, ok := gitRuns("log", "--format=%s", ref+"..HEAD")
+	if !ok {
+		return nil
+	}
+	var owed []string
+	for _, subject := range lines {
+		if subject == "" || strings.HasPrefix(subject, "Merge ") {
+			continue
+		}
+		typ, _, split := strings.Cut(subject, ":")
+		if !split {
+			owed = append(owed, subject)
+			continue
+		}
+		if before, _, scoped := strings.Cut(typ, "("); scoped {
+			typ = before
+		}
+		if !nonConsumerTypes[strings.TrimSpace(typ)] {
+			owed = append(owed, subject)
+		}
+	}
+	return owed
+}
+
+// unreleasedEntries counts the bullets under ## [Unreleased], the rule the
+// Makefile's CHECK_CHANGELOG applies when it refuses a cut that left any
+// behind.
+func unreleasedEntries(changelog string) int {
+	var entries int
+	in := false
+	for _, line := range strings.Split(changelog, "\n") {
+		if strings.HasPrefix(line, "## [") {
+			in = line == "## [Unreleased]"
+			continue
+		}
+		if in && strings.HasPrefix(line, "- ") {
+			entries++
+		}
+	}
+	return entries
+}
+
+// TestChangelogRecordsWorkSinceLastRelease refuses a merge that moves the
+// tree past a release without saying, under [Unreleased], what a user of the
+// next release meets.
+//
+// The release gates cannot catch this: CHECK_CHANGELOG reads CHANGELOG.md
+// against the version being cut, so it says whether the last cut was written
+// down, never whether the work since it was. A fix that lands with no entry
+// moves into the next release's section as whatever the next author had time
+// for, or into the auto-generated GitHub notes, which carry commit subjects
+// rather than what changed for the reader.
+//
+// A CHANGELOG.md that moved since the tag is let past, which is what leaves
+// the release cut alone: emptying [Unreleased] is what moves the file, and
+// the commit carrying that move runs before the tag it will be cut under
+// exists. An edit made for any other reason while work landed unrecorded
+// slips by too; the check is a merge gate, not a proof.
+func TestChangelogRecordsWorkSinceLastRelease(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skipf("git unavailable")
+	}
+	lines, ok := gitRuns("describe", "--tags", "--abbrev=0", "HEAD")
+	if !ok || len(lines) == 0 {
+		t.Skip("no released tag before HEAD; nothing for the changelog to owe an entry to")
+	}
+	tag := lines[0]
+
+	changed, ok := gitRuns("diff", "--name-only", tag+"..HEAD", "--", "CHANGELOG.md")
+	if !ok {
+		t.Skipf("git diff unavailable")
+	}
+	if len(changed) > 0 {
+		return
+	}
+
+	owed := owedToChangelog(tag)
+	if len(owed) == 0 {
+		return
+	}
+
+	path := findChangelogPath()
+	if path == "" {
+		t.Skip("CHANGELOG.md not found relative to test runner")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read CHANGELOG.md: %v", err)
+	}
+	if n := unreleasedEntries(string(raw)); n > 0 {
+		return
+	}
+
+	t.Errorf("CHANGELOG.md has moved %d commits past %s and records none of them under [Unreleased]:",
+		len(owed), tag)
+	for _, subject := range owed {
+		t.Errorf("  %s", subject)
+	}
+	t.Errorf("  whoever upgrades reads that section, not the commit log; write the entry before merging")
 }

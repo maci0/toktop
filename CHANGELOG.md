@@ -66,6 +66,39 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - An ingest event's `note` is capped before the path walk that shortens it, not
   after. A note the length of a full request body cost hundreds of path
   resolutions per event on an endpoint that accepts unauthenticated posts.
+- Two `toktop update` runs no longer race each other into a lost or missing
+  binary. An operator whose first run reported a network failure re-runs it in
+  a second terminal, and a dashboard's own watch makes the replacement visible
+  before the first run has printed anything; both reach the install holding a
+  verified download of the same release, and the "is this newer than me" check
+  was taken before either got there, so the last rename decided which won and
+  a run that finished after an older one could leave the older binary
+  installed. On Windows the lost race was worse than that: each run renamed
+  the installed binary aside and removed the other's, so a run dying between
+  its two renames left the only copy under the displaced name. Installs are
+  now serialized by an exclusive lock beside the binary, and a run that finds
+  the release already installed leaves it alone rather than replacing it with
+  the same bytes. The lock is broken once it is a minute old (measured with
+  `core.Age`, so a backwards clock step cannot wedge every later update), a
+  lock that cannot be taken because the directory is unwritable falls through
+  to the install, which fails on its own with a clearer error, and a lock that
+  cannot be released is reported rather than dropped.
+- The known-hosts recovery hint is now a command the operator's own shell can
+  run. It spelled a POSIX `cp` on every platform, so on Windows it named a
+  command that does not exist there, and on both platforms a home directory
+  named `/home/a b` reached the operator as a command that copied toktop.old
+  to `/home/a`. The Windows hint is `Copy-Item -LiteralPath ... -Force`, which
+  also stops a directory named `a[b]` being read as a wildcard. A path holding
+  a quote, a `$()` or a `&` is quoted for the shell it is printed into.
+- The remote process sweep no longer reports a clipped command line as
+  garbage. The sweep's cut is a byte cut, so the last character of a truncated
+  line could be the leading bytes of a multi-byte one: a process whose
+  arguments past `CmdlinePrefix` start with an emoji, a CJK word or a
+  combining mark shipped a line ending in half a character. Every other
+  kernel-sourced string in the program is valid UTF-8 before anything reads
+  it, and half a character is not, so the same process could be matched under
+  one spelling on the far side of a case fold and another on this side. The
+  partial character is now dropped, as every other ill-formed byte is.
 
 ## [0.22.0] - 2026-09-29
 
