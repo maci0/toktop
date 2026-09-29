@@ -34,8 +34,8 @@ func norm(v, vMax float64) float64 {
 // unitRound is the fraction a value must reach in the next unit up for the
 // rounded rendering to cross the boundary: 999.5 to "%.0f" prints 1000, and
 // 999.95 to "%.1f" prints 1000.0. The unit is chosen on the rounded value, so
-// a count reads 1.0M rather than 1000.0k, and the same magnitude does not
-// change spelling across a boundary.
+// a count or rate reads 1.0M rather than 1000.0k, and the same magnitude does
+// not change spelling across a boundary.
 //
 // Both are thresholds on the scaled value, not on the number the caller
 // passed: k and ms/1000, never the tok/s or millisecond count itself. That
@@ -68,7 +68,18 @@ func fmtRate(v float64) string {
 	}
 	k := v / 1000
 	switch {
-	case v >= rateNoDecimal || k >= unitRound:
+	case k >= unitRound:
+		// Past this point the k form cannot hold the value: "%.0f" of 999.95
+		// prints 1000, so a rate of 999,950 reads as 1,000,000. The M form
+		// is fmtCount's, for the reason unitRound gives.
+		return fmt.Sprintf("%.1fM", k/1000)
+	case k >= unitRoundTo:
+		// "%.0f" rounds 999.5 up, so every rate from 999,500 to 999,950
+		// printed "1000k" in the arm below. The decimal keeps the k
+		// honest right up to the M boundary.
+		return fmt.Sprintf("%.1fk", k)
+	case v >= rateNoDecimal:
+		// Safe to drop the decimal: %.0f is exact over [10000, 999500).
 		return fmt.Sprintf("%.0fk", k)
 	case v >= 1000:
 		return fmt.Sprintf("%.1fk", k)

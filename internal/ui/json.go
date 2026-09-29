@@ -62,22 +62,22 @@ type jsonReport struct {
 }
 
 type jsonEngine struct {
-	Label     string      `json:"label"`
-	Kind      string      `json:"kind,omitempty"`
-	Addr      string      `json:"addr"`
-	OK        bool        `json:"ok"`
-	Error     string      `json:"error,omitempty"`
-	Version   string      `json:"version,omitempty"`
-	PID       int         `json:"pid,omitempty"`
-	ProcRSSMB float64     `json:"proc_rss_mb,omitempty"`
-	ProcCPU   float64     `json:"proc_cpu_pct,omitempty"`
-	Models    []jsonModel `json:"models,omitempty"`
-	OutTokPS  float64     `json:"out_tok_per_s"`
-	InTokPS   float64     `json:"in_tok_per_s"`
-	Running   int         `json:"running"`
-	Waiting   int         `json:"waiting"`
-	KvPct     float64     `json:"kv_cache_pct"`
-	TTFTms    float64     `json:"ttft_ms,omitempty"`
+	Label      string      `json:"label"`
+	Kind       string      `json:"kind,omitempty"`
+	Addr       string      `json:"addr"`
+	OK         bool        `json:"ok"`
+	Error      string      `json:"error,omitempty"`
+	Version    string      `json:"version,omitempty"`
+	PID        int         `json:"pid,omitempty"`
+	ProcRSSMiB float64     `json:"proc_rss_mib,omitempty"`
+	ProcCPU    float64     `json:"proc_cpu_pct,omitempty"`
+	Models     []jsonModel `json:"models,omitempty"`
+	OutTokPS   float64     `json:"out_tok_per_s"`
+	InTokPS    float64     `json:"in_tok_per_s"`
+	Running    int         `json:"running"`
+	Waiting    int         `json:"waiting"`
+	KvPct      float64     `json:"kv_cache_pct"`
+	TTFTms     float64     `json:"ttft_ms,omitempty"`
 }
 
 type jsonModel struct {
@@ -129,17 +129,17 @@ type jsonProbe struct {
 }
 
 type jsonSystem struct {
-	CPUModel    string  `json:"cpu_model,omitempty"`
-	OsName      string  `json:"os,omitempty"`
-	Kernel      string  `json:"kernel,omitempty"`
-	MemTotalMB  uint64  `json:"mem_total_mb"`
-	MemUsedMB   uint64  `json:"mem_used_mb"`
-	SwapTotalMB uint64  `json:"swap_total_mb"`
-	SwapUsedMB  uint64  `json:"swap_used_mb"`
-	Load1       float64 `json:"load1"`
-	Load5       float64 `json:"load5"`
-	Load15      float64 `json:"load15"`
-	HostUptimeS float64 `json:"host_uptime_secs"`
+	CPUModel     string  `json:"cpu_model,omitempty"`
+	OsName       string  `json:"os,omitempty"`
+	Kernel       string  `json:"kernel,omitempty"`
+	MemTotalMiB  uint64  `json:"mem_total_mib"`
+	MemUsedMiB   uint64  `json:"mem_used_mib"`
+	SwapTotalMiB uint64  `json:"swap_total_mib"`
+	SwapUsedMiB  uint64  `json:"swap_used_mib"`
+	Load1        float64 `json:"load1"`
+	Load5        float64 `json:"load5"`
+	Load15       float64 `json:"load15"`
+	HostUptimeS  float64 `json:"host_uptime_secs"`
 	// Drivers are the accelerator driver versions the host strip names, keyed
 	// by vendor. They are not the per-device jsonGPU driver: this map carries
 	// the runtime versions (cuda, amdgpu, the nvidia driver) and the ones read
@@ -160,23 +160,23 @@ type jsonTemp struct {
 }
 
 type jsonGPU struct {
-	Vendor     string  `json:"vendor"`
-	Index      int     `json:"index"`
-	Name       string  `json:"name,omitempty"`
-	MilliC     int     `json:"milli_c,omitempty"`
-	MemUsedMB  uint64  `json:"mem_used_mb"`
-	MemTotalMB uint64  `json:"mem_total_mb"`
-	UtilPct    float64 `json:"util_pct"`
-	PowerW     float64 `json:"power_w,omitempty"`
-	Driver     string  `json:"driver,omitempty"`
+	Vendor      string  `json:"vendor"`
+	Index       int     `json:"index"`
+	Name        string  `json:"name,omitempty"`
+	MilliC      int     `json:"milli_c,omitempty"`
+	MemUsedMiB  uint64  `json:"mem_used_mib"`
+	MemTotalMiB uint64  `json:"mem_total_mib"`
+	UtilPct     float64 `json:"util_pct"`
+	PowerW      float64 `json:"power_w,omitempty"`
+	Driver      string  `json:"driver,omitempty"`
 }
 
-// bytesPerMB scales the byte counts below into the *_mb fields. It is 2^20,
-// not 10^6: the figures are mebibytes, matching the MiB/GiB the TUI renderers
-// print, and the kernel's meminfo kB column is a KiB. A consumer reading
-// mem_total_mb against a 10^6-based expectation is off by 4.9%, so the unit
-// is stated here rather than left to the field name.
-const bytesPerMB = 1 << 20
+// bytesPerMiB scales the byte counts below into the *_mib fields. It is 2^20,
+// not 10^6, matching the MiB/GiB the TUI renderers print; the kernel's
+// meminfo kB column is likewise a KiB. The fields are named for the unit they
+// carry: a consumer reading mem_total_mib against a 10^6-based expectation is
+// still off by 4.9%, but the name no longer claims otherwise.
+const bytesPerMiB = 1 << 20
 
 // demoSeed reports the seed only in a demo run, where --seed is in effect.
 // Seed 0 is a working seed, so the field carries a pointer: a plain int with
@@ -273,21 +273,21 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 
 func jsonEngineOf(p core.ProviderSnapshot) jsonEngine {
 	e := jsonEngine{
-		Label:     core.SanitizeText(p.Label),
-		Kind:      core.SanitizeText(p.Kind),
-		Addr:      core.SanitizeText(p.Addr),
-		OK:        p.OK,
-		Error:     core.SanitizeText(p.Err),
-		Version:   core.SanitizeText(p.Version),
-		PID:       p.PID,
-		ProcRSSMB: float64(p.ProcRSS) / bytesPerMB,
-		ProcCPU:   p.ProcCPU,
-		OutTokPS:  p.OutTokPS,
-		InTokPS:   p.InTokPS,
-		Running:   p.Running,
-		Waiting:   p.Waiting,
-		KvPct:     p.KVPct,
-		TTFTms:    p.TTFTms,
+		Label:      core.SanitizeText(p.Label),
+		Kind:       core.SanitizeText(p.Kind),
+		Addr:       core.SanitizeText(p.Addr),
+		OK:         p.OK,
+		Error:      core.SanitizeText(p.Err),
+		Version:    core.SanitizeText(p.Version),
+		PID:        p.PID,
+		ProcRSSMiB: float64(p.ProcRSS) / bytesPerMiB,
+		ProcCPU:    p.ProcCPU,
+		OutTokPS:   p.OutTokPS,
+		InTokPS:    p.InTokPS,
+		Running:    p.Running,
+		Waiting:    p.Waiting,
+		KvPct:      p.KVPct,
+		TTFTms:     p.TTFTms,
 	}
 	for _, m := range p.Models {
 		e.Models = append(e.Models, jsonModel{
@@ -373,20 +373,20 @@ func jsonSystemOf(s *core.SysSample) *jsonSystem {
 		return nil
 	}
 	out := &jsonSystem{
-		CPUModel:    core.SanitizeText(s.CPUModel),
-		OsName:      core.SanitizeText(s.OsName),
-		Kernel:      core.SanitizeText(s.Kernel),
-		MemTotalMB:  s.MemTotal / bytesPerMB,
-		MemUsedMB:   s.MemUsed / bytesPerMB,
-		SwapTotalMB: s.SwapTotal / bytesPerMB,
-		SwapUsedMB:  s.SwapUsed / bytesPerMB,
-		Load1:       s.Load1,
-		Load5:       s.Load5,
-		Load15:      s.Load15,
-		HostUptimeS: s.HostUptime.Seconds(),
-		Drivers:     jsonDrivers(s.Drivers),
-		RemoteHost:  core.SanitizeText(s.RemoteHost),
-		RemoteErr:   core.SanitizeText(s.RemoteErr),
+		CPUModel:     core.SanitizeText(s.CPUModel),
+		OsName:       core.SanitizeText(s.OsName),
+		Kernel:       core.SanitizeText(s.Kernel),
+		MemTotalMiB:  s.MemTotal / bytesPerMiB,
+		MemUsedMiB:   s.MemUsed / bytesPerMiB,
+		SwapTotalMiB: s.SwapTotal / bytesPerMiB,
+		SwapUsedMiB:  s.SwapUsed / bytesPerMiB,
+		Load1:        s.Load1,
+		Load5:        s.Load5,
+		Load15:       s.Load15,
+		HostUptimeS:  s.HostUptime.Seconds(),
+		Drivers:      jsonDrivers(s.Drivers),
+		RemoteHost:   core.SanitizeText(s.RemoteHost),
+		RemoteErr:    core.SanitizeText(s.RemoteErr),
 	}
 	for _, n := range s.NPUs {
 		if n = core.SanitizeText(n); n != "" {
@@ -402,15 +402,15 @@ func jsonSystemOf(s *core.SysSample) *jsonSystem {
 	}
 	for _, g := range s.GPUs {
 		out.GPUs = append(out.GPUs, jsonGPU{
-			Vendor:     core.SanitizeText(g.Vendor),
-			Index:      g.Index,
-			Name:       core.SanitizeText(g.Name),
-			MilliC:     g.MilliC,
-			MemUsedMB:  g.MemUsed / bytesPerMB,
-			MemTotalMB: g.MemTotal / bytesPerMB,
-			UtilPct:    g.UtilPct,
-			PowerW:     g.PowerW,
-			Driver:     core.SanitizeText(g.Driver),
+			Vendor:      core.SanitizeText(g.Vendor),
+			Index:       g.Index,
+			Name:        core.SanitizeText(g.Name),
+			MilliC:      g.MilliC,
+			MemUsedMiB:  g.MemUsed / bytesPerMiB,
+			MemTotalMiB: g.MemTotal / bytesPerMiB,
+			UtilPct:     g.UtilPct,
+			PowerW:      g.PowerW,
+			Driver:      core.SanitizeText(g.Driver),
 		})
 	}
 	return out

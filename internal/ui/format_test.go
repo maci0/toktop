@@ -206,6 +206,11 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 		{9999, "10.0k"},
 		{9999.9, "10.0k"},
 		{10000, "10k"},
+		// The k form runs out of digits at 999.95k: "%.0fk" of 999.95
+		// prints 1000, so 999,950 tok/s read as 1,000,000.
+		{999949, "999.9k"},
+		{999950, "1.0M"},
+		{2500000, "2.5M"},
 	}
 	for _, tc := range rates {
 		if got := fmtRate(tc.v); got != tc.want {
