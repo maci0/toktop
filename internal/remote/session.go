@@ -165,9 +165,17 @@ func (c *Client) Run(ctx context.Context, script string) (string, error) {
 		// returned. Closing the session is what makes it return; the grace
 		// bounds the wait so a wedged channel cannot hold Run past its own
 		// deadline, and costs nothing when the join is prompt.
+		//
+		// A stopped timer, not time.After: a command whose Wait returns at
+		// once leaves a live one-second timer behind in the runtime heap
+		// holding this closure's captured state, and a run polling a target
+		// that never answers takes this branch every cycle for as long as
+		// the dashboard holds it.
+		grace := time.NewTimer(stderrDrainGrace)
 		select {
 		case <-done:
-		case <-time.After(stderrDrainGrace):
+			grace.Stop()
+		case <-grace.C:
 		}
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 			return "", c.redactPeerHome(fmt.Errorf("remote command timed out: %w%s", ctx.Err(), stderrTail(stderr.String())))
