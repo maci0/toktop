@@ -30,6 +30,21 @@ func decodeReport(t *testing.T, s core.Snapshot) map[string]any {
 	return doc
 }
 
+// The report names the binary that wrote it, but the program version cannot
+// tell a consumer whether a field it reads still means what it meant a
+// release ago: the same field can change unit or sense across two minors
+// under one schema. The schema field is the report's own revision, on its own
+// axis, so a consumer pins to it and treats `version` as provenance.
+func TestJSONReportNamesItsSchema(t *testing.T) {
+	doc := decodeReport(t, core.Snapshot{At: time.Now()})
+	if got := doc["schema"]; got != float64(jsonReportSchema) {
+		t.Errorf("schema = %v, want %d", got, jsonReportSchema)
+	}
+	if _, ok := doc["version"]; !ok {
+		t.Errorf("report carries no version to name the binary that wrote it: %v", doc)
+	}
+}
+
 func TestJSONAgentCarriesTheSpanItsRateUses(t *testing.T) {
 	now := time.Now()
 	snap := core.Snapshot{

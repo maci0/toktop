@@ -695,6 +695,11 @@ The chart histories are not in it: they are the frame's own buffer, sized by
 how long the process ran, so a consumer wanting a series should sample
 `--once --json` at a steady `--interval` instead.
 
+`schema` is the report's own revision and `version` is the toktop that wrote
+it. Pin to `schema`: it moves when a published field is removed, renamed, or
+changes meaning or unit, and it does not move when the report merely gains
+one, so a consumer reading named fields keeps working across an addition.
+
 An agent event carries `span_ms`, how long the model spent on its tokens, under
 the same name and unit `POST /v1/events` takes. It is the denominator of
 `agent_rates[].tok_per_s` when every event in the window reports one, so a

@@ -28,7 +28,23 @@ func JSONFrame(cfg Config, s core.Snapshot) (string, error) {
 	return string(b), nil
 }
 
+// jsonReportSchema is the revision of the report's shape, published as the
+// report's `schema` field. It is a separate axis from `version`, which names
+// the binary that wrote the report: a consumer pinning toktop to a release
+// still has to survive the report gaining a field, and the program version
+// alone cannot say whether a field it reads means what it meant a release ago.
+//
+// It is bumped when a published field is removed, renamed, or changes meaning
+// or unit. Adding a field is not a bump: a consumer reading named fields
+// ignores what it does not know, and that is the property the revision
+// exists to preserve. The number is the contract, so it never moves for a
+// change that keeps every published field readable as before.
+const jsonReportSchema = 1
+
 type jsonReport struct {
+	Schema int `json:"schema"`
+	// Version is the toktop that wrote the report, not the report's shape;
+	// see jsonReportSchema.
 	Version    string       `json:"version"`
 	Demo       bool         `json:"demo,omitempty"`
 	DemoSeed   *int64       `json:"demo_seed,omitempty"`
@@ -214,6 +230,7 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 	outAgg, inAgg := aggBoth(s, sum)
 
 	rep := jsonReport{
+		Schema:     jsonReportSchema,
 		Version:    cfg.Version,
 		Demo:       cfg.Demo,
 		DemoSeed:   demoSeed(cfg),

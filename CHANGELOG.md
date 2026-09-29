@@ -13,6 +13,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- The `--json` report carries `schema`, its own revision, beside the
+  `version` that names the toktop that wrote it. The program version cannot
+  tell a script whether a field it reads still means what it meant a release
+  ago. `schema` moves when a published field is removed, renamed, or changes
+  meaning or unit, and does not move when the report merely gains one, so a
+  consumer reading named fields keeps working across an addition. It is `1`.
+
 ### Fixed
 
 - The host-key pin store is no longer left with no copy beside it. A
