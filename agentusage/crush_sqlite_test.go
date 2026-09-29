@@ -215,6 +215,39 @@ func withinTree(path, dir string) bool {
 	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
+// SQLite gives a column the storage class of whatever was written into it, so
+// a column crush declares INTEGER can hold text or a fraction, and scanning
+// either into an int64 is a conversion error rather than a value. That error
+// fails the statement, and the store toktop cannot constrain would then report
+// nothing for as long as the row stands. The counters are cast in the
+// statement instead: a malformed counter reads as the zero it cannot be, and
+// the sessions around it still read.
+func TestCrushSourceReadsAroundMalformedCounterColumn(t *testing.T) {
+	dir := t.TempDir()
+	crushDB(t, dir, map[string][3]int64{})
+	since := time.Now()
+	db, err := sql.Open("sqlite", filepath.Join(dir, ".crush", "crush.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	// A NOT NULL INTEGER column keeps both: the affinity converts a literal
+	// that is a lossless integer and leaves the rest as written.
+	if _, err := db.Exec(`INSERT INTO sessions (id, completion_tokens, prompt_tokens, updated_at) VALUES
+		('text', 'lots', 0, ?),
+		('real', 20.5, 7, ?),
+		('good', 100, 40, ?)`, since.UnixMilli(), since.UnixMilli(), since.UnixMilli()); err != nil {
+		t.Fatal(err)
+	}
+	out, in, ok := crushSessionSum([]string{dir}, since)
+	if !ok {
+		t.Fatal("a malformed counter column failed the whole store")
+	}
+	if out != 120 || in != 47 {
+		t.Fatalf("output %d and input %d, want 120 and 47 (the malformed rows read as zero)", out, in)
+	}
+}
+
 // Watch routes crush through this source, which is what makes the counts
 // reach a caller without it knowing where they came from. Tokens already in
 // the database at attach belong to a previous run, the same rule the file

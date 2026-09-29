@@ -155,8 +155,16 @@ func crushDBIn(root string) string {
 	return filepath.Join(resolved, filepath.FromSlash(crushDBRel))
 }
 
+// The two counter columns are cast in the statement rather than left as the
+// table declares them. SQLite gives a column the storage class of whatever was
+// written into it, so a column crush declares INTEGER can hold a fraction or a
+// string, and scanning either into an int64 is a conversion error that fails
+// the statement and with it every reading of the store for as long as the row
+// stands. CAST reads such a value as the zero it cannot be, and leaves a real
+// counter, a NULL and a fraction's whole part alone. The id is not cast: it is
+// read as text, and every storage class converts to text.
 const crushSessionsQuery = `
-	SELECT id, completion_tokens, prompt_tokens
+	SELECT id, CAST(completion_tokens AS INTEGER), CAST(prompt_tokens AS INTEGER)
 	FROM sessions`
 
 const crushSessionsSinceQuery = crushSessionsQuery + `
