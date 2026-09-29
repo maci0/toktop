@@ -1041,8 +1041,8 @@ Other claims checked against code on this pass, all of which hold as written:
   That job-wide scope is what a workflow or runner
   compromise would use against the update channel of summary risk 3. The two
   CI drift gates (`make check-ci-platforms`, `make check-ci-tags`,
-  .github/workflows/ci.yml, 66-74) are what keeps a shipped platform and a
-  vetted one the same set.
+  `make check-ci-env`, .github/workflows/ci.yml, 66-83) are what keeps a
+  shipped platform, a vetted one and a pinned build environment the same set.
 - The agent-store asset names dsh, crush, and opencode, and the default
   `--agents` path also tails claude, codex, qwen, copilot, kimi, gemini, grok,
   agy, clanker, and the built-in pi, prime-agent, and feynman definitions

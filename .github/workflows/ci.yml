@@ -15,8 +15,12 @@ concurrency:
 # Match the Makefile: locale/timezone must not follow the runner into
 # formatting, glob order, or timestamps. Instruction-set baselines, the
 # non-FIPS crypto module and CGO_ENABLED=0 match the released artifacts;
-# race-test steps turn cgo on. Empty GOFLAGS/GOEXPERIMENT so a runner-level
-# extra flag cannot change compile or test results relative to `make`.
+# race-test steps turn cgo on. Empty GOFLAGS/GOEXPERIMENT/GODEBUG so a
+# runner-level extra flag cannot change compile or test results relative to
+# `make`. GOENV=off and the empty GOPRIVATE/GONOSUMDB/GOINSECURE keep the go
+# command off the runner's own config file and the checksum database, which
+# is what the Makefile exports for the steps that go through it. `make
+# check-ci-env` fails when these and the Makefile's exports stop agreeing.
 env:
   LC_ALL: C
   TZ: UTC
@@ -26,6 +30,11 @@ env:
   CGO_ENABLED: "0"
   GOFLAGS: ""
   GOEXPERIMENT: ""
+  GODEBUG: ""
+  GOENV: "off"
+  GOPRIVATE: ""
+  GONOSUMDB: ""
+  GOINSECURE: ""
 
 jobs:
   test:
@@ -82,6 +91,14 @@ jobs:
       - name: the Makefile's go test lines carry the zone tag and -shuffle=on
         if: runner.os == 'Linux'
         run: make check-test-flags
+      # The env block above is a copy of the build inputs the Makefile
+      # exports, and the copy is what every `go` step here reads: `make`
+      # applies those exports to its own recipes, not to the workflow. A key
+      # dropped from one side leaves the runner's own value reaching the
+      # compiler, so the two copies have to be answerable to each other.
+      - name: the workflow env block matches the Makefile's build exports
+        if: runner.os == 'Linux'
+        run: make check-ci-env
       # The build matrix below is a copy of the Makefile's PLATFORMS, so the
       # two can drift: the release job builds and publishes PLATFORMS while
       # this workflow vets and compiles whatever the matrix lists.

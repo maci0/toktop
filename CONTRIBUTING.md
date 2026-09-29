@@ -34,7 +34,9 @@
   different binary from every other machine, and one carrying
   `GOPRIVATE=github.com/*` would skip the checksum database on modules the
   go.sum lines cover. Everything the build needs is in the Makefile,
-  `go.mod` and `GOWORK=off`.
+  `go.mod` and `GOWORK=off`. CI spells the same list in its workflow env
+  block, because `make` exports reach its own recipes and not a workflow's
+  `go` steps; `make check-ci-env` fails when the two copies disagree.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
 - Only to regenerate the README screenshot (below), and never for the
@@ -198,7 +200,7 @@ in day-to-day work:
 | `make test-asan` | all tests again under `-asan` (both sqlite tag halves); the go command refuses `-race -asan` together, so this is a second run and not a flag on `make test`. It skips `TestStaticFrameAllocBudget` by name, because an instrumented allocator makes an exact allocation count meaningless; `make test` still asserts that budget. Linux CI and `make ci` run it; it needs a C compiler and does not enter the edit-test loop |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-platforms`, `check-yaml`, `check-help-docs`) |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-yaml`, `check-help-docs`) |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
@@ -216,6 +218,7 @@ in day-to-day work:
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
 | `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, hands `-tags` one quoted argument, and keeps `-shuffle=on` (`make check` runs it) |
+| `make check-ci-env` | fail unless every workflow env block pins the build inputs the Makefile exports, name and value (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
 | `make check-yaml` | fail unless every workflow in `.github/workflows/` and `.github/dependabot.yml` are valid YAML and pass the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
@@ -253,10 +256,10 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
-the Linux leg of the test job runs four of the `make check` guards
-(`check-ci-tags`, `check-test-flags`, `check-ci-platforms`, `check-help-docs`).
-The fifth, `check-yaml`, runs in the `scripts` job, which installs the pinned
-tool env that target lints with.
+the Linux leg of the test job runs five of the `make check` guards
+(`check-ci-tags`, `check-ci-env`, `check-test-flags`, `check-ci-platforms`,
+`check-help-docs`). The sixth, `check-yaml`, runs in the `scripts` job, which
+installs the pinned tool env that target lints with.
 Vulnerability analysis follows the host platform's build constraints.
 `staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
 Linux, macOS and Windows, plus cross-compiles of linux/amd64, linux/arm64,

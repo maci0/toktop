@@ -889,6 +889,55 @@ check-ci-tags: ## fail if a workflow's go test/vet/staticcheck line does not car
 # The matrix entries only, so the `matrix.goos` uses in the step bodies and the
 # uppercase GOOS/GOARCH in their env blocks do not read as platforms.
 CI_WORKFLOW := .github/workflows/ci.yml
+
+# Every build input this Makefile exports, with the value a released artifact
+# depends on. A workflow step that runs go directly (ci.yml's gofmt, go mod
+# tidy, go test, go install tool and the matrix compiles) does not inherit the
+# exports above: those are recipe-local to make, so in a workflow the same keys
+# have to be spelled in the env block or the runner's own environment reaches
+# the compiler. A GitHub-hosted runner keeps those values empty today, which is
+# what hides the gap: an image built with `go env -w GOAMD64=v3` or an
+# inherited GOPRIVATE sets them, and then a platform compiles differently from
+# the one the release path ships. Names AND values, so a rename and a re-pin
+# both fail.
+CI_ENV_REQUIRED := \
+	LC_ALL=C TZ=UTC \
+	GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off CGO_ENABLED=0 \
+	GOFLAGS= GOEXPERIMENT= GODEBUG= GOENV=off \
+	GOPRIVATE= GONOSUMDB= GOINSECURE=
+
+.PHONY: check-ci-env
+check-ci-env: ## fail unless every workflow env block pins the build inputs the Makefile exports
+	@fail=0; \
+	for spec in $(CI_ENV_REQUIRED); do \
+		key=$${spec%%=*}; want=$${spec#*=}; \
+		for wf in $(WORKFLOWS); do \
+			if have=$$(awk -v key="$$key" ' \
+				/^ *env: *$$/ { envind = match($$0, /[^ ]/); inenv = 1; next } \
+				inenv { \
+					if ($$1 ~ /^#/) next; \
+					m = match($$0, /[^ ]/); \
+					if (m > 0) { \
+						if (m <= envind) { inenv = 0; next } \
+						if ($$1 == key ":") { \
+							g = $$0; sub(/^[^:]*:[ ]*/, "", g); \
+							gsub(/"/, "", g); sub(/[ ]+$$/, "", g); \
+							print g; found = 1; exit; \
+						} \
+					} \
+					next; \
+				} \
+				END { if (!found) exit 1 }' "$$wf"); then :; else have="<unset>"; fi; \
+			if [ "$$have" != "$$want" ]; then \
+				echo "make check-ci-env: $$wf does not pin $$key='$$want' in an env block (found '$$have')," >&2; \
+				echo "  so a go step there reads the runner's value instead of the one the Makefile exports;" >&2; \
+				echo "  add $$key to the workflow env block, or change it in both places at once" >&2; \
+				fail=1; \
+			fi; \
+		done; \
+	done; \
+	exit $$fail
+
 .PHONY: check-ci-platforms
 check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 	@in_workflow=$$(sed -n -E 's/.*goos:[[:space:]]*([a-z0-9]+)[^a-z0-9]*goarch:[[:space:]]*([a-z0-9]+).*/\1\/\2/p' $(CI_WORKFLOW) | sort); \
@@ -1098,6 +1147,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the workflow YAML and the doc guards (CI parity)
 	@$(MAKE) --no-print-directory check-test-flags
 	@$(MAKE) --no-print-directory check-ci-tags
+	@$(MAKE) --no-print-directory check-ci-env
 	@$(MAKE) --no-print-directory check-ci-platforms
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
