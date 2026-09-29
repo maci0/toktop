@@ -145,6 +145,18 @@ paths:
             text/plain:
               schema:
                 $ref: "#/components/schemas/Reason"
+        "500":
+          description: |
+            The handler panicked and the recovered answer carries no detail of
+            the fault, only that there was one. The line on the server names
+            it; the sender gets nothing to act on beyond the retry.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
         "503":
           description: |
             64 bodies were already decoding. This is a pile-up, not a fault:
@@ -178,11 +190,26 @@ paths:
               description: The length the body would have had; a HEAD states it with no body.
               schema:
                 type: integer
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
           content:
             text/plain:
               schema:
                 type: string
                 const: "ok\n"
+        "403":
+          description: |
+            The `Host` named another machine on a loopback-bound listener. The
+            guard runs before routing, so it answers this path as well as
+            `/v1/events`, and a rebound request learns nothing about what is
+            served.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
         "405":
           description: The path takes GET and HEAD only.
           headers:
@@ -190,6 +217,20 @@ paths:
               schema:
                 type: string
                 const: GET, HEAD
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "500":
+          description: |
+            The handler panicked and the recovered answer carries no detail of
+            the fault, only that there was one. The probe is the only path here
+            a panic can reach without a body to decode.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
           content:
             text/plain:
               schema:
@@ -205,6 +246,8 @@ paths:
               description: The length the body would have had; a HEAD states it with no body.
               schema:
                 type: integer
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
           content:
             text/plain:
               schema:
@@ -223,6 +266,15 @@ paths:
               description: The length the body would have had.
               schema:
                 type: integer
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "403":
+          description: |
+            The `Host` named another machine on a loopback-bound listener, the
+            same refusal the GET gets and before routing rather than after it.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
         "405":
           description: The path takes GET and HEAD only.
           headers:
@@ -230,6 +282,13 @@ paths:
               schema:
                 type: string
                 const: GET, HEAD
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+        "500":
+          description: The handler panicked; the GET's answer without a body.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
         "503":
           description: Every event slot is held, so every POST is being refused.
           headers:
@@ -239,6 +298,8 @@ paths:
               description: The length the body would have had.
               schema:
                 type: integer
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
 
 components:
   parameters:

@@ -417,7 +417,10 @@ closes DNS rebinding: a rebound page is same-origin with the endpoint, so
 the browser sends no `Origin` at all. An endpoint bound off loopback with
 `--ingest` applies no such rule, because its peers reach it under whatever
 name they use for the machine. Wrong methods on these paths answer `405` with
-`Allow` and a body naming the path and the methods it takes.
+`Allow` and a body naming the path and the methods it takes. A handler panic
+answers `500` with `internal error` and nothing else, so a sender sees that
+there was a fault and no detail of it; the ERROR line on the server names the
+panic.
 Unknown paths answer `404` naming the two endpoints and the methods each one
 takes, as `not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)`, so
 a POST to `/events` is not a generic not-found page and a client can split the
