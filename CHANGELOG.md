@@ -170,6 +170,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   consumer decoding into a typed slice had one field whose absence meant
   something other than the empty list the other three publish. No field is
   removed, renamed or remeant, so `schema` stays at 1.
+
+- `docs/openapi.yaml` now carries examples for `POST /v1/events`: one `Event`
+  object, a two-line NDJSON stream, the `202` ack, and one `Reason` per answer
+  a sender is most likely to read. The schemas described every field and no
+  request, so a client generator had nothing to send. A test holds each
+  example to the handlers: one that the endpoint would answer `400` to, one
+  naming a field the schema drops, or an ack pair the feed cannot produce
+  fails it.
+
+- The `X-Request-Id` the spec echoes is the sender's id single-lined, with a
+  home directory in it folded to `~` and cut to 64 characters, not the header
+  value verbatim. The spec said "echoed" in both the parameter and the answer
+  header. The fold is what keeps an account name out of an answer that
+  outlives the run that wrote it.
+
+- `Event.id` declares `minLength: 1`, and the request body says that resending
+  it needs an `id` on every event or one `Idempotency-Key` on the request. A
+  body carrying neither is accepted, and its replay is counted again.
+
 - A `202` from `POST /v1/events` now says what `stored` is: the feed is the
   answering process's memory, so `stored` acknowledges receipt for display and
   is not a durable-write receipt. An event is gone when that process exits, is

@@ -628,3 +628,189 @@ func splitOperations(t *testing.T, section string) (get, head string) {
 	}
 	return strings.Join(lines[gi:hi], "\n"), strings.Join(lines[hi:], "\n")
 }
+
+// The examples a client generator copies out of the spec. Nothing tied them to
+// the handlers: an example whose field is one the decoder drops, or whose
+// value the endpoint answers 400 to, teaches a sender the wrong request, and
+// an ack example whose counts no request could produce teaches it to read a
+// pair that never arrives. Each is run through the code that reads the wire.
+
+// The Event example is a body the endpoint accepts, spelled in the fields the
+// Event schema declares and in nothing else: a generator copies the example
+// verbatim, so a field here that the schema omits is a field whose value
+// vanishes on the way in.
+func TestOpenAPIEventExampleIsAcceptedAsWritten(t *testing.T) {
+	example := exampleObject(t, `#/components/schemas/Event"`)
+	var wire map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(example), &wire); err != nil {
+		t.Fatalf("the application/json request example is not a JSON object: %v\n%s", err, example)
+	}
+	for name := range wire {
+		if !slices.Contains(declaredProps(t, "Event"), name) {
+			t.Errorf("the request example sends %q, which the Event schema does not declare; a sender copying it loses the field", name)
+		}
+	}
+	if _, ok := wire["id"]; !ok && !exampleKeysRequest(t) {
+		t.Errorf("the request example carries no id and the operation it documents names no Idempotency-Key, " +
+			"so a sender copying the body alone double-counts every replay")
+	}
+	accepted := acceptsExampleBody(t, example)
+	if !accepted {
+		t.Errorf("the request example is refused by eventFromWire:\n%s", example)
+	}
+}
+
+// The NDJSON example line by line, since a stream is decoded one object at a
+// time and a bad line in the middle keeps only what came before it.
+func TestOpenAPINDJSONExampleIsAcceptedLineByLine(t *testing.T) {
+	lines := exampleBlock(t, "One Event object per line.")
+	if len(lines) == 0 {
+		t.Fatal("the application/x-ndjson example is empty")
+	}
+	for _, line := range lines {
+		if kind := jsonRootKind([]byte(line)); kind != "object" {
+			t.Errorf("an NDJSON example line is a %s, not an object: %s", kind, line)
+			continue
+		}
+		if !acceptsExampleBody(t, line) {
+			t.Errorf("an NDJSON example line is refused by eventFromWire: %s", line)
+		}
+	}
+}
+
+// The ack example is a pair the handler can write: both counts the Ack schema
+// declares, both whole, and stored never above accepted, which is the one
+// ordering the feed holds to (it decodes every line and can only keep a
+// subset).
+func TestOpenAPIAckExampleIsAPairTheHandlerCanWrite(t *testing.T) {
+	example := exampleObject(t, `#/components/schemas/Ack"`)
+	var ack map[string]int
+	if err := json.Unmarshal([]byte(example), &ack); err != nil {
+		t.Fatalf("the 202 example is not a JSON object of whole numbers: %v\n%s", err, example)
+	}
+	for _, name := range declaredProps(t, "Ack") {
+		if _, ok := ack[name]; !ok {
+			t.Errorf("the 202 example carries no %q, which the Ack schema declares", name)
+		}
+	}
+	for name := range ack {
+		if !slices.Contains(declaredProps(t, "Ack"), name) {
+			t.Errorf("the 202 example carries %q, which the Ack schema does not declare", name)
+		}
+	}
+	if ack["stored"] > ack["accepted"] {
+		t.Errorf("the 202 example reads accepted %d, stored %d; the feed can only keep a subset of what the wire carried",
+			ack["accepted"], ack["stored"])
+	}
+}
+
+// acceptsExampleBody reports whether one example object decodes and passes the
+// field checks a real POST runs, the same path a request takes.
+func acceptsExampleBody(t *testing.T, body string) bool {
+	t.Helper()
+	var raw json.RawMessage
+	if err := json.Unmarshal([]byte(body), &raw); err != nil {
+		return false
+	}
+	var wire agentEventWire
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Errorf("the example is not an Event the wire struct decodes: %v\n%s", err, body)
+		return false
+	}
+	_, err := eventFromWire(wire)
+	return err == nil
+}
+
+// exampleKeysRequest reports whether the operation carrying the Event example
+// names an Idempotency-Key, the request-level key that covers an id-less body.
+func exampleKeysRequest(t *testing.T) bool {
+	t.Helper()
+	return strings.Contains(openapiSection(t, eventsPath), "#/components/parameters/IdempotencyKey")
+}
+
+// exampleObject returns the example block following anchor as one JSON object.
+// The block mappings the spec writes for these two are flat, so the pairs are
+// spelled back as JSON: an integer value stays a number and anything else is
+// the string the plain scalar already is.
+func exampleObject(t *testing.T, anchor string) string {
+	t.Helper()
+	block := exampleBlock(t, anchor)
+	if len(block) == 0 {
+		t.Fatalf("docs/openapi.yaml declares no example after %q", anchor)
+	}
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, line := range block {
+		key, value, ok := strings.Cut(strings.TrimSpace(line), ":")
+		if !ok {
+			t.Fatalf("example line %q is not a flat key/value pair; this reader handles one level only:\n%s", line, strings.Join(block, "\n"))
+		}
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		name, err := json.Marshal(strings.TrimSpace(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(name)
+		b.WriteByte(':')
+		value = strings.TrimSpace(value)
+		if _, err := strconv.Atoi(value); err == nil {
+			b.WriteString(value)
+			continue
+		}
+		quoted, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(quoted)
+	}
+	b.WriteByte('}')
+	return b.String()
+}
+
+// exampleBlock returns the lines belonging to the first `example:` key after
+// the line containing anchor, at any depth: the body of a block mapping or of
+// a block scalar, verbatim, up to the first line back at or left of the key's
+// indent.
+func exampleBlock(t *testing.T, anchor string) []string {
+	t.Helper()
+	lines := strings.Split(openapiSource(t), "\n")
+	start := -1
+	for i, l := range lines {
+		if strings.Contains(l, anchor) {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("docs/openapi.yaml names no %q to anchor an example on", anchor)
+	}
+	key := -1
+	for i := start + 1; i < len(lines); i++ {
+		// A block scalar carries its indicator on the key's own line
+		// (`example: |`), so the tail after the colon is either empty or that
+		// indicator, and nothing else may sit there.
+		rest, ok := strings.CutPrefix(strings.TrimSpace(lines[i]), "example:")
+		rest = strings.TrimSpace(rest)
+		if ok && (rest == "" || rest == "|" || rest == ">" || rest == "|-" || rest == ">-") {
+			key = i
+			break
+		}
+	}
+	if key < 0 {
+		t.Fatalf("docs/openapi.yaml declares no example after %q", anchor)
+	}
+	indent := len(lines[key]) - len(strings.TrimLeft(lines[key], " "))
+	var out []string
+	for _, l := range lines[key+1:] {
+		if strings.TrimSpace(l) == "" {
+			continue
+		}
+		if len(l)-len(strings.TrimLeft(l, " ")) <= indent {
+			break
+		}
+		out = append(out, l)
+	}
+	return out
+}

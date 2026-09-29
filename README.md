@@ -520,7 +520,9 @@ handler runs are the exception, and they carry no id to correlate: a header
 block past the 16 KiB budget answers `431`, and a request line it cannot parse
 answers `400` with the runtime's own reason, both closing the connection. An
 echoed id is single-lined and cut to 64 characters,
-so an id longer than that comes back truncated rather than as it was sent. The
+so an id longer than that comes back truncated rather than as it was sent, and
+a home directory inside it is folded to `~` the way every event field's is, so
+what comes back is a correlation handle rather than a copy of the header. The
 id is a correlation id only: the `req` on the log
 line is the same value, and neither it nor the sender's own key is read as an
 event id.

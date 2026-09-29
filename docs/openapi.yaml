@@ -64,6 +64,12 @@ paths:
 
         The body is read as JSON or NDJSON whatever the `Content-Type` says,
         so a plain `curl -d` works unmodified.
+
+        Resending a body needs one of the two keys, or the events it carries
+        are counted a second time: an `id` on each event, or one
+        `Idempotency-Key` on the request, which keys every id-less line by its
+        position in the body. A body carrying neither is accepted, and a replay
+        of it reads `{"accepted":2,"stored":4}`.
       operationId: recordEvents
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
@@ -74,10 +80,20 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/Event"
+            example:
+              agent: coder
+              kind: tool
+              prompt_tokens: 4200
+              output_tokens: 310
+              thinking_tokens: 40
+              note: shell(git status)
           application/x-ndjson:
             schema:
               type: string
             description: One Event object per line.
+            example: |
+              {"agent":"coder","model":"gpt-5","prompt_tokens":4200,"output_tokens":310}
+              {"agent":"coder","model":"gpt-5","kind":"tool","output_tokens":90,"span_ms":1500}
       responses:
         "202":
           description: |
@@ -95,6 +111,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Ack"
+              example:
+                accepted: 12
+                stored: 10
         "400":
           description: |
             The body is not a JSON object or NDJSON stream, a `ts` is not an
@@ -363,17 +382,22 @@ components:
       description: |
         A correlation id for this request. Echoed back on every answer the
         server's own handlers give, single-lined and cut to 64 characters, and
-        read as no more than that: it never names an event. The two refusals
-        net/http makes before a handler runs (see `RuntimeRefusal`) carry
-        none, and an id long enough to trip the second is itself the reason it
-        is missing.
+        read as no more than that: it never names an event. What comes back is
+        the id the sender sent with a home directory in it folded to `~`, the
+        same fold the event fields get, so the echoed value is a correlation
+        handle and not a verbatim copy of the header. The two refusals net/http
+        makes before a handler runs (see `RuntimeRefusal`) carry none, and an
+        id long enough to trip the second is itself the reason it is missing.
       schema:
         type: string
         maxLength: 64
 
   headers:
     RequestId:
-      description: The request's `X-Request-Id`, echoed, or one minted when the sender set none.
+      description: |
+        The request's `X-Request-Id`, echoed single-lined, with any home
+        directory in it folded to `~` and cut to 64 characters, or one minted
+        when the sender set none.
       schema:
         type: string
     RetryAfter:
@@ -414,7 +438,15 @@ components:
       description: A one-line reason naming the field, the bound or the shape the sender got wrong.
       examples:
         - "bad ts: must be an RFC 3339 string"
+        - "bad json: prompt_tokens is out of range"
+        - "bad id: must be at most 128 characters"
         - "not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)"
+        - "method not allowed; /v1/events accepts POST, not PUT"
+        - "browser-originated requests are not accepted; post from a script or agent without an Origin header"
+        - "host is not this machine; refusing a request addressed to another name"
+        - "event stream exceeds 1048576 byte cap"
+        - "request stalled: no body bytes for 1m0s"
+        - "at most 64 event streams are decoded at once; retry"
 
     Event:
       type: object
@@ -446,13 +478,17 @@ components:
         id:
           type: string
           maxLength: 128
+          minLength: 1
           description: |
             The caller's own key for this event, at most 128 characters. A
             repeat of a key recorded within the last 15 minutes is ignored,
             while the ledger still holds fewer than 7200 ids. An id past the
             cap, or one that is nothing printable, is a 400 naming the field
             rather than a truncated key, because two keys clamped onto one
-            stored id would drop the second event as a duplicate. Omitted, a
+            stored id would drop the second event as a duplicate. The one
+            printable character is the floor: whitespace and control characters
+            are stripped before the id is stored, so an id of them is empty by
+            the time it is keyed and is refused the same way. Omitted, a
             request `Idempotency-Key` is used instead.
         ts:
           type: string
