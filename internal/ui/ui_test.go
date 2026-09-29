@@ -212,7 +212,11 @@ func testHelpOverlayMutesActionKeys(t *testing.T) {
 		t.Error("t toggled the timescale while help was open")
 	}
 	for _, k := range []string{"p", "P"} {
-		key(k)
+		// p dispatches through a program command, so a nil command is the
+		// whole claim: running it is what fires a probe.
+		if cmd := key(k); cmd != nil {
+			t.Errorf("%s returned a probe command while help was open: %v", k, cmd())
+		}
 		synctest.Wait()
 		if got := probes.Load(); got != 0 {
 			t.Errorf("%s fired %d probes while help was open", k, got)
@@ -657,7 +661,7 @@ func TestCompressSeriesAveragesWithinEngine(t *testing.T) {
 			nonzero = append(nonzero, g)
 		}
 	}
-	if len(nonzero) != 2 || nonzero[0]+nonzero[1] != 250 {
+	if len(nonzero) != 2 || nonzero[0] != 200 || nonzero[1] != 50 {
 		t.Fatalf("columns = %v, want one 200 bucket (mean of 100,300) and one 50", nonzero)
 	}
 }
@@ -691,8 +695,9 @@ func TestSpanCapBounds(t *testing.T) {
 	if got := spanCap(-1); got != 0 {
 		t.Errorf("spanCap(-1) = %d, want 0", got)
 	}
-	if got := spanCap(100); got <= 0 || got > 63 {
-		t.Errorf("spanCap(100) = %d, want positive <= 63", got)
+	// 100 columns is 1e11ns, 37 bits, so 63-37 levels of halving are left.
+	if got := spanCap(100); got != 26 {
+		t.Errorf("spanCap(100) = %d, want 26", got)
 	}
 	if got := spanCap(math.MaxInt); got != 0 {
 		t.Errorf("spanCap(MaxInt) = %d, want 0", got)
@@ -2064,8 +2069,14 @@ func TestFooterNoticeSurvivesANarrowPane(t *testing.T) {
 
 func TestFooterOmitsDeadKeys(t *testing.T) {
 	empty := New(Config{Version: "t", Prober: func() {}}, nil)
-	if got := strip(empty.renderFooter()); strings.Contains(got, "probe") || strings.Contains(got, "timescale") {
-		t.Errorf("empty footer advertised keys with no effect: %q", got)
+	foot := strip(empty.renderFooter())
+	if strings.Contains(foot, "probe") || strings.Contains(foot, "timescale") {
+		t.Errorf("empty footer advertised keys with no effect: %q", foot)
+	}
+	// The dead keys are the claim; the footer still has to carry the live
+	// ones, or an empty render would satisfy the check above.
+	if !strings.Contains(foot, "help") || !strings.Contains(foot, "q") {
+		t.Errorf("empty footer dropped the keys that do work: %q", foot)
 	}
 	agents := New(Config{Version: "t", Prober: func() {}}, nil)
 	agents.snap = core.Snapshot{Agents: []core.AgentEvent{{Agent: "claude"}}}
@@ -2142,8 +2153,13 @@ func TestProbeKeyNoopsWithoutEngines(t *testing.T) {
 		var probes atomic.Int32
 		m := New(Config{Version: "t", Prober: func() { probes.Add(1) }}, nil)
 		for _, k := range []string{"p", "P"} {
-			nm, _ := m.Update(keyMsg(k))
+			// The probe travels as a program command, so the noop has to
+			// return none at all, not merely avoid calling the prober.
+			nm, cmd := m.Update(keyMsg(k))
 			m = nm.(Model)
+			if cmd != nil {
+				t.Errorf("%s returned a probe command with no engines attached: %v", k, cmd())
+			}
 			synctest.Wait()
 			if got := probes.Load(); got != 0 {
 				t.Errorf("%s fired %d probes with no engines attached", k, got)

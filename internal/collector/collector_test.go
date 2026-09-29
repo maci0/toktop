@@ -278,6 +278,7 @@ func TestEmitFirstThroughputGaugeSeedsRate(t *testing.T) {
 			c.SetSysFn(nil)
 			now := time.Unix(1000, 0)
 			c.SetNow(func() time.Time { return now })
+			t.Cleanup(func() { c.SetNow(nil) })
 			ch := make(chan core.Snapshot, 1)
 			c.emit(context.Background(), ch)
 			first := (<-ch).Providers[0]
@@ -293,7 +294,11 @@ func TestEmitFirstThroughputGaugeSeedsRate(t *testing.T) {
 			now = now.Add(time.Second)
 			c.emit(context.Background(), ch)
 			next := (<-ch).Providers[0]
-			wantNext := tc.want*(1-emaAlpha) + 300*emaAlpha
+			// A local alpha, not the package constant: an expectation built
+			// from the same constant as the code moves with a retune and
+			// proves nothing. 300 at 0.35 smooths to 300, and 0 seeds to 105.
+			const alpha = 0.35
+			wantNext := tc.want*(1-alpha) + 300*alpha
 			if next.OutTokPS != wantNext || next.InTokPS != 35 {
 				t.Fatalf("next rates = %v/%v, want %v/35", next.OutTokPS, next.InTokPS, wantNext)
 			}
@@ -336,6 +341,7 @@ func TestEmitHonorsZeroThroughputGauge(t *testing.T) {
 			c.SetSysFn(nil)
 			now := time.Unix(1000, 0)
 			c.SetNow(func() time.Time { return now })
+			t.Cleanup(func() { c.SetNow(nil) })
 			out := make(chan core.Snapshot, 1)
 			c.emit(context.Background(), out)
 			<-out
@@ -572,6 +578,7 @@ func frozenCollector(t *testing.T, frozen time.Time, providers []provider.Provid
 	t.Helper()
 	c := New(providers, time.Second)
 	c.SetNow(func() time.Time { return frozen })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.SetSysFn(func() core.SysSample { return core.SysSample{MemTotal: 8, MemUsed: 3} })
 	c.procFn = func() []procs.Info { return nil }
 	return c
@@ -758,6 +765,10 @@ func TestRunRefusesASecondLiveRun(t *testing.T) {
 	if err := c.Run(ctx, ch); !errors.Is(err, errRunInProgress) {
 		t.Fatalf("second Run = %v, want errRunInProgress", err)
 	}
+	// The live run is still filling the channel, so what the refused Run adds
+	// is measured against a drained one: a stale frame here would fail the
+	// check spuriously, and would later stand in for the restart's first.
+	drain(ch)
 	if n := len(ch); n != 0 {
 		t.Fatalf("the refused Run emitted %d snapshots", n)
 	}
@@ -765,6 +776,7 @@ func TestRunRefusesASecondLiveRun(t *testing.T) {
 	if err := <-first; err != nil {
 		t.Fatalf("first Run = %v, want nil", err)
 	}
+	drain(ch)
 
 	// The claim is released on return, so a restart is not read as a second
 	// live loop and a collector that was stopped can still be run again.
@@ -992,6 +1004,7 @@ func TestRecordAgentKeepsChronologicalOrder(t *testing.T) {
 	base := time.Now()
 	const skew = 3 * time.Second
 	c.SetNow(func() time.Time { return base.Add(10 * time.Second) })
+	t.Cleanup(func() { c.SetNow(nil) })
 	order := []time.Duration{0, 3 * time.Second, 7 * time.Second, 5 * time.Second}
 	for _, d := range order {
 		c.RecordAgent(core.AgentEvent{At: base.Add(10*time.Second + d + skew), Agent: "a", OutputTokens: 1})
@@ -1019,6 +1032,7 @@ func TestRecordAgentAgesOutSenderRunningAhead(t *testing.T) {
 	const skew = 90 * time.Second
 	now := base
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	// Two events a second apart, on a host whose clock is 90s fast. The
 	// second names the same agent, so one offset covers both.
@@ -1056,6 +1070,7 @@ func TestRecordAgentOffsetFollowsASmallerLead(t *testing.T) {
 	base := time.Now()
 	now := base
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	// First sight: a host 90s fast, as a dead RTC leaves it.
 	const stale = 90 * time.Second
@@ -1113,6 +1128,7 @@ func TestRecordAgentSharedNameTakesTheSmallerOffset(t *testing.T) {
 	base := time.Now()
 	now := base
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	const fast = 60 * time.Second
 	c.RecordAgent(core.AgentEvent{At: now.Add(fast), Agent: "claude", OutputTokens: 40})
@@ -1185,6 +1201,7 @@ func TestRecordAgentRefusesEventBehindRetainedWindow(t *testing.T) {
 	now := base
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	for i := range core.AgentHistoryLen {
 		now = base.Add(time.Duration(i) * time.Second)
 		c.RecordAgent(core.AgentEvent{At: now, ID: fmt.Sprintf("n%d", i), Agent: "a"})
@@ -1276,6 +1293,7 @@ func TestRecordAgentIgnoresReplayAfterRingEviction(t *testing.T) {
 	now := base
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	if !c.RecordAgent(core.AgentEvent{At: base, ID: "turn-1", Agent: "a", OutputTokens: 7}) {
 		t.Fatal("first send reported a duplicate")
 	}
@@ -1310,6 +1328,7 @@ func TestRecordAgentReusesIDPastHorizon(t *testing.T) {
 	now := base
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.RecordAgent(core.AgentEvent{At: base, ID: "old", Agent: "a"})
 	now = base.Add(core.AgentIDHorizon + time.Second)
 	if !c.RecordAgent(core.AgentEvent{At: now, ID: "old", Agent: "a", OutputTokens: 7}) {
@@ -1331,6 +1350,7 @@ func TestRecordAgentIDLedgerStaysBounded(t *testing.T) {
 	now := base
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	const flood = 4 * core.AgentIDLedgerMax
 	for i := range flood {
 		now = base.Add(time.Duration(i) * time.Millisecond)
@@ -1375,6 +1395,7 @@ func TestPerProviderStateKeyedByEndpoint(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	c := New([]provider.Provider{(&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8080", m: m1}).asProvider(), (&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8081", m: m2}).asProvider()}, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	get := func() map[string]float64 {
 		c.emit(context.Background(), ch)
@@ -1413,6 +1434,7 @@ func TestDuplicateEndpointsCollapsed(t *testing.T) {
 	other := (&fakeProvider{label: core.KindLlamaCPP, addr: "http://127.0.0.1:8081", m: m}).asProvider()
 	c := New([]provider.Provider{dup, dup, other}, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	c.emit(context.Background(), ch) // seed baseline
 	snap := <-ch
@@ -1797,6 +1819,14 @@ func TestEmitSysSampleDoesNotPinMu(t *testing.T) {
 
 // waitFor polls cond until it holds or the deadline passes; probe completion
 // is asynchronous, so tests must wait rather than sleep-and-hope.
+// drain empties a buffered snapshot channel, so a check on what arrives next
+// is a check on the run that starts next and not on what a stopped one left.
+func drain(ch chan core.Snapshot) {
+	for len(ch) > 0 {
+		<-ch
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -2106,6 +2136,7 @@ func TestProbeAllHonorsRetryAfter(t *testing.T) {
 		defer clockMu.Unlock()
 		return now
 	})
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.lastModel[srv.URL] = "m"
 
 	c.ProbeAll()
@@ -2171,14 +2202,11 @@ func TestAgentCmp(t *testing.T) {
 		{"equal", core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, core.AgentEvent{At: t0, Agent: "a", ID: "1", Note: "alpha"}, 0},
 	}
 	for _, tc := range cases {
-		c := core.AgentCmp(tc.a, tc.b)
-		switch {
-		case tc.want < 0 && c >= 0:
-			t.Errorf("%s: AgentCmp = %d, want < 0", tc.name, c)
-		case tc.want > 0 && c <= 0:
-			t.Errorf("%s: AgentCmp = %d, want > 0", tc.name, c)
-		case tc.want == 0 && c != 0:
-			t.Errorf("%s: AgentCmp = %d, want 0", tc.name, c)
+		// Exactly -1, 0 or 1: sort.Slice only reads the sign, so a magnitude
+		// past it would sort correctly here and be compared as a count by a
+		// caller that is not sorting.
+		if c := core.AgentCmp(tc.a, tc.b); c != tc.want {
+			t.Errorf("%s: AgentCmp = %d, want %d", tc.name, c, tc.want)
 		}
 	}
 }
@@ -2356,6 +2384,7 @@ func TestRecordAgentDuplicateDoesNotZeroTheOffset(t *testing.T) {
 	base := time.Now()
 	now := base
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	const fast = 90 * time.Second
 	ev := core.AgentEvent{At: now.Add(fast), ID: "turn-1", Agent: "remote", OutputTokens: 40}
@@ -2397,6 +2426,7 @@ func TestRecordAgentOffsetAgesOutWithTheHorizon(t *testing.T) {
 	base := time.Now()
 	now := base
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 
 	const fast = 60 * time.Second
 	c.RecordAgent(core.AgentEvent{At: now.Add(fast), Agent: "remote", OutputTokens: 40})

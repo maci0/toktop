@@ -735,8 +735,9 @@ func TestUnansweredChannelOpenClosesTheConnection(t *testing.T) {
 	defer cli.Close()
 
 	start := time.Now()
-	if _, err := cli.Run(t.Context(), "true"); err == nil {
-		t.Fatal("an unanswered channel open should fail the run")
+	_, err = cli.Run(t.Context(), "true")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("unanswered open err = %v, want the session-open deadline", err)
 	}
 	if elapsed := time.Since(start); elapsed > 5*time.Second {
 		t.Fatalf("the unanswered open was not bounded by sessionOpenTimeout: %s", elapsed)
@@ -897,6 +898,10 @@ func TestRelayCapsConcurrentConnections(t *testing.T) {
 				return
 			}
 			held = append(held, c)
+			// Every relayed connection gets a byte, so the read past the cap
+			// tells a refused connection (EOF at once) from a piped one (the
+			// byte, or a timeout if it is never written).
+			_, _ = c.Write([]byte{0})
 		}
 	}()
 	rport := up.Addr().(*net.TCPAddr).Port
@@ -933,9 +938,21 @@ func TestRelayCapsConcurrentConnections(t *testing.T) {
 	}
 	defer c.Close()
 	c.SetReadDeadline(time.Now().Add(5 * time.Second))
-	if _, err := c.Read(make([]byte, 1)); err == nil {
+	switch _, err := c.Read(make([]byte, 1)); {
+	case err == nil:
 		t.Fatalf("connection %d was piped past the cap of %d", maxConcurrentRelays+1, maxConcurrentRelays)
+	case isTimeout(err):
+		t.Fatalf("connection %d was piped past the cap of %d: the read timed out instead of closing",
+			maxConcurrentRelays+1, maxConcurrentRelays)
 	}
+}
+
+// isTimeout reports a read that ran into its deadline rather than the peer
+// closing, which is what a relayed connection the upstream never wrote to
+// looks like.
+func isTimeout(err error) bool {
+	var ne net.Error
+	return errors.As(err, &ne) && ne.Timeout()
 }
 
 func waitForRelayCount(t *testing.T, cli *Client, n int) {

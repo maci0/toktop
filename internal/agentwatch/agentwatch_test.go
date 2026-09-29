@@ -262,12 +262,21 @@ func TestSurvivorTakesOverTheStore(t *testing.T) {
 	appendLine(t, filepath.Join(transcript, "s.jsonl"), usageLine(work, 700))
 	waitFor(t, waitCeiling, func() bool {
 		for _, ev := range rec.forPID(survivor) {
-			if ev.OutputTokens >= 700 {
+			if ev.OutputTokens != 0 {
 				return true
 			}
 		}
 		return false
 	})
+	// One line of 700, read once: two watchers on the shared store would
+	// bill it twice, which is the failure the handover exists to prevent.
+	var out int64
+	for _, ev := range rec.forPID(survivor) {
+		out += ev.OutputTokens
+	}
+	if out != 700 {
+		t.Fatalf("survivor reported %d output tokens, want the 700 written once", out)
+	}
 }
 
 func TestSameProcess(t *testing.T) {
@@ -616,18 +625,21 @@ func TestEngineTakesPrecedence(t *testing.T) {
 
 	pid := cmd.Process.Pid
 	waitFor(t, waitCeiling, func() bool { return len(rec.forPID(pid)) > 0 })
+	// Attribution names the endpoint, with the scheme the engine list carried
+	// stripped, so that is what the event must carry.
+	endpoint := ln.Addr().String()
 	var out int64
 	for _, ev := range rec.forPID(pid) {
-		if ev.ViaEngine == "" {
-			t.Fatalf("agent using the engine was not attributed: %+v", ev)
+		if ev.ViaEngine != endpoint {
+			t.Fatalf("agent attributed to %q, want the engine it connected to %q: %+v", ev.ViaEngine, endpoint, ev)
 		}
-		if !strings.Contains(ev.Note, "counted by engine") {
-			t.Fatalf("attribution missing from the note: %+v", ev)
+		if want := core.ShortDir(work) + noteSeparator + "counted by engine " + endpoint; ev.Note != want {
+			t.Fatalf("note = %q, want %q", ev.Note, want)
 		}
 		out += ev.OutputTokens
 	}
-	if out == 0 {
-		t.Fatal("attributed agent produced no token events to display")
+	if out != 500 {
+		t.Fatalf("attributed agent reported %d output tokens, want the 500 written once", out)
 	}
 }
 
@@ -856,6 +868,11 @@ func TestParseEngineAddrDefaultPorts(t *testing.T) {
 		if tt.err {
 			if err == nil {
 				t.Errorf("parseEngineAddr(%q) err=nil, want a parse error", tt.in)
+			}
+			// A failed parse reports nothing: a label left over from the
+			// broken input reaches the dashboard as an attribution.
+			if ap != (netip.AddrPort{}) || label != "" {
+				t.Errorf("parseEngineAddr(%q) = %v %q alongside its error, want zero values", tt.in, ap, label)
 			}
 			continue
 		}

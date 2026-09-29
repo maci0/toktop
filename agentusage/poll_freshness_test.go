@@ -500,8 +500,8 @@ func TestClankerMissingStateDirIsQuiet(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := w.Poll()
-	if s.Input != 10 || s.Output != 4 {
-		t.Fatalf("sample = %+v, want input 10 output 4", s)
+	if s.Input != 10 || s.Output != 4 || s.Total != 14 {
+		t.Fatalf("sample = %+v, want input 10 output 4 total 14", s)
 	}
 	if strings.Contains(lines.String(), "agent transcript walk failed") {
 		t.Fatalf("reading the new log warned:\n%s", lines.String())

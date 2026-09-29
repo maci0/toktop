@@ -290,15 +290,17 @@ func TestDerivedEventIDFitsCap(t *testing.T) {
 	if derivedEventID("", 1) != "" || derivedEventID(derivedKeyPrefix("k"), 0) != "" {
 		t.Fatal("empty key or non-positive seq must not mint an id")
 	}
-	// A flag is two runes, one character. Counting runes would reject a
-	// legal id that clampField kept as 126 flags plus ":1".
+	// A flag is two runes, one character, and the sender's key is hashed
+	// before it reaches the id, so the property that has to hold is that
+	// nothing of the key leaks into it: the id is the hex digest and the
+	// sequence, whatever runes the caller's key was written with.
 	flags := strings.Repeat("\U0001F1E9\U0001F1EA", 80)
 	id = derivedEventID(derivedKeyPrefix(flags), 1)
-	if n := uniseg.GraphemeClusterCount(id); n > 128 {
-		t.Fatalf("flag id = %d characters, cap 128", n)
+	if want := derivedKeyPrefix(flags) + ":1"; id != want {
+		t.Fatalf("flag id = %q, want %q", id, want)
 	}
-	if !utf8.ValidString(id) || !strings.HasSuffix(id, ":1") {
-		t.Fatalf("flag id %q is invalid UTF-8 or lost its suffix", id)
+	if !utf8.ValidString(id) || strings.ContainsFunc(id, func(r rune) bool { return r > 0x7f }) {
+		t.Fatalf("flag id = %q, want the ASCII digest", id)
 	}
 }
 
@@ -555,13 +557,18 @@ func TestIngestBlankTimestampTakesArrivalInstant(t *testing.T) {
 		t.Run(ts, func(t *testing.T) {
 			rec := &memRecorder{}
 			s := startIngest(t, rec)
+			sent := time.Now()
 			code, body := postBody(t, "http://"+s.Addr()+"/v1/events", `{"ts":`+ts+`}`)
 			if code != http.StatusAccepted {
 				t.Fatalf("status = %d %q, want 202", code, body)
 			}
 			awaitEvents(t, rec, 1)
-			if time.Since(rec.evs[0].At) > time.Minute {
-				t.Errorf("ts %s stored %s, want the arrival instant", ts, rec.evs[0].At)
+			// Between the request and the assertion, not merely after it: a
+			// stamp far in the future is negative to time.Since and would
+			// clear a one-sided bound.
+			at := rec.evs[0].At
+			if at.Before(sent.Add(-time.Minute)) || at.After(time.Now().Add(time.Minute)) {
+				t.Errorf("ts %s stored %s, want the arrival instant", ts, at)
 			}
 		})
 	}
@@ -1090,6 +1097,7 @@ func TestIngestTreatsEmptyTimestampAsAbsent(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
+	sent := time.Now()
 	resp := post(t, "http://"+s.Addr()+"/v1/events",
 		`{"agent":"a","ts":""}`+"\n"+`{"agent":"b","ts":"   "}`)
 	if resp != http.StatusAccepted {
@@ -1097,8 +1105,10 @@ func TestIngestTreatsEmptyTimestampAsAbsent(t *testing.T) {
 	}
 	awaitEvents(t, rec, 2)
 	for i, ev := range rec.evs {
-		if ev.At.IsZero() {
-			t.Errorf("event %d: empty ts not stamped", i)
+		// A stamp, not merely a populated one: a wrong instant is as wrong
+		// as a missing one, and IsZero would clear both.
+		if ev.At.Before(sent.Add(-time.Minute)) || ev.At.After(time.Now().Add(time.Minute)) {
+			t.Errorf("event %d: empty ts stored %s, want the arrival instant", i, ev.At)
 		}
 	}
 }
@@ -1604,8 +1614,10 @@ func TestIngestSanitizesCustomKind(t *testing.T) {
 		t.Fatalf("status = %d", resp)
 	}
 	awaitEvents(t, rec, 1)
-	if got := rec.evs[0].Kind; strings.ContainsRune(got, 0x1b) || strings.ContainsRune(got, 0x07) {
-		t.Errorf("kind retained escape sequences: %q", got)
+	// The OSC title and its BEL are dropped; the sender's own text survives,
+	// so a kind emptied instead of cleaned is not mistaken for a clean one.
+	if got := rec.evs[0].Kind; got != "weird" {
+		t.Errorf("kind = %q, want the escape sequence stripped to %q", got, "weird")
 	}
 }
 
@@ -2081,8 +2093,9 @@ func TestNewServerNeedsRecorder(t *testing.T) {
 		s.Close()
 		t.Fatal("unusable address accepted")
 	}
-	if strings.Contains(err.Error(), "needs a recorder") {
-		t.Errorf("newServer err = %v, want the address failure", err)
+	// The address is named, so the message points at the thing to fix.
+	if !strings.Contains(err.Error(), "not-a-port") {
+		t.Errorf("newServer err = %v, want it to name the address", err)
 	}
 }
 

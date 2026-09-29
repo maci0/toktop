@@ -44,6 +44,7 @@ func replayFrames(t *testing.T, polls int) []string {
 		return []procs.Info{{PID: 42, Name: "ollama", PortHint: 11434, Engine: "ollama", DefPort: 11434}}
 	}
 	c.SetNow(func() time.Time { return *now.Load() })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.SetPacer(pace)
 
 	ctx, cancel := context.WithCancel(context.Background())

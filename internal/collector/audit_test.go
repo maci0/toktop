@@ -54,6 +54,7 @@ func TestEngineHealthTransitionsAreAuditedOnce(t *testing.T) {
 	fp := &fakeProvider{label: "engine", m: &provider.Metrics{OutTotal: 10}}
 	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.procFn = nil
 	logs := captureAudit(t)
 	ch := make(chan core.Snapshot, 1)
@@ -104,6 +105,7 @@ func TestSlowEnginePollsAreAuditedOnce(t *testing.T) {
 	fp := &fakeProvider{label: "engine", m: &provider.Metrics{OutTotal: 10}}
 	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.procFn = nil
 	logs := captureAudit(t)
 	ch := make(chan core.Snapshot, 1)
@@ -141,6 +143,7 @@ func TestEngineOutageClearsTheSlowRun(t *testing.T) {
 	fp := &fakeProvider{label: "engine", m: &provider.Metrics{OutTotal: 10}}
 	c := New([]provider.Provider{fp.asProvider()}, time.Second)
 	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.procFn = nil
 	logs := captureAudit(t)
 	ch := make(chan core.Snapshot, 1)
@@ -197,6 +200,7 @@ func TestProbeMeasurementsAreAudited(t *testing.T) {
 	c := New([]provider.Provider{(&fakeProvider{label: "engine", addr: srv.URL}).asProvider()}, time.Second)
 	c.lastModel[srv.URL] = "m"
 	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	t.Cleanup(func() { c.SetNow(nil) })
 	logs := captureAudit(t)
 
 	for range 2 {
@@ -239,6 +243,7 @@ func TestProbeFailuresAreAuditedOnce(t *testing.T) {
 	// one reports the same down_for the frames carry.
 	clock := time.Unix(1_700_000_000, 0).UTC()
 	c.SetNow(func() time.Time { return clock })
+	t.Cleanup(func() { c.SetNow(nil) })
 	logs := captureAudit(t)
 
 	wave := func() {
@@ -300,6 +305,7 @@ func TestWindowRefusalsAreAuditedOnce(t *testing.T) {
 	now := base
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	c.procFn = nil
 	logs := captureAudit(t)
 	ch := make(chan core.Snapshot, 1)

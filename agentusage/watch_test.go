@@ -1738,9 +1738,20 @@ func TestSampleStampFollowsInjectedClock(t *testing.T) {
 	}
 
 	// A nil clock restores the wall clock rather than panicking on every read.
+	// The counts have to move: a sample whose figures are unchanged keeps the
+	// stamp it was published with, so an unchanged poll would compare the
+	// frozen instant against itself.
 	w.SetNow(nil)
-	if s := w.Poll(); s.At.Before(frozen) {
-		t.Fatalf("sample At = %v after SetNow(nil), want wall time at or after %v", s.At, frozen)
+	append_(t, filepath.Join(store, "session.jsonl"), claudeLine(work, 5))
+	s := w.Poll()
+	if s.Output != 26 {
+		t.Fatalf("sample output = %d after SetNow(nil), want 26", s.Output)
+	}
+	// Close to now, not merely at or after the frozen instant: the frozen one
+	// is months back, so an ordering check alone would pass on a clock that
+	// was never restored.
+	if d := time.Since(s.At); d < 0 || d > 5*time.Second {
+		t.Fatalf("sample At = %v after SetNow(nil), %v from the wall clock", s.At, d)
 	}
 }
 
@@ -1846,8 +1857,11 @@ func TestCountedFilesAreCapped(t *testing.T) {
 	append_(t, held, claudeLine(work, 5000))
 	w.cached, w.scanned = nil, time.Time{}
 	w.Poll()
-	if got := w.Sample().Output; got < before+5000 {
-		t.Fatalf("appending to a released transcript reported %d, want at least %d", got, before+5000)
+	// Exactly the appended line: a released transcript that fell back to
+	// byte zero would bill its whole history a second time, and a lower bound
+	// would read that as fine.
+	if got := w.Sample().Output; got != before+5000 {
+		t.Fatalf("appending to a released transcript reported %d, want exactly %d", got, before+5000)
 	}
 }
 

@@ -86,8 +86,11 @@ func TestScanTempsFallsBackToThermalZones(t *testing.T) {
 		filepath.Join(sysroot, "class/hwmon"), // empty
 		filepath.Join(sysroot, "class/thermal"),
 	)
-	if len(temps) != 1 || temps[0].Label != "soc_thermal" {
-		t.Fatalf("fallback failed: %+v", temps)
+	if len(temps) != 1 {
+		t.Fatalf("fallback returned %d readings, want 1: %+v", len(temps), temps)
+	}
+	if got := temps[0]; got.Label != "soc_thermal" || got.MilliC != 45000 || got.IsGPU {
+		t.Errorf("fallback reading = %+v, want label soc_thermal at 45000 milliC, gpu false", got)
 	}
 }
 
@@ -313,13 +316,17 @@ func TestSensorLayoutDropsExpiredKeys(t *testing.T) {
 	})
 
 	root := t.TempDir()
-	_ = sensorLayout("fresh\x00"+root, root, listHwmon)
+	sensorLayout("fresh\x00"+root, root, listHwmon)
 
 	sensorLayoutMu.Lock()
 	_, still := sensorLayouts["stale"]
+	_, stored := sensorLayouts["fresh\x00"+root]
 	sensorLayoutMu.Unlock()
 	if still {
 		t.Fatal("expired sensor layout still in the cache")
+	}
+	if !stored {
+		t.Fatal("the layout read here was never stored, so the cache rebuilds on every poll")
 	}
 }
 
@@ -543,7 +550,7 @@ func TestReadProcOutageIsNotNegativeAfterAClockStep(t *testing.T) {
 // becomes "i", so a chip named "nvdİa" satisfies the "nvidia" needle
 // under ToLower and is marked a GPU that no driver reports as one.
 func TestSensorLabelFoldsASCIIOnly(t *testing.T) {
-	for _, spoof := range []string{"nvd\u0130a", "\u0130915"} {
+	for _, spoof := range []string{"nv\u0130a", "\u0130915"} {
 		if got := sensorLabel(spoof); core.ContainsAny(got, gpuChips...) {
 			t.Errorf("sensorLabel(%q) = %q, must not match a GPU chip", spoof, got)
 		}

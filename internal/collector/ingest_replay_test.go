@@ -124,6 +124,7 @@ func TestIngestReplayLeavesTheFeedAsOneRunDid(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	url := serveIngest(t, c)
 
 	first := postStream(t, url, replayStream, "harness-turn-77")
@@ -154,6 +155,7 @@ func TestConcurrentIngestReplaysRecordOnce(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0).UTC()
 	c := New(nil, time.Second)
 	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
 	url := serveIngest(t, c)
 
 	type ack struct {
