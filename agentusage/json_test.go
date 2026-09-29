@@ -535,23 +535,34 @@ func TestKeyFoldIsASCIIOnly(t *testing.T) {
 	}
 }
 
+// A record naming two directories resolves to the same one every poll, and to
+// the one the sorted walk reaches first. Go map order is randomized per
+// range, so an unsorted walk made ownership a coin flip that transcript.go
+// then cached for the session.
 func TestCwdChoiceIsDeterministic(t *testing.T) {
-	// A record naming two directories resolves to the same one every time.
-	// Go map order is randomized per range, so an unsorted walk made
-	// ownership a coin flip that transcript.go then cached for the session.
-	line := `{"context":{"cwd":"/home/u/other"},"cwd":"/home/u/proj"}`
-	first, ok := parseJSON([]byte(line))
-	if !ok {
-		t.Fatal("valid JSON was rejected")
-	}
-	for i := range 50 {
-		ev, ok := parseJSON([]byte(line))
-		if !ok || ev != first {
-			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
-		}
-	}
-	if first.Cwd != "/home/u/proj" {
-		t.Fatalf("cwd = %q, want /home/u/proj (keys are visited in sorted order)", first.Cwd)
+	for _, tc := range []struct {
+		name, line, want string
+	}{
+		{"top level outranks a subtree", `{"context":{"cwd":"/home/u/other"},"cwd":"/home/u/proj"}`, "/home/u/proj"},
+		{"smallest key name at one level", `{"workdir":"/home/u/second","cwd":"/home/u/first"}`, "/home/u/first"},
+		{"an empty value names no directory", `{"cwd":"","project_dir":"/home/u/proj"}`, "/home/u/proj"},
+		{"smallest subtree key name", `{"metadata":{"cwd":"/home/u/second"},"message":{"project_dir":"/home/u/first"}}`, "/home/u/first"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			first, ok := parseJSON([]byte(tc.line))
+			if !ok {
+				t.Fatal("valid JSON was rejected")
+			}
+			for i := range 50 {
+				ev, ok := parseJSON([]byte(tc.line))
+				if !ok || ev != first {
+					t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
+				}
+			}
+			if first.Cwd != tc.want {
+				t.Fatalf("cwd = %q, want %s", first.Cwd, tc.want)
+			}
+		})
 	}
 }
 
@@ -597,70 +608,6 @@ func TestWalkCoversEverySubtreePastTheInlineScratch(t *testing.T) {
 	}
 	if ev.Cwd != "/home/u/proj" {
 		t.Fatalf("cwd = %q, want /home/u/proj (this level outranks any subtree)", ev.Cwd)
-	}
-}
-
-func TestCwdPicksTheSmallestKeyName(t *testing.T) {
-	// Two working directories at the same level: the smaller key wins, which
-	// is what visiting the level in sorted order decided. Go's map order is
-	// randomized per range, so an unguarded first-wins would disagree with
-	// itself between polls on the very line transcript.go caches.
-	line := []byte(`{"workdir":"/home/u/second","cwd":"/home/u/first"}`)
-	first, ok := parseJSON(line)
-	if !ok {
-		t.Fatal("valid JSON was rejected")
-	}
-	for i := range 50 {
-		ev, ok := parseJSON(line)
-		if !ok || ev != first {
-			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
-		}
-	}
-	if first.Cwd != "/home/u/first" {
-		t.Fatalf("cwd = %q, want /home/u/first", first.Cwd)
-	}
-}
-
-func TestCwdSkipsAnEmptyValue(t *testing.T) {
-	// The smaller key wins, but an empty value names no directory at all: a
-	// record spelling an empty cwd beside a real one reports the real one, or
-	// the record carries no working directory and ownership falls through to
-	// the launch path alone.
-	line := []byte(`{"cwd":"","project_dir":"/home/u/proj"}`)
-	first, ok := parseJSON(line)
-	if !ok {
-		t.Fatal("valid JSON was rejected")
-	}
-	for i := range 50 {
-		ev, ok := parseJSON(line)
-		if !ok || ev != first {
-			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
-		}
-	}
-	if first.Cwd != "/home/u/proj" {
-		t.Fatalf("cwd = %q, want /home/u/proj", first.Cwd)
-	}
-}
-
-func TestCwdIsDeterministicAcrossSiblingSubtrees(t *testing.T) {
-	// Two subtrees, each naming one working directory, neither at the top of
-	// the record: subtrees are descended in key order, so "message" is read
-	// before "metadata" and its directory is the one the record reports. Map
-	// iteration order would otherwise pick a winner per line, and the same
-	// line would attribute itself to a different directory on each poll.
-	line := []byte(`{"metadata":{"cwd":"/home/u/second"},"message":{"project_dir":"/home/u/first"}}`)
-	first, ok := parseJSON(line)
-	if !ok {
-		t.Fatal("valid JSON was rejected")
-	}
-	for i := range 50 {
-		ev, ok := parseJSON(line)
-		if !ok || ev != first {
-			t.Fatalf("run %d disagreed: %q vs %q", i, ev.Cwd, first.Cwd)
-		}
-	}
-	if first.Cwd != "/home/u/first" {
-		t.Fatalf("cwd = %q, want /home/u/first", first.Cwd)
 	}
 }
 

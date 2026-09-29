@@ -1643,15 +1643,7 @@ func TestIngestStripsInvisibleCharsFromAgent(t *testing.T) {
 // $HOME must not ride along into the retained feed, the live dashboard and
 // the --once --plain report, which is often redirected into a file.
 func TestIngestFoldsHomeOutOfNote(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "private-user")
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	if got, err := os.UserHomeDir(); err != nil || got != home {
-		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
-	}
+	home := redirectHome(t)
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
@@ -1676,15 +1668,7 @@ func TestIngestFoldsHomeOutOfNote(t *testing.T) {
 // client that names the session file or the directory it is reporting on puts
 // the account that owns $HOME into whichever field it chose.
 func TestIngestFoldsHomeOutOfEveryFreeTextField(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "private-user")
-	if err := os.MkdirAll(home, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	if got, err := os.UserHomeDir(); err != nil || got != home {
-		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
-	}
+	home := redirectHome(t)
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
@@ -1707,7 +1691,7 @@ func TestIngestFoldsHomeOutOfEveryFreeTextField(t *testing.T) {
 		"model":      ev.Model,
 		"via_engine": ev.ViaEngine,
 	} {
-		if strings.Contains(got, "private-user") {
+		if strings.Contains(got, testHomeAccount) {
 			t.Errorf("%s = %q names the account", name, got)
 		}
 		if !strings.Contains(got, "~") {
@@ -1723,9 +1707,7 @@ func TestIngestFoldsHomeOutOfEveryFreeTextField(t *testing.T) {
 // spelled forward-slashed on purpose: a sender on any platform writes it that
 // way, and folding it must not depend on the receiver's separator.
 func TestIngestFoldsAnotherAccountsHomeOutOfFreeTextFields(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "private-user")
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	redirectHome(t)
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
@@ -1757,9 +1739,7 @@ func TestIngestFoldsAnotherAccountsHomeOutOfFreeTextFields(t *testing.T) {
 // reporting on, a callback it forwards to) puts the account that owns its
 // $HOME into the 404 line, and the local home fold cannot reach that account.
 func TestIngestFoldsAnotherAccountsHomeOutOfTheLoggedPath(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "private-user")
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	redirectHome(t)
 	lg, buf := captureLogger()
 	rec := &memRecorder{}
 	s := startIngestLog(t, rec, lg)
@@ -1790,15 +1770,7 @@ func TestIngestFoldsAnotherAccountsHomeOutOfTheLoggedPath(t *testing.T) {
 // locally watched one is. Everything above the checkout is where a client's
 // name and a project index sit, and the feed only needs the checkout.
 func TestIngestShortensAPathNote(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "private-user")
-	if err := os.MkdirAll(filepath.Join(home, "clients", "AcmeCorp", "migrator"), 0o700); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
-	if got, err := os.UserHomeDir(); err != nil || got != home {
-		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
-	}
+	home := redirectHome(t)
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
@@ -1816,10 +1788,33 @@ func TestIngestShortensAPathNote(t *testing.T) {
 		if got := rec.evs[i].Note; got != lastComponents(want) {
 			t.Errorf("note = %q, want %q", got, lastComponents(want))
 		}
-		if strings.Contains(rec.evs[i].Note, "private-user") {
+		if strings.Contains(rec.evs[i].Note, testHomeAccount) {
 			t.Errorf("note %q names the account", rec.evs[i].Note)
 		}
 	}
+}
+
+// testHomeAccount is the account name a redirected $HOME carries, and the
+// string no folded field may still contain.
+const testHomeAccount = "private-user"
+
+// redirectHome points $HOME and $USERPROFILE at a fresh directory named
+// after an account, creating it first: a test that folds this account out of
+// a field has to be able to say the account is gone. A host whose
+// os.UserHomeDir ignores the environment cannot run the check, so the test
+// skips rather than asserting against a home it never redirected.
+func redirectHome(t *testing.T) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), testHomeAccount)
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if got, err := os.UserHomeDir(); err != nil || got != home {
+		t.Skipf("cannot redirect the home directory (got %q, %v)", got, err)
+	}
+	return home
 }
 
 // lastComponents is what core.ShortDir leaves of a path on this platform:
@@ -1833,9 +1828,7 @@ func lastComponents(dir string) string {
 }
 
 func TestIngestLeavesFreeTextNoteAlone(t *testing.T) {
-	home := filepath.Join(t.TempDir(), "private-user")
-	t.Setenv("HOME", home)
-	t.Setenv("USERPROFILE", home)
+	home := redirectHome(t)
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
 
@@ -3047,6 +3040,49 @@ func TestStatusWriterUnwrap(t *testing.T) {
 // the idle deadline. Past the in-flight cap a POST is refused immediately, so
 // a peer opening connections and withholding bodies costs the process no
 // descriptors it has to wait out.
+// holdOneEventSlot starts a POST whose body never ends, so the request takes
+// the single in-flight slot and keeps it until the returned release runs.
+// Every test below the cap needs one such request parked inside the decode
+// loop: the refusal, the health answer and the audit line are all decided
+// against a slot this one holds. The body is closed only by release, so the
+// request spans the whole check.
+//
+// A caller must defer the release rather than clean it up: the slot is a
+// package var the tests swap, and its restore is a defer that runs after
+// every cleanup, so a cleanup-released request would still be reading the
+// var the restore has already put back. A test that frees the slot mid-check
+// to assert the endpoint takes events again can call it there too; the second
+// call closes an already-closed pipe and reads an already-closed channel.
+func holdOneEventSlot(t *testing.T, s *Server) (release func()) {
+	t.Helper()
+	pr, pw := io.Pipe()
+	stalled := make(chan struct{})
+	go func() {
+		defer close(stalled)
+		defer pw.Close()
+		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
+		if err != nil {
+			return
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for len(eventSlots) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(eventSlots) == 0 {
+		pw.Close()
+		<-stalled
+		t.Fatal("stalled POST never reached the decode loop")
+	}
+	return func() { pw.Close(); <-stalled }
+}
+
 // healthz returns the status of a GET /healthz probe.
 func healthz(t *testing.T, s *Server) int {
 	t.Helper()
@@ -3065,32 +3101,8 @@ func healthz(t *testing.T, s *Server) int {
 func TestHealthzReportsSaturation(t *testing.T) {
 	s := startIngest(t, &memRecorder{})
 	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
-
-	pr, pw := io.Pipe()
-	stalled := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
-		if err != nil {
-			stalled <- err
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}
-		stalled <- err
-	}()
-	t.Cleanup(func() { pw.Close() })
-
-	deadline := time.Now().Add(5 * time.Second)
-	for len(eventSlots) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(eventSlots) == 0 {
-		t.Fatal("stalled POST never reached the decode loop")
-	}
+	release := holdOneEventSlot(t, s)
+	defer release()
 
 	resp, err := http.Get("http://" + s.Addr() + "/healthz")
 	if err != nil {
@@ -3113,8 +3125,7 @@ func TestHealthzReportsSaturation(t *testing.T) {
 		t.Errorf("healthz Retry-After = %q, want 1", got)
 	}
 
-	pw.Close()
-	<-stalled
+	release()
 	if code := healthz(t, s); code != http.StatusOK {
 		t.Errorf("healthz after the slot freed = %d, want 200", code)
 	}
@@ -3125,35 +3136,8 @@ func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 	// One slot, as the default cap would have many: the test is about the
 	// refusal, not about the size of the cap.
 	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
-
-	// A body that never ends: the pipe is closed only after the refusal, so
-	// the request holds its slot across the whole check.
-	pr, pw := io.Pipe()
-	stalled := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
-		if err != nil {
-			stalled <- err
-			return
-		}
-		req.Header.Set("Content-Type", "application/json")
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}
-		stalled <- err
-	}()
-
-	// Wait for the stalled request to take the slot.
-	deadline := time.Now().Add(5 * time.Second)
-	for len(eventSlots) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(eventSlots) == 0 {
-		t.Fatal("stalled POST never reached the decode loop")
-	}
+	release := holdOneEventSlot(t, s)
+	defer release()
 
 	start := time.Now()
 	code, body := postBody(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder","output_tokens":1}`)
@@ -3166,8 +3150,7 @@ func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 
 	// The slot is the stalled request's, not the refused one's: once its body
 	// ends, the endpoint takes events again.
-	pw.Close()
-	<-stalled
+	release()
 	if code := post(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder","output_tokens":1}`); code != http.StatusAccepted {
 		t.Fatalf("status after the stalled request ended = %d, want 202", code)
 	}
@@ -3178,31 +3161,7 @@ func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 func TestEveryRefusalCarriesTheSameRetryAfter(t *testing.T) {
 	s := startIngest(t, &memRecorder{})
 	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
-
-	pr, pw := io.Pipe()
-	stalled := make(chan struct{})
-	go func() {
-		defer close(stalled)
-		defer pw.Close()
-		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
-		if err != nil {
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}
-	}()
-	defer func() { pw.Close(); <-stalled }()
-
-	deadline := time.Now().Add(5 * time.Second)
-	for len(eventSlots) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(eventSlots) == 0 {
-		t.Fatal("stalled POST never reached the decode loop")
-	}
+	defer holdOneEventSlot(t, s)()
 
 	want := strconv.Itoa(retryAfterSeconds)
 	for _, target := range []struct {
@@ -3303,30 +3262,8 @@ func TestRefusedPostAuditsInFlightDepth(t *testing.T) {
 	}
 	serveIngest(t, s)
 	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
-
-	pr, pw := io.Pipe()
-	stalled := make(chan error, 1)
-	go func() {
-		defer pw.Close()
-		req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events", pr)
-		if err != nil {
-			stalled <- err
-			return
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err == nil {
-			io.Copy(io.Discard, resp.Body)
-			resp.Body.Close()
-		}
-		stalled <- err
-	}()
-	deadline := time.Now().Add(5 * time.Second)
-	for len(eventSlots) == 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	if len(eventSlots) == 0 {
-		t.Fatal("stalled POST never reached the decode loop")
-	}
+	release := holdOneEventSlot(t, s)
+	defer release()
 
 	if code, _ := postBody(t, "http://"+s.Addr()+"/v1/events", `{"agent":"coder"}`); code != http.StatusServiceUnavailable {
 		t.Fatalf("status = %d, want 503", code)
@@ -3337,8 +3274,7 @@ func TestRefusedPostAuditsInFlightDepth(t *testing.T) {
 			t.Errorf("refusal audit line missing %q: %s", want, got)
 		}
 	}
-	pw.Close()
-	<-stalled
+	release()
 }
 
 // SetNow writes the clock every handler stamps a missing or far-future
