@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"encoding/json"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -165,6 +166,16 @@ func TestOpenAPIDocumentsEveryAnswerTheServerGives(t *testing.T) {
 	note(healthAnswers, http.StatusOK)
 	note(healthAnswers, post(t, health, ""))
 
+	// The two answers net/http gives before a handler runs, reached over a raw
+	// connection because a client library cannot send a request this server
+	// rejects on the wire. Both close the connection, so neither is a status
+	// any operation above could collect.
+	note(postAnswers, rawStatus(t, s, "POST "+eventsPath+" HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: "+
+		strings.Repeat("x", maxHeaderBytes*2)+"\r\nContent-Length: 0\r\n\r\n"))
+	note(postAnswers, rawStatus(t, s, "NOT-A-REQUEST-LINE\r\n\r\n"))
+	note(healthAnswers, rawStatus(t, s, "GET "+healthPath+" HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: "+
+		strings.Repeat("x", maxHeaderBytes*2)+"\r\nContent-Length: 0\r\n\r\n"))
+
 	postCodes := openapiCodes(openapiSection(t, eventsPath))
 	for code := range postAnswers {
 		if !containsCode(postCodes, code) {
@@ -185,6 +196,24 @@ func TestOpenAPIDocumentsEveryAnswerTheServerGives(t *testing.T) {
 			t.Errorf("HEAD %s can answer %d, which docs/openapi.yaml does not declare (it declares %s)",
 				healthPath, code, strings.Join(openapiCodes(headSection), " "))
 		}
+	}
+}
+
+// The 431 and the bare 400 belong to the runtime, not to a handler, so nothing
+// above could have found them and the spec could be stripped of both without a
+// failure. They are real answers a client meets, so they are pinned here: the
+// header budget on the listener is what produces the 431, and an id that
+// overruns the budget is one way to reach it. Nothing in this package may
+// start writing these answers itself, which is what would make the spec's
+// statement that they carry no X-Request-Id wrong.
+func TestRuntimeRefusalsAreTheRuntimes(t *testing.T) {
+	s := startIngest(t, &memRecorder{})
+	if got := rawStatus(t, s, "POST /v1/events HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: "+
+		strings.Repeat("x", maxHeaderBytes*2)+"\r\nContent-Length: 0\r\n\r\n"); got != http.StatusRequestHeaderFieldsTooLarge {
+		t.Errorf("a header block past the %d byte budget answered %d, want 431", maxHeaderBytes, got)
+	}
+	if got := rawStatus(t, s, "NOT-A-REQUEST-LINE\r\n\r\n"); got != http.StatusBadRequest {
+		t.Errorf("an unparseable request line answered %d, want 400", got)
 	}
 }
 
@@ -469,6 +498,33 @@ func containsCode(codes []string, code int) bool {
 		}
 	}
 	return false
+}
+
+// rawStatus writes a request verbatim over its own connection and returns the
+// status the server answers, for the refusals net/http makes before a handler
+// runs: a header block past maxHeaderBytes and an unparseable request line. A
+// client library cannot send either and read the answer, so the only way to
+// hold the spec to them is to speak the wire here.
+func rawStatus(t *testing.T, s *Server, request string) int {
+	t.Helper()
+	conn, err := net.Dial("tcp", s.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	if _, err := conn.Write([]byte(request)); err != nil {
+		t.Fatal(err)
+	}
+	answer := readResponse(t, conn, 5*time.Second)
+	m := regexp.MustCompile(`^HTTP/1\.[01] (\d{3}) `).FindStringSubmatch(answer)
+	if m == nil {
+		t.Fatalf("no status line in the answer to a raw request: %q", answer)
+	}
+	code, err := strconv.Atoi(m[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code
 }
 
 // rebound sends a request addressed to a name that is not this machine, the

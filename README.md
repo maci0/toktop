@@ -434,7 +434,11 @@ instant keeps the event in the window rather than refused by it. The same pair i
 Other statuses: `400` for malformed JSON, a bad `ts`, a token count outside the
 64-bit range, or an `id` that cannot be stored whole, `408` when a stream
 stalls mid-body (the body names which bound broke: no bytes for a minute, or
-the 10 minute lifetime), and `413` past the 1 MiB body cap.
+the 10 minute lifetime), `413` past the 1 MiB body cap, and `431` past the
+16 KiB header budget. A `431`, and a `400` for a request line the Go runtime
+cannot parse, are its own answers rather than this endpoint's: both close the
+connection, and their bodies are the runtime's `431 Request Header Fields Too
+Large` and `400 Bad Request` rather than a reason naming a field.
 
 A failure partway through a stream keeps every event before the failing line,
 and the body says so and says how to recover: `...; 12 earlier events in this
@@ -496,10 +500,15 @@ bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. An accept failure that ends the
 endpoint writes one ERROR line naming the bound address and the reason.
 Responses carry `X-Request-Id`, echoed from the request when the sender set
-one and minted from a per-server counter when it did not, so every answer is
+one and minted from a per-server counter when it did not, so every answer a
+handler gives is
 correlatable to its
 audit line either way and a request sequence replayed against a fresh server
-mints the same ids twice. An echoed id is single-lined and cut to 64 characters,
+mints the same ids twice. The two refusals the Go runtime makes before a
+handler runs are the exception, and they carry no id to correlate: a header
+block past the 16 KiB budget answers `431`, and a request line it cannot parse
+answers `400` with the runtime's own reason, both closing the connection. An
+echoed id is single-lined and cut to 64 characters,
 so an id longer than that comes back truncated rather than as it was sent. The
 id is a correlation id only: the `req` on the log
 line is the same value, and neither it nor the sender's own key is read as an

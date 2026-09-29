@@ -152,6 +152,8 @@ paths:
             text/plain:
               schema:
                 $ref: "#/components/schemas/Reason"
+        "431":
+          $ref: "#/components/responses/RuntimeRefusal"
         "500":
           description: |
             The handler panicked and the recovered answer carries no detail of
@@ -263,6 +265,8 @@ paths:
             text/plain:
               schema:
                 $ref: "#/components/schemas/Reason"
+        "431":
+          $ref: "#/components/responses/RuntimeRefusal"
     head:
       summary: Liveness probe, headers only
       description: |
@@ -302,6 +306,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+        "431":
+          $ref: "#/components/responses/RuntimeRefusal"
         "503":
           description: Every event slot is held, so every POST is being refused.
           headers:
@@ -315,6 +321,23 @@ paths:
               $ref: "#/components/headers/RequestId"
 
 components:
+  responses:
+    RuntimeRefusal:
+      description: |
+        The answer net/http gives before the request reaches a handler: a
+        header block past the 16 KiB budget the listener is built with, or a
+        request line it cannot parse. Both close the connection, and both
+        carry the status line alone: the body is the runtime's own
+        `431 Request Header Fields Too Large` or `400 Bad Request`, not the
+        one-line reason naming a field that every other answer on this port
+        gives. `X-Request-Id` is absent for the same reason, so a client
+        correlating answers by it has nothing to correlate here; the sender's
+        own oversized `X-Request-Id` is what produced the refusal.
+      content:
+        text/plain:
+          schema:
+            $ref: "#/components/schemas/Reason"
+
   parameters:
     IdempotencyKey:
       name: Idempotency-Key
@@ -335,9 +358,12 @@ components:
       in: header
       required: false
       description: |
-        A correlation id for this request. Echoed back on every answer,
-        single-lined and cut to 64 characters, and read as no more than that:
-        it never names an event.
+        A correlation id for this request. Echoed back on every answer the
+        server's own handlers give, single-lined and cut to 64 characters, and
+        read as no more than that: it never names an event. The two refusals
+        net/http makes before a handler runs (see `RuntimeRefusal`) carry
+        none, and an id long enough to trip the second is itself the reason it
+        is missing.
       schema:
         type: string
         maxLength: 64
