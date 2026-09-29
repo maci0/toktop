@@ -2,6 +2,7 @@ package collector
 
 import (
 	"context"
+	"crypto/sha256"
 	"log/slog"
 	"os"
 	"time"
@@ -25,12 +26,19 @@ type downState struct {
 }
 
 // foldedErr is one poll error's text after the home fold and the length
-// bound, kept alongside the exact error and the home it was folded against so
-// a repeat of that error can be answered from memory.
+// bound, kept alongside a digest of the exact error and the home it was folded
+// against so a repeat of that error can be answered from memory.
+//
+// The digest is a digest rather than the error text because the error is the
+// engine's to choose and is not bounded: an error carrying a decoder's whole
+// offending literal runs to megabytes, and holding one per engine for the life
+// of the process is memory a remote peer sized. Digesting still answers the
+// repeat from memory, since a downed engine repeats one error verbatim, and the
+// hash is a pass over the bytes rather than the fold the memo exists to skip.
 type foldedErr struct {
-	raw  string
-	home string
-	text string
+	digest [sha256.Size]byte
+	home   string
+	text   string
 }
 
 // foldErr is the folded text of err, memoized per key. The fold is a pure
@@ -42,8 +50,9 @@ type foldedErr struct {
 // old one.
 func (c *Collector) foldErr(key string, err error) string {
 	raw := err.Error()
+	digest := sha256.Sum256([]byte(raw))
 	home, herr := os.UserHomeDir()
-	if f, ok := c.errFold[key]; ok && f.raw == raw && f.home == home {
+	if f, ok := c.errFold[key]; ok && f.digest == digest && f.home == home {
 		return f.text
 	}
 	if herr != nil {
@@ -60,7 +69,7 @@ func (c *Collector) foldErr(key string, err error) string {
 	if c.errFold == nil {
 		c.errFold = make(map[string]foldedErr)
 	}
-	c.errFold[key] = foldedErr{raw: raw, home: home, text: text}
+	c.errFold[key] = foldedErr{digest: digest, home: home, text: text}
 	return text
 }
 

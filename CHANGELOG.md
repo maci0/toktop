@@ -15,6 +15,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A downed engine no longer sizes the collector's memory. The fold that keeps
+  one poll error from being re-folded every interval remembered the error
+  itself, and an engine's error is its to choose and is not bounded: a decoder
+  embeds the whole offending literal, so a `/api/ps` answer carrying a
+  multi-megabyte number left that many bytes resident per engine for the life
+  of the process, behind a published text already bounded to a snippet. The
+  memo is keyed on a digest of the error now, so a repeat is still answered
+  from memory and the retained state is the same size whatever the peer sent.
 - The site's `unhandled` line carries the stack behind the throw, folded onto
   the one JSON object Workers Logs reads. A throw that reached the top of
   `fetch` is the one failure on the site nobody can reproduce: the request
