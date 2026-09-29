@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("PRETTY_NAME=\"\xac\xac\xac\xac\xac\\20000\"")

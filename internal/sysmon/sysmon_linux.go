@@ -243,11 +243,19 @@ func prettyOSName() string {
 	if err != nil {
 		return ""
 	}
+	return parseOSRelease(b)
+}
+
+// parseOSRelease reads PRETTY_NAME out of an os-release file's bytes. The
+// unquoted value crosses kernelText once more: strconv.Unquote reads the octal
+// escapes a build never wrote as raw bytes, and a name carrying one reaches the
+// panel as ill-formed text the panel cannot measure.
+func parseOSRelease(b []byte) string {
 	for line := range strings.SplitSeq(kernelText(b), "\n") {
 		if k, v, ok := strings.Cut(line, "="); ok && k == "PRETTY_NAME" {
 			v = strings.TrimSpace(v)
 			if u, err := strconv.Unquote(v); err == nil {
-				return u
+				return kernelText([]byte(u))
 			}
 			return v
 		}
