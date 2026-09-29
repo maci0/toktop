@@ -96,8 +96,8 @@ every released binary up with them.
 
 `scripts/screenshot.py` runs on a developer's machine and is never linked into
 a release artifact. `make check-yaml` is here for the same reason: it lints
-`.github/workflows/` and `.github/dependabot.yml`, which nothing else in the
-tree parses. The interpreter is pinned exactly in `.python-version` and
+`.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml`, which
+nothing else in the tree parses. The interpreter is pinned exactly in `.python-version` and
 the Makefile passes it to `uv venv` as `--python`, so the pins below fix both
 what is installed and what it is installed into. The pins are exact, with
 sha256 hashes on the pure-Python

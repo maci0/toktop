@@ -303,7 +303,7 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 	}
 	// Same segments as the TUI strip (hostSegments), uncapped: this report
 	// wraps to the terminal's width, so a cut CPU model would be a fact the
-	// reader has no way to get back. They carry the strip's separator, not a
+	// reader has no way to get back. They carry a visible separator, not a
 	// space: a CPU model ending in a word and the OS name after it run
 	// together into one indistinguishable string, and this report has no row
 	// borders to tell the fields apart.

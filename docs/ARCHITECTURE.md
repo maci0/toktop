@@ -125,10 +125,10 @@ what every build shares, and a test file with none is a test that runs
 everywhere.
 
 `_unix.go` is not one meaning, and the build tag is the authority in every
-case. Four files use it for `!windows` (`cmd/toktop/pipe_unix.go`,
-`internal/remote/auth_unix.go`, `internal/selfreload/exec_unix.go`,
-`internal/selfreload/stat_unix.go`), which is the opposite of the POSIX
-platforms. `internal/core/procattr_unix.go` uses it for the stricter `unix`
+case. Five files use it for `!windows` (`cmd/toktop/pipe_unix.go`,
+`internal/remote/auth_unix.go`, `internal/remote/restore_unix.go`,
+`internal/selfreload/exec_unix.go`, `internal/selfreload/stat_unix.go`),
+which is the opposite of the POSIX platforms. `internal/core/procattr_unix.go` uses it for the stricter `unix`
 constraint Go provides, pairing with `procattr_other.go` on `!unix`. A file
 whose tag names a subset of the POSIX platforms takes no suffix, because a
 suffix would claim more than the tag delivers.
@@ -139,7 +139,8 @@ root-only half of the linux walk, `internal/procs/procs_tooling.go` the half
 darwin and windows share, and `internal/sysmon/sysmon_utsfield.go` the
 `linux || darwin` field reader. The same shape covers build tags that are not
 platforms at all: `agentusage/source_off.go` and `agentusage/crush_sqlite.go`
-are the halves of the `sqlite` tag.
+are the halves of the `sqlite` tag, and `agentusage/opencode_sqlite.go` is the
+third, the half that reads opencode's machine-wide store.
 
 `internal/sysmon` is the one place that goes further: `sysmon_darwin_host.go`
 and `sysmon_windows_host.go` pair a platform with its host-reading half,

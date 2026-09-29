@@ -119,9 +119,9 @@ type storeHandle struct {
 // times a second does not reopen the database each time. Opening one is not
 // cheap: SQLite parses the DSN, applies six connection parameters and prepares
 // the statement, and a store holding a handful of sessions measures 132µs to
-// open, query and close against 42µs to query on a handle already open. That
-// is a third of a 250ms poll interval spent re-establishing a connection whose
-// target has not moved.
+// open, query and close against 42µs to query on a handle already open, so
+// re-opening costs three times the read it replaces, on a poll that runs every
+// 250ms by default.
 var openStores = struct {
 	sync.Mutex
 	byPath map[string]*storeHandle

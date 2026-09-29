@@ -77,8 +77,9 @@ func pickShell(look func(string) (string, error), names ...string) string {
 	return ""
 }
 
-// clkTck is the jiffies-per-second constant on the linux path. USER_HZ is
-// fixed at 100 by the Linux ABI; there is no runtime probe.
+// clkTck is the jiffies-per-second constant the CPU delta math divides by.
+// USER_HZ is fixed at 100 by the Linux ABI; there is no runtime probe, and
+// the windows path scales its 100ns units into the same jiffies.
 const clkTck = 100
 
 // Sampler turns raw process listings into Infos, deriving CPU percentage on
@@ -617,7 +618,8 @@ func MatchEngine(i Info) (engine string, defPort int, ok bool) {
 var defaultSamplerRefresh time.Duration
 
 // sweepWait bounds how long a caller parks on another caller's in-flight
-// listing. Long enough that a normal Windows CIM sweep is waited out rather
-// than duplicated, short enough that a lister wedged in the kernel does not
-// pin the panel.
+// listing. It is shorter than a Windows CIM sweep, which the sweep comment
+// above says outlasts the refresh window, so this gives up on a peer that
+// slow rather than duplicating its work; a lister wedged in the kernel is
+// released rather than left pinning the panel.
 const sweepWait = 2 * time.Second

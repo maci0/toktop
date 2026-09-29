@@ -295,7 +295,8 @@ between two of them from `Sample.Delta`.
 `Rate` is output tokens per second between two samples; `InputRate` is the
 same for billed prompt tokens, and `ThinkingRate` for the reasoning share.
 Each has a method form taking the two samples in the order a caller holds
-them, as `cur.RateFrom(prev)` and `cur.InputRateFrom(prev)`, so the pair
+them, as `cur.RateFrom(prev)`, `cur.InputRateFrom(prev)` and
+`cur.ThinkingRateFrom(prev)`, so the pair
 cannot be swapped at the call site.
 All three divide
 by the time the model spent (`Sample.Span`) when the transcript recorded it,
@@ -310,7 +311,8 @@ the instant the run started and the two agree. `Watcher.SetPacer` replaces
 what paces the `Run` loop: `WallPacer` is the wall clock a run uses unless it
 is told otherwise, and a `NewVirtualPacer` fires one pass per call instead, so
 a test that replays a run reads the same transcripts per step however long
-they took to grow. Both halves of a replayed run then come from the driver.
+they took to grow. The ticker holds one tick, so a driver that fires again
+before the loop has taken the last one loses a pass rather than queueing it. Both halves of a replayed run then come from the driver.
 A caller supplying its own `Pacer` implements `New`, which hands back a
 `Ticker`: the channel the loop selects on, and the `Stop` that releases
 whatever paces it.
@@ -410,7 +412,7 @@ Event fields are all optional; anything omitted gets the default:
 | `prompt_tokens` / `output_tokens` / `thinking_tokens` | integer | `0` | negative values and values above 2^40 clamp to `0`; a whole JSON number such as `100.0` counts; a count outside the 64-bit integer range is a `400` naming the field instead of a clamp; thinking is the reasoning share of output when the agent says so |
 | `via_engine` | string | - | monitored engine already counting this output; aggregates skip the event; capped at 128 characters |
 | `span_ms` | integer | `0` | how long the model spent on this event's tokens, in milliseconds. It is the rate denominator, so it beats the gap between events. Negative values and values above 86400000 clamp to `0`, which leaves the gap between events in charge; a whole JSON number such as `2000.0` counts, and a value that is not a number is a `400` naming the field |
-| `note` | string | - | free-form, capped at 512 characters; a note that is nothing but a directory is reduced to its last two components, with a path under `$HOME` folded to `~`, so client and project names above the checkout never reach the feed |
+| `note` | string | - | free-form, capped at 512 characters; a note that is nothing but a directory is reduced to its last two components, counting the home directory as its first component rather than as `~`, so client and project names above the checkout never reach the feed. A note that is free text keeps the `~` a `$HOME` path is folded to, and is left whole |
 
 Every length cap above counts grapheme clusters, the unit the feed displays
 in, not the code points a JSON schema's `maxLength` counts: an id of 129 flags
@@ -497,8 +499,9 @@ posting to `/events` is not silent. A healthy `GET /healthz` is not logged. It
 answers `503` with `Retry-After: 1` and a one-line reason while all 64 event
 slots are held, because the endpoint is refusing every POST then and `ok` would
 describe a service that accepts nothing. Crossing into that state logs one
-WARN line and crossing back logs one INFO line, each carrying the same fields
-a POST line does plus `in_flight` and `slot_cap`; the crossings are logged
+WARN line and crossing back logs one INFO line, each naming `req`, `method`,
+`path`, `status`, `remote` and `duration` beside `in_flight` and `slot_cap`,
+with no counts to report, since no body was decoded; the crossings are logged
 rather than the state, so a probe on its usual interval stays free. On a box
 whose senders have all stopped posting that pair of lines is the only report
 the saturation gets. A refused POST audits `in_flight` and
@@ -637,9 +640,10 @@ technology:
 
 - **Keyboard only** - every action has a key (table above); nothing requires
   pointing or clicking, and `?` always shows the full key map.
-- **Pause freezes everything** - `space` stops the streaming data and the
+- **Pause holds the frame** - `space` stops the streaming data and the
   header clock, so a still frame can be read at leisure with a screen reader
-  or magnifier.
+  or magnifier. A probe that lands while paused still updates the probe
+  results, which is the one thing that moves under the pause.
 - **Status never rides on color alone** - down engines show `✗` plus their
   error text, probes show `✓`/`✗`, gauges print their percentage, and the
   engine count is spelled out numerically in the header.
@@ -702,8 +706,9 @@ toktop update     subcommand: install the latest release (--check to only
                   stdout is the release URL and nothing else, or nothing at
                   all when the release names no GitHub release page, which
                   stderr then says
-toktop help       same as --help (-h); `toktop help update` / `toktop help
-                  version` / `toktop help completion` print their own screens
+toktop help       same as --help (-h); `toktop help update` and `toktop help
+                  completion` print their own screens, `toktop help version`
+                  the top-level usage again
 toktop version    same as --version (-v), which `toktop help`, `toktop version`
                   and `toktop update` all accept
 toktop completion <bash|zsh|fish>
@@ -839,7 +844,8 @@ to the directory that shell's completion setup reads.
 The script is generated from the flags this build actually defines, so a new
 flag is completed the day it lands and the completion never goes stale. It
 completes the subcommands and their own flags (`toktop update --<TAB>` offers
-`--check` and `--repo`, not the top-level flags), and offers a file list only
+that subcommand's own, `--check` and `--repo`, not the top-level flags), and
+offers a file list only
 where a flag takes a path (`--ssh-key`).
 
 ## Environment variables

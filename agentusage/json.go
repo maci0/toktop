@@ -170,9 +170,9 @@ func parseJSON(line []byte) (jsonEvent, bool) {
 // in outputKeys, thinkingKeys, totalKeys, inputKeys, cacheKeys and cwdKeys. A
 // match is a filter, not a lookup: it only means the record has to be decoded,
 // so a false positive costs the decode it would have paid anyway, while a key
-// holding none of them is never read again. TestUsageMarkersCoverKeys is what
-// keeps the two lists in step, and fails the build when a key is added to a
-// table without one. Grouped by first byte so a record that carries nothing
+// holding none of them is never read again. TestUsageMarkersCoverEveryKey is
+// what keeps the two lists in step, and fails the build when a key is added to
+// a table without one. Grouped by first byte so a record that carries nothing
 // costs one compare per byte.
 func mayCarryUsage(line []byte) bool {
 	for i := range len(line) {

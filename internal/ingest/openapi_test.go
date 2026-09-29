@@ -23,15 +23,25 @@ import (
 // give and the file does not name is a client that cannot handle the server
 // in front of it. These tests drive the real server and hold the file to that.
 
-// openapiSection is one path's block of docs/openapi.yaml, from its own
-// heading to the next path or to the components section.
-func openapiSection(t *testing.T, path string) string {
+// openapiPathRE lists the path headings the spec declares, which sit at two
+// spaces of indent under `paths:`.
+var openapiPathRE = regexp.MustCompile(`(?m)^  (/[^:]*):$`)
+
+// openapiSource reads docs/openapi.yaml.
+func openapiSource(t *testing.T) string {
 	t.Helper()
 	src, err := os.ReadFile(filepath.Join("..", "..", "docs", "openapi.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	lines := strings.Split(string(src), "\n")
+	return string(src)
+}
+
+// openapiSection is one path's block of docs/openapi.yaml, from its own
+// heading to the next path or to the components section.
+func openapiSection(t *testing.T, path string) string {
+	t.Helper()
+	lines := strings.Split(openapiSource(t), "\n")
 	heading := "  " + path + ":"
 	start := -1
 	for i, l := range lines {
@@ -92,6 +102,15 @@ func TestOpenAPIDocumentsEveryServedEndpoint(t *testing.T) {
 			if !strings.Contains(section, "\n    "+strings.ToLower(method)+":") {
 				t.Errorf("%s %s: docs/openapi.yaml documents no such operation", e.path, method)
 			}
+		}
+	}
+	served := make(map[string]bool, len(ingestEndpoints))
+	for _, e := range ingestEndpoints {
+		served[e.path] = true
+	}
+	for _, m := range openapiPathRE.FindAllStringSubmatch(openapiSource(t), -1) {
+		if !served[m[1]] {
+			t.Errorf("docs/openapi.yaml documents path %s, which no endpoint serves", m[1])
 		}
 	}
 }

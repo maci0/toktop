@@ -257,7 +257,9 @@ func helpScrollLabel(above, below int) string {
 // draw. The "● probing…" badge p draws lives in a panel title, not here.
 func (m Model) helpRows() [][2]string {
 	if m.w < minDashW || m.h < minDashH {
-		// Short forms: the compact box has 34 cells of body, and a longer
+		// Short forms: the pane can be too short to hold the whole list, and
+		// a narrow one leaves the box body a few cells across once the border
+		// and padding take their six, so a longer
 		// description is clipped mid-word by the pane. The three keys that
 		// close the box lead, so a pane too short for the whole list drops the
 		// row at the bottom rather than the way out of it.

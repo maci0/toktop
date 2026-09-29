@@ -2,10 +2,10 @@
 // engine HTTP requests (routers like OmniRoute require API keys even for
 // model listing). The token is scoped: it rides requests only to
 // destinations admitted via Allow, which callers reserve for endpoints the
-// operator named explicitly (--add). Discovery probes dozens of localhost
-// ports on spec, and whatever answers there is entitled to nothing, so a
-// hostile listener on a scanned port cannot harvest a gateway API key that
-// was never meant for it. Set once at startup, before discovery spawns
+// operator named explicitly (--add). Discovery probes a list of well-known
+// localhost ports on spec, and whatever answers there is entitled to nothing,
+// so a hostile listener on a scanned port cannot harvest a gateway API key
+// that was never meant for it. Set once at startup, before discovery spawns
 // goroutines.
 //
 // The package also owns the redirect policy the polling and discovery

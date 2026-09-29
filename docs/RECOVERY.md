@@ -18,12 +18,13 @@ somebody else's data.
 | the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
 | the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`), removed on release, broken when older than a minute | `lockStore` |
 | a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/install.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
+| the install lock, while a replacement holds it | the installed binary plus `.lock` (`internal/selfupdate/install.go`, `installLockSuffix`), removed on release, broken when older than a minute | `lockInstall` |
 | the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/install.go`, `installDisplacing`) | `installDisplacing` |
 | the installed binary | the running executable's own path | `install` |
 | the store a killed write staged, and never renamed | a `.known_hosts-*` file beside the store (`internal/remote/knownhosts.go`, `knownHostsTempPrefix`), removed by the rename, by the failure that reports it, or by the restore that recovered the store it belonged to (`clearInterruptedWrite`) | `atomicWriteFile` |
 | a store staging file older than 24 hours | the same directory, removed by prefix and age on the next store write (`internal/core/fs.go`, `SweepStaleTemps`, `StaleTempAge`) | `writeKnownHosts` |
 
-The two files beside the binary hold no state worth recovering: both are
+The files beside the binary hold no state worth recovering: each is
 rebuilt by running `toktop update` again. Everything else toktop touches is
 read-only, and belongs to something else:
 
@@ -78,6 +79,9 @@ installed binary with it:
 - `toktop.old` is removed by the next update, before the next one displaces
   the binary again (`applyTo`, `installDisplacing`). It is the previous
   binary, never the installed one.
+- `<binary>.lock` is removed on release and broken as stale after a minute
+  (`lockInstall`). It is the only file beside the binary that toktop creates
+  and deletes in one write.
 
 ## RPO and RTO
 
@@ -376,15 +380,16 @@ waits for `https://toktop.ai/health` to answer `ok` (the body names no
 version, so that is an availability check and not a confirmation of what is
 serving).
 
-The target refuses to run unless `dist/site.deployed` exists, the marker
-`site-deploy` leaves behind. That marker is what stops a second rollback from
+The target does nothing unless `dist/site.deployed` exists, the marker
+`site-deploy` leaves behind: it prints why and exits 0 rather than rolling a
+second time. That marker is what stops a second rollback from
 undoing the first and putting the broken deployment back, and it lives under
 `dist/`, which `make clean` sweeps around: the clean deletes everything else
 in `dist/` and leaves the two markers (`site.deployed`, `site.rolled-back`)
 where they are, because a build sweep is not entitled to take the record of a
 deployment that is live. Deleting `dist/` by hand does take it, and after
-that a rollback of a deploy from this tree is refused with "nothing to roll
-back" while the bad deployment is still live. The way out is `wrangler
+that a rollback of a deploy from this tree changes nothing and says "nothing to
+roll back" while the bad deployment is still live. The way out is `wrangler
 rollback` at the pin the Makefile names (4.126.0), once, having checked the
 deployment list in the Cloudflare dashboard for what the first rollback undid.
 

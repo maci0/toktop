@@ -45,7 +45,9 @@ Nothing about usage, agents or engines. The only files toktop writes are:
   aside leaves a `known_hosts.displaced` copy behind. Every write also leaves
   a `known_hosts.bak` copy of the store, holding the same host keys.
 - A `.toktop-update-*` download next to the binary, and the previous binary as
-  `<binary>.old`, when `toktop update` replaces it in place.
+  `<binary>.old`, when `toktop update` replaces it in place. `<binary>.lock`
+  sits beside the binary while that install holds the cross-process lock and
+  is removed when the install finishes.
 
 Agent events live in memory for the life of the process. There is no history
 file, no cache and no database. If you want the feed to disappear, quit.

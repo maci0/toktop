@@ -1506,9 +1506,10 @@ check-api: ## verify VERSION removes nothing PUBLIC_PKGS exported at the last re
 # for.
 #
 # The watched list is the surfaces a reader or a caller reads rather than
-# code it compiles: the README, the docs tree, the --help text, the feed
-# contract the OpenAPI describes, the importable package and the Worker the
-# site serves. A commit that touches only Go internals needs no entry, which
+# code it compiles: the README, the --help text, the feed contract the
+# OpenAPI describes, the importable package and the Worker the site serves.
+# The rest of docs/ is deliberately absent (see CHANGELOG_WATCHED above).
+# A commit that touches only Go internals needs no entry, which
 # is what keeps this from demanding one per commit. The base is the last
 # released tag before HEAD, as check-api takes it, so a cut is measured
 # against the release it follows and not against the commit ahead of it. A

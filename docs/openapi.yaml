@@ -413,7 +413,7 @@ components:
       type: string
       description: A one-line reason naming the field, the bound or the shape the sender got wrong.
       examples:
-        - "bad json: ts must be an RFC 3339 string"
+        - "bad ts: must be an RFC 3339 string"
         - "not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)"
 
     Event:
@@ -522,6 +522,7 @@ components:
           maxLength: 512
           description: |
             Free text. A note that is nothing but a directory is reduced to
-            its last two components, with a path under `$HOME` folded to `~`.
-            Any other text is stored as sent, past that fold. Past the cap it
+            its last two components, counting the home directory as its first
+            component. Any other text is stored as sent, past the fold that
+            replaces a path under `$HOME` with `~`. Past the cap it
             is clamped, not refused.
