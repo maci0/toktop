@@ -181,6 +181,14 @@ func warnIgnoredUserHome() {
 // --agents. Without one, the variable cannot take effect, and the rule
 // GAUNTLET_HOME follows above names only a --agents run for the same reason.
 //
+// A relative value is named with the consequence that follows, which is not
+// the same for all three: the opencode database and the kimi store have a
+// home directory to fall back to, and the ssh host-key store resolves through
+// os.UserConfigDir, which refuses a relative XDG_CONFIG_HOME outright on
+// Linux. There the run does not read a default directory, it names no store
+// and every connect fails, so the warning says so rather than sending the
+// operator after a fallback that does not exist.
+//
 // An absolute KIMI_CODE_HOME is checked for the store under it, the way
 // GAUNTLET_HOME is checked for the file beside it. kimi creates its sessions
 // directory itself on first run, so a variable the operator set naming no
@@ -207,7 +215,19 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 			continue
 		}
 		if !filepath.IsAbs(v) {
-			fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q and reading the default directory\n", e.name, v)
+			fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q\n", e.name, v)
+			// The consequence differs per variable, and naming the wrong one
+			// sends the operator after a fallback that does not exist. A store
+			// with a default to fall back to says so; the ssh host-key store
+			// resolves through os.UserConfigDir, which refuses a relative
+			// XDG_CONFIG_HOME on Linux and so names no store at all, failing
+			// every connect. Asked of the package that resolves it, so the
+			// warning and the connect cannot disagree.
+			if e.name == "XDG_CONFIG_HOME" && remote.HostKeyStorePath() == "" {
+				fmt.Fprintf(os.Stderr, "toktop: $XDG_CONFIG_HOME names no host-key store on this platform; every ssh:// target will fail to connect\n")
+			} else {
+				fmt.Fprintf(os.Stderr, "toktop: reading the default directory instead\n")
+			}
 			continue
 		}
 		if e.name == "KIMI_CODE_HOME" {

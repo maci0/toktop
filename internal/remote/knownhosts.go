@@ -48,6 +48,12 @@ func defaultKnownHostsPath() string {
 	return filepath.Join(dir, "toktop", "known_hosts")
 }
 
+// HostKeyStorePath is the store the next ssh connect reads and writes, or ""
+// when this environment places none. Exported so the startup warning in
+// cmd/toktop resolves the store the same way the connect does, rather than
+// describing a fallback the reader does not take.
+func HostKeyStorePath() string { return knownHostsPath() }
+
 // storeMu serializes TOFU reads and writes inside this process, per store
 // path. Handshake callbacks from one connection are sequential; the mutex
 // covers concurrent connections and the file itself. It says nothing about

@@ -24,6 +24,7 @@ import (
 	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
+	"github.com/maci0/toktop/internal/remote"
 	"github.com/maci0/toktop/internal/selfupdate"
 	"github.com/maci0/toktop/internal/ui"
 )
@@ -539,6 +540,31 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The warning a relative XDG_CONFIG_HOME prints has to name the consequence
+// that follows on this platform. A store with a home to fall back to reads one;
+// the host-key store resolves through os.UserConfigDir, which refuses a
+// relative XDG_CONFIG_HOME outright on Linux, so there is no store at all and
+// every connect fails. Promising a default directory that does not exist sends
+// the operator after a directory nothing will ever read.
+func TestWarnIgnoredXDGHomeNamesTheConsequence(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "")
+	t.Setenv("KIMI_CODE_HOME", "")
+	t.Setenv("XDG_CONFIG_HOME", "cfg")
+	got := captureStderr(t, func() { warnIgnoredXDGHome(false, true, false) })
+	if store := remote.HostKeyStorePath(); store == "" {
+		if !strings.Contains(got, "names no host-key store") {
+			t.Fatalf("warnIgnoredXDGHome() printed %q, want the no-store consequence the platform actually has", got)
+		}
+		if strings.Contains(got, "default directory") {
+			t.Fatalf("warnIgnoredXDGHome() printed %q, promising a default directory this platform cannot resolve", got)
+		}
+		return
+	}
+	if !strings.Contains(got, "default directory") {
+		t.Fatalf("warnIgnoredXDGHome() printed %q, want the fallback the platform actually takes", got)
 	}
 }
 

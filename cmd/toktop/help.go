@@ -187,7 +187,9 @@ Environment (a flag always wins over the variable it mirrors):
                           (--opencode-db), default ~/.local/share; a relative
                           value is ignored
   XDG_CONFIG_HOME         where the ssh host-key store lives, default
-                          ~/.config; a relative value is ignored
+                          ~/.config; a relative value is ignored, and on
+                          Linux it names no store at all, so every ssh://
+                          target then fails to connect
   KIMI_CODE_HOME          where kimi's session logs are read (--agents),
                           default ~/.kimi-code; a relative value is ignored,
                           and so is one with no sessions directory in it
