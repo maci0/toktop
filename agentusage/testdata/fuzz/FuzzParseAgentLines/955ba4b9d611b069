@@ -1,0 +1,2 @@
+go test fuzz v1
+[]byte("{\"tYpe\":\"assistant\",\"messAge\":{\"usAge\":{\"\":1e700,\"output_tokens\":1}}}")

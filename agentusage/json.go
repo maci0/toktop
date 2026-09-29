@@ -6,6 +6,8 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
+	"io"
 	"math"
 
 	"github.com/maci0/toktop/internal/core"
@@ -57,6 +59,10 @@ var (
 		"thinking_tokens": true, "thinkingtokens": true, "reasoning_tokens": true,
 		"reasoning_output_tokens": true, "thoughtstokencount": true,
 		"reasoningtokens": true, "reasoning": true, "thinking": true,
+		// Gemini's tokens.thoughts, the bare spelling of thoughtsTokenCount
+		// beside the counters it writes. A turn billed on thought tokens
+		// alone reads as no usage at all without it.
+		"thoughts": true,
 	}
 	totalKeys = map[string]bool{
 		"total_tokens": true, "totaltokens": true, "totaltokencount": true,
@@ -87,6 +93,13 @@ var (
 		// two billed cache shares cacheRead and cacheWrite. They are the
 		// bulk of a turn's prompt: input alone is the uncached remainder.
 		"cacheread": true, "cachewrite": true,
+		// dsh writes them as cacheReadTokens and cacheWriteTokens, and Grok
+		// as cachedReadTokens and cacheCreationTokens. Both report the
+		// uncached prompt beside these rather than inside it, so a definition
+		// pointed at one of those logs read the uncached remainder alone and
+		// under-reported the prompt by the bulk of a turn.
+		"cachereadtokens": true, "cachewritetokens": true,
+		"cachedreadtokens": true, "cachecreationtokens": true,
 	}
 	// Fields naming the working directory a record belongs to.
 	cwdKeys = map[string]bool{
@@ -115,8 +128,15 @@ var (
 // nothing this package reads.
 //
 // This runs once per transcript record, so nothing here copies the line:
-// TrimSpace slices it, and json.Unmarshal neither retains nor modifies its
-// input.
+// TrimSpace slices it, and the decoder neither retains nor modifies its input.
+//
+// Numbers decode as json.Number rather than float64. Decoding into a float64
+// fails the whole record when any number in it is out of range, whatever the
+// number is and wherever it sits: a "toolParameters" that escaped its digits
+// fails the turn's own counters beside it, and the record is lost whole,
+// while the typed per-agent decoders skip the field they do not model and
+// read the counters anyway. asInt applies the range, and refuses a value
+// outside it, once a number is in a field this package recognizes.
 func parseJSON(line []byte) (jsonEvent, bool) {
 	line = bytes.TrimPrefix(line, utf8BOM)
 	trimmed := bytes.TrimSpace(line)
@@ -124,7 +144,16 @@ func parseJSON(line []byte) (jsonEvent, bool) {
 		return jsonEvent{}, false
 	}
 	var doc any
-	if err := json.Unmarshal(trimmed, &doc); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(trimmed))
+	dec.UseNumber()
+	if err := dec.Decode(&doc); err != nil {
+		return jsonEvent{}, false
+	}
+	// A Decoder stops at the end of the first value and leaves whatever
+	// follows it unread, where json.Unmarshal rejected the line outright.
+	// Nothing here reads a second value, so a record with trailing content is
+	// as malformed as one that fails to parse, and stays rejected.
+	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
 		return jsonEvent{}, false
 	}
 	var ev jsonEvent
@@ -149,7 +178,7 @@ func mayCarryUsage(line []byte) bool {
 	for i := range len(line) {
 		switch lowerASCII(line[i]) {
 		case 't':
-			if hasPrefixFold(line[i:], "token") || hasPrefixFold(line[i:], "thinking") || hasPrefixFold(line[i:], "total") {
+			if hasPrefixFold(line[i:], "token") || hasPrefixFold(line[i:], "thinking") || hasPrefixFold(line[i:], "total") || hasPrefixFold(line[i:], "thought") {
 				return true
 			}
 		case 'o':
@@ -259,7 +288,7 @@ func walk(node any, ev *jsonEvent, depth int) {
 				assign(ev, lower, child)
 			}
 			switch child.(type) {
-			case nil, bool, float64: // no subtree to descend into
+			case nil, bool, json.Number: // no subtree to descend into
 			default:
 				if !payloadKeys[lower] {
 					kids = append(kids, child)
@@ -321,10 +350,13 @@ func assign(ev *jsonEvent, lower string, val any) {
 }
 
 func asInt(v any) (int, bool) {
-	n, ok := v.(float64)
+	num, ok := v.(json.Number)
 	if !ok {
 		return 0, false
 	}
+	// A number too large for a float64 arrives here as +Inf with an error, and
+	// fails the range test below either way.
+	n, _ := num.Float64()
 	// The conversion below is only defined within the range of int, and
 	// out-of-range results differ by platform (amd64 gives the minimum,
 	// arm64 saturates to the maximum). A counter outside int, or past
@@ -333,9 +365,9 @@ func asInt(v any) (int, bool) {
 	if !(n >= 1) || n > float64(maxSaneTokens) || n > float64(math.MaxInt) {
 		return 0, false
 	}
-	// JSON numbers are float64. A fractional remainder (1.5, 99.9) would
-	// become 1 or 99 through a truncating conversion; ingest already
-	// refuses those, and a transcript line is the same kind of counter.
+	// A fractional remainder (1.5, 99.9) would become 1 or 99 through a
+	// truncating conversion; ingest already refuses those, and a transcript
+	// line is the same kind of counter.
 	i := int(n)
 	if n != float64(i) {
 		return 0, false

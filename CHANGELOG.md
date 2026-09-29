@@ -34,6 +34,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   panel shows that the string is unreadable there instead of a name the
   hardware never reported.
 
+- A definition pointed at a Gemini, dsh or Grok transcript read that store
+  through the envelope-agnostic walker, which did not know three spellings the
+  per-agent decoders read: Gemini's `tokens.thoughts`, and the cached prompt
+  shares dsh and Grok report beside the uncached one (`cacheReadTokens`,
+  `cacheWriteTokens`, `cachedReadTokens`, `cacheCreationTokens`). A turn
+  billed on thought tokens alone read as no usage at all, and a dsh or Grok
+  turn read its uncached prompt alone, short by the bulk of the prompt.
+
+- A record holding a number no float64 can represent, in a field no adapter
+  models, took the whole record down with it: the walker decoded into
+  float64, so the failure reached past the field to the turn's own counters,
+  while the per-agent decoders skipped the field and read the record. Numbers
+  are now decoded as written and range-checked once they reach a recognized
+  field.
+
 ## [0.21.0] - 2026-09-28
 
 Binaries, checksums, and a CycloneDX SBOM are on

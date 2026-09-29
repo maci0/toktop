@@ -702,3 +702,55 @@ func TestGenericSkipsRecordsWithNoCounters(t *testing.T) {
 		}
 	}
 }
+
+// TestGenericReadsEveryShapeTheAdaptersDo pins the envelope-agnostic walk
+// against the per-agent decoders: a definition pointed at one of these logs
+// reads it through parseGeneric, so a counter one of the adapters bills and
+// the walk does not know is a turn that reports short. Each line here is one
+// an adapter accepts, with the figure the walk has to reach.
+func TestGenericReadsEveryShapeTheAdaptersDo(t *testing.T) {
+	for _, tc := range []struct {
+		line       string
+		tool       string
+		wantOutput int
+		wantThink  int
+		wantInput  int
+	}{
+		// Gemini writes thought tokens outside tokens.output, under a spelling
+		// of its own.
+		{`{"tokens":{"thoughts":7}}`, "gemini", 0, 7, 0},
+		// dsh reports the cached prompt beside the uncached one, and Grok
+		// spells the same two shares its own way.
+		{`{"type":"assistant/message","usage":{"inputTokens":10,"cacheReadTokens":30,"cacheWriteTokens":5}}`, "dsh", 0, 0, 45},
+		{`{"method":"_x.ai/session/update","params":{"update":{"sessionUpdate":"turn_completed","usage":{"inputTokens":10,"cachedReadTokens":30,"cacheCreationTokens":5}}}}`, "grok", 0, 0, 45},
+	} {
+		v, _, ok := parseGeneric([]byte(tc.line))
+		if !ok {
+			t.Errorf("%s: %s reported no usage, the adapter reads it", tc.tool, tc.line)
+			continue
+		}
+		if v.output != tc.wantOutput || v.thinking != tc.wantThink || v.input != tc.wantInput {
+			t.Errorf("%s: %s read as %+v, want output %d thinking %d input %d",
+				tc.tool, tc.line, v, tc.wantOutput, tc.wantThink, tc.wantInput)
+		}
+	}
+}
+
+// TestParseJSONReadsPastAnUnrepresentableNumber pins the decode's tolerance: a
+// number no float64 holds, in a field no adapter models, must not take the
+// counters beside it down with it. The typed decoders skip the field and read
+// the record, so the walk that stands in for them has to as well.
+func TestParseJSONReadsPastAnUnrepresentableNumber(t *testing.T) {
+	ev, ok := parseJSON([]byte(`{"usAge":{"params":1e700},"usage":{"output_tokens":3}}`))
+	if !ok {
+		t.Fatal("a record with an unrepresentable number beside its counters was dropped whole")
+	}
+	if ev.Usage.Output != 3 {
+		t.Fatalf("output = %d, want 3", ev.Usage.Output)
+	}
+	// The same number in a recognized field is still not a measurement.
+	ev, ok = parseJSON([]byte(`{"usage":{"output_tokens":1e700}}`))
+	if !ok || ev.Usage.Output != 0 {
+		t.Fatalf("out-of-range counter = %d ok=%v, want 0 and a record", ev.Usage.Output, ok)
+	}
+}
