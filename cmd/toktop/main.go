@@ -301,7 +301,19 @@ func runMain() int {
 		if sysFn != nil {
 			col.SetSysFn(sysFn)
 		}
-		go col.Run(ctx, ch)
+		go func() {
+			// Run's only error is a second concurrent Run, and the collector
+			// has no other supervisor to notice: dropped, the dashboard came
+			// up collecting nothing and said nothing.
+			if err := col.Run(ctx, ch); err != nil {
+				logcfg.Logger().Error("toktop: collector stopped",
+					"error", logcfg.Field(core.RedactHome(err.Error()), 256))
+				select {
+				case feedErr <- "collector stopped: " + core.RedactHome(err.Error()):
+				default:
+				}
+			}
+		}()
 		prober = col.ProbeAll
 		recorder = col
 

@@ -228,6 +228,7 @@ func listTranscripts(root string, suffixes []string, cutoff, now time.Time, forc
 				timer.Stop()
 				continue
 			case <-timer.C:
+				auditWalkFailure(key, fmt.Errorf("gave up after %s waiting for a transcript walk", walkWait))
 				return nil, false
 			}
 		}

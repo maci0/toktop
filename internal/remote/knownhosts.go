@@ -188,9 +188,12 @@ func tofu() (ssh.HostKeyCallback, error) {
 	// another process's lock: the store is replaced by rename, so a reader
 	// sees either the old or the new file, never a partial one.
 	mu := storeMutex(path)
-	mu.Lock()
-	_, err := readKnownHosts(path)
-	mu.Unlock()
+	var err error
+	func() {
+		mu.Lock()
+		defer mu.Unlock()
+		_, err = readKnownHosts(path)
+	}()
 	if err != nil {
 		return nil, err
 	}
@@ -573,7 +576,12 @@ func restoreStore(path string) {
 			return nil
 		}
 		store, err := readKnownHosts(path)
-		if err != nil || len(store) == 0 {
+		if err != nil {
+			return err
+		}
+		if len(store) == 0 {
+			audit().Warn("toktop: host key store was missing and its backup holds no pins",
+				"path", logcfg.RedactedField(core.RedactHome(path), 256))
 			return nil
 		}
 		audit().Warn("toktop: host key store was missing, pins recovered from its backup",
