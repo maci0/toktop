@@ -1193,6 +1193,7 @@ site-rollback: require-bun ## roll the site Worker back to the version before th
 	if [ ! -d $(SITE_DEPLOYED) ]; then \
 		echo "nothing to roll back: no deploy from this tree is waiting to be undone ($(SITE_DEPLOYED) is absent)"; \
 		echo "'wrangler rollback' with no version undoes the most recent deployment whoever shipped it, so a second run here would roll back a rollback and put the version you just undid back on the site"; \
+		echo "to recover from this machine anyway, check the deployment list in the Cloudflare dashboard for what the deploy before this one was, then run 'cd site && bunx wrangler@$(WRANGLER) rollback' once, or check out the commit that served correctly and run 'make site-deploy' from it"; \
 		exit 0; \
 	fi; \
 	(cd site && bunx wrangler@$(WRANGLER) rollback) || exit 1; \

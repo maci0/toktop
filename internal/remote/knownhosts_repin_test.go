@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"golang.org/x/crypto/ssh"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Deleting the store is how an operator re-pins a host on purpose, after a
@@ -37,6 +39,58 @@ func TestDeletingTheStoreRepinsRatherThanRecoveringTheBackup(t *testing.T) {
 	restoreStore(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Errorf("restoreStore must not write the backup back over a store deleted on purpose: %v", err)
+	}
+}
+
+// The deletion itself is silent: nothing logs a store that is simply absent,
+// because absent is the re-pin gesture, and every run that finds no store is
+// either a first contact or an operator's decision. An accidental removal (a
+// config reset, a cleanup script, a sync that dropped the file) is therefore
+// first reported by the next connect trusting a host the operator had already
+// pinned, which is the interception the store exists to refuse, while a copy
+// holding those pins sits beside it unread. The copy must not be restored
+// (that is the re-pin), so the warning is the whole of what the operator is
+// told, and it has to name the copy and the command that puts it back.
+func TestDeletingTheStoreWarnsWhenACopyStillHoldsItsPins(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir) // os.UserHomeDir reads this one on Windows
+	path := filepath.Join(dir, "known_hosts")
+	line := "h:22 " + strings.TrimSpace(string(ssh.MarshalAuthorizedKey(fakePublicKey("repin"))))
+	if err := writeKnownHosts(path, map[string]string{"h:22": line}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	logs := captureAudit(t)
+
+	restoreStore(path)
+
+	warns := linesWith(logs, "host key store was removed")
+	if len(warns) != 1 {
+		t.Fatalf("audit lines for a deleted store holding a copy = %d, want 1: %v", len(warns), warns)
+	}
+	if !strings.Contains(warns[0], "level=WARN") {
+		t.Errorf("deletion logged below warn: %q", warns[0])
+	}
+	if !strings.Contains(warns[0], backupSuffix) {
+		t.Errorf("deletion line does not name the copy that still holds the pins: %q", warns[0])
+	}
+	if !strings.Contains(warns[0], core.RedactHome(restoreCommand(backupPath(path), path))) {
+		t.Errorf("deletion line does not carry the command that restores the store: %q", warns[0])
+	}
+	if strings.Contains(warns[0], dir) {
+		t.Errorf("audit line carries the home directory: %q", warns[0])
+	}
+
+	// A first run on a host that has never pinned anything is not a loss, and
+	// warning about it would put a line in front of every operator's first
+	// connection.
+	logs.Reset()
+	restoreStore(filepath.Join(t.TempDir(), "known_hosts"))
+	if got := linesWith(logs, "host key store was removed"); len(got) != 0 {
+		t.Errorf("a store that was never written is audited as removed: %v", got)
 	}
 }
 

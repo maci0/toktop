@@ -440,6 +440,20 @@ func TestRestoreDisplacedRefusesWhatAnUpdateDidNotLeave(t *testing.T) {
 		}
 	})
 
+	t.Run("empty file is not promoted", func(t *testing.T) {
+		os.Remove(self)
+		os.Remove(displaced) // the symlink the previous case left behind
+		if err := os.WriteFile(displaced, nil, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := restoreDisplaced(self, displaced); err != nil {
+			t.Fatalf("an empty leftover must be skipped, not fail the update: %v", err)
+		}
+		if _, err := os.Stat(self); !os.IsNotExist(err) {
+			t.Error("an empty file was promoted onto the install path, leaving a binary no platform can run")
+		}
+	})
+
 	t.Run("directory is refused", func(t *testing.T) {
 		os.Remove(displaced)
 		if err := os.Mkdir(displaced, 0o700); err != nil {

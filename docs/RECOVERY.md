@@ -126,12 +126,22 @@ for, and the pins it appears to hold are pins on names nothing will ever
 present.
 
 A store that is missing with no interrupted-write marks beside it reads as an
-empty one, so its pins are not recoverable from this machine, whether or not
-`known_hosts.bak` is still there. Re-pin each host by connecting to it
-once and judging the fingerprint printed at first use, or restore the
-directory from whatever backs it up. Deleting the store is a deliberate
-way to do exactly that, and the next connect pins each host again and says
-so on stderr.
+empty one, because a deletion toktop cannot tell from a deliberate one. The
+copy beside it is not read back for exactly that reason: restoring it would
+undo the re-pin gesture. What toktop does do is say so. When a copy still
+parses, the connect warns that the store was removed, that every pin it held
+is dropped, names the copy and prints the `cp` that puts it back
+(`warnDeletedStore`, `internal/remote/knownhosts.go`). So a store removed by a
+config reset, a cleanup script or a sync is not silent: the operator learns
+that the next connection to a host they had pinned will be trusted on first
+contact, and has the command to undo it before making it. A store that was
+never written is not a loss and warns about nothing.
+
+Without that copy, the pins are not recoverable from this machine. Re-pin each
+host by connecting to it once and judging the fingerprint printed at first use,
+or restore the directory from whatever backs it up. Deleting the store is a
+deliberate way to do exactly that, and the next connect pins each host again
+and says so on stderr.
 
 ## Restoring a store that is present but damaged
 
@@ -203,6 +213,12 @@ removed by hand re-pins, and
 the marks it acted on, so the re-pin works again on the very next run instead
 of a later one.
 
+The half that makes an accidental deletion recoverable is
+`TestDeletingTheStoreWarnsWhenACopyStillHoldsItsPins`: the store is removed by
+hand with its copy intact, and the warning is the only thing that tells the
+operator the copy is there. It also holds that a store which was never written
+warns about nothing, so the first connect on a fresh install stays quiet.
+
 Every write to the store is atomic (staged, fsynced, renamed, with the
 directory entry flushed afterwards) and cross-process serialized by a lock
 file beside the store (`lockStore`), so a store that exists is a whole one.
@@ -241,6 +257,12 @@ The file is the previous release, verified the way `toktop update` verified
 it, so the fingerprint is not in question; what is missing is the name, and
 that is what the `mv` restores. In PowerShell the same move is
 `Move-Item toktop.exe.old toktop.exe`.
+
+A zero-length `toktop.exe.old` is not moved: it is not a binary any platform
+can run, and a host whose install path holds one cannot execute the update
+meant to repair it, so `restoreDisplaced` leaves it where it is and the
+checksummed download becomes the installed binary instead. Delete the empty
+file by hand once the next update has landed.
 
 On those platforms the previous release is installed by hand and verified the
 way `toktop update` verifies. A release publishes the asset

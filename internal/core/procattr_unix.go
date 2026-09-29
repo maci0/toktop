@@ -28,7 +28,7 @@ import (
 //
 // It requires a command built with exec.CommandContext: os/exec refuses to
 // start one whose Cancel it did not set.
-
+//
 // It lives here because the agent store discovery, the process listing and
 // the GPU sampler each spawn a wrapper that outlives its deadline, and none
 // of them should own the fix.

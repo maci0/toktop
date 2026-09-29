@@ -377,12 +377,23 @@ func installDisplacing(tmpName, self string) error {
 // install path unrunnable. This runs before the download and before the
 // checksum, so restoring here is the one place in the package that puts
 // content at the executable with no verification behind it.
+//
+// An empty one is left where it is and the install carries on. A zero-length
+// file is not a binary any platform can run, so promoting it would leave a
+// host that cannot execute the update meant to repair it, which is the state
+// this function exists to end. A downloaded release is checksummed before it
+// is renamed into place, so that path ends with something that runs.
 func restoreDisplaced(self, displaced string) error {
 	if _, err := os.Stat(self); !os.IsNotExist(err) {
 		return nil
 	}
-	if fi, err := os.Lstat(displaced); err == nil && !fi.Mode().IsRegular() {
-		return fmt.Errorf("refusing to restore %s: not a regular file (mode %s)", core.RedactHome(displaced), fi.Mode())
+	if fi, err := os.Lstat(displaced); err == nil {
+		if !fi.Mode().IsRegular() {
+			return fmt.Errorf("refusing to restore %s: not a regular file (mode %s)", core.RedactHome(displaced), fi.Mode())
+		}
+		if fi.Size() == 0 {
+			return nil
+		}
 	}
 	if err := os.Rename(displaced, self); err != nil {
 		if os.IsNotExist(err) {

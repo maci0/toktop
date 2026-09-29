@@ -599,6 +599,7 @@ func restoreStore(path string) {
 	// A store an operator deleted is a re-pin request, not a loss to repair:
 	// writing the backup back here would re-pin the key they just rejected.
 	if !interruptedWrite(path) {
+		warnDeletedStore(path)
 		return
 	}
 	err := lockStore(path, func() error {
@@ -636,6 +637,36 @@ func restoreStore(path string) {
 			"path", logcfg.RedactedField(core.RedactHome(path), 256),
 			"error", logcfg.RedactedField(err.Error(), 256))
 	}
+}
+
+// warnDeletedStore reports a store that is gone while a copy of it still
+// parses beside it.
+//
+// The copy is not read back. An operator who removed the store to accept a
+// host's new key must not have that key handed to them again by the copy, and
+// the absence of the store is the whole signal that they meant it. What the
+// warning carries is what the removal cost, and the command that undoes it if
+// the removal was not theirs.
+//
+// Without it the deletion is silent. Nothing else logs a store that is simply
+// absent, because absent is the re-pin gesture, so an accidental removal (a
+// config reset, a cleanup script, a sync that dropped it) is first reported by
+// the next connect trusting a host the operator had already pinned, which is
+// the interception the store exists to refuse. The copy sitting beside the
+// missing store is the only evidence left of what was lost, and it is evidence
+// nobody would otherwise look at.
+//
+// Nothing is said when no copy parses: there is nothing to restore, and a
+// first run on a host with no store yet is not a loss.
+func warnDeletedStore(path string) {
+	copy, ok := freshestParsedCopy(path)
+	if !ok {
+		return
+	}
+	audit().Warn("toktop: host key store was removed, so every pin it held is dropped",
+		"path", logcfg.RedactedField(core.RedactHome(path), 256),
+		"copy", logcfg.RedactedField(core.RedactHome(copy), 256),
+		"restore", logcfg.RedactedField(core.RedactHome(restoreCommand(copy, path)), 256))
 }
 
 // checkStoreCopy re-creates the copy the store is recovered from when that

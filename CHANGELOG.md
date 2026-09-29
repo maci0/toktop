@@ -364,6 +364,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   bar, and a reader who tabbed into a code block could not tell it from a
   clipped one. Both take `--fg` for the reason `kbd` already did: `--fg` names
   a boundary, `--line` divides the page.
+- A host key store removed by something other than toktop is now said so. The
+  store's absence is the gesture that re-pins a host on purpose, so nothing
+  logged it, and a store dropped by a config reset or a cleanup script was
+  first reported by the next connect trusting a host the operator had already
+  pinned. When a copy of the store still parses beside it, the connect now warns
+  that every pin it held is dropped, names the copy, and prints the `cp` that
+  puts it back. The copy is still not read back, since that is what undoing the
+  re-pin gesture means.
+- A zero-length `toktop.exe.old` is no longer moved onto the install path. It
+  is not a binary any platform can run, so promoting it left a host that could
+  not execute the update meant to repair it, the state the restore exists to
+  end. The file is left where it is and the checksummed download is installed
+  over the missing path instead.
 
 ## [0.22.0] - 2026-09-29
 
