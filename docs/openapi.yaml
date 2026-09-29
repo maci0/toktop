@@ -495,7 +495,8 @@ components:
           format: date-time
           description: |
             RFC 3339, offset required. Absent, null or blank takes the arrival
-            instant; whitespace around the stamp is ignored; anything else
+            instant; whitespace around the stamp is ignored; a leap second
+            (23:59:60) is taken as the following second; anything else
             unparseable is a 400 naming the field. A stamp more than two
             minutes from arrival in either direction is clamped to arrival.
         agent:

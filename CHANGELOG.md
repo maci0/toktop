@@ -15,6 +15,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
+  stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
+  the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting
+  what `clock_gettime` handed it posted a `400` on the line naming it. A stream
+  is refused at its first bad event, so every line after the leap second in that
+  POST body was lost with it. It now lands on the following second, the minute
+  the leap second occupies. A second past 60 stays a `400`.
 - A rename that could not be made durable no longer reports as a write that
   succeeded. `core.SyncDir` returned nothing, so a failed directory flush on the
   self-update install and on the `known_hosts` store was dropped on the floor:

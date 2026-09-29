@@ -440,6 +440,45 @@ func TestIngestRejectsGarbageTimestamp(t *testing.T) {
 	}
 }
 
+// The leap second is a stamp RFC 3339 spells and the platform parser refuses.
+// A host stepped into it (adjtimex STA_INSLEEP) reports 23:59:60, and a stream
+// refused there loses every line after it, so the second is taken and lands on
+// the following minute. A second past 60 is still garbage.
+func TestIngestAcceptsLeapSecondTimestamp(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+	base := "http://" + s.Addr() + "/v1/events"
+
+	code, _ := postBody(t, base, `{"agent":"a","ts":"2016-12-31T23:59:60Z"}`)
+	if code != http.StatusAccepted {
+		t.Fatalf("leap-second ts status = %d, want 202", code)
+	}
+	if rec.count() != 1 {
+		t.Fatalf("recorded %d events, want 1", rec.count())
+	}
+	want := time.Date(2017, time.January, 1, 0, 0, 0, 0, time.UTC)
+	// The stored stamp is the arrival instant: 2017 is years outside the skew
+	// bound, which is the clamp doing its job. The parse is what is under test.
+	for _, v := range []string{"2016-12-31T23:59:60Z", "2016-12-31T15:59:60-08:00"} {
+		got, err := parseEventTime(json.RawMessage(strconv.Quote(v)))
+		if err != nil {
+			t.Errorf("parseEventTime(%q) = %v", v, err)
+			continue
+		}
+		if !got.Equal(want) {
+			t.Errorf("parseEventTime(%q) = %s, want %s", v, got, want)
+		}
+	}
+	for _, bad := range []string{`"2016-12-31T23:59:61Z"`, `"2016-12-31T23:59:6Z"`, `"23:59:60"`} {
+		code, body := postBody(t, base, `{"agent":"a","ts":`+bad+`}`)
+		if code != http.StatusBadRequest {
+			t.Errorf("ts %s: status = %d, want 400", bad, code)
+		} else if !strings.Contains(body, "ts") {
+			t.Errorf("ts %s: body %q does not name the field", bad, body)
+		}
+	}
+}
+
 // Type mistakes must name the JSON field (or the expected shape) so a harness
 // can fix the payload. encoding/json's default text names the Go type.
 func TestIngestJSONTypeErrorsNameTheField(t *testing.T) {

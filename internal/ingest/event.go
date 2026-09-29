@@ -220,7 +220,8 @@ type agentEventWire struct {
 // Absent, null, or whitespace-only yields the zero Time; the caller stamps
 // arrival. Surrounding whitespace is trimmed before the parse, so a stamp a
 // sender padded is the instant it names rather than a 400 over bytes no RFC
-// 3339 reader counts. Anything else is errBadTS.
+// 3339 reader counts. A leap second is the one stamp the parse grammar spells
+// and the parser refuses; parseLeapSecond takes it. Anything else is errBadTS.
 func parseEventTime(raw json.RawMessage) (time.Time, error) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
@@ -235,10 +236,40 @@ func parseEventTime(raw json.RawMessage) (time.Time, error) {
 		return time.Time{}, nil
 	}
 	t, err := time.Parse(time.RFC3339, v)
-	if err != nil {
-		return time.Time{}, errBadTS
+	if err == nil {
+		return t, nil
 	}
-	return t, nil
+	if lt, ok := parseLeapSecond(v); ok {
+		return lt, nil
+	}
+	return time.Time{}, errBadTS
+}
+
+// parseLeapSecond reads the one RFC 3339 stamp time.Parse refuses: the leap
+// second 23:59:60, which the grammar allows (RFC 3339 section 5.7) and which
+// the platform clock reports on a host stepped into it (adjtimex STA_INSLEEP,
+// a sender formatting what clock_gettime handed it).
+//
+// A refused second is a hard error on a stream, not on one line: decodeStream
+// stops at the first bad event, so every line after the leap second in that POST
+// body is lost with it, twice a year, on whichever sender is disciplined
+// enough to be sitting in the leap second at all.
+//
+// The stamp lands on the following second, the same minute the leap second
+// occupies, since a time.Time cannot hold :60. The date is not checked against
+// a leap-second table: the table is data that goes stale the moment a new one is
+// scheduled, and the cost of accepting :60 on a date that has none is a stamp
+// one second late on an event that is about to be clamped to arrival anyway.
+func parseLeapSecond(v string) (time.Time, bool) {
+	i := strings.IndexByte(v, 'T')
+	if i < 0 || len(v) < i+9 || v[i+7:i+9] != "60" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, v[:i+7]+"59"+v[i+9:])
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t.Add(time.Second), true
 }
 
 var errBadTS = errors.New("must be an RFC 3339 string")
