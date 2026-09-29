@@ -16,12 +16,19 @@ import (
 // per call for the life of the process. A new group also keeps the group
 // signal off toktop itself, which is not in it.
 //
-// The Cancel covers the other half too: when the direct child exits but a
-// grandchild still holds the output pipe, a caller that set WaitDelay has it
-// fire Cancel, and the group kill takes the surviving tree with it. Without
-// that, Output waits on stdout for EOF and the call pins far past the
-// deadline.
+// The Cancel covers the deadline: when the parent is still running at the
+// deadline, os/exec calls it and the group kill takes the tree with it.
 //
+// It does not cover the WaitDelay path. When the direct child exits on its
+// own while a grandchild still holds the output pipe, os/exec closes the
+// pipes on the WaitDelay expiry without calling Cancel ("if pipes are closed
+// due to WaitDelay, no Cancel call has occurred"), and the survivor is never
+// signalled. A caller that needs the tree taken in that case has to signal the
+// group itself once the command returns.
+//
+// It requires a command built with exec.CommandContext: os/exec refuses to
+// start one whose Cancel it did not set.
+
 // It lives here because the agent store discovery, the process listing and
 // the GPU sampler each spawn a wrapper that outlives its deadline, and none
 // of them should own the fix.
