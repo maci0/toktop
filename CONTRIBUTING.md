@@ -20,6 +20,11 @@
   `make scripts-check` (CI installs that file's version via `version-file`;
   black/ruff/mypy pins in `scripts/requirements-dev.txt`). The target names a
   too-old uv rather than failing on an unknown flag.
+- `shellcheck` at or above the `SHELLCHECK_MIN` in the Makefile for
+  `make check-shell`, which analyzes the bash completion script
+  `toktop completion bash` prints. The bash ubuntu runner already carries a
+  newer one; the target refuses an older version rather than reporting a pass
+  from a rule set that predates the script's own `# shellcheck disable`.
 - The Python in `.python-version`, exact like the other toolchains. `make
   scripts-env` passes it to `uv venv` as `--python`, so uv downloads that
   build when the host does not have it; nothing reads whatever `python3` the
@@ -200,7 +205,7 @@ in day-to-day work:
 | `make test-asan` | all tests again under `-asan` (both sqlite tag halves); the go command refuses `-race -asan` together, so this is a second run and not a flag on `make test`. It skips `TestStaticFrameAllocBudget` by name, because an instrumented allocator makes an exact allocation count meaningless; `make test` still asserts that budget. Linux CI and `make ci` run it; it needs a C compiler and does not enter the edit-test loop |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + yamllint over `.github/workflows/` and `.github/dependabot.yml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-yaml`, `check-help-docs`) |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + shellcheck over the bash completion script + yamllint over `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-shell`, `check-yaml`, `check-help-docs`) |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
@@ -220,7 +225,8 @@ in day-to-day work:
 | `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, hands `-tags` one quoted argument, and keeps `-shuffle=on` (`make check` runs it) |
 | `make check-ci-env` | fail unless every workflow env block pins the build inputs the Makefile exports, name and value (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
-| `make check-yaml` | fail unless every workflow in `.github/workflows/` and `.github/dependabot.yml` are valid YAML and pass the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
+| `make check-yaml` | fail unless every workflow in `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` are valid YAML and pass the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
+| `make check-shell` | fail unless `shellcheck` (at or above the Makefile's `SHELLCHECK_MIN`) clears the bash completion script `toktop completion bash` prints; the script is generated, so a copy kept beside the Go source cannot go stale (`make check` runs it, on the Linux CI leg) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
@@ -257,9 +263,10 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
-the Linux leg of the test job runs five of the `make check` guards
+the Linux leg of the test job runs six of the `make check` guards
 (`check-ci-tags`, `check-ci-env`, `check-test-flags`, `check-ci-platforms`,
-`check-help-docs`). The sixth, `check-yaml`, runs in the `scripts` job, which
+`check-help-docs`, `check-shell`). The seventh, `check-yaml`, runs in the
+`scripts` job, which
 installs the pinned tool env that target lints with.
 Vulnerability analysis follows the host platform's build constraints.
 `staticcheck` and `go vet ./...` and `go test -race -shuffle=on ./...` run on
@@ -288,7 +295,8 @@ make pr
 ```
 
 That is `make ci` (gofmt, tidy, staticcheck, vet, yamllint over the
-workflows, govulncheck, race tests for both sqlite tag halves),
+workflows and the feed contract, shellcheck over the bash completion script,
+govulncheck, race tests for both sqlite tag halves),
 `make site-lint` (biome formatter and linter over the
 Worker and the jsonc configs, at the `BIOME` pin in the Makefile, config in
 `biome.jsonc`; run

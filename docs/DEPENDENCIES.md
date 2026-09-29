@@ -101,6 +101,18 @@ a linter and a deploy tool cannot pull a tree into the repo for themselves.
 `site/wrangler.jsonc` names the compatibility date the Worker is written
 against.
 
+## Shell, the bash completion script only
+
+`toktop completion bash` prints a script a user's shell sources, and it is the
+only shell this tree ships. `make check-shell` is the only analyzer that reads
+it: the script is generated from the flag set, handed to shellcheck, and the
+generated file stays under `dist/`. shellcheck is a system package rather than
+a fetched pin, so the Makefile carries a floor (`SHELLCHECK_MIN`) instead of an
+exact version: CI's ubuntu runner and a contributor's package manager are
+different distributions, and a script that clears the floor gains nothing from
+being pinned to one release. The zsh and fish scripts are printed too and stay
+unanalyzed; neither shell is covered by shellcheck.
+
 ## Gates that keep this honest
 
 - `go mod tidy -diff` in CI: the manifest matches the imports. Every build

@@ -53,6 +53,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- Two files in this tree no gate read are read by one. The bash completion
+  script `toktop completion bash` prints carried a `# shellcheck disable` for a
+  rule nothing ever ran, which reads as a check that passed; the script is now
+  generated from the flag set and run through shellcheck in `make check` and on
+  the Linux CI leg. `docs/openapi.yaml`, the feed contract `internal/ingest`
+  parses, joined the workflows in the yamllint run for the same reason.
 - A footer notice no longer takes the key list with it. On a pane too narrow
   for the full list and the notice together, every key, `q quit` and `? help`
   included, gave way for the length of the notice, so the key that did nothing

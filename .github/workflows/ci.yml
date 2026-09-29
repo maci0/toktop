@@ -129,6 +129,14 @@ jobs:
         run: |
           go vet -mod=readonly -tests=true -tags timetzdata ./...
           go vet -mod=readonly -tests=true -tags "sqlite timetzdata" ./agentusage/...
+      # The bash completion script is shell code this repo prints and a user
+      # sources, and no Go analyzer reads it. shellcheck is in the ubuntu image;
+      # `make check-shell` refuses an older one rather than reporting a pass
+      # from a rule set that predates the script's own disable comment. Linux
+      # only: the script is the same bytes from the same source on every runner.
+      - name: shellcheck (linux only)
+        if: runner.os == 'Linux'
+        run: make check-shell
       - name: govulncheck (linux only; both sqlite tag halves)
         if: runner.os == 'Linux'
         # Makefile GOVULNCHECK is the only version string; `go run @version`

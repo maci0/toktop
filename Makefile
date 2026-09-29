@@ -152,6 +152,17 @@ SBOM_TOOL   := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
 # manifest plus lockfile would exist only to pin this one linter.
 BIOME_VERSION := 2.5.14
 BIOME         := @biomejs/biome@$(BIOME_VERSION)
+# shellcheck for the bash completion script `toktop completion bash` prints.
+# The floor is the oldest release whose checks this script has to clear under,
+# so a machine with an older shellcheck is told rather than reporting a pass
+# from a rule set that predates the script's own `# shellcheck disable`.
+SHELLCHECK_MIN := 0.10.0
+SHELLCHECK     := shellcheck
+# Defines the shellcheck_too_old function ($1 is a version; it returns true when
+# that version is below $(SHELLCHECK_MIN)), the same shape as UV_TOO_OLD below
+# and for the same reason: a definition and its call in one shell, or the
+# function is undefined at the call and every version passes.
+SHELLCHECK_OLD = shellcheck_too_old() { awk -v min='$(SHELLCHECK_MIN)' -v have="$$1" 'BEGIN { n = split(min, a, "."); m = split(have, b, "."); for (i = 1; i <= (n > m ? n : m); i++) { x = a[i] + 0; y = b[i] + 0; if (y < x) exit 0; if (y > x) exit 1 } exit 1 }'; }
 # Cloudflare deploy tool for site/. Deploying with whatever `wrangler` a
 # machine happens to have installed (or a bare `cf deploy`) makes the upload
 # depend on PATH, so the pin is named here and every deploy path reads it.
@@ -367,6 +378,7 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	ok() { printf '  ok       %s\n' "$$1"; }; \
 	gap() { printf '  MISSING  %s\n' "$$1" >&2; fail=1; }; \
 	$(UV_TOO_OLD); \
+	$(SHELLCHECK_OLD); \
 	if command -v $(GO) >/dev/null 2>&1; then \
 		ok "go $$($(GO) env GOVERSION) (go.mod pins $(GO_VERSION); make selects it)"; \
 	else \
@@ -404,6 +416,16 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 		fi; \
 	else \
 		gap "uv is not on PATH (make scripts-check and check-yaml need >= $(UV_MIN))"; \
+	fi; \
+	if command -v $(SHELLCHECK) >/dev/null 2>&1; then \
+		have=$$($(SHELLCHECK) --version | awk '/^version:/ { sub(/^version: */, ""); print; exit }'); \
+		if shellcheck_too_old "$$have"; then \
+			gap "shellcheck $$have on PATH, make check-shell needs >= $(SHELLCHECK_MIN)"; \
+		else \
+			ok "shellcheck $$have (>= $(SHELLCHECK_MIN))"; \
+		fi; \
+	else \
+		gap "shellcheck is not on PATH (make check-shell analyzes the bash completion script)"; \
 	fi; \
 	if [ "$$fail" != "0" ]; then \
 		echo "make prereqs: install the MISSING tools above; CONTRIBUTING.md 'Prerequisites' explains each" >&2; \
@@ -959,6 +981,13 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 # .yamllint. Only .github/workflows: site/wrangler.jsonc is jsonc, and biome
 # owns it.
 #
+# docs/openapi.yaml is the third kind of file: not a gate, but the
+# machine-readable feed contract internal/ingest's test reads, and the only
+# YAML in the tree outside .github. It was the same unmapped document for the
+# same reason, and a duplicate key or a bad indent in it fails the Go test that
+# parses it with a message about a path rather than about the line that is
+# wrong.
+#
 # yamllint runs from the scripts env, the one black, ruff and mypy run from, so
 # its pin is a line in scripts/requirements-dev.txt with a hash on the wheel
 # like theirs. `uvx yamllint@1.38.0` pinned the linter and nothing else: uvx
@@ -980,12 +1009,42 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 # else in the set is at warning level today and --strict costs nothing. ci.yml
 # calls this target rather than yamllint directly, so the flag is the same
 # locally and remotely.
-GITHUB_YAML := $(WORKFLOWS) .github/dependabot.yml
+# Every non-jsonc YAML document in the tree, so a new one has to be added here
+# deliberately rather than linting by accident on whatever a glob returned.
+YAML_FILES := $(WORKFLOWS) .github/dependabot.yml docs/openapi.yaml
+
+# One shell script ships from this tree: the bash completion `toktop completion
+# bash` prints, which a user's shell sources. It carried a `# shellcheck
+# disable=SC2207` for a rule no gate here ever ran, which is worse than no
+# suppression at all: it reads as a check that passed. It is checked by
+# generating it and handing the output to shellcheck, because a copy kept
+# beside the Go source goes stale the day a flag moves, and the flag list is
+# built from the FlagSet at run time. The generated file is under dist/, which
+# .gitignore covers.
+#
+# The zsh and fish scripts go unanalyzed: no tree-wide shell checker in this
+# repo covers them, and the bash one is the one the completion path installs
+# with a bare redirect.
+.PHONY: check-shell
+check-shell: ## shellcheck the bash completion script 'toktop completion bash' prints
+	@command -v $(SHELLCHECK) >/dev/null 2>&1 || { \
+		echo "make check-shell: $(SHELLCHECK) is not on PATH; the bash completion script in cmd/toktop/completion.go is shell code and no other analyzer reads it" >&2; \
+		exit 1; \
+	}
+	@$(SHELLCHECK_OLD); \
+	have=$$($(SHELLCHECK) --version | awk '/^version:/ { sub(/^version: */, ""); print; exit }'); \
+	if shellcheck_too_old "$$have"; then \
+		echo "make check-shell: $(SHELLCHECK) $$have is older than $(SHELLCHECK_MIN), so the run below would clear a script against a rule set that predates its own '# shellcheck disable' comment" >&2; \
+		exit 1; \
+	fi
+	@mkdir -p $(DIST)
+	@$(GO) run -mod=readonly $(GOTAGS) $(CMD) completion bash > $(DIST)/completion.bash
+	@$(SHELLCHECK) $(DIST)/completion.bash
 
 .PHONY: check-yaml
-check-yaml: ## fail if a workflow or .github/dependabot.yml is invalid YAML or breaks the .yamllint rule set
+check-yaml: ## fail if a workflow, .github/dependabot.yml or docs/openapi.yaml is invalid YAML or breaks the .yamllint rule set
 	@$(MAKE) --no-print-directory scripts-env
-	@$(SCRIPTS_BIN)/yamllint --strict --config-file .yamllint $(GITHUB_YAML)
+	@$(SCRIPTS_BIN)/yamllint --strict --config-file .yamllint $(YAML_FILES)
 
 # `make help` and the CONTRIBUTING.md target table both enumerate what a
 # contributor runs, and a target that reaches them through one and not the
@@ -1144,7 +1203,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 	$(SCRIPTS_BIN)/python scripts/screenshot.py $(CAPTURE) $(OUT) $(SCALE) $(COLS) $(ROWS)
 
 .PHONY: check
-check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the workflow YAML and the doc guards (CI parity)
+check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the bash completion script, the workflow YAML and the doc guards (CI parity)
 	@$(MAKE) --no-print-directory check-test-flags
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-env
@@ -1158,6 +1217,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the workflow YAM
 	@$(MAKE) tidy-check
 	@$(MAKE) lint
 	@$(MAKE) vet
+	@$(MAKE) check-shell
 
 .PHONY: ci
 ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests

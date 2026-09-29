@@ -1,11 +1,13 @@
-# yamllint config for the workflow files in .github/workflows/ and the
-# dependabot config beside them. The workflows are where every merge gate in
-# this repo is defined, so a YAML error in one is a gate that stops running
-# rather than a gate that fails, and no other tool in the tree parses them:
-# gofmt, staticcheck, vet, biome, ruff, mypy and black all read something else.
-# dependabot.yml moves the pins those gates rest on, and GitHub reads a broken
-# one the same silent way: no update is offered and the tree ages on pins
-# nobody proposed moving.
+# yamllint config for the workflow files in .github/workflows/, the dependabot
+# config beside them, and the feed contract in docs/openapi.yaml. The workflows
+# are where every merge gate in this repo is defined, so a YAML error in one is
+# a gate that stops running rather than a gate that fails, and no other tool in
+# the tree parses them: gofmt, staticcheck, vet, biome, ruff, mypy and black all
+# read something else. dependabot.yml moves the pins those gates rest on, and
+# GitHub reads a broken one the same silent way: no update is offered and the
+# tree ages on pins nobody proposed moving. docs/openapi.yaml is the only other
+# YAML in the tree, and internal/ingest's test parses it, so a duplicate key or
+# a bad indent there is a contract error too.
 #
 # Extends the default rule set (syntax, indentation, key duplication, trailing
 # spaces, colons, brackets), so the finding is a defect and not a taste. The
