@@ -51,7 +51,21 @@ they live and what already stands in their way.
   the wrong file (`warnUnknownEnv`, `reportedField` and `maxReportedName` in
   `cmd/toktop/validate.go`, `logActiveConfig` in `cmd/toktop/config.go`), and
   the rule's list of churning files now covers `internal/remote/` and
-  `internal/collector/`, where the drifted numbers were.
+  `internal/collector/`, where the drifted numbers were. This pass took up
+  three controls that landed after that one, none of which any row named: the
+  leap second the ingest stamp grammar now accepts (`parseLeapSecond`,
+  internal/ingest/event.go), the latch that records a health answer the
+  prober never received (`auditHealthUnwritten`, internal/ingest/health.go),
+  and the durability of the two writes this tree stages and renames, which
+  report a directory flush they could not make rather than dropping it
+  (`syncStoreDir`, internal/remote/knownhosts.go; `flushInstallDir` and
+  `restoreDisplaced`, internal/selfupdate/install.go, over `SyncDir` in
+  internal/core/fs.go). The pin-store entry above now says which of those
+  failures are the write's own and which stay warnings, since a store write
+  reported as durable past a failed flush is exactly the claim a reader
+  builds on. No risk changed rank: each of the three sits behind a write or a
+  clamp M12 and M6 already cover, and a stamp the sender invents still lands
+  wherever the two-minute clamp puts it.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -139,14 +153,26 @@ What is worth stealing, corrupting, or denying:
   then. A restore spends the marks it acted on (`clearInterruptedWrite`):
   they are the evidence of a loss that has been repaired, and a mark left in
   place would keep the next deletion from being a re-pin for as long as it
-  survived. A truncated or emptied store is a different state again and still
-  fails the read loudly rather than re-trusting every host. The copies share
+  survived. A mark that restore cannot delete is now reported for the same
+  reason (`clearInterruptedWrite`, a warn naming the path): it is the file the
+  re-pin gesture keys on, so a leftover one outlives the repair as a state the
+  operator has to clear by hand. Whether the store write could be made durable
+  is likewise reported rather than assumed: a flush the directory refuses
+  fails the write (`syncStoreDir`), the bytes are left in place, and the copy
+  that could not be refreshed stays the warning it has always been
+  (`writeBackup`). A truncated or emptied store is a different state again
+  and still fails the read loudly rather than re-trusting every host. The
+  copies share
   the store's directory, so they recover a store lost, emptied or overwritten
   inside it, not a config directory that is gone: backing the directory up is
   the operator's half, and a store lost with its directory and no marks beside
   it is a manual repair. The same interrupted-write window in the self-update
   leaves the installed binary under `.old`, which the next install restores
-  before replacing it (internal/selfupdate/install.go, `restoreDisplaced`).
+  before replacing it (internal/selfupdate/install.go, `restoreDisplaced`);
+  that restore now refuses to act on a `Stat` that failed for a reason other
+  than absence, since a permission error or an immutable entry says nothing
+  about what the install path holds and renaming over it would replace a binary
+  nobody had read.
   [RECOVERY.md](RECOVERY.md) is the
   operational half: the state inventory, the RPO and RTO, and the restore
   and its verification.
@@ -783,7 +809,14 @@ ports that are then exposed on local loopback (client.go).
   either direction are clamped to arrival time (stream.go): ahead, so the
   "live" marker cannot be pinned by a claimed far-future stamp, and behind,
   because a lagging sender's events sort to the front of the retained feed
-  and are then refused as outside the window. Mixed Latin+Cyrillic/Greek
+  and are then refused as outside the window. The accepted grammar grew one
+  stamp since that clamp was written: `parseLeapSecond` (event.go) takes the
+  leap second 23:59:60 that `time.Parse` refuses, because a refused stamp ends
+  the NDJSON stream at that line rather than dropping one event, and lands it
+  on the following second. The date is not checked against a leap-second
+  table, so an unauthenticated sender may put :60 on any date it names; what
+  bounds that is the same two-minute clamp, which folds a stamp the sender
+  invented onto arrival like any other. Mixed Latin+Cyrillic/Greek
   agent names collapse to `anonymous` (event.go).
 - *Repudiation*: POST handlers emit remote, request id, status, accepted
   count, and stored count at info on success, warn for rejection/write
@@ -980,7 +1013,7 @@ Controls verified in code, with the threats they cover:
 | M9: Non-finite rejection in metrics (per-value and a family-sum overflow guard) and numeric-text coercion of the vendor's Prometheus text exposition (`parseProm`, `strconv.ParseFloat` behind `finite()`) and its JSON replies, both bounded by the body caps of M8; a counter that goes backwards yields a rate clamped to zero rather than a negative one | poisoned counters/rates propagating through history (B2 tampering) | provider/provider.go, `parseProm` 376 and the family-sum guard; internal/gpu/parse.go, the finite check; internal/collector/rates.go, the counter-reset clamp |
 | M10: Probes request 32 tokens, Ollama `think=false`, OpenAI `n=1`; streaming readers stop after 32 observed content/reasoning units or 1 KiB decoded content/reasoning, with 16 KiB scanner and 128 KiB stream limits. Non-stream OpenAI JSON over 16 KiB is rejected. Reported token counts trusted only up to 128; fixed prompt, model-id cap `core.ModelNameMax` 256 (M34, the same constant the provider layer stores ids under), embed/rerank filtering, 429/503 backoff 15s–5m, and a wave cap of 4 backends per wave with a rotating cursor, so one `--probe` tick on a wide fleet cannot fan out one billed generation per backend at once. A wire-reported `eval_duration` is passed through `nanoseconds`, which returns zero for a negative value, one outside the int64 nanosecond range, or one beyond `maxEvalDuration` 24h, so a count that would wrap into a plausible duration cannot reach `fitEvalDuration`'s band rescale and report a throughput the engine never claimed | Limits client work and reduces B2 compute/spend amplification; request parameters and closing a response do not guarantee that a backend stops generation or billing; a hostile engine's reported durations cannot wrap into a plausible rate (B2 tampering) | internal/probe/probe.go |
 | M11: Poll/scan/probe timeouts (700ms/1.5s/30s) + context-bounded requests | hung-engine DoS (B2/B3) | discover.go; provider.go; probe.go |
-| M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, writes serialized within and across processes (mutex plus `known_hosts.lock` over the whole read-modify-write, stale locks broken), temp-file plus rename with the directory entry flushed (core.SyncDir, shared with the self-update install), and unparsable, conflicting-duplicate or record-free stores failing the read. The repair copies beside the store (`known_hosts.bak`, the displaced copy) are consulted and restored only where `interruptedWrite` finds the marks of a write that did not finish, so a store an operator deleted on purpose re-pins on the next connect instead of having the key they just rejected silently pinned back | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect, in one process or two; corruption or an appended line read as a shorter store, forcing a re-TOFU; a deliberate re-pin undone into the rejected key | knownhosts.go, `readKnownHosts`, `interruptedWrite`, `clearInterruptedWrite`, `restoreStore`; core/fs.go |
+| M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, writes serialized within and across processes (mutex plus `known_hosts.lock` over the whole read-modify-write, stale locks broken), temp-file plus rename whose directory flush is checked, not assumed: `core.SyncDir` returns the reason it could not flush, and `syncStoreDir` (knownhosts.go) turns it into the write's own error, so a first-contact pin that is in place but not durable fails the connect rather than printing the `first use ... pinned to` line it cannot stand behind; the write is not undone, and a copy that could not be refreshed stays the warning it was (`writeBackup`). The same helper serves the self-update install, where `flushInstallDir` (install.go) reports a rename that could not be made durable as an install failure with the new binary already in place, and skips the flush on Windows, the one platform that journals the rename itself. Unparsable, conflicting-duplicate or record-free stores fail the read. The repair copies beside the store (`known_hosts.bak`, the displaced copy) are consulted and restored only where `interruptedWrite` finds the marks of a write that did not finish, so a store an operator deleted on purpose re-pins on the next connect instead of having the key they just rejected silently pinned back | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect, in one process or two; corruption or an appended line read as a shorter store, forcing a re-TOFU; a deliberate re-pin undone into the rejected key; a pin or an install announced as durable that a crash can take back | knownhosts.go, `readKnownHosts`, `interruptedWrite`, `clearInterruptedWrite`, `restoreStore`, `syncStoreDir`, `writeBackup`; internal/selfupdate/install.go, `flushInstallDir` and `restoreDisplaced`; core/fs.go, `SyncDir` |
 | M13: Banner deadline lifted only on complete version line; 15s command timeout; keepalive with bounded probe waits; SupportedAlgorithms (no ssh-rsa SHA-1 / DSA); `agentDialTimeout` 2s bounds the wait for a wedged ssh-agent to answer a dial, so a machine with an agent configured and none running still reaches the password prompt; forwardDialTimeout 8s. A forwarded port whose `Accept` keeps failing is paced instead of hammered: the gap starts at `forwardAcceptRetry` 100 ms, doubles per consecutive failure, is capped at `forwardAcceptRetryMax` 5 s, is spread over a tenth-to-full jitter range by `acceptBackoff` so several forwarded ports failing on one system condition do not retry in lockstep, and resets to the base gap the moment one accept succeeds | trickle/silent-peer hangs (B3 DoS); weak host-key algorithms; hung tunnel dial (B3b); a wedged agent pinning the connect past the prompt (B4 DoS); a forwarded port stuck refusing to accept spinning at ten wakeups a second for the life of the client, burning a core while every dashboard poll against it times out (B3b DoS) | internal/remote/client.go, the `handshakeConn` type and its `Read`, `bannerTimeout`, and the `SupportedAlgorithms` filter; internal/remote/auth.go, `agentDialTimeout` and the platform dial in auth_unix.go / auth_windows.go; internal/remote/forward.go, `forwardDialTimeout`, `forwardAcceptRetry`, `forwardAcceptRetryMax`, `acceptBackoff` and the `relay` loop |
 | M14: Local-only defaults: forward listeners on 127.0.0.1, ingest on 127.0.0.1:8420 | accidental network exposure (B1 widening; B3b stays local) | client.go; main.go |
 | M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | cmd/toktop/endpoints.go, `routableBind` |
@@ -1408,7 +1441,14 @@ Recorded as threats with locations; fixes do not happen in this document:
     id, method, path, redacted peer, status and elapsed time as every other
     ingest line plus `in_flight` and `slot_cap`, so a saturated endpoint is a
     recorded event rather than a 503 no one is watching for
-    (`TestHealthzAuditsSaturationCrossings`). A decode failure that is not one
+    (`TestHealthzAuditsSaturationCrossings`). A probe whose answer never
+    reached the prober is the one health failure that used to leave no line at
+    all, and is latched the same way: `auditHealthUnwritten` (health.go, the
+    `healthUnwritten` latch in server.go) writes one warn on the crossing,
+    over the `healthMu` the crossing latch already holds, naming the write
+    error beside the same request metadata
+    (`TestHealthzRecordsAnAnswerThatWasNotDelivered`). A decode failure that
+    is not one
     the decoder classified itself is recorded as a body read failure rather
     than as a malformed object (`decodeFailure` in stream.go, the second
     `body_error` branch, which leaves a `*json.SyntaxError` and a
