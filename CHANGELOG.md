@@ -323,6 +323,29 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   a field that advances only when the counters did. The field is documented as
   the current sample's `At` copied across, and a test pins both halves of the
   claim against a real watcher.
+- An audit line naming a store directory no longer spells out the account that
+  owns `$HOME` when the directory's own spelling differs from the
+  environment's. The slug of a working directory carries the account inside one
+  path component, where no path fold can see it, and the replacement that folded
+  it compared bytes: a session recorded from `/home/dev` beside a `$HOME` of
+  `/home/Dev`, or one recorded in the decomposed spelling of a name macOS
+  stores composed, kept the account in the line an issue paste carries. Both
+  sides are composed to one form and folded by case, the way a path element is
+  folded beside it.
+
+- A chat run in a directory whose name ends in a rune Unicode calls a space
+  (U+00A0, U+3000, a plain trailing space) is counted again. Gemini's
+  `.project_root` was trimmed with `strings.TrimSpace`, which trims every such
+  rune, so the path left a directory that does not exist and every record of
+  that chat was dropped as belonging to another one, with nothing logged. Only
+  the line terminator comes off now.
+
+- A host field read from a peer decodes the same way the same field read
+  locally does. The remote reader handed the bytes straight to the field
+  clamp, where the sanitizer drops an ill-formed byte outright: a `PRETTY_NAME`
+  or a CPU model written in Latin-1 reached the dashboard with its accented
+  letters deleted, where the local reader marks the spot with U+FFFD. The
+  replacement happens once, at the field boundary.
 
 - A session store that cannot be read is no longer opened once per poll. The
   handle table caches the read-only connection a poll reuses, but the

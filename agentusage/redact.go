@@ -4,9 +4,8 @@
 package agentusage
 
 import (
-	"strings"
-
 	"github.com/maci0/toktop/internal/core"
+	"golang.org/x/text/unicode/norm"
 )
 
 // redactStorePath folds the account that owns $HOME out of text a store
@@ -26,7 +25,15 @@ import (
 func redactStorePath(s string) string {
 	folded := core.RedactHome(s)
 	if slug := pathSlug(HomeDir()); slug != "" {
-		folded = strings.ReplaceAll(folded, slug, "~")
+		// Compose both sides and fold case, the way RedactHome folds a path
+		// element. The store names the directory from its own cwd spelling
+		// and HomeDir spells the account the environment's way, so on the
+		// case-folding file systems the two differ as bytes while naming
+		// one account: a byte-exact ReplaceAll put "users-dev" through
+		// beside a slug of "Users-Dev" and left the account in the line.
+		// The composed spellings are what compare, a decomposed account
+		// ("jose" + U+0301) against a precomposed one included.
+		folded = core.ReplaceFold(norm.NFC.String(folded), norm.NFC.String(slug), "~")
 	}
 	return folded
 }

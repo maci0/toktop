@@ -297,6 +297,21 @@ func nameContinues(rest string) bool {
 	return r == '.' || r == '-' || r == '_' || unicode.IsLetter(r) || unicode.IsDigit(r)
 }
 
+// ReplaceFold replaces every case-insensitive occurrence of old in s with
+// new. It is replaceFold for a caller outside this package that has to fold a
+// name out of text it did not receive as a path: a store directory spells a
+// working directory with its separators turned into '-', so the account
+// inside it is not a path element any prefix fold can see, and a byte-exact
+// strings.ReplaceAll leaves it in the line the operator pastes into an issue
+// whenever the store wrote the spelling the process carried and the
+// environment spells the account the other way ("users-dev" against
+// "Users-Dev").
+//
+// It folds case only, so the caller composes both sides to one normalization
+// form first; replaceFold compares runes and cannot see a composed and a
+// decomposed spelling of one name as equal.
+func ReplaceFold(s, old, new string) string { return replaceFold(s, old, new) }
+
 // replaceFold replaces every case-insensitive occurrence of old with new,
 // leaving the matched text's own spelling to the caller. Runes are compared
 // one at a time because a folded rune is not always as wide as the one it

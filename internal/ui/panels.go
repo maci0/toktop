@@ -201,7 +201,7 @@ func (m Model) gaugesBody(w, rows int) (string, int) {
 		if shown > 0 {
 			b.WriteString("\n")
 		}
-		name := styleDim.Render(clip(shorten(core.SanitizeText(p.Label), w-6), w-6))
+		name := styleDim.Render(clip(shorten(core.SingleLine(p.Label), w-6), w-6))
 		block := []string{name, "kv  " + GaugeBar(p.KVPct, min(max(w-10, 4), 20), kvHeat)}
 		if third != "" {
 			block = append(block, third)
@@ -365,7 +365,7 @@ func (m Model) probesBody(w, h int) string {
 		// "✓ " and the separating space are the two cells the mark spends
 		// before the measurement starts.
 		if cells := w - 2 - lipgloss.Width(outcome) - 1; cells >= probeModelMin {
-			line = mark + " " + styleDim.Render(shorten(core.SanitizeText(p.Model), cells)) + " " + outcome
+			line = mark + " " + styleDim.Render(shorten(core.SingleLine(p.Model), cells)) + " " + outcome
 		}
 		out.WriteString(clip(line, w) + "\n")
 		shown++

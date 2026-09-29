@@ -114,7 +114,14 @@ func readGeminiRoot(dir string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	cwd := strings.TrimSpace(string(b))
+	// Only the line terminator comes off. strings.TrimSpace trims every rune
+	// Unicode calls a space, U+00A0 and U+3000 among them, and a directory
+	// may legally end in one: a checkout at "/work/toktop\u00a0" is a
+	// directory that exists, and the trimmed spelling is a different path on
+	// every platform, so every record read from that chat was dropped as
+	// belonging to another directory, with nothing logged. Same for a plain
+	// trailing space.
+	cwd := strings.Trim(string(b), "\r\n")
 	if cwd == "" {
 		return "", false
 	}

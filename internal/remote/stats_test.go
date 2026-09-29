@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -653,5 +654,26 @@ func TestStatsRunIsSteppableByADriver(t *testing.T) {
 	s.SetPacer(nil)
 	if got := s.pacer(); got != core.WallPacer {
 		t.Fatalf("pacer() = %#v after a nil pacer, want core.WallPacer", got)
+	}
+}
+
+// The peer's bytes are decoded at the field boundary, the rule the local
+// reader of the same three fields already follows: an ill-formed byte becomes
+// U+FFFD once, here, instead of being dropped outright by the sanitizer
+// downstream, so the same field reads the same on both paths and a letter the
+// image wrote in Latin-1 is marked rather than silently lost.
+func TestParseVitalsReplacesIllFormedPeerBytes(t *testing.T) {
+	dump := "%toktop%cpu\nIntel\xaeCore\xe9 i3\n%toktop%os\n\"Fedora \\377\"\n%toktop%kernel\n6.1.0\n"
+	var s core.SysSample
+	parseVitals(dump, &s)
+
+	if !utf8.ValidString(s.CPUModel) || !strings.Contains(s.CPUModel, "\uFFFD") {
+		t.Errorf("cpumodel = %q, want the invalid bytes replaced, not dropped", s.CPUModel)
+	}
+	if !strings.HasPrefix(s.CPUModel, "Intel") || !strings.Contains(s.CPUModel, "Core") {
+		t.Errorf("cpumodel lost the readable part: %q", s.CPUModel)
+	}
+	if want := "Fedora \uFFFD"; s.OsName != want {
+		t.Errorf("osname = %q, want %q", s.OsName, want)
 	}
 }

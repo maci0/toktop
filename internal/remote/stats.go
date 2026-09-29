@@ -497,5 +497,15 @@ func trimQuotes(s string) string {
 // 5 MB field in the snapshot, re-sanitized by every renderer on every frame
 // and written whole into --json.
 func vitalsField(s string) string {
-	return core.ModelName(s)
+	// Decode the peer's bytes to valid UTF-8 at this boundary, the rule
+	// internal/sysmon's kernelText states for the same three fields read
+	// locally: a release string, a CPU model and a kernel version are
+	// written by whoever built the image, and a build tool using another
+	// encoding puts a Latin-1 or Shift-JIS byte in them. core.SanitizeText,
+	// which every renderer applies downstream, drops an ill-formed byte
+	// outright, so "Intel\xAECore" reached the operator as "IntelCore" with
+	// the letter gone and no sign anything was lost, and the same field read
+	// locally on that machine rendered with U+FFFD instead. The two readers
+	// of one field have to agree.
+	return core.ModelName(strings.ToValidUTF8(s, "�"))
 }
