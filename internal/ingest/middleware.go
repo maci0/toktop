@@ -225,7 +225,7 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, sto
 		"duration", d.Round(time.Microsecond),
 	}
 	if errMsg != "" {
-		attrs = append(attrs, "error", logcfg.Field(errMsg, 256))
+		attrs = append(attrs, "error", logcfg.Field(errMsg, logcfg.FieldCap))
 	}
 	attrs = append(attrs, extra...)
 	level := slog.LevelInfo

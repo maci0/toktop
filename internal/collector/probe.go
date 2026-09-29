@@ -102,7 +102,7 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 	lg := audit()
 	attrs := []any{
 		"engine", logcfg.Field(t.label, 128),
-		"addr", logcfg.Field(t.req.Base, 256),
+		"addr", logcfg.Field(t.req.Base, logcfg.FieldCap),
 		"model", logcfg.Field(t.req.Model, 128),
 	}
 	if s.OK {
@@ -132,7 +132,7 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 	}
 	attrs = append(attrs,
 		"duration", took.Round(time.Millisecond),
-		"reason", logcfg.Field(s.Err, 256))
+		"reason", logcfg.Field(s.Err, logcfg.FieldCap))
 	lg.Warn("toktop: probe failed", attrs...)
 }
 

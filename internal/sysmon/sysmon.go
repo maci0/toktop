@@ -113,8 +113,8 @@ func noteSourceFailure(source string, err error) {
 		return
 	}
 	audit().Warn("toktop: host vitals source unreadable",
-		"source", logcfg.Field(source, 256),
-		"error", logcfg.Field(err.Error(), 256))
+		"source", logcfg.Field(source, logcfg.FieldCap),
+		"error", logcfg.Field(err.Error(), logcfg.FieldCap))
 }
 
 // noteSourceOK closes an outage recorded by noteSourceFailure. A source that
@@ -134,7 +134,7 @@ func noteSourceOK(source string) {
 	downFor := core.Age(instant(), r.since)
 	r.mu.Unlock()
 	audit().Info("toktop: host vitals source readable again",
-		"source", logcfg.Field(source, 256),
+		"source", logcfg.Field(source, logcfg.FieldCap),
 		"down_for", downFor.Round(time.Second))
 }
 

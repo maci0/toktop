@@ -182,7 +182,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 		sw := &statusWriter{ResponseWriter: w}
 		http.Error(sw, msg, status)
 		if sw.err != nil {
-			extra = append(extra, "response_error", logcfg.RedactedField(sw.err.Error(), 256))
+			extra = append(extra, "response_error", logcfg.RedactedField(sw.err.Error(), logcfg.FieldCap))
 		}
 		done(status, n, stored, msg, extra...)
 	}
@@ -203,7 +203,7 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	var writeArm []any
 	armWrite := func() {
 		if err := rc.SetWriteDeadline(time.Now().Add(write)); err != nil {
-			writeArm = []any{"write_deadline_unarmed", logcfg.RedactedField(err.Error(), 256)}
+			writeArm = []any{"write_deadline_unarmed", logcfg.RedactedField(err.Error(), logcfg.FieldCap)}
 		} else {
 			writeArm = nil
 		}

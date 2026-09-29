@@ -193,6 +193,12 @@ func utcTime(_ []string, a slog.Attr) slog.Attr {
 	return a
 }
 
+// FieldCap is the cap to pass Field and RedactedField when the attribute's own
+// width is not a fact about the caller: a host, a path, a tool name. A width
+// that is a fact, a request id, an HTTP method, an agent name, is named where
+// the field is built and passed as its own constant.
+const FieldCap = 256
+
 // Field prepares attacker-shaped text for a single-line log attribute:
 // terminal escapes stripped, whitespace collapsed so a payload cannot split
 // the line, then capped. [core.SingleLine] and [core.ClampField] are the two

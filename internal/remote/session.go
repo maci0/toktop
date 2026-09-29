@@ -235,7 +235,7 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 		// a network blip and a host to investigate, so it is recorded before
 		// the error reaches the caller that will drop the target.
 		audit().Warn("toktop: ssh channel open unanswered",
-			"target", logcfg.RedactedField(c.Target.LogHost(), 256),
+			"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
 			"wait", sessionOpenTimeout)
 		c.conn.Close()
 		// conn.Close is what releases the parked open; the session it may

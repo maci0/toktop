@@ -111,7 +111,7 @@ func (r streamResult) decodeFailure(err error, keyed bool) streamResult {
 	if _, ok := errors.AsType[*net.OpError](err); ok {
 		r.status = http.StatusBadRequest
 		r.msg = clientJSONError(err)
-		r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), 256)}
+		r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), logcfg.FieldCap)}
 		return r
 	}
 	// Anything else that came out of the decoder is a read failure the
@@ -129,7 +129,7 @@ func (r streamResult) decodeFailure(err error, keyed bool) streamResult {
 		if _, ok := errors.AsType[*json.UnmarshalTypeError](err); !ok {
 			r.status = http.StatusBadRequest
 			r.msg = clientJSONError(err)
-			r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), 256)}
+			r.extra = []any{"body_error", logcfg.RedactedField(err.Error(), logcfg.FieldCap)}
 			return r
 		}
 	}

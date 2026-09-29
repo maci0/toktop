@@ -63,7 +63,7 @@ func (c *Collector) foldErr(key string, err error) string {
 		// it, so it is said once per distinct engine error rather than left
 		// to be discovered in a path that was supposed to be folded.
 		audit().Warn("toktop: home directory unknown; engine errors keep their home paths",
-			"error", logcfg.RedactedField(herr.Error(), 256))
+			"error", logcfg.RedactedField(herr.Error(), logcfg.FieldCap))
 	}
 	text := core.Snippet([]byte(core.RedactHome(raw)))
 	if c.errFold == nil {
@@ -247,10 +247,10 @@ func logChanges(changes []healthChange, level slog.Level, msg, heldKey string) {
 	for _, ch := range changes {
 		attrs := []any{
 			"engine", logcfg.Field(ch.p.Label, 128),
-			"addr", logcfg.Field(ch.p.Addr, 256),
+			"addr", logcfg.Field(ch.p.Addr, logcfg.FieldCap),
 		}
 		if ch.reason != "" {
-			attrs = append(attrs, "reason", logcfg.Field(ch.reason, 256))
+			attrs = append(attrs, "reason", logcfg.Field(ch.reason, logcfg.FieldCap))
 		}
 		if ch.took > 0 {
 			attrs = append(attrs, "duration", ch.took.Round(time.Millisecond))

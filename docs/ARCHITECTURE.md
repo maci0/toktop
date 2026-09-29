@@ -30,8 +30,10 @@ alongside them would be a layer importing sideways into itself.
 - `agentusage` (top level, not `internal/`): the public Go package other
   programs embed. It reports tokens for AI coding agents read from the
   transcripts those agents already write. It is tier 2 and imports
-  `internal/core` for string helpers only; no type from `internal/` appears in
-  its exported API.
+  `internal/core` for the string helpers and the cadence types; a consumer
+  outside the module never writes an `internal/` import path, since
+  `agentusage` re-exports the core types it needs (`Pacer`, `Ticker`,
+  `VirtualPacer`) as aliases under its own names.
 - `cmd/toktop`: flag parsing, validation and warnings (`flags.go`,
   `validate.go`), the startup config record and its two renderings (`config.go`),
   endpoint and target wiring (`attach.go`, `endpoints.go`), the

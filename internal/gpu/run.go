@@ -201,9 +201,9 @@ func noteRunFailure(name, path string, err error) {
 		return
 	}
 	audit().Warn("toktop: gpu vendor tool failed",
-		"tool", logcfg.Field(name, 256),
-		"path", logcfg.Field(path, 256),
-		"error", logcfg.Field(err.Error(), 256))
+		"tool", logcfg.Field(name, logcfg.FieldCap),
+		"path", logcfg.Field(path, logcfg.FieldCap),
+		"error", logcfg.Field(err.Error(), logcfg.FieldCap))
 }
 
 // noteRunOK clears a recorded outage and says so, so a tool that comes back is
@@ -223,8 +223,8 @@ func noteRunOK(name, path string) {
 	downFor := core.Age(instant(), t.since)
 	t.mu.Unlock()
 	audit().Info("toktop: gpu vendor tool answering again",
-		"tool", logcfg.Field(name, 256),
-		"path", logcfg.Field(path, 256),
+		"tool", logcfg.Field(name, logcfg.FieldCap),
+		"path", logcfg.Field(path, logcfg.FieldCap),
 		"down_for", downFor.Round(time.Second))
 }
 

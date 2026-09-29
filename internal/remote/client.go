@@ -234,13 +234,13 @@ func Connect(ctx context.Context, t Target) (*Client, error) {
 		// dashboard with no engines on it. The audit line is the record that
 		// outlives the frame.
 		audit().Warn("toktop: ssh connect failed",
-			"target", logcfg.RedactedField(t.LogHost(), 256),
+			"target", logcfg.RedactedField(t.LogHost(), logcfg.FieldCap),
 			"port", t.Port,
-			"error", logcfg.RedactedField(t.RedactUser(err.Error()), 256))
+			"error", logcfg.RedactedField(t.RedactUser(err.Error()), logcfg.FieldCap))
 		return nil, errors.New(core.RedactHome(err.Error()))
 	}
 	audit().Info("toktop: ssh connected",
-		"target", logcfg.RedactedField(t.LogHost(), 256),
+		"target", logcfg.RedactedField(t.LogHost(), logcfg.FieldCap),
 		"port", t.Port,
 		"dial", time.Since(c.connectedAt).Round(time.Millisecond))
 	return c, nil
@@ -367,7 +367,7 @@ func (c *Client) keepalive() {
 			// keepalive and a peer that closed the socket need different
 			// investigations and the wire error alone cannot tell them apart.
 			audit().Warn("toktop: ssh peer stopped answering keepalives",
-				"target", logcfg.RedactedField(c.Target.LogHost(), 256),
+				"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
 				"misses", misses,
 				"probe_every", keepaliveEvery)
 			c.conn.Close() // unblocks any probe still awaiting a reply
@@ -456,9 +456,9 @@ func (c *Client) watchClose() {
 	// engines stop answering and the vitals loop gives up. Up to here the only
 	// record was one stderr line under the alt screen.
 	audit().Error("toktop: ssh connection lost",
-		"target", logcfg.RedactedField(c.Target.LogHost(), 256),
+		"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
 		"port", c.Target.Port,
 		"uptime", time.Since(c.connectedAt).Round(time.Second),
-		"error", logcfg.RedactedField(c.Target.RedactUser(c.Err().Error()), 256))
+		"error", logcfg.RedactedField(c.Target.RedactUser(c.Err().Error()), logcfg.FieldCap))
 	close(c.closed)
 }

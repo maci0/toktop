@@ -213,7 +213,7 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 		// line the same way the sweep itself is bounded.
 		if len(s.cached) == 0 {
 			audit().Warn("toktop: process listing failed, no snapshot to fall back on",
-				"error", logcfg.RedactedField(err.Error(), 256))
+				"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 		} else if !s.listFailed {
 			// A snapshot on hand is why the panel still shows something, and
 			// that is exactly why the outage is invisible: every provider
@@ -222,7 +222,7 @@ func (s *Sampler) SnapshotAt(now time.Time) []Info {
 			// like the transcript read failures, because the same sweep
 			// repeats every refreshMin for as long as the table is gone.
 			audit().Warn("toktop: process listing failed; the displayed processes are a stale snapshot",
-				"error", logcfg.RedactedField(err.Error(), 256))
+				"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 		}
 		s.listFailed = true
 		return slices.Clone(s.cached)

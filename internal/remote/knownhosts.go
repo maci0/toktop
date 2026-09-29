@@ -462,8 +462,8 @@ func writeKnownHosts(path string, store map[string]string) error {
 	// reporting an error here would leave the operator with a pin to distrust.
 	if err := writeBackup(path, b.String()); err != nil {
 		audit().Warn("toktop: host key store backup not written",
-			"path", logcfg.RedactedField(core.RedactHome(path), 256),
-			"error", logcfg.RedactedField(err.Error(), 256))
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 	}
 	return nil
 }
@@ -573,11 +573,11 @@ func restoreStore(path string) {
 		}
 		if len(store) == 0 {
 			audit().Warn("toktop: host key store was missing and its backup holds no pins",
-				"path", logcfg.RedactedField(core.RedactHome(path), 256))
+				"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap))
 			return nil
 		}
 		audit().Warn("toktop: host key store was missing, pins recovered from its backup",
-			"path", logcfg.RedactedField(core.RedactHome(path), 256))
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap))
 		if err := writeKnownHosts(path, store); err != nil {
 			return err
 		}
@@ -586,8 +586,8 @@ func restoreStore(path string) {
 	})
 	if err != nil {
 		audit().Warn("toktop: host key store not restored from its backup",
-			"path", logcfg.RedactedField(core.RedactHome(path), 256),
-			"error", logcfg.RedactedField(err.Error(), 256))
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 	}
 }
 
@@ -616,9 +616,9 @@ func warnDeletedStore(path string) {
 		return
 	}
 	audit().Warn("toktop: host key store was removed, so every pin it held is dropped",
-		"path", logcfg.RedactedField(core.RedactHome(path), 256),
-		"copy", logcfg.RedactedField(core.RedactHome(copy), 256),
-		"restore", logcfg.RedactedField(core.RedactHome(restoreCommand(copy, path)), 256))
+		"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+		"copy", logcfg.RedactedField(core.RedactHome(copy), logcfg.FieldCap),
+		"restore", logcfg.RedactedField(core.RedactHome(restoreCommand(copy, path)), logcfg.FieldCap))
 }
 
 // checkStoreCopy re-creates the copy the store is recovered from when that
@@ -664,13 +664,13 @@ func checkStoreCopy(path string) {
 	})
 	if err != nil {
 		audit().Warn("toktop: host key store backup not rewritten from the store",
-			"path", logcfg.RedactedField(core.RedactHome(path), 256),
-			"error", logcfg.RedactedField(err.Error(), 256))
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 		return
 	}
 	if rebuilt {
 		audit().Warn("toktop: host key store backup rewritten from the store",
-			"path", logcfg.RedactedField(core.RedactHome(path), 256),
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
 			"reason", why)
 	}
 }
@@ -784,8 +784,8 @@ func replaceFile(tmpName, path string) error {
 		// the store itself is missing, so a leftover nobody could delete
 		// would be handed back as the operator's pins on some later run.
 		audit().Warn("toktop: known_hosts backup left behind",
-			"path", logcfg.RedactedField(core.RedactHome(displaced), 256),
-			"error", logcfg.RedactedField(rerr.Error(), 256))
+			"path", logcfg.RedactedField(core.RedactHome(displaced), logcfg.FieldCap),
+			"error", logcfg.RedactedField(rerr.Error(), logcfg.FieldCap))
 	}
 	core.SyncDir(filepath.Dir(path))
 	return nil

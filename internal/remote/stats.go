@@ -15,11 +15,6 @@ import (
 	"github.com/maci0/toktop/internal/sysmon"
 )
 
-// remoteErrMax caps the remote's own failure text wherever it is written:
-// the stored sample error the frame and both reports render, and the audit
-// attribute beside it.
-const remoteErrMax = 256
-
 // Stats samples host vitals from a remote every few seconds and merges them
 // into snapshots, tagged with the host so the UI can show origin. Load and
 // memory come from /proc and stay empty on non-Linux remotes; CPU model, OS
@@ -238,7 +233,7 @@ func (s *Stats) poll(ctx context.Context) {
 		// audit line below, because this copy is the one the frame, the
 		// --plain report and --json publish: a peer's stderr can name either
 		// without naming a path, which the home fold does not reach.
-		s.err = logcfg.RedactedField(s.Client.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), remoteErrMax)
+		s.err = logcfg.RedactedField(s.Client.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), logcfg.FieldCap)
 		s.failedPolls++
 		// The UI shows the reason on the frame it happens to be drawn on and
 		// the frame is replaced a second later. The audit log gets the start of
@@ -251,8 +246,8 @@ func (s *Stats) poll(ctx context.Context) {
 		s.mu.Unlock()
 		if failedFirst {
 			audit().Warn("toktop: remote vitals poll failed",
-				"target", logcfg.RedactedField(s.Client.Target.LogHost(), remoteErrMax),
-				"error", logcfg.RedactedField(s.Client.Target.RedactUser(err.Error()), remoteErrMax))
+				"target", logcfg.RedactedField(s.Client.Target.LogHost(), logcfg.FieldCap),
+				"error", logcfg.RedactedField(s.Client.Target.RedactUser(err.Error()), logcfg.FieldCap))
 		}
 		return
 	}
@@ -269,7 +264,7 @@ func (s *Stats) poll(ctx context.Context) {
 	s.mu.Unlock()
 	if recovered {
 		audit().Info("toktop: remote vitals poll recovered",
-			"target", logcfg.RedactedField(s.Client.Target.LogHost(), remoteErrMax),
+			"target", logcfg.RedactedField(s.Client.Target.LogHost(), logcfg.FieldCap),
 			"failed_polls", failedPolls,
 			"outage", outage)
 	}

@@ -294,7 +294,7 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 			// constant, so it is capped and folded like the rest of the line's
 			// text; the dial error names the same socket and is folded with it.
 			audit().Warn("toktop: ssh agent unreachable, continuing without it",
-				"socket", logcfg.Field(core.RedactHome(sock), 256),
+				"socket", logcfg.Field(core.RedactHome(sock), logcfg.FieldCap),
 				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 		} else {
 			methods = append(methods, ssh.PublicKeysCallback(ag.Signers))

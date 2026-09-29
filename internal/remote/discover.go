@@ -40,7 +40,7 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 	// exists to name. The script marks the unreadable case on stdout instead.
 	if out, err := c.Run(ctx, netTCPScript); err != nil {
 		audit().Warn("toktop: remote listening-port sweep failed, falling back to an active probe",
-			"error", logcfg.RedactedField(c.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), 256))
+			"error", logcfg.RedactedField(c.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), logcfg.FieldCap))
 	} else if strings.Contains(out, noProcNetTCPMarker) {
 		audit().Warn("toktop: remote listening-port sweep could not read /proc/net/tcp, falling back to an active probe")
 	} else {
@@ -65,7 +65,7 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 	// absence from the dashboard.
 	if out, err := c.Run(ctx, procScanScript()); err != nil {
 		audit().Warn("toktop: remote engine scan failed; engines on custom ports will not be discovered",
-			"error", logcfg.RedactedField(c.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), 256))
+			"error", logcfg.RedactedField(c.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), logcfg.FieldCap))
 	} else {
 		d.EnginePorts = enginePorts(parseProcScan(out))
 	}

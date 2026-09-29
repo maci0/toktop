@@ -29,7 +29,7 @@ import (
 // escape sequence repainted the operator's screen (or named an endpoint with
 // glyphs it does not have). Same fold, so the line an operator reads and the
 // record they paste into an issue are the same text.
-func operatorText(s string) string { return logcfg.Field(s, 256) }
+func operatorText(s string) string { return logcfg.Field(s, logcfg.FieldCap) }
 
 func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	if set["opencode-db"] && !f.agents {

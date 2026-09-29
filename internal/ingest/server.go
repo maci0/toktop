@@ -199,7 +199,7 @@ func (s *Server) Serve() error {
 	if err != nil && s.log != nil {
 		s.log.Error("toktop: ingest stopped",
 			"addr", s.addr,
-			"error", logcfg.RedactedField(err.Error(), 256))
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 	}
 	return err
 }

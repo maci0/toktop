@@ -368,8 +368,8 @@ func runMain() int {
 			// screen: a run that silently ingests nothing looks exactly like a
 			// run whose agents post nothing.
 			logcfg.Logger().Warn("toktop: ingest disabled",
-				"addr", logcfg.Field(f.ingest, 256),
-				"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), 256))
+				"addr", logcfg.Field(f.ingest, logcfg.FieldCap),
+				"error", logcfg.Field(logcfg.RedactAddrs(err.Error()), logcfg.FieldCap))
 		} else {
 			feedAddr = srv.Addr()
 			if demoSrc != nil {
@@ -379,14 +379,14 @@ func runMain() int {
 			// line asked for: a --ingest on port 0 names an ephemeral port only
 			// this run knows. Without it the audit log holds the request and no
 			// way to post to what answered it.
-			logcfg.Logger().Info("toktop: ingest listening", "addr", logcfg.Field(feedAddr, 256))
+			logcfg.Logger().Info("toktop: ingest listening", "addr", logcfg.Field(feedAddr, logcfg.FieldCap))
 			if routableBind(feedAddr) {
 				fmt.Fprintf(os.Stderr, "toktop: warning: ingest endpoint %s accepts unauthenticated events from any reachable peer\n", operatorText(feedAddr))
 				// The one state change in the run that widens who can write to
 				// this machine's feed, and the only record of it was a stderr
 				// line the alt screen hides for the life of the run.
 				logcfg.Logger().Warn("toktop: ingest bound off loopback",
-					"addr", logcfg.Field(feedAddr, 256))
+					"addr", logcfg.Field(feedAddr, logcfg.FieldCap))
 			}
 			go func() {
 				if err := srv.Serve(); err != nil {
@@ -453,7 +453,7 @@ func feedFailure(feedErr chan<- string, msg string, cause error) {
 // line is what an operator pastes into issues.
 func reportFailure(feedErr chan<- string, level slog.Level, msg string, cause error) {
 	logcfg.Logger().Log(context.Background(), level, "toktop: "+msg,
-		"error", logcfg.Field(core.RedactHome(cause.Error()), 256))
+		"error", logcfg.Field(core.RedactHome(cause.Error()), logcfg.FieldCap))
 	feedFailure(feedErr, msg, cause)
 }
 

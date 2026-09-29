@@ -294,7 +294,7 @@ func (c *Client) auditForwardFailure(rport int, err error, fails int) {
 	c.forwardWarnAt[rport] = now
 	c.forwardWarnMu.Unlock()
 	fields := []any{
-		"target", logcfg.RedactedField(c.Target.LogHost(), 256),
+		"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
 		"port", c.Target.Port,
 		"forwarded_port", rport,
 	}
@@ -302,7 +302,7 @@ func (c *Client) auditForwardFailure(rport int, err error, fails int) {
 		fields = append(fields, "consecutive_failures", fails)
 	}
 	audit().Warn("toktop: ssh forward failed", append(fields,
-		"error", logcfg.RedactedField(c.Target.RedactUser(err.Error()), 256))...)
+		"error", logcfg.RedactedField(c.Target.RedactUser(err.Error()), logcfg.FieldCap))...)
 }
 
 // acquireRelay records local as a connection this client is piping, or refuses

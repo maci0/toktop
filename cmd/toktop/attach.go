@@ -36,13 +36,13 @@ var attachLog = logcfg.Logger
 func attachLocal(ctx context.Context, providers []provider.Provider, raw string) []provider.Provider {
 	if err := bearer.Allow(raw); err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v; requests there go unauthenticated\n", err)
-		attachLog().Warn("toktop: bearer refused", "endpoint", logcfg.Field(raw, 256), "error", logcfg.Field(err.Error(), 256))
+		attachLog().Warn("toktop: bearer refused", "endpoint", logcfg.Field(raw, logcfg.FieldCap), "error", logcfg.Field(err.Error(), logcfg.FieldCap))
 	}
 	if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p.Poll != nil {
 		return append(providers, p)
 	}
 	fmt.Fprintf(os.Stderr, "toktop: nothing recognized at %s; polling as generic openai anyway\n", operatorText(raw))
-	attachLog().Warn("toktop: nothing recognized at endpoint", "endpoint", logcfg.Field(raw, 256))
+	attachLog().Warn("toktop: nothing recognized at endpoint", "endpoint", logcfg.Field(raw, logcfg.FieldCap))
 	return append(providers, provider.NewOpenAICompat(raw, raw, core.KindOpenAI))
 }
 
@@ -68,14 +68,14 @@ func attachTarget(ctx context.Context, tgt remote.Target, sshKey string, sysFn f
 		// unreadable host-key store and unreachable hosts, none of which the
 		// dashboard says anything about once it is up.
 		attachLog().Warn("toktop: ssh target not attached",
-			"target", logcfg.Field(tgt.LogHost(), 256),
+			"target", logcfg.Field(tgt.LogHost(), logcfg.FieldCap),
 			"port", tgt.Port,
-			"error", logcfg.Field(tgt.RedactUser(err.Error()), 256))
+			"error", logcfg.Field(tgt.RedactUser(err.Error()), logcfg.FieldCap))
 		return nil, sysFn, err
 	}
 	fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n", len(rp), operatorText(tgt.Host))
 	attachLog().Info("toktop: ssh target attached",
-		"target", logcfg.Field(tgt.LogHost(), 256),
+		"target", logcfg.Field(tgt.LogHost(), logcfg.FieldCap),
 		"port", tgt.Port,
 		"engines", len(rp))
 	prev := sysFn
@@ -165,7 +165,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 			fmt.Fprintf(os.Stderr, "toktop: %s:%d could not be forwarded locally; engines on that port are invisible\n",
 				operatorText(tgt.Host), p)
 			attachLog().Warn("toktop: remote port not forwarded",
-				"target", logcfg.Field(tgt.LogHost(), 256),
+				"target", logcfg.Field(tgt.LogHost(), logcfg.FieldCap),
 				"remote_port", p)
 		}
 	}
@@ -179,7 +179,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 				// the audit twin for this drop already drops. A user's
 				// terminal is not the one place the account may stand.
 				fmt.Fprintf(os.Stderr, "toktop: ssh connection to %s lost (%s)\n", operatorText(tgt.Host),
-					logcfg.RedactedField(tgt.RedactUser(core.RedactHome(cli.Err().Error())), 256))
+					logcfg.RedactedField(tgt.RedactUser(core.RedactHome(cli.Err().Error())), logcfg.FieldCap))
 			}
 		}
 		// Close on both paths: watchClose reclaims listeners after a drop,
@@ -213,7 +213,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
 			operatorText(tgt.Host), rports[i])
 		attachLog().Warn("toktop: remote port skipped",
-			"target", logcfg.Field(tgt.LogHost(), 256),
+			"target", logcfg.Field(tgt.LogHost(), logcfg.FieldCap),
 			"remote_port", rports[i],
 			"reason", "no recognized engine API")
 	}
