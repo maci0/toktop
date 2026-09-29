@@ -67,6 +67,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- An agent's usage store is now opened once and kept, rather than opened and
+  closed on every poll. crush and opencode are read several times a second,
+  and rebuilding the read-only connection each time meant SQLite parsed the
+  DSN, applied six connection parameters and prepared the statement again for
+  a store that had not moved. Against a store holding a handful of sessions
+  the read measures 42us with the handle held open against 157us without it.
+  A store the agent replaces is opened afresh, so a handle never outlives the
+  file behind it, a read that fails drops its handle so the next poll retries
+  from a new one, and the table is capped the way the outage latch beside it
+  is.
 - The host strip's overflow count now names the way out the panel titles
   already name it: `+2 more (enlarge window)` where the row has the cells,
   and the bare count where it does not. A count with no way to reach it

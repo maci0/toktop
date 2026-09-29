@@ -176,15 +176,24 @@ func (crushDBSource) sessions(dirs []string, since time.Time) (map[string]map[st
 	return out, true
 }
 
-func readCrushSessions(path string, since time.Time) (map[string]sessionCounts, bool) {
-	db, err := openReadOnly(path)
+func readCrushSessions(path string, since time.Time) (_ map[string]sessionCounts, ok bool) {
+	db, err := openStore(path)
 	if err != nil {
 		if !storeAbsent(path) {
 			auditStoreRead("crush", path, err)
 		}
 		return nil, false
 	}
-	defer db.Close()
+	// A read that fails drops the shared handle rather than leaving it for the
+	// next poll: a handle whose last read went wrong is replaced on the next
+	// open, so a corrupt page or a database left mid-recovery costs one poll
+	// instead of every poll after it. Registered before rows.Close so the rows
+	// are closed first.
+	defer func() {
+		if !ok {
+			closeStore(path)
+		}
+	}()
 
 	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
 	defer cancel()

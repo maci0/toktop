@@ -180,7 +180,7 @@ func dirArgs(dirs []string, fold bool) []any {
 	return args
 }
 
-func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
+func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok bool) {
 	if o.path == "" || len(dirs) == 0 {
 		return values{}, false
 	}
@@ -189,14 +189,24 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 	// this have no opencode at all. A store that is present and unreadable is
 	// a different thing: it reports nothing forever, which the dashboard
 	// renders as an idle agent, so it is audited.
-	db, err := openReadOnly(o.path)
+	db, err := openStore(o.path)
 	if err != nil {
 		if !storeAbsent(o.path) {
 			auditStoreRead("opencode", o.path, err)
 		}
 		return values{}, false
 	}
-	defer db.Close()
+	// A read that failed drops the shared handle, so the next poll opens a
+	// fresh one instead of reusing a handle that just went wrong. Only a failed
+	// read drops it: a store that reads and holds nothing in this window is an
+	// idle agent, not a broken handle, and dropping it would reopen the
+	// database on every poll of every idle session. Registered before the
+	// cancel below so the context is released first.
+	defer func() {
+		if !ok {
+			closeStore(o.path)
+		}
+	}()
 
 	// One read of the folding flag decides the statement and its arguments
 	// together, so the placeholder count and the bound values cannot disagree.
@@ -214,12 +224,14 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
 		}
 		return values{}, false
 	}
-	v := values{
+	v = values{
 		output:   counter64(out.Int64),
 		thinking: counter64(thinking.Int64),
 		total:    counter64(total.Int64),
 		input:    counter64(input.Int64),
 	}
 	noteStoreReadOK("opencode", o.path)
-	return v, v.present()
+	// The read itself succeeded whatever the totals came to, so the handle
+	// stays open even when the store holds nothing for this window.
+	return v, true
 }

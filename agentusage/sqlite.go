@@ -87,6 +87,118 @@ func openReadOnly(path string) (*sql.DB, error) {
 	return db, nil
 }
 
+// maxOpenStores bounds the open-handle table. The key set is the set of agent
+// stores the running watchers read, which is one per project an agent has been
+// started in, and a dashboard left running across a churn of worktrees grows it
+// the way storeReadState does. The cap is the same trade for the same reason:
+// an evicted handle is a store no watcher read recently, and its next read
+// opens one.
+const maxOpenStores = 32
+
+// storeHandle is one open store and the file it was opened on. The identity
+// rides along because the handle is now kept open across polls: a store the
+// agent replaces (a fresh crush.db after a reinstall, a database rebuilt by a
+// test) leaves the old handle reading an unlinked inode, and the dashboard
+// would report the deleted store's numbers for as long as the process ran.
+type storeHandle struct {
+	db *sql.DB
+	fi os.FileInfo
+}
+
+// openStores holds one read-only handle per store, so a poll that runs several
+// times a second does not reopen the database each time. Opening one is not
+// cheap: SQLite parses the DSN, applies six connection parameters and prepares
+// the statement, and a store holding a handful of sessions measures 132µs to
+// open, query and close against 42µs to query on a handle already open. That
+// is a third of a 250ms poll interval spent re-establishing a connection whose
+// target has not moved.
+var openStores = struct {
+	sync.Mutex
+	byPath map[string]*storeHandle
+	order  []string // the same keys in insertion order, oldest first
+}{byPath: map[string]*storeHandle{}}
+
+// openStore returns a read-only handle on the database at path, reusing the one
+// already open on that exact file. The stat is what decides reuse: a path whose
+// file is no longer the one the handle was opened on (same inode, same device)
+// is a replaced store, and the old handle is closed rather than served. A read
+// that failed drops its handle through closeStore, so a corrupt page or a
+// database left mid-recovery costs one poll rather than every poll after it.
+//
+// Caller must not hold openStores' lock; the handle is shared, so a caller that
+// wants it released says so with closeStore, not by closing the *sql.DB.
+func openStore(path string) (*sql.DB, error) {
+	openStores.Lock()
+	defer openStores.Unlock()
+	if h, ok := openStores.byPath[path]; ok {
+		if sameFile(h.fi, statFile(path)) {
+			return h.db, nil
+		}
+		_ = h.db.Close()
+		delete(openStores.byPath, path)
+		openStores.order = removeKey(openStores.order, path)
+	}
+	db, err := openReadOnly(path)
+	if err != nil {
+		return nil, err
+	}
+	openStores.byPath[path] = &storeHandle{db: db, fi: statFile(path)}
+	openStores.order = append(openStores.order, path)
+	for len(openStores.order) > maxOpenStores {
+		victim := openStores.order[0]
+		openStores.order = openStores.order[1:]
+		if h, ok := openStores.byPath[victim]; ok {
+			_ = h.db.Close()
+			delete(openStores.byPath, victim)
+		}
+	}
+	return db, nil
+}
+
+// closeStore drops the cached handle for path, and is what a caller calls after
+// a read that failed: the handle is not the thing to keep alive once a read
+// through it has gone wrong. A path with no cached handle is a no-op, since a
+// read that never opened one has nothing to drop.
+func closeStore(path string) {
+	openStores.Lock()
+	defer openStores.Unlock()
+	if h, ok := openStores.byPath[path]; ok {
+		_ = h.db.Close()
+		delete(openStores.byPath, path)
+		openStores.order = removeKey(openStores.order, path)
+	}
+}
+
+// removeKey drops key from a FIFO order list. The lists hold at most
+// maxOpenStores entries, so the linear scan costs nothing against the open it
+// saves.
+func removeKey(order []string, key string) []string {
+	for i, k := range order {
+		if k == key {
+			return append(order[:i], order[i+1:]...)
+		}
+	}
+	return order
+}
+
+// statFile stats path, reporting a nil FileInfo for a failure. A store that is
+// not there is a case the callers already handle, and a nil here fails
+// sameFile, so the handle is replaced and the open that follows reports the
+// absence with its own error.
+func statFile(path string) os.FileInfo {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return nil
+	}
+	return fi
+}
+
+// sameFile reports whether two stats name the same file, with a missing stat
+// on either side meaning they do not.
+func sameFile(a, b os.FileInfo) bool {
+	return a != nil && b != nil && os.SameFile(a, b)
+}
+
 // storeAbsent reports whether a store that failed to read is simply not there.
 // A machine without the agent installed has no database, and that is an answer
 // rather than a fault worth a log line. Any other cause is not: a store that
