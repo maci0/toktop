@@ -101,6 +101,46 @@ var (
 			Background(cBase)
 )
 
+// backdropStyle is cBase as a background rather than as an assumption. Every
+// ratio quoted against cBase above is a claim about how the palette reads on
+// that surface, and nothing in the frame was painting it: the drawn dashboard
+// set foreground colors and left the backdrop to whatever the terminal profile
+// happened to be. On a dark profile the numbers hold. On a light one the
+// primary text (#d7dde5) falls to 1.37:1 and cDim to 3.60:1, so the whole
+// dashboard is a light-gray wash a low-vision reader cannot read at all
+// (WCAG 1.4.3), and the border that separates one panel from the next inverts
+// from 3.49:1 to 5.43:1 (WCAG 1.4.11). helpStyle already painted this surface
+// for the keys overlay; painting it for the frame makes the palette's documented
+// contract true on every terminal instead of on the common one.
+var backdropStyle = lipgloss.NewStyle().Background(cBase)
+
+// resetSeq ends every styled run this package writes, and it is what clears the
+// backdrop partway along a line: an inner Style.Render closes with it, so the
+// cells after it would fall back to the terminal's own background unless the
+// backdrop is re-asserted. lipgloss does not do that for a wrapped style, so
+// paintBackdrop splits on it.
+const resetSeq = "\x1b[0m"
+
+// paintBackdrop fills the frame's cells with cBase and re-asserts it after
+// every inner reset, padding short rows out to w so no column falls through to
+// the terminal. It is a no-op on a profile with no color at all: styleSides
+// recovers an empty run there, so the escape the frame needs is the one the
+// palette never had.
+func paintBackdrop(s string, w int) string {
+	sides := styleSides(backdropStyle)
+	if sides[0] == "" && sides[1] == "" {
+		return s
+	}
+	lines := strings.Split(s, "\n")
+	for i, ln := range lines {
+		if gap := w - widthOf(ln); gap > 0 {
+			ln += strings.Repeat(" ", gap)
+		}
+		lines[i] = sides[0] + strings.ReplaceAll(ln, resetSeq, resetSeq+sides[0]) + sides[1]
+	}
+	return strings.Join(lines, "\n")
+}
+
 // panel wraps content in a titled rounded box. Content is padded/cut to
 // innerW x innerH with plain spaces; the padding is ours rather than
 // lipgloss's, whose wrapping mishandles densely styled chart cells.

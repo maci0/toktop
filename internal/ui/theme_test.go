@@ -327,3 +327,95 @@ func TestPadBlockFillsEveryRow(t *testing.T) {
 		}
 	}
 }
+
+// The frame is painted over cBase, so the palette's documented contrast floors
+// hold on any terminal profile rather than only on a dark one. Two properties
+// carry that: every cell of every row is covered, and the backdrop is
+// re-asserted after an inner Style.Render, whose reset would otherwise drop it
+// for the rest of the row.
+func TestPaintBackdropCoversEveryCell(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	const w = 20
+	rows := []string{
+		"",
+		styleOK.Render("ok") + " tail",
+		"a" + styleDim.Render("b") + "c" + styleBad.Render("d") + "e",
+	}
+	got := paintBackdrop(strings.Join(rows, "\n"), w)
+	// Every reset is followed by the backdrop, so no cell after one is left on
+	// whatever the terminal's own background is.
+	side := styleSides(backdropStyle)
+	for i, ln := range strings.Split(got, "\n") {
+		if width := widthOf(ln); width != w {
+			t.Errorf("row %d is %d cells, want %d: %q", i, width, w, ln)
+		}
+		if !strings.Contains(rows[i], resetSeq) {
+			continue // a row with nothing styled on it has no reset to recover from
+		}
+		if want := resetSeq + side[0]; !strings.Contains(ln, want) {
+			t.Errorf("row %d has no backdrop after a reset: %q", i, ln)
+		}
+	}
+}
+
+// With no color profile the palette has no escape to give, so the frame must
+// come back byte for byte: a backdrop that invented one would put SGR bytes
+// into captured and piped output, which the profile is what suppresses.
+func TestPaintBackdropNoOpWithoutColor(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.Ascii)
+	defer lipgloss.SetColorProfile(prev)
+
+	in := styleOK.Render("ok") + "\nshort"
+	if got := paintBackdrop(in, 20); got != in {
+		t.Errorf("paintBackdrop under the Ascii profile rewrote the frame:\n got %q\nwant %q", got, in)
+	}
+}
+
+// The drawn dashboard and the plain report are the same View on two paths, and
+// only the drawn one is painted: the plain frame is the screen-reader report,
+// and a background is one more SGR run in output whose whole contract is that
+// it carries no styling at all.
+func TestViewLeavesPlainReportUnstyled(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	for _, cfg := range []Config{{Version: "t", Plain: true}, {Version: "t", Plain: true, Demo: true}} {
+		m := New(cfg, nil)
+		m.snap = busySnap()
+		m.w, m.h, m.ready = 100, 30, true
+		m.paused, m.feedDown = true, "agentwatch: session store unreadable"
+		if out := m.View(); strings.Contains(out, "\x1b") {
+			t.Errorf("plain frame (demo=%v) carries ANSI escapes:\n%q", cfg.Demo, out)
+		}
+	}
+}
+
+// The live plain view is the one path that was styled and the one the
+// screen-reader contract is written for, so the footer, the paused badge and
+// the degraded-stream line are all pinned here rather than only in
+// PlainTextFrame, which never drew them.
+func TestPlainViewCarriesNoFooterStyling(t *testing.T) {
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(prev)
+
+	m := New(Config{Version: "t", Plain: true, Demo: true, DemoSeed: 7}, nil)
+	m.snap = busySnap()
+	m.w, m.h, m.ready = 100, 30, true
+	m.notice = "no engines yet"
+	m.paused, m.feedDown = true, "agentwatch: session store unreadable"
+	out := m.View()
+	for _, want := range []string{"q quit", "? help", "PAUSED", "DEMO seed 7", "feed:"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("plain frame lost %q, which the footer and the badges print:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "\x1b") {
+		t.Errorf("plain frame carries ANSI escapes:\n%q", out)
+	}
+}

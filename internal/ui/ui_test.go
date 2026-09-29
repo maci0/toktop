@@ -1498,7 +1498,7 @@ func TestHostSegmentsSanitizeDrivers(t *testing.T) {
 		Drivers: map[string]string{"nv\x1b]0;title": "5\x1b[35m50"},
 		NPUs:    []string{"ane\x1b]52;c;QUJD\x07"},
 	}
-	segs := hostSegments(sy, stripHostLimits)
+	segs := hostSegments(sy, stripHostLimits, false)
 	// Raw segments: the driver key, the driver value and the NPU name each
 	// carry a payload, and each is sanitized at its own call site in
 	// hostSegments, so only the unstripped string can fail here.

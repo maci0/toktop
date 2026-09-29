@@ -58,7 +58,7 @@ func (m Model) renderSystem() string {
 
 	var ident []string
 	if sy != nil && (sy.CPUModel != "" || sy.OsName != "" || len(sy.Drivers) > 0 || len(sy.NPUs) > 0) {
-		ident = hostSegments(sy, stripHostLimits)
+		ident = hostSegments(sy, stripHostLimits, false)
 	}
 
 	cpuTemps := sysCPUTemps(sy)
@@ -180,31 +180,48 @@ func fitSeg(s string, n int) string {
 // hostSegments adds CPU model, OS·kernel and driver versions to the strip.
 // All values can originate from another host (ssh vitals) or vendor tooling,
 // so they pass the terminal sanitizer.
-func hostSegments(sy *core.SysSample, lim hostSegmentLimits) []string {
+//
+// plain drops the styling. The plain report is the screen-reader frame and
+// carries no ANSI at all, and these segments were the last thing in it that
+// did: the identity line came out carrying a foreground run a reader announces
+// as nothing and a light terminal shows at 1.96:1 (WCAG 1.4.3).
+func hostSegments(sy *core.SysSample, lim hostSegmentLimits, plain bool) []string {
+	label := func(s string) string {
+		if plain {
+			return s
+		}
+		return styleInfo.Render(s)
+	}
+	muted := func(s string) string {
+		if plain {
+			return s
+		}
+		return dim(s)
+	}
 	var segs []string
 	if sy.CPUModel != "" {
-		segs = append(segs, dim(fitSeg(core.SanitizeText(sy.CPUModel), lim.cpu)))
+		segs = append(segs, muted(fitSeg(core.SanitizeText(sy.CPUModel), lim.cpu)))
 	}
 	if sy.OsName != "" || sy.Kernel != "" {
 		osPart := core.SanitizeText(sy.OsName)
 		if sy.Kernel != "" {
 			osPart = strings.TrimSpace(osPart + " · " + core.SanitizeText(sy.Kernel))
 		}
-		segs = append(segs, dim(fitSeg(osPart, lim.os)))
+		segs = append(segs, muted(fitSeg(osPart, lim.os)))
 	}
 	if len(sy.Drivers) > 0 {
 		var parts []string
 		for _, k := range slices.Sorted(maps.Keys(sy.Drivers)) {
 			parts = append(parts, core.SanitizeText(k)+" "+core.SanitizeText(sy.Drivers[k]))
 		}
-		segs = append(segs, styleInfo.Render(fitSeg(strings.Join(parts, " · "), lim.drivers)))
+		segs = append(segs, label(fitSeg(strings.Join(parts, " · "), lim.drivers)))
 	}
 	if len(sy.NPUs) > 0 {
 		names := make([]string, len(sy.NPUs))
 		for i, n := range sy.NPUs {
 			names[i] = core.SanitizeText(n)
 		}
-		segs = append(segs, styleInfo.Render("npu: "+strings.Join(names, ",")))
+		segs = append(segs, label("npu: "+strings.Join(names, ",")))
 	}
 	return segs
 }

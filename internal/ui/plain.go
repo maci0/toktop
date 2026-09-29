@@ -114,15 +114,17 @@ func (m Model) renderPlain() string {
 	body := strings.TrimSuffix(PlainTextFrame(m.cfg, m.snap), "\n")
 	// The report is frozen on a paused frame, so without a badge a paused
 	// plain view is indistinguishable from a feed that stalled. The drawn
-	// dashboard carries the same badge for the same reason.
+	// dashboard carries the same badge for the same reason. It is printed
+	// unstyled, as the rest of this frame is: a screen reader reads an SGR run
+	// as nothing, and a light terminal shows cYellow at 1.95:1 (WCAG 1.4.3).
 	if m.paused {
-		body += "\n" + styleWarn.Render("‖ PAUSED")
+		body += "\n‖ PAUSED"
 	}
 	if m.feedDown != "" {
 		// The drawn frame puts the degraded-stream message in the feed panel.
 		// The plain report has no panel titles to point at it, so it says
 		// which subsystem failed on its own line.
-		body += "\n" + styleBad.Render("feed: "+core.SingleLine(m.feedDown))
+		body += "\nfeed: " + core.SingleLine(m.feedDown)
 	}
 	return body + "\n" + m.renderFooter()
 }
@@ -307,7 +309,7 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 	// space: a CPU model ending in a word and the OS name after it run
 	// together into one indistinguishable string, and this report has no row
 	// borders to tell the fields apart.
-	if ident := hostSegments(sy, hostSegmentLimits{}); len(ident) > 0 {
+	if ident := hostSegments(sy, hostSegmentLimits{}, true); len(ident) > 0 {
 		b.WriteString(strings.Join(ident, " · ") + "\n")
 	}
 	shown := 0

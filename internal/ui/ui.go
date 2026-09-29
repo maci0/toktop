@@ -495,11 +495,22 @@ func (m Model) updateHelpKey(key string) Model {
 
 // --- view ------------------------------------------------------------------
 
-// View draws one frame at the model's current size. It fills the agent
-// summary first, since the header, charts, feed and agents view each read a
-// different slice of it and the retained feed is long enough that walking it
-// per consumer shows up in a frame.
+// View draws one frame at the model's current size, over the palette's own
+// backdrop. It is the one place every drawn path passes through, so it is
+// where the frame gets its surface; the plain report is the exception and is
+// left as bare text (see renderPlain).
 func (m Model) View() string {
+	if m.cfg.Plain && m.ready {
+		return m.draw()
+	}
+	return paintBackdrop(m.draw(), m.w)
+}
+
+// draw renders the frame's contents, with no surface of its own.
+func (m Model) draw() string {
+	// It fills the agent summary first, since the header, charts, feed and
+	// agents view each read a different slice of it and the retained feed is
+	// long enough that walking it per consumer shows up in a frame.
 	if !m.ready {
 		// Same glyph the probe panel uses for work in progress: the status
 		// vocabulary stays monochrome terminal glyphs, no color emoji.

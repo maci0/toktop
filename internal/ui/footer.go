@@ -54,32 +54,32 @@ func (m Model) demoTag() string {
 	if !m.cfg.Demo {
 		return ""
 	}
-	return styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
+	return m.footNotice(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
 }
 
 func (m Model) renderFooter() string {
-	base := styleInfo.Render("q") + dim(" quit  ") +
-		styleInfo.Render("space") + dim(" pause  ")
+	base := m.footKey("q") + m.footLabel(" quit  ") +
+		m.footKey("space") + m.footLabel(" pause  ")
 	// The keys that are not on every frame, in the order they are dropped.
 	// "?" is not among them: it is how a reader finds the reference that lists
 	// the rest, so a row too narrow for the full list sheds from the right
 	// rather than letting the pane clip the last hint away.
 	var opt []string
 	if m.canProbe() {
-		opt = append(opt, styleInfo.Render("p")+dim(" probe  "))
+		opt = append(opt, m.footKey("p")+m.footLabel(" probe  "))
 	}
 	if m.canTimescale() {
-		opt = append(opt, styleInfo.Render("t")+dim(" timescale  "))
+		opt = append(opt, m.footKey("t")+m.footLabel(" timescale  "))
 	}
 	if m.canSwapFocus() {
 		label := " agents  "
 		if m.focusAgents {
 			label = " engines  "
 		}
-		opt = append(opt, styleInfo.Render("a")+dim(label))
+		opt = append(opt, m.footKey("a")+m.footLabel(label))
 	}
 	foot := func(opt []string) string {
-		return base + strings.Join(opt, "") + styleInfo.Render("?") + dim(" help")
+		return base + strings.Join(opt, "") + m.footKey("?") + m.footLabel(" help")
 	}
 	tag := m.demoTag()
 	keys := foot(opt)
@@ -98,8 +98,8 @@ func (m Model) renderFooter() string {
 	// that did nothing took the reader's map of the app away with it. The
 	// notice itself is printed whole or not at all; cut mid-sentence it stops
 	// answering the press it exists to answer.
-	notice := styleWarn.Render(m.notice)
-	for _, sep := range []string{dim("  ·  "), " "} {
+	notice := m.footNotice(m.notice)
+	for _, sep := range []string{m.footLabel("  ·  "), " "} {
 		kept := slices.Clone(opt)
 		for {
 			if widthOf(tag+foot(kept)+sep+notice) <= m.w {
@@ -114,7 +114,33 @@ func (m Model) renderFooter() string {
 	// Nothing beside the notice fits, and the notice names its own key, so it
 	// takes the row on its own rather than being clipped off it.
 	room := max(m.w-widthOf(tag), 0)
-	return tag + styleWarn.Render(shorten(m.notice, room))
+	return tag + m.footNotice(shorten(m.notice, room))
+}
+
+// footKey, footLabel and footNotice style the footer row, and return their
+// argument unstyled for the plain report. That report is the non-visual frame:
+// a screen reader reads an SGR run as nothing, and a low-vision reader on a
+// light terminal reads cDim at 3.60:1 and cCyan at 1.96:1 (WCAG 1.4.3). The
+// words already carry what the colors were carrying.
+func (m Model) footKey(s string) string {
+	if m.cfg.Plain {
+		return s
+	}
+	return styleInfo.Render(s)
+}
+
+func (m Model) footLabel(s string) string {
+	if m.cfg.Plain {
+		return s
+	}
+	return dim(s)
+}
+
+func (m Model) footNotice(s string) string {
+	if m.cfg.Plain {
+		return s
+	}
+	return styleWarn.Render(s)
 }
 
 func (m Model) renderEmpty() string {
