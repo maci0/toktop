@@ -2102,6 +2102,14 @@ func TestProbeAllTargetSelection(t *testing.T) {
 			if tc.want == "" {
 				waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 0 },
 					"probe ran against a model that must be skipped")
+				// The negative above only means something if this harness
+				// would have seen a hit. Swap in an inventory that must
+				// probe and prove the same wave path records one.
+				fp.m = &provider.Metrics{Models: []core.ModelInfo{{Name: "control"}}}
+				emitOnce(t, c)
+				c.ProbeAll()
+				waitFor(t, func() bool { return hits.Load() == 1 },
+					"the same wave never reached the engine with a probeable model, so the negative above proved nothing")
 				return
 			}
 			waitFor(t, func() bool { return got.Load().(string) == tc.want },

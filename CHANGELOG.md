@@ -241,6 +241,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The lock error `toktop update` prints when it cannot take the install lock
+  named the home directory back after redacting it. The message wrapped the
+  `*fs.PathError` from `os.Remove`, whose own text spells the path out in full,
+  so `~/.local/bin/toktop.lock` was printed as `~/.local/bin/toktop.lock`
+  followed by the same path unredacted. The wrapped error is rebuilt with the
+  redacted path, keeping the operation and the cause that `errors.Is` and
+  `errors.As` reach.
 - `docs/openapi.yaml` names the toktop release it describes in
   `info.version`, which is the field a client generator pins. It said `0.1.0`
   through every change to the answers `/healthz` gives, to the `X-Request-Id`

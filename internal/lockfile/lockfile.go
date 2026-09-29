@@ -35,6 +35,22 @@ type Policy struct {
 // directory passes core.RedactHome in its place.
 func Raw(s string) string { return s }
 
+// redactPathErr returns err with the path it names printed through redact.
+//
+// The os calls below all fail with a *fs.PathError, whose message is its own
+// path spelled out in full. Wrapping one with %w next to a redacted path
+// therefore prints the redacted path and then the same path unredacted one
+// clause later, and the account name the redaction exists to remove is in the
+// message either way. The operation and the cause are carried over intact, so
+// errors.Is and errors.As still reach the reason the call failed.
+func redactPathErr(redact func(string) string, err error) error {
+	var pe *fs.PathError
+	if !errors.As(err, &pe) {
+		return err
+	}
+	return &fs.PathError{Op: pe.Op, Path: redact(pe.Path), Err: pe.Err}
+}
+
 // With runs fn while holding the lock file at lock and releases it on the way
 // out. owner names what the lock protects, and redact maps a path to the form
 // the failure messages print.
@@ -60,10 +76,10 @@ func With(lock, owner string, p Policy, redact func(string) string, fn func() er
 				// later caller report a lock held by no process, so the
 				// failure to clear it rides along with the failure that
 				// left it there.
-				lerr := fmt.Errorf("cannot write the lock %s: %w", redact(lock), werr)
+				lerr := fmt.Errorf("cannot write the lock %s: %w", redact(lock), redactPathErr(redact, werr))
 				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
 					lerr = errors.Join(lerr,
-						fmt.Errorf("left a lock file at %s that must be deleted: %w", redact(lock), rerr))
+						fmt.Errorf("left a lock file at %s that must be deleted: %w", redact(lock), redactPathErr(redact, rerr)))
 				}
 				return lerr
 			}
@@ -83,7 +99,8 @@ func With(lock, owner string, p Policy, redact func(string) string, fn func() er
 					return
 				}
 				if rerr := os.Remove(lock); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w", redact(lock), rerr))
+					err = errors.Join(err, fmt.Errorf("cannot release the lock at %s: %w",
+						redact(lock), redactPathErr(redact, rerr)))
 				}
 			}()
 			return fn()
@@ -117,7 +134,7 @@ func With(lock, owner string, p Policy, redact func(string) string, fn func() er
 		if time.Now().After(deadline) {
 			if breakErr != nil {
 				return fmt.Errorf("%s is locked by another toktop; the stale lock at %s could not be removed: %w",
-					redact(owner), redact(lock), breakErr)
+					redact(owner), redact(lock), redactPathErr(redact, breakErr))
 			}
 			return fmt.Errorf("%s is locked by another toktop; giving up after %s", redact(owner), p.Wait)
 		}

@@ -4,8 +4,11 @@
 package lockfile
 
 import (
+	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -115,5 +118,224 @@ func TestEachAcquisitionCarriesItsOwnToken(t *testing.T) {
 	first, second := newToken(), newToken()
 	if first == second {
 		t.Fatal("two acquisitions of one process produced the same token")
+	}
+}
+
+// testPolicy keeps the give-up arms short enough for a unit test and long
+// enough that a scheduling hiccup does not read as a broken lock.
+func testPolicy() Policy {
+	return Policy{Wait: 200 * time.Millisecond, Poll: time.Millisecond, Stale: time.Minute}
+}
+
+// holdLock takes the lock the way a peer process would and leaves it behind,
+// so a test can contend with a holder that never releases.
+func holdLock(t *testing.T, lock string) {
+	t.Helper()
+	f, err := os.OpenFile(lock, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		t.Fatalf("plant the peer lock: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("close the planted lock: %v", err)
+	}
+}
+
+// The critical section runs, and the lock is gone on the way out: a lock file
+// left behind makes every later caller report a holder that is not running.
+func TestWithRunsAndReleases(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "store.lock")
+	ran := false
+	if err := With(lock, "store", testPolicy(), Raw, func() error {
+		ran = true
+		if _, err := os.Stat(lock); err != nil {
+			t.Errorf("the lock was not held while fn ran: %v", err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("uncontended With: %v", err)
+	}
+	if !ran {
+		t.Error("fn never ran")
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("the lock outlived the critical section: %v", err)
+	}
+}
+
+// fn's own failure is the caller's answer, and the release still happens: a
+// lock kept past a failed critical section is the wedge the whole package
+// exists to avoid.
+func TestWithReleasesOnAFailedCriticalSection(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "store.lock")
+	want := errors.New("read-modify-write failed")
+	err := With(lock, "store", testPolicy(), Raw, func() error { return want })
+	if !errors.Is(err, want) {
+		t.Fatalf("With = %v, want the failure fn returned", err)
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("a failed critical section left the lock behind: %v", err)
+	}
+}
+
+// A lock held by a peer is waited on, not taken: the second caller runs only
+// once the first is out, and never interleaves with it.
+func TestWithWaitsForTheHolder(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "store.lock")
+	release := make(chan struct{})
+	held := make(chan struct{})
+	go func() {
+		_ = With(lock, "first", testPolicy(), Raw, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+
+	ran := make(chan struct{})
+	go func() {
+		_ = With(lock, "second", testPolicy(), Raw, func() error { close(ran); return nil })
+	}()
+	select {
+	case <-ran:
+		t.Fatal("the second caller ran while the lock was held")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-ran:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the second caller never got the lock after the holder released")
+	}
+}
+
+// A lock nobody releases is a real failure with a real cause: the give-up
+// names what is locked and how long the caller waited, so the operator can
+// tell a slow peer from a wedged one.
+func TestWithGivesUpOnAStuckHolder(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "store.lock")
+	holdLock(t, lock)
+
+	err := With(lock, "known-host store", testPolicy(), Raw, func() error {
+		t.Error("fn ran while another process held the lock")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("With succeeded against a lock nobody released")
+	}
+	for _, want := range []string{"known-host store", "locked by another toktop", testPolicy().Wait.String()} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("give-up message %q does not name %q", err, want)
+		}
+	}
+}
+
+// A stale lock that will not unlink is a different failure from a live one,
+// and reporting it as the latter names a peer that is not running. The
+// message carries the path, so it goes through the caller's redactor: a
+// caller that hides its home directory must not leak one into an error. A
+// non-empty directory stands in for the unlink that keeps failing (a
+// read-only config dir cannot be arranged portably), and it also proves the
+// retry gives up on the deadline instead of spinning on the stale arm.
+func TestWithReportsAnUnremovableStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "store.lock")
+	if err := os.Mkdir(lock, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(lock, "held"), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stale := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(lock, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	redact := func(s string) string { return strings.ReplaceAll(s, dir, "<home>") }
+	start := time.Now()
+	err := With(lock, "known-host store", testPolicy(), redact, func() error {
+		t.Error("fn ran while the lock could not be broken")
+		return nil
+	})
+	if err == nil {
+		t.Fatal("With succeeded against a stale lock that would not unlink")
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Errorf("the give-up took %s; the stale arm spins instead of checking the deadline", elapsed)
+	}
+	for _, want := range []string{"known-host store", "could not be removed", "<home>"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("give-up message %q does not name %q", err, want)
+		}
+	}
+	if strings.Contains(err.Error(), dir) {
+		t.Errorf("give-up message %q leaked the unredacted path", err)
+	}
+	// The redaction rewrites the path a *fs.PathError carries; it must not cost
+	// the caller the reason the call failed.
+	var pe *fs.PathError
+	if !errors.As(err, &pe) {
+		t.Fatalf("give-up error %v is not a *fs.PathError; the cause is unreachable", err)
+	}
+	if pe.Path != "<home>/store.lock" {
+		t.Errorf("PathError.Path = %q, want the redacted lock path", pe.Path)
+	}
+	if pe.Err == nil {
+		t.Error("PathError.Err is nil, so the reason the break failed was dropped")
+	}
+}
+
+// A lock older than the stale age belongs to a process that died holding it.
+// Waiting out the full deadline on it would report a holder that is not
+// running, so it is broken and the caller proceeds.
+func TestWithBreaksAStaleLock(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "store.lock")
+	holdLock(t, lock)
+	stale := time.Now().Add(-2 * time.Minute)
+	if err := os.Chtimes(lock, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+
+	ran := false
+	if err := With(lock, "store", testPolicy(), Raw, func() error {
+		ran = true
+		return nil
+	}); err != nil {
+		t.Fatalf("a stale lock was not broken: %v", err)
+	}
+	if !ran {
+		t.Error("fn never ran after the stale lock was broken")
+	}
+	if _, err := os.Stat(lock); !os.IsNotExist(err) {
+		t.Errorf("the lock outlived the broken critical section: %v", err)
+	}
+}
+
+// A lock that cannot be created at all is not a lock failure: the directory
+// is missing or unwritable, and the work itself reports that with a clearer
+// error. Reporting a lock error here would name a peer that does not exist
+// and leave the operator with nothing to act on, so fn runs either way.
+func TestWithRunsWhenTheLockCannotBeCreated(t *testing.T) {
+	lock := filepath.Join(t.TempDir(), "absent", "store.lock")
+	want := errors.New("the work reports its own cause")
+	ran := false
+	err := With(lock, "store", testPolicy(), Raw, func() error {
+		ran = true
+		return want
+	})
+	if !ran {
+		t.Error("fn never ran, so the caller saw a lock error instead of the work's")
+	}
+	if !errors.Is(err, want) {
+		t.Fatalf("With = %v, want the failure fn returned", err)
+	}
+}
+
+// Raw is the policy a caller with nothing to hide passes: the lock path
+// reaches its own messages unchanged.
+func TestRawIsIdentity(t *testing.T) {
+	const path = "/home/operator/.config/toktop/known_hosts"
+	if got := Raw(path); got != path {
+		t.Errorf("Raw(%q) = %q, want it unchanged", path, got)
 	}
 }
