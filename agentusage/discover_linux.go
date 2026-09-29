@@ -17,6 +17,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Discover lists the agent CLIs running on this machine, in ascending pid
@@ -184,31 +186,17 @@ func startedAt(pid int) time.Time {
 // procStartTicks returns /proc/PID/stat field 22 (starttime), skipping the
 // comm field whose parentheses may contain spaces.
 func procStartTicks(stat string) (uint64, bool) {
-	closeP := strings.LastIndexByte(stat, ')')
-	if closeP < 0 || closeP+2 > len(stat) {
-		return 0, false
-	}
-	rest := stat[closeP+2:]
-	field := 3
-	i := 0
-	for field <= 22 && i < len(rest) {
-		for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
-			i++
+	var ticks uint64
+	var ok bool
+	core.WalkProcStat(stat, 22, func(field int, value string) bool {
+		if field != 22 {
+			return true
 		}
-		if i >= len(rest) {
-			break
-		}
-		start := i
-		for i < len(rest) && rest[i] != ' ' && rest[i] != '\t' && rest[i] != '\n' {
-			i++
-		}
-		if field == 22 {
-			n, err := strconv.ParseUint(rest[start:i], 10, 64)
-			return n, err == nil
-		}
-		field++
-	}
-	return 0, false
+		n, err := strconv.ParseUint(value, 10, 64)
+		ticks, ok = n, err == nil
+		return false
+	})
+	return ticks, ok
 }
 
 func ticksSinceBoot(ticks uint64) (time.Duration, bool) {

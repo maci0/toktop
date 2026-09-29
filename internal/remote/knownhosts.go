@@ -465,11 +465,8 @@ func malformedPin(path string, n int, line, why string) error {
 
 // atomicWriteFile writes contents to path through a temp file in the same
 // directory, so a reader never sees a half-written store. The temp file is
-// owner-only from the moment it is created, and it is removed unless the
-// rename landed. A removal that fails is reported with the failure that
-// triggered it: the staging file holds this host's pinned keys, so an
-// operator told only "cannot write the store" has no way to know the
-// directory now holds one.
+// owner-only from the moment it is created, and [core.DiscardStaged] removes it
+// unless the rename landed.
 func atomicWriteFile(path, contents string) (err error) {
 	tmp, err := os.CreateTemp(filepath.Dir(path), knownHostsTempPrefix+"*")
 	if err != nil {
@@ -478,14 +475,7 @@ func atomicWriteFile(path, contents string) (err error) {
 	tmpName := tmp.Name()
 	defer func() {
 		tmp.Close()
-		if err == nil {
-			os.Remove(tmpName) // no-op once the rename succeeded
-			return
-		}
-		if rerr := os.Remove(tmpName); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			err = errors.Join(err,
-				fmt.Errorf("left a staging file at %s that must be deleted: %w", tmpName, rerr))
-		}
+		err = core.DiscardStaged(tmpName, err)
 	}()
 	if _, err := tmp.WriteString(contents); err != nil {
 		return err

@@ -143,37 +143,17 @@ func readProcFile(path string) []byte {
 // resident set in pages (field 24) from one /proc/PID/stat body, respecting
 // the comm parens (a comm may contain spaces).
 func procStatCPUAndRSS(stat string) (ticks uint64, rssBytes uint64) {
-	open := strings.LastIndexByte(stat, '(')
-	closeP := strings.LastIndexByte(stat, ')')
-	if open < 0 || closeP < 0 || closeP+2 > len(stat) {
-		return 0, 0
-	}
-	// Field 3 onward, walked in place: strings.Fields would allocate a
-	// slice of ~50 strings per process per poll.
-	rest := stat[closeP+2:]
 	var utime, stime, pages uint64
-	field := 3
-	i := 0
-	for field <= 24 && i < len(rest) {
-		for i < len(rest) && (rest[i] == ' ' || rest[i] == '\t') {
-			i++
-		}
-		if i >= len(rest) {
-			break
-		}
-		start := i
-		for i < len(rest) && rest[i] != ' ' && rest[i] != '\t' && rest[i] != '\n' {
-			i++
-		}
+	core.WalkProcStat(stat, 24, func(field int, value string) bool {
 		switch field {
 		case 14:
-			utime, _ = strconv.ParseUint(rest[start:i], 10, 64)
+			utime, _ = strconv.ParseUint(value, 10, 64)
 		case 15:
-			stime, _ = strconv.ParseUint(rest[start:i], 10, 64)
+			stime, _ = strconv.ParseUint(value, 10, 64)
 		case 24:
-			pages, _ = strconv.ParseUint(rest[start:i], 10, 64)
+			pages, _ = strconv.ParseUint(value, 10, 64)
 		}
-		field++
-	}
+		return true
+	})
 	return core.SatAddU64(utime, stime), core.MulSatU64(pages, uint64(os.Getpagesize()))
 }

@@ -397,18 +397,10 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	// A failed update that leaves its partial download behind is reported
 	// with the failure, not swallowed: the operator otherwise sees the
 	// original error with no sign the install directory now holds an
-	// unverified file. Once the rename has succeeded there is nothing left at
-	// tmpName and the Remove is a no-op.
+	// unverified file.
 	defer func() {
 		tmp.Close()
-		if err == nil {
-			os.Remove(tmpName) // no-op once the rename succeeded
-			return
-		}
-		if rerr := os.Remove(tmpName); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
-			err = errors.Join(err,
-				fmt.Errorf("left a partial download at %s that must be deleted: %w", tmpName, rerr))
-		}
+		err = core.DiscardStaged(tmpName, err)
 	}()
 
 	sum, err := fetch(ctx, assetURL, tmp, maxAssetBytes)

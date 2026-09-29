@@ -4,6 +4,7 @@
 package core
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -118,4 +119,32 @@ func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
 // is about to happen: the sweep runs before it.
 func TestSweepStaleTempsOnMissingDir(t *testing.T) {
 	SweepStaleTemps(filepath.Join(t.TempDir(), "absent"), "toktop.tmp")
+}
+
+// DiscardStaged decides what a caller is told about a staging file left behind
+// by a failed write, so both branches are pinned: a success must not report a
+// removal, and a failure must not swallow one.
+func TestDiscardStaged(t *testing.T) {
+	dir := t.TempDir()
+	leaked := filepath.Join(dir, "stage.tmp")
+	if err := os.WriteFile(leaked, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// A write that failed has to report the leftover; an operator told only
+	// that the write failed has no way to know the directory now holds one.
+	boom := errors.New("checksum mismatch")
+	err := DiscardStaged(leaked, boom)
+	if !errors.Is(err, boom) {
+		t.Errorf("the failure it triggered was lost: %v", err)
+	}
+	if _, serr := os.Stat(leaked); !os.IsNotExist(serr) {
+		t.Errorf("the staging file survived: %v", serr)
+	}
+
+	// A write that succeeded renamed the file away, so nothing is left and
+	// nothing is reported.
+	if err := DiscardStaged(leaked, nil); err != nil {
+		t.Errorf("a succeeded write reported %v", err)
+	}
 }
