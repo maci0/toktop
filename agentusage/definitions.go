@@ -141,7 +141,8 @@ var (
 // nothing when every key it names is one [Spec] has a field for.
 //
 // A load that was refused leaves the previous answer in place: the file that
-// would have named these keys is not the one in force.
+// would have named these keys is not the one in force. A load of a path with
+// no file at it is not a refusal, and clears the answer.
 func UnknownUsageKeys() []string {
 	defsMu.RLock()
 	defer defsMu.RUnlock()
@@ -379,6 +380,12 @@ func LoadDefinitions(path string) error {
 	data, err := readCapped(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
+			// A file that is not there is not a file that was refused, so the
+			// load still describes what is in force: nothing. The keys a
+			// previous file named were named by that file, not this one.
+			defsMu.Lock()
+			unknownKeys = nil
+			defsMu.Unlock()
 			return nil
 		}
 		// A file that is there but cannot be read is a file that cannot be

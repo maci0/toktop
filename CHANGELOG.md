@@ -85,6 +85,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `POST /v1/events` gave the two spellings of `-9223372036854775808`
+  different answers. The integer form is inside the int64 range, so it clamped
+  to `0`; the whole-float form parsed through a float64, which rounds that
+  value and every integer below it onto `-2^63` and was refused `400` as out of
+  range. A float branch now reads the exact value back from the text, so
+  `-9223372036854775808.0` and `-9223372036854775809.0` answer what the
+  integer beside them answers. `span_ms` shares the reader.
+- `agentusage.UnknownUsageKeys` kept naming the unknown `usage` keys of an
+  earlier definitions file after a load of a path with no file at it. A
+  missing file is not a refused one, so the load now clears the answer, as
+  the doc already said it would.
 - `make site-rollback` and `make site-deploy` cleared the rolled-back record
   with `rmdir`, which cannot remove a marker directory that still holds the
   manifest a previous rollback wrote into it. The `rmdir` failed, was

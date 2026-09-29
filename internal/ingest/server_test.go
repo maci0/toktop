@@ -440,6 +440,27 @@ func TestIngestAcceptsWholeJSONNumberTokenCounts(t *testing.T) {
 	}
 }
 
+// -2^63 is the last value int64 holds, and a float64 cannot tell it from the
+// integers below it: every one of them rounds onto it. Both spellings are
+// inside the range and negative, so both record a clamped 0.
+func TestIngestAcceptsInt64BoundaryTokenCount(t *testing.T) {
+	for _, value := range []string{"-9223372036854775808", "-9223372036854775808.0"} {
+		t.Run(value, func(t *testing.T) {
+			rec := &memRecorder{}
+			s := startIngest(t, rec)
+			resp := post(t, "http://"+s.Addr()+"/v1/events",
+				`{"agent":"boundary","output_tokens":`+value+`}`)
+			if resp != http.StatusAccepted {
+				t.Fatalf("status = %d, want %d", resp, http.StatusAccepted)
+			}
+			awaitEvents(t, rec, 1)
+			if rec.evs[0].OutputTokens != 0 {
+				t.Errorf("output_tokens = %d, want 0", rec.evs[0].OutputTokens)
+			}
+		})
+	}
+}
+
 func TestIngestRejectsTokenCountOverflow(t *testing.T) {
 	// Both sides of the int64 range. The negative values are the ones that
 	// round to -2^63 as a float64 and would otherwise pass the bound the

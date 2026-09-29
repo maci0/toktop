@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"math/big"
 	"strconv"
 	"strings"
 	"time"
@@ -257,8 +258,8 @@ const maxSpanMS = int64(core.MaxEventSpan / time.Millisecond)
 // number too large for a float64 to hold is the same out-of-range answer a
 // value past MaxInt64 gets, not a claim that it is not an integer: it is one,
 // and the two limits are the same field being too big. A value outside the
-// int64 range is that answer on either side of zero, whether it was written
-// as an integer or as a whole float.
+// int64 range is that answer on either side of zero, whatever spelling wrote
+// it, and the exactWholeInt branch below is what keeps the two agreeing.
 func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 	s := strings.TrimSpace(string(raw))
 	if s == "" || s == "null" {
@@ -271,19 +272,23 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 		// zero it is on, and the answer is the 400 the positive side already
 		// gets below. It cannot be left to the float branch: every such value
 		// rounds to the nearest float64, and a count just under -2^63 rounds
-		// to -2^63 exactly, which then passes the MinInt64 bound and is
-		// stored as an in-range number. The documented promise is a 400 for
-		// anything outside the range.
+		// to -2^63 exactly, which the int64 bound would then read as a value
+		// inside the range. The documented promise is a 400 for anything
+		// outside it.
 		return 0, fmt.Errorf("bad json: %s is out of range", field)
 	}
 	f, err := strconv.ParseFloat(s, 64)
 	if err == nil && !math.IsNaN(f) && !math.IsInf(f, 0) && math.Trunc(f) == f {
-		// The bounds are exclusive at both ends: a float64 rounds every value
-		// within half an ulp of an int64 extreme onto that extreme, so 2^63 and
-		// -2^63 are each also how the whole floats just past them parse. A
-		// comparison open at the MinInt64 end would accept the float form of a
-		// count the integer form refuses, which is the same answer the sender
-		// got for -9223372036854775808 and one the two spellings must share.
+		if n, ok := exactWholeInt(s, f); ok {
+			if n.Cmp(minInt64Big) < 0 || n.Cmp(maxInt64Big) > 0 {
+				return 0, fmt.Errorf("bad json: %s is out of range", field)
+			}
+			return n.Int64(), nil
+		}
+		// No exact reading, so the rounded one answers. The bounds are closed
+		// at both ends: -2^63 is what a float64 shows for every count within
+		// half an ulp of it, and the integer form of such a count is out of
+		// range, so the two spellings have to agree.
 		if f >= math.MaxInt64 || f <= math.MinInt64 {
 			return 0, fmt.Errorf("bad json: %s is out of range", field)
 		}
@@ -293,6 +298,74 @@ func parseTokenJSON(raw json.RawMessage, field string) (int64, error) {
 		return 0, fmt.Errorf("bad json: %s is out of range", field)
 	}
 	return 0, fmt.Errorf("bad json: %s must be an integer", field)
+}
+
+var (
+	minInt64Big = big.NewInt(math.MinInt64)
+	maxInt64Big = big.NewInt(math.MaxInt64)
+)
+
+// exactWholeInt reads back the integer a whole JSON number spells, for the
+// magnitudes where a float64 rounds it onto an int64 extreme: every count
+// within half an ulp of 2^63 or of -2^63 parses as the extreme itself, so the
+// rounded value cannot tell -2^63 (inside the range) from the integers below
+// it (outside). Below exactFloatRange a float64 holds every integer of that
+// magnitude exactly, so there is nothing to read back and the caller keeps its
+// value. A spelling big.Rat reads as something other than a whole JSON number
+// is refused here rather than loosened into a count.
+func exactWholeInt(s string, f float64) (*big.Int, bool) {
+	if math.Abs(f) < exactFloatRange {
+		return nil, false
+	}
+	if !isJSONNumber(s) {
+		return nil, false
+	}
+	r, ok := new(big.Rat).SetString(s)
+	if !ok || !r.IsInt() {
+		return nil, false
+	}
+	return r.Num(), true
+}
+
+// exactFloatRange is 2^62, the magnitude from which a float64 has an ulp
+// above 1 and so can no longer name every integer it holds.
+const exactFloatRange = 4.611686018427388e+18
+
+// isJSONNumber reports whether s is a JSON number, the one spelling
+// big.Rat.SetString would otherwise also read: it also takes a rational like
+// "1/2" and a hexadecimal float, neither of which the wire can carry, and a
+// count is not a field a second number syntax widens.
+func isJSONNumber(s string) bool {
+	i := 0
+	if strings.HasPrefix(s, "-") {
+		i++
+	}
+	digits := func() bool {
+		start := i
+		for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+			i++
+		}
+		return i > start
+	}
+	if !digits() {
+		return false
+	}
+	if i < len(s) && s[i] == '.' {
+		i++
+		if !digits() {
+			return false
+		}
+	}
+	if i < len(s) && (s[i] == 'e' || s[i] == 'E') {
+		i++
+		if i < len(s) && (s[i] == '+' || s[i] == '-') {
+			i++
+		}
+		if !digits() {
+			return false
+		}
+	}
+	return i == len(s)
 }
 
 // isNumRangeError reports whether a strconv parse failed because the value
