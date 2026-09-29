@@ -248,8 +248,10 @@ SITE_LOCK         := $(DIST)/site.lock
 # two record whether a deploy from this tree is still waiting to be undone, so
 # the second rollback finds nothing of this tree's to undo and says so.
 # Directories, like the lock: dist-clean deletes the top-level files a release
-# must not ship and leaves these alone, and `make clean` takes them with
-# dist/. The one a deploy leaves behind holds a manifest of what it uploaded
+# must not ship and leaves these alone, and `make clean` moves them out of the
+# way and puts them back, because a marker that says a deploy of this tree is
+# live is the record a rollback needs and a build sweep is not entitled to
+# take. The one a deploy leaves behind holds a manifest of what it uploaded
 # (SITE_DEPLOYINFO), and a rollback moves it with the directory, so the
 # version that was undone is still on record.
 SITE_DEPLOYED     := $(DIST)/site.deployed
@@ -1431,13 +1433,28 @@ pr: ## every PR merge gate except the OS matrix: ci + site-lint + site-check + c
 # touches regular files at depth 1 and leaves the lock alone; this is the one
 # target that does not.
 .PHONY: clean
-clean: ## remove build artifacts
+# The two site markers are build output by location and not by nature: they
+# record that a deploy from this tree is still live and waiting to be undone,
+# and dist-clean already leaves them alone for that reason. A clean that took
+# them would make `make site-rollback` refuse with "nothing to roll back" while
+# the deployment it would have undone is the one serving, and a routine clean
+# is exactly what somebody runs first when the site looks wrong. So the sweep
+# deletes everything else in dist/ and leaves the two where they are.
+clean: ## remove build artifacts, keeping the site deploy and rollback markers
 	@if [ -d $(SITE_LOCK) ]; then \
 		echo "make clean: $(SITE_LOCK) is held; a site deploy or rollback is running." >&2; \
 		echo "  wait for it to finish, or remove the directory if that process is gone" >&2; \
 		exit 1; \
 	fi
-	rm -rf $(DIST) $(BINARY) coverage.out *.test
+	@if [ -d $(DIST) ]; then \
+		for entry in $(DIST)/* $(DIST)/.[!.]*; do \
+			case "$$(basename $$entry)" in \
+				$(notdir $(SITE_DEPLOYED))|$(notdir $(SITE_ROLLED_BACK))) continue ;; \
+			esac; \
+			rm -rf "$$entry"; \
+		done; \
+	fi
+	rm -rf $(BINARY) coverage.out *.test
 
 .PHONY: check-changelog
 check-changelog: ## verify CHANGELOG.md contains release section and link for VERSION

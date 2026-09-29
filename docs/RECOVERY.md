@@ -39,8 +39,19 @@ read-only, and belongs to something else:
   with `make site-rollback`, which needs no data restore, and the details are
   in [Rolling the site back](#rolling-the-site-back).
 
-There is no database, no queue, no cache directory and no uploaded file.
-Nothing to back up beyond the pin store, which is why this file is short.
+The one piece of state a caller hands to toktop is the agent event feed, and
+it is not a store: `POST /v1/events` answers `202` with `{"accepted":N,
+"stored":M}` and keeps the events in the answering process's memory
+(`Collector.agents`, trimmed to `core.AgentHistoryLen`, the newest 512). The
+202 acknowledges receipt for display, not a durable write, so an event is gone
+when that process exits, is re-exec'd by `toktop update`, or crashes, and a
+sender that needs an event to outlive the dashboard keeps its own copy. The id
+ledger that makes a retry count once is held the same way, so a retry that
+crosses a restart is stored and counted again instead of being suppressed.
+
+There is no database, no durable queue, no cache directory and no uploaded
+file. Nothing to back up beyond the pin store, which is why this file is
+short.
 
 ## What toktop deletes
 
@@ -72,6 +83,7 @@ installed binary with it:
 
 | Question | Answer |
 | --- | --- |
+| RPO for agent events posted to `--ingest` | everything acknowledged but not yet outlived, which is every event the run held: the feed is process memory, so a quit, an update re-exec or a crash costs the whole feed and nothing recovers it (`RecordAgent`, `core.AgentHistoryLen`). The RTO is the sender's own, since only the sender holds a copy. |
 | RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next connect: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
@@ -367,11 +379,14 @@ serving).
 The target refuses to run unless `dist/site.deployed` exists, the marker
 `site-deploy` leaves behind. That marker is what stops a second rollback from
 undoing the first and putting the broken deployment back, and it lives under
-`dist/`, which `make clean` removes. After a clean, a rollback of a deploy
-from this tree is refused with "nothing to roll back" while the bad
-deployment is still live. The way out is `wrangler rollback` at the pin the
-Makefile names (4.126.0), once, having checked the deployment list in the
-Cloudflare dashboard for what the first rollback undid.
+`dist/`, which `make clean` sweeps around: the clean deletes everything else
+in `dist/` and leaves the two markers (`site.deployed`, `site.rolled-back`)
+where they are, because a build sweep is not entitled to take the record of a
+deployment that is live. Deleting `dist/` by hand does take it, and after
+that a rollback of a deploy from this tree is refused with "nothing to roll
+back" while the bad deployment is still live. The way out is `wrangler
+rollback` at the pin the Makefile names (4.126.0), once, having checked the
+deployment list in the Cloudflare dashboard for what the first rollback undid.
 
 A rollback reaches one version back. Further back than the platform's
 deployment history is a redeploy, not a rollback, and its source is git:

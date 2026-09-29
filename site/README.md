@@ -26,8 +26,8 @@ below rather than passing it over. What a deploy uploaded is recorded in
 `dist/site.deployed/manifest`: the commit, the `wrangler` and `bun` pins, and
 the digests of `worker.js` and of the captures. A rollback moves that
 directory to `dist/site.rolled-back` with the manifest still in it, so the
-version that was undone is on record too. Both are under `dist/`, so
-`make clean` takes them.
+version that was undone is on record too. Both are under `dist/`, and
+`make clean` keeps them there, deleting the rest of `dist/` around them.
 
 `make site-rollback` runs once. `wrangler rollback` with no version undoes
 whichever deployment is most recent, whoever shipped it, so running the undo
@@ -36,7 +36,10 @@ A deploy that reported success leaves `dist/site.deployed` behind, and a
 rollback moves it to `dist/site.rolled-back`: a second rollback finds nothing
 of this tree's to undo, says so, and exits 0 without calling wrangler at all.
 The markers are directories under `dist/`, so `make dist-clean` leaves them
-alone and `make clean` takes them with the rest of `dist/`. The deploy lock is
+alone and `make clean` leaves them alone too. A clean that took them would
+make the rollback refuse with "nothing to roll back" while the deployment it
+would have undone is the one serving, and a routine clean is what somebody
+runs first when the site looks wrong. The deploy lock is
 held the same way, and `make clean` refuses while it is held: removing `dist/`
 out from under a running deploy would free a lock nobody is watching and let a
 second upload race the first. They record what

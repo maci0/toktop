@@ -84,7 +84,10 @@ paths:
             Every event in the body decoded. `accepted` counts what the wire
             carried, `stored` what the retained feed took, so a replay, or an
             event stamped behind the whole retained window, shows the two
-            apart. The pair is on the request's log line as well.
+            apart. The pair is on the request's log line as well. Neither
+            number is a durability receipt: the feed is this process's memory,
+            so see the `stored` schema for what an acknowledged event is and
+            is not.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
@@ -395,6 +398,15 @@ components:
             Events the retained feed took. Below `accepted` on a replay of ids
             the feed already holds, and on events stamped behind the whole
             retained window.
+
+            The feed is this process's memory, not a store: `stored` means the
+            event was taken for display by the run that answered, and it is
+            gone when that run exits, is re-exec'd by `toktop update`, or
+            crashes. A sender that needs an event to outlive the dashboard it
+            posted it to has to keep its own copy; the 202 is an acknowledgement
+            of receipt, not a durable-write receipt. The id ledger that makes a
+            retry count once is held the same way, so a retry that crosses a
+            restart is stored and counted again rather than suppressed.
           examples: [10]
 
     Reason:

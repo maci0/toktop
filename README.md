@@ -431,6 +431,14 @@ retained window: the feed holds the newest 512 events, and one older than all
 of them would be dropped before any consumer read it. A sender whose clock
 runs behind sees the gap on the same count, and the clamp to the arrival
 instant keeps the event in the window rather than refused by it. The same pair is on the POST's log line.
+
+Neither count is a durability receipt. The feed is the running process's
+memory, not a store: `stored` means the event was taken for display by the
+run that answered, and it is gone when that run exits, is re-exec'd by
+`toktop update`, or crashes. An event has to outlive the dashboard it was
+posted to, the sender keeps its own copy. See [docs/RECOVERY.md](docs/RECOVERY.md)
+for the rest of what toktop holds and what a lost run costs.
+
 Other statuses: `400` for malformed JSON, a bad `ts`, a token count outside the
 64-bit range, or an `id` that cannot be stored whole, `408` when a stream
 stalls mid-body (the body names which bound broke: no bytes for a minute, or

@@ -135,6 +135,26 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- A `202` from `POST /v1/events` now says what `stored` is: the feed is the
+  answering process's memory, so `stored` acknowledges receipt for display and
+  is not a durable-write receipt. An event is gone when that process exits, is
+  re-exec'd by `toktop update`, or crashes, and a sender that needs an event
+  to outlive the dashboard it posted to keeps its own copy. The `stored` and
+  `id` documentation, the OpenAPI `Ack` schema and `docs/RECOVERY.md` say so
+  too; RECOVERY.md's RPO table carries a row for it.
+
+- `make clean` keeps `dist/site.deployed` and `dist/site.rolled-back` instead
+  of taking them with `dist/`. Those two record that a deploy from this tree
+  is still live and waiting to be undone, and the guard that stops a second
+  `make site-rollback` from rolling back the rollback reads them. A clean took
+  them, so a routine clean, which is what somebody runs first when the site
+  looks wrong, left the rollback refusing with "nothing to roll back" while the
+  deployment it would have undone was the one serving. The clean now deletes
+  everything else under `dist/` and leaves the two markers alone, as
+  `make dist-clean` already did. Deleting `dist/` by hand still takes them, and
+  the way out of that is unchanged: `wrangler rollback` once, after reading the
+  deployment list in the Cloudflare dashboard.
+
 - Every environment variable is now named in one place. `agentusage` and
   `internal/remote` each export the base-directory and secret variables their
   readers consult (`GauntletHomeEnv`, `KimiHomeEnv`, `XDGDataHomeEnv`,
