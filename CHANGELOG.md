@@ -926,6 +926,38 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   two counters are cast in the statement, so a malformed one reads as the zero
   it cannot be and the sessions around it still read.
 
+- A long session name no longer spends the whole agent table. The name column
+  is sized to its widest cell, so one long name took the width the recency
+  cell needed and `padBlock` cut that cell off the right edge, which is the
+  reading the column floors exist to protect. The name is shortened to the
+  length `feedLine` already shortens an agent name to, so a name is not
+  spelled at two lengths in the two tables carrying it.
+
+- The engine stats row now gives up the running count before the waiting count
+  when the pane is too narrow for all of it. The row dropped the in rate and
+  both queue depths together, so a pane a little too narrow lost the whole
+  backlog where a little more room would have kept the half of it that
+  mattered. The waiting count is never the reading shed: a row cut mid-number
+  reads as a missing value, which is the one reading a queue backing up cannot
+  afford.
+
+- The plain report's `kv cache` percentage now names its band. The drawn KV
+  meter carries pressure as a colored bar, whose band a monochrome terminal
+  keeps and a reader who is not told where the ramp breaks cannot see, and 60%
+  and 95% are one number without the word. The word rides the percentage the
+  way memory and temperature already do, and both readings are classified by
+  one function.
+
+- The sticky bar on toktop.ai no longer covers what the keyboard moves to. The
+  bar is sticky at `z-index: 10` and only `section` carried a scroll offset,
+  so a browser bringing a focus stop into view on Tab, which no per-element
+  margin covers, put the focus ring under the bar and lost it, and the section
+  a nav link names opened behind the bar (WCAG 2.4.11 Focus Not Obscured). The
+  offset is `scroll-padding-top` on the scrollport, so it covers an anchor
+  jump, the skip link and a focus stop at once, and it reads the bar's height
+  from a `--bar-h` token rather than spelling the height a second time. The
+  byte figures in `site/README.md` move with it.
+
 ## [0.22.0] - 2026-09-29
 
 Binaries, checksums, and a CycloneDX SBOM are on
