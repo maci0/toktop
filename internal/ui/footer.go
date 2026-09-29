@@ -37,6 +37,18 @@ func (m Model) canSwapFocus() bool {
 	return len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents)
 }
 
+// demoTag names the seed a demo frame was drawn from, or nothing on a real
+// run. The seed is reported so a demo frame is reproducible, which only holds
+// if the frame says which run produced it, so every layout that draws a frame
+// carries it: the footer everywhere but the compact strip, which renders no
+// footer and takes the tag as a line of its own.
+func (m Model) demoTag() string {
+	if !m.cfg.Demo {
+		return ""
+	}
+	return styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
+}
+
 func (m Model) renderFooter() string {
 	base := styleInfo.Render("q") + dim(" quit  ") +
 		styleInfo.Render("space") + dim(" pause  ")
@@ -61,10 +73,7 @@ func (m Model) renderFooter() string {
 	foot := func(opt []string) string {
 		return base + strings.Join(opt, "") + styleInfo.Render("?") + dim(" help")
 	}
-	tag := ""
-	if m.cfg.Demo {
-		tag = styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
-	}
+	tag := m.demoTag()
 	keys := foot(opt)
 	for m.w > 0 && len(opt) > 0 && widthOf(tag)+widthOf(keys) > m.w {
 		opt = opt[:len(opt)-1]
@@ -352,6 +361,12 @@ func (m Model) minimalHint() string {
 // own because the footer and header are not rendered here.
 func (m Model) renderMinimal() string {
 	var lines []string
+	// Identity first, the way the header leads the full frame: a demo run on a
+	// pane too small for the footer has nowhere else to say which seed produced
+	// the numbers below it.
+	if tag := m.demoTag(); tag != "" {
+		lines = append(lines, clip(tag, m.w))
+	}
 	lines = append(lines, dim(m.minimalHint()))
 	// space pauses here too: without a badge a frozen strip is
 	// indistinguishable from a feed that stalled.
@@ -425,7 +440,7 @@ func (m Model) renderMinimal() string {
 	if len(lines) > bodyH && bodyH >= 3 {
 		hidden := len(lines) - (bodyH - 1)
 		lines = lines[:bodyH-1]
-		lines = append(lines, dim(clip(fmt.Sprintf("+%d more (enlarge window to view)", hidden), m.w)))
+		lines = append(lines, dim(clip(moreNote(m.w, hidden), m.w)))
 	}
 	body := clipBlock(strings.Join(lines, "\n"), m.w, bodyH)
 	if bodyH == 0 {

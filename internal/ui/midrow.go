@@ -67,15 +67,41 @@ func moreMarker(title string, w, hidden int) string {
 	if hidden <= 0 {
 		return ""
 	}
-	forms := append(moreForms(hidden), bareMoreForm(hidden))
-	for _, form := range forms {
+	form, gap, ok := fitMore(hidden, lipgloss.Width(title), w)
+	if !ok {
+		return ""
+	}
+	return strings.Repeat(" ", gap) + dim(form)
+}
+
+// moreNote is the same marker for a row that carries nothing else, so the
+// longest spelling still fits and the leading gap is dropped. The compact
+// strip's overflow line is the one row that prints the count on a line of its
+// own, and it spelled it a fourth way ("+N more (enlarge window to view)")
+// where every other view said the same thing from moreForms.
+func moreNote(w, hidden int) string {
+	form, _, ok := fitMore(hidden, 0, w)
+	if !ok {
+		// Nothing fit, not even the bare count: the count is still the reading
+		// the reader is owed, so it takes the row and the pane clips it, the
+		// same last resort packSegs takes.
+		return bareMoreForm(hidden)
+	}
+	return form
+}
+
+// fitMore picks the marker's spelling and the gap it hangs on: the longest
+// form that fits beside a title of titleWidth cells, on the widest gap that
+// still fits. ok is false when not even the bare count fits there.
+func fitMore(hidden, titleWidth, w int) (form string, gap int, ok bool) {
+	for _, form := range append(moreForms(hidden), bareMoreForm(hidden)) {
 		for gap := 2; gap >= 1; gap-- {
-			if lipgloss.Width(title)+lipgloss.Width(form)+gap <= w {
-				return strings.Repeat(" ", gap) + dim(form)
+			if titleWidth+lipgloss.Width(form)+gap <= w {
+				return form, gap, true
 			}
 		}
 	}
-	return ""
+	return "", 0, false
 }
 
 // bareMoreForm is the overflow marker with nothing beside it but the number,

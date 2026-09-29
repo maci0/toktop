@@ -2776,6 +2776,50 @@ func TestTimescaleKeyExplainsItselfInCompactStrip(t *testing.T) {
 	}
 }
 
+// The overflow count is worded the same wherever it is counted, and the
+// compact strip is the one row that prints it on a line of its own: it spelled
+// its own "+N more (enlarge window to view)" where every panel title says
+// "+N more (enlarge window)".
+func TestCompactOverflowUsesTheSharedMarker(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	providers := make([]core.ProviderSnapshot, 6)
+	for i := range providers {
+		providers[i] = core.ProviderSnapshot{Label: fmt.Sprintf("engine-%d", i), OK: true}
+	}
+	m.snap = core.Snapshot{Providers: providers}
+	m.w, m.h, m.ready = 70, 8, true
+	out := strip(m.renderMinimal())
+	if !strings.Contains(out, "+2 more (enlarge window)") {
+		t.Errorf("compact overflow line is not the shared marker:\n%s", out)
+	}
+	if strings.Contains(out, "enlarge window to view") {
+		t.Errorf("compact strip still spells the overflow its own way:\n%s", out)
+	}
+}
+
+// A demo frame is reproducible from its seed, which only holds if the frame
+// says which run produced it. The compact strip renders no footer, so the tag
+// it takes from there has to be a line of its own.
+func TestCompactStripCarriesTheDemoSeed(t *testing.T) {
+	m := New(Config{Version: "t", Demo: true, DemoSeed: 42}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	m.w, m.h, m.ready = 70, 24, true
+	out := strip(m.renderMinimal())
+	if !strings.Contains(out, "DEMO seed 42") {
+		t.Errorf("compact strip does not name the demo seed:\n%s", out)
+	}
+}
+
+// A real run has no seed to report and must not gain the line.
+func TestCompactStripHasNoDemoTagOnARealRun(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	m.w, m.h, m.ready = 70, 24, true
+	if out := strip(m.renderMinimal()); strings.Contains(out, "DEMO") {
+		t.Errorf("compact strip names a demo seed on a real run:\n%s", out)
+	}
+}
+
 // With an engine attached these are not inert: t must still flip the
 // timescale and a must still reach the agents view.
 func TestLiveKeysStillWorkWithoutNotice(t *testing.T) {
