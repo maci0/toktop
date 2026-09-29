@@ -170,8 +170,10 @@ func logWindowRefusals(run windowRun) {
 // Agents newest-last (see core.Snapshot), so keep them sorted by timestamp
 // the way the probe ring is. A non-empty ID already recorded within
 // core.AgentIDHorizon is ignored, so a retried POST of the same event does not
-// double-count, however long after the first send it arrives. The ledger is
-// process memory, so that window does not cross a restart: a replay that
+// double-count for the length of that window. Past the horizon, or once the
+// ledger's count cap has retired the id under a fleet arriving faster than the
+// rate the cap is sized for, the same POST is stored and counted again. The
+// ledger is process memory, so the window does not cross a restart: a replay that
 // arrives after a restart or a `toktop update` re-exec is stored and counted
 // again, and only the sender holding the key can recognize it as its own.
 // An event that sorts behind the whole retained window is refused too, so the

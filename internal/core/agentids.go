@@ -46,10 +46,13 @@ type agentIDEntry struct {
 }
 
 // AgentIDLedger remembers the event ids already stored, so a retried POST
-// counts once however long after the first send it arrives. It is keyed on the
-// instant the event was recorded, not on the event's own timestamp: a replay
-// carries the sender's clock, and a forged or stale stamp must not decide how
-// long its own duplicate is ignored.
+// counts once for as long as the id is held: AgentIDHorizon after the first
+// send, and no longer once the count cap has retired it under a fleet arriving
+// faster than agentIDPeakRate. A sender that retries past the horizon, or a
+// request re-sent to a recorder that has since restarted, is stored again. It
+// is keyed on the instant the event was recorded, not on the event's own
+// timestamp: a replay carries the sender's clock, and a forged or stale stamp
+// must not decide how long its own duplicate is ignored.
 //
 // The zero value is ready to use. It is not safe for concurrent use; the
 // recorder holding it owns the lock its other fields are under.
