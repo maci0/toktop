@@ -103,6 +103,16 @@ const maxOpenStores = 32
 type storeHandle struct {
 	db *sql.DB
 	fi os.FileInfo
+	// refs counts the reads currently holding this handle, and gone says the
+	// table has dropped it. A dropped handle is closed by the release that
+	// takes refs to zero, never by the drop itself: the handle is shared, and
+	// closing it while a reader is between openStore and its query makes that
+	// reader's query fail with "database is closed" for a reason the store
+	// never had. Two drops reach the same handle while a read is on it: the
+	// cache eviction that made room for a newer store, and closeStore after
+	// the reader that lost the file replaced it.
+	refs int
+	gone bool
 }
 
 // openStores holds one read-only handle per store, so a poll that runs several
@@ -121,51 +131,81 @@ var openStores = struct {
 // openStore returns a read-only handle on the database at path, reusing the one
 // already open on that exact file. The stat is what decides reuse: a path whose
 // file is no longer the one the handle was opened on (same inode, same device)
-// is a replaced store, and the old handle is closed rather than served. A read
+// is a replaced store, and the old handle is dropped rather than served. A read
 // that failed drops its handle through closeStore, so a corrupt page or a
 // database left mid-recovery costs one poll rather than every poll after it.
 //
-// Caller must not hold openStores' lock; the handle is shared, so a caller that
-// wants it released says so with closeStore, not by closing the *sql.DB.
-func openStore(path string) (*sql.DB, error) {
+// The returned handle is held for the caller: releaseStore hands it back, and
+// until then it is not closed even if the table drops it. Caller must not hold
+// openStores' lock, and must not close the *sql.DB itself.
+func openStore(path string) (*storeHandle, error) {
 	openStores.Lock()
 	defer openStores.Unlock()
 	if h, ok := openStores.byPath[path]; ok {
 		if sameFile(h.fi, statFile(path)) {
-			return h.db, nil
+			h.refs++
+			return h, nil
 		}
-		_ = h.db.Close()
 		delete(openStores.byPath, path)
 		openStores.order = removeKey(openStores.order, path)
+		dropStoreLocked(h)
 	}
 	db, err := openReadOnly(path)
 	if err != nil {
 		return nil, err
 	}
-	openStores.byPath[path] = &storeHandle{db: db, fi: statFile(path)}
+	h := &storeHandle{db: db, fi: statFile(path), refs: 1}
+	openStores.byPath[path] = h
 	openStores.order = append(openStores.order, path)
 	for len(openStores.order) > maxOpenStores {
 		victim := openStores.order[0]
 		openStores.order = openStores.order[1:]
 		if h, ok := openStores.byPath[victim]; ok {
-			_ = h.db.Close()
 			delete(openStores.byPath, victim)
+			dropStoreLocked(h)
 		}
 	}
-	return db, nil
+	return h, nil
+}
+
+// dropStoreLocked takes a handle out of the table for good and closes it once
+// the reads holding it are done. Caller holds openStores.
+func dropStoreLocked(h *storeHandle) {
+	h.gone = true
+	if h.refs == 0 {
+		_ = h.db.Close()
+	}
+}
+
+// releaseStore hands back the handle openStore returned. A handle still in the
+// table stays cached for the next poll; one the table dropped is closed here,
+// by the last read that was holding it.
+func releaseStore(h *storeHandle) {
+	if h == nil {
+		return
+	}
+	openStores.Lock()
+	defer openStores.Unlock()
+	h.refs--
+	if h.refs <= 0 && h.gone {
+		h.refs = 0
+		_ = h.db.Close()
+	}
 }
 
 // closeStore drops the cached handle for path, and is what a caller calls after
 // a read that failed: the handle is not the thing to keep alive once a read
 // through it has gone wrong. A path with no cached handle is a no-op, since a
-// read that never opened one has nothing to drop.
+// read that never opened one has nothing to drop. A read still on that handle
+// keeps it open until it releases it; the drop is what makes the close
+// happen, not what performs it.
 func closeStore(path string) {
 	openStores.Lock()
 	defer openStores.Unlock()
 	if h, ok := openStores.byPath[path]; ok {
-		_ = h.db.Close()
 		delete(openStores.byPath, path)
 		openStores.order = removeKey(openStores.order, path)
+		dropStoreLocked(h)
 	}
 }
 

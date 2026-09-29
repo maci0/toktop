@@ -199,13 +199,19 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok boo
 	// this have no opencode at all. A store that is present and unreadable is
 	// a different thing: it reports nothing forever, which the dashboard
 	// renders as an idle agent, so it is audited.
-	db, err := openStore(o.path)
+	h, err := openStore(o.path)
 	if err != nil {
 		if !storeAbsent(o.path) {
 			auditStoreRead("opencode", o.path, err)
 		}
 		return values{}, false
 	}
+	// The handle is held for this read, so a reader that is on it while
+	// another read drops it, or the cache evicts it, still has a live
+	// connection to finish on. Registered first so it runs last: the drop
+	// below has to land before the release.
+	defer releaseStore(h)
+	db := h.db
 	// A read that failed drops the shared handle, so the next poll opens a
 	// fresh one instead of reusing a handle that just went wrong. Only a failed
 	// read drops it: a store that reads and holds nothing in this window is an

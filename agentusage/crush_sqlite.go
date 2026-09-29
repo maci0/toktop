@@ -177,13 +177,20 @@ func (crushDBSource) sessions(dirs []string, since time.Time) (map[string]map[st
 }
 
 func readCrushSessions(path string, since time.Time) (_ map[string]sessionCounts, ok bool) {
-	db, err := openStore(path)
+	h, err := openStore(path)
 	if err != nil {
 		if !storeAbsent(path) {
 			auditStoreRead("crush", path, err)
 		}
 		return nil, false
 	}
+	// The handle is held for this read, so a reader that is on it while
+	// another read drops it, or the cache evicts it, still has a live
+	// connection to finish on. Registered first so it runs last: the drop
+	// below has to land before the release, or a handle the table has already
+	// given up would sit closed-on-release with a reader still to come.
+	defer releaseStore(h)
+	db := h.db
 	// A read that fails drops the shared handle rather than leaving it for the
 	// next poll: a handle whose last read went wrong is replaced on the next
 	// open, so a corrupt page or a database left mid-recovery costs one poll

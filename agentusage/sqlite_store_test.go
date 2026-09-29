@@ -6,6 +6,7 @@
 package agentusage
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -107,6 +108,34 @@ func TestCloseStoreDropsTheHandle(t *testing.T) {
 	}
 	if first == second {
 		t.Error("a dropped handle was handed back; a read that failed would be repeated against it forever")
+	}
+}
+
+// A drop must not close a handle out from under a read that is still on it.
+// The handle is shared, so a peer reader whose read failed calls closeStore
+// while this one is between openStore and its query; the query then fails with
+// "database is closed" for a reason the store never had, and the agent is
+// audited as an unreadable store it read fine a moment earlier.
+func TestCloseStoreLeavesAHeldHandleUsable(t *testing.T) {
+	dir := t.TempDir()
+	crushDB(t, dir, map[string][3]int64{"s1": {10, 20, 1789581724}})
+	resetOpenStores(t)
+	path := filepath.Join(dir, ".crush", "crush.db")
+
+	h, err := openStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A peer read fails and drops the handle while this one still holds it.
+	closeStore(path)
+	if err := h.db.QueryRowContext(context.Background(), "select 1").Scan(new(int)); err != nil {
+		t.Fatalf("the handle was closed under the read holding it: %v", err)
+	}
+	// The last read to let go is the one that closes it, or the handle would
+	// outlive the drop that retired it.
+	releaseStore(h)
+	if err := h.db.QueryRowContext(context.Background(), "select 1").Scan(new(int)); err == nil {
+		t.Error("a dropped handle stayed open after the last read released it; every poll after would leak a connection")
 	}
 }
 
