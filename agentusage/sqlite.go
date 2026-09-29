@@ -244,8 +244,9 @@ func storeReadKey(agent, path string) string { return agent + "\x00" + path }
 
 // storeReadForLocked returns the latch for one store, recording its first
 // sighting so the order carries every live key. An eviction drops the oldest
-// key rather than the entry the caller is about to touch, so a store at the
-// cap keeps its own latch. Caller holds storeReadState.
+// key that is not currently failing rather than the entry the caller is about
+// to touch, so a store at the cap keeps its own latch. Caller holds
+// storeReadState.
 func storeReadForLocked(key string) *storeRead {
 	if r, ok := storeReadState.states[key]; ok {
 		return r
@@ -254,10 +255,35 @@ func storeReadForLocked(key string) *storeRead {
 	storeReadState.states[key] = r
 	storeReadState.order = append(storeReadState.order, key)
 	for len(storeReadState.order) > maxStoreReads {
-		delete(storeReadState.states, storeReadState.order[0])
-		storeReadState.order = storeReadState.order[1:]
+		evictStoreReadLocked()
 	}
 	return r
+}
+
+// evictStoreReadLocked drops one key from the latch table, the oldest one
+// whose latch is not set. A store that has failed once and stayed quiet since
+// is the entry the cap exists to reclaim, and it is the only one whose loss
+// costs nothing: its next failure is a new outage to report anyway.
+//
+// A store that is still failing is the entry that must survive, because the
+// whole point of the latch is to hold it for the length of the outage. The
+// oldest key alone is not safe to drop when the table is churning: a host
+// running many agent projects accumulates keys for directories that are long
+// gone, and one sweep through them evicts the latch of the store that is
+// failing right now, whose next poll then reads as a new outage and logs the
+// same line again. Every other key in the table is either failing too or has
+// nothing to lose, so the oldest is the fallback when there is no quiet one.
+func evictStoreReadLocked() {
+	drop := 0
+	for i, key := range storeReadState.order {
+		if !storeReadState.states[key].failed {
+			drop = i
+			break
+		}
+	}
+	key := storeReadState.order[drop]
+	delete(storeReadState.states, key)
+	storeReadState.order = append(storeReadState.order[:drop], storeReadState.order[drop+1:]...)
 }
 
 // markStoreFailed latches one store's failure and reports whether this call
