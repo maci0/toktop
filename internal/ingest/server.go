@@ -42,12 +42,14 @@ type Server struct {
 	// newServer; nil on a Server built as a literal, which skips the check.
 	hostGuard func(host string) bool
 	log       *slog.Logger
-	// Body bounds, fixed at construction. They were package vars so a test
-	// could shrink them, which put mutable state on the request path: every
-	// body read and every error string read them while a test wrote them, and
-	// the OpenAPI spec test wrote one against a live server. Per-server fields
+	// Body bounds, fixed at construction. They were package vars the request
+	// path read directly, which put mutable state on that path: every body
+	// read and every error string read them while a test wrote them, and the
+	// OpenAPI spec test wrote one against a live server. Per-server fields
 	// written before Serve leave the handler goroutines reading an immutable
 	// value, and a test that wants different bounds builds a different server.
+	// The defaultBodyIdle and friends constants are what a zero field falls
+	// back to, so they are defaults and not a second way to set a bound.
 	// The keep-alive idle bound is not one of them: it never varied per
 	// server, so it stays the package constant the http.Server is built with.
 	// Absolute deadlines, so they stay on the wall clock and not on now.

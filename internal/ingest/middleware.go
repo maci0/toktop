@@ -177,7 +177,8 @@ const maxRequestID = 64
 // transcript twice: the ids land in the answer's headers and in the audit
 // line, and a run that cannot be replayed cannot be diffed against a
 // baseline. The id is a correlation handle, not a secret, and it is minted
-// only when the sender supplied nothing to correlate against.
+// only when the sender supplied nothing to correlate against. The toktop-
+// prefix marks an id this run minted rather than one the sender echoed.
 func (s *Server) incomingRequestID(r *http.Request) string {
 	if v := logcfg.Field(r.Header.Get("X-Request-Id"), maxRequestID); v != "" {
 		return v
