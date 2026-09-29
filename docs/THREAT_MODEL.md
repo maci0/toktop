@@ -875,7 +875,7 @@ Controls verified in code, with the threats they cover:
 | M32: `currentUser` validates `USER` and `USERNAME` through `validTargetField` before handing either to the transport and falls through to the passwd database when either is empty or would fail validation; the passwd name is passed through `basenameLogin` so a Windows `DOMAIN\user` yields `user`. `TOKTOP_SSH_PASSWORD` moved behind the exported `remote.PasswordEnv` constant so the startup warning that names an unusable variable spells it the way the code reads it | a hostile environment redirecting the ssh connection to a different account, or naming an invalid string the transport would reject later as a password failure (B6) | internal/remote/client.go, `currentUser` 118-128; internal/remote/target.go, `validTargetField` 369; internal/remote/auth.go, `PasswordEnv` 99; cmd/toktop/validate.go, the `remote.PasswordEnv` warning at 234-238 |
 | M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick (B5 DoS) | cmd/toktop/main.go, 149 (`remote.ParseTargets`); internal/remote/target.go, the dedup key at 104; internal/remote/forward.go, the listener reuse at 68-71; internal/gpu/gpu.go, `maxToolOutput` 227 and the `cappedOutput` writer at 230-236 |
 | M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 91, `ModelName` 104; call sites internal/provider/openai.go, 66, 119, 152, 167; internal/provider/ollama.go, 40-42; internal/probe/probe.go, `ModelNameMax` 88-92 |
-| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, the `logcfg.Logger()` call in `Serve`; internal/remote/client.go, 34; internal/collector/collector.go, 38; internal/gpu/gpu.go, 160; cmd/toktop/attach.go, 28; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 118, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own audit lines additionally run `RedactAddrs` over the text through `logcfg.RedactedField` (client.go, 237-455). Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; a destination the operator typed (an engine `addr`) is not a peer address, so nothing short of the home fold removes it, while an ssh `target` is stripped of its account at the call site before the fold ever sees it (M40); and the one payload that quotes text the process did not author, the recovered panic value and its stack, is folded at the call site instead (M46) rather than by the handler, since `logcfg.Field` alone would not reach the message | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 77, `HomeHandler` 101, `Field` 167, `RedactedField` 201; internal/core/redact.go, `RedactHome` 24 |
+| M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message and every top-level string attribute, so a path written by code that never thought about disclosure (a request path, a rejected header, a library error) is still folded. `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. All six audit loggers build theirs from that one function (internal/ingest/server.go, 74, the `logcfg.Logger()` call in `New`; internal/remote/client.go, 33; internal/collector/collector.go, 38; internal/gpu/gpu.go, 206; cmd/toktop/attach.go, 28; and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go, 118, which is what its walk-failure line goes through), so the redaction reaches the ssh, engine-state, GPU, attach and agent-watch lines too, and the ssh client's own audit lines additionally run `RedactAddrs` over the text through `logcfg.RedactedField` (client.go, 237-455). Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; a destination the operator typed (an engine `addr`) is not a peer address, so nothing short of the home fold removes it, while an ssh `target` is stripped of its account at the call site before the fold ever sees it (M40); and the one payload that quotes text the process did not author, the recovered panic value and its stack, is folded at the call site instead (M46) rather than by the handler, since `logcfg.Field` alone would not reach the message | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger` 77, `HomeHandler` 101, `Field` 167, `RedactedField` 201; internal/core/redact.go, `RedactHome` 24 |
 | M37: `make release` refuses a non-dev `VERSION` built from a tree that cannot be tied to the bytes shipped. `check-release-source` fails the cut when `git rev-parse HEAD` fails (a source export, where buildinfo has no commit to record and `SOURCE_DATE_EPOCH` falls back to 0, dating every archive member to the epoch) and, unless `ALLOW_DIRTY=1` is passed by name, when `git status --porcelain` is nonempty; a non-numeric `SOURCE_DATE_EPOCH` is refused too. `VERSION=dev` is exempt, since a dev build is a local artifact whose manifest records the tree honestly. This is the reproducibility half of the update channel's trust story: an artifact whose bytes do not match the commit the release page points at cannot be re-derived or audited by anyone who downloads it | a release cut from an uncommitted or non-git tree, shipping binaries that buildinfo names a commit for while the archive members carry something else, against the same trust anchor as summary risk 3 (B5 tampering/repudiation) | Makefile, `check-release-source`, a prerequisite of `release` |
 | M38: One watcher per agent store. `discover` stops the trackers of exited processes before it installs a follower onto a store a dead tracker was still tailing (`for _, t := range exited { w.stopOne(t) }` ahead of the install, internal/agentwatch/agentwatch.go, 270-272), and `stopOne` reports the dead watcher's final growth first, so the follower's baseline is taken after the stopped tracker's last sample. Two watchers on one store each report the same growth under their own PID, and the collector's id window cannot merge two sample ids, so every token written in the overlap is counted twice | doubled token counts and a follower whose baseline overlaps the partition it replaced: a dashboard-integrity defect on a path a process exit alone triggers, with no hostile input (B7 tampering) | internal/agentwatch/agentwatch.go, 275-277; test internal/agentwatch/handover_test.go |
 | M39: Clocks and callbacks a running goroutine reads are taken under a lock rather than raced. The ingest server's `SetNow` writes `s.now` under `nowMu` and `instant` reads it under `RLock` (internal/ingest/server.go, `nowMu`, `SetNow`, `instant`); the agent watcher guards the two fields `SetNow` and `SetOnError` write with `clockMu`, because every tracker's own reader goroutine stamps events from that clock (internal/agentwatch/agentwatch.go, `clockMu` with `reportError` releasing the lock before calling a caller-supplied sink); `gpu.Sample` collects its per-tool results under a local mutex; the host-vitals sampler reads its clock through `instant`, which takes `clockMu` before calling the caller's function, so a `SetNow` swap cannot tear against a cache window being aged (internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`) | a data race on the demo clock or the error sink between a handler goroutine and a tracker, which is a correctness and availability fault rather than a boundary crossing, recorded here because the ingest clock is set from demo mode and a race there lands in the same audit surface as B1 | internal/ingest/server.go, `nowMu`, `SetNow`, `instant`; internal/agentwatch/agentwatch.go, `clockMu`, `reportError`; internal/gpu/gpu.go, `Sample` 249 (the local mutex at 251-262); internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`; tests internal/ingest/server_test.go, internal/agentwatch/concurrency_test.go |
@@ -1217,49 +1217,59 @@ Recorded as threats with locations; fixes do not happen in this document:
   and the same floor, `TOKTOP_LOG_LEVEL` (internal/logcfg), so the floor
   moves for all of them at once and none of them is silent because its own
   endpoint is off:
-  - the ingest server (`logcfg.Logger()` in `Serve`, internal/ingest/server.go):
-    POST /v1/events, 404/405, and recovered handler panics. Default info
+  - the ingest server (`logcfg.Logger()` in `New`, internal/ingest/server.go,
+    74): POST /v1/events, 404/405, and recovered handler panics, all through
+    `logRequest` at :322, which names the request id, method, path, redacted
+    peer, status, accepted and stored counts and the elapsed time on every
+    line. Default info
     includes successful POSTs; warn/error suppress them, and error also
     suppresses 4xx rejections. Successful health checks are not logged
-    (server.go). Request ids can be supplied by callers (server.go), so they
+    (`handleHealth`, :624). Request ids can be supplied by callers
+    (`incomingRequestID`, :262), so they
     provide correlation, not sender identity. A body that trips a deadline
     names which bound it broke, in the 408 body rather than a log line
     (M30, `stallReason` in server.go), so an operator can
     tell a peer that stopped sending from one whose stream outlived the
     10-minute bound without reading the source for which branch fired.
   - the ssh client (`var audit = logcfg.Logger`, internal/remote/client.go,
-    29): connect failure and success (`:225` warn, `:231` info), a peer that
-    stopped answering keepalives (`:361`), an unanswered channel open (`:542`),
-    and a lost connection (`:883` error). Every one names the target by host
+    33): connect failure and success (`:236` warn, `:242` info), a peer that
+    stopped answering keepalives (`:369`), and a lost connection (`:451`
+    error, carrying the uptime). An unanswered channel open is the fourth
+    (internal/remote/session.go, 159). Every one names the target by host
     alone, with the account folded out of the error text (M40); a forward
-    failure is the sixth site, at `:756`. The two auth-chain lines written here
+    failure is the sixth site (internal/remote/forward.go, 237). The two
+    auth-chain lines written here
     rather than in the client, a default ssh key that is present and will not
     load and an agent socket that refuses the connection
-    (internal/remote/auth.go, 233 and 245), fold `$HOME` out of the key and
+    (internal/remote/auth.go, 247 and 262), fold `$HOME` out of the key and
     socket paths and both error texts for the same reason.
   - the engine collector (`auditFn = logcfg.Logger`,
-    internal/collector/collector.go, 40, one line per
-    engine that crossed a boundary: `logHealth` at :538, called warn for not
-    answering and info for answering again at :375-376, carrying label, addr,
-    reason and down-for, and `logSlow` at :559, called warn for a poll that
-    answered past `slowPollThreshold` (:534, half of provider.PollTimeout) and
-    info when the next one answers in time, carrying label, addr, duration and
+    internal/collector/collector.go, 38, one line per
+    engine that crossed a boundary: `logChanges` at health.go:233, called with
+    warn for not answering and info for answering again at collector.go:413-414,
+    carrying label, addr, reason and down-for, and warn for a poll that
+    answered past `slowPollThreshold` (health.go:221, half of
+    provider.PollTimeout) with info when the next one answers in time
+    (collector.go:415-416), carrying label, addr, duration and
     slow-for. Both latches are per endpoint, so a run of them writes one line,
     and a failed poll clears the slow latch, because the outage line is the
-    loudest signal and the next answer is measured fresh).
+    loudest signal and the next answer is measured fresh. Events the retained
+    window turned away get their own pair of lines from `logWindowRefusals`
+    (agents.go:142), so a stored-below-accepted POST reads as a refusal rather
+    than a replay.
   - the GPU vendor tools (`var audit = logcfg.Logger`, internal/gpu/gpu.go,
-    123): a vendor CLI that failed to answer (`:157`) and one that answered
-    again (`:178`), carrying the tool name and the reason, so a `$PATH` tool
+    206): a vendor CLI that failed to answer (`:242`) and one that answered
+    again (`:264`), carrying the tool name and the reason, so a `$PATH` tool
     that stops working is a recorded event rather than a blank panel.
-  - the agent watch (`aw.SetOnError` in cmd/toktop/main.go, 312): a condition
+  - the agent watch (`aw.SetOnError` in cmd/toktop/main.go, 337): a condition
     the
     watcher cannot return, warn, with the error text. The dedup latch that
     keeps it to one line per distinct condition lives in the watcher
     (agentwatch.go, `engineError`), not here. The agentusage package writes
     its own lines through the logger the host installs
-    (`agentusage.SetLogger`, cmd/toktop/main.go, 104, over
-    `agentusage.SetLogger` at agentusage/candidates.go, 84): a transcript
-    walk that could not finish (`auditWalkFailure`, 100), which folds
+    (`agentusage.SetLogger`, cmd/toktop/main.go, 118, over
+    `agentusage.SetLogger` at agentusage/candidates.go, 101): a transcript
+    walk that could not finish (`auditWalkFailure`, 125), which folds
     `$HOME` out of both the root and the error text before logging, since a
     walk failure is exactly the line an operator pastes into an issue.
   - the `--add` attach path (`var attachLog = logcfg.Logger`,
