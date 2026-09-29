@@ -398,7 +398,13 @@ bump and a patch is refused. A minor bump is let through, and only against a
 release when a removal it found has nowhere in the changelog to be recorded,
 since the caller upgrading reads those notes and not the diff. Run it with
 `make check-api VERSION=0.15.0`. A checkout with no released tag before the
-commit being cut has nothing to compare against and passes.
+commit being cut has nothing to compare against and passes, and so does a
+repository's first commit, which has no parent. A shallow checkout is
+different: it has that parent in the real history and the clone simply does
+not carry it, so the gate refuses it with a message naming `fetch-depth: 0`
+rather than comparing nothing and passing. `ALLOW_SHALLOW=1` overrides, for
+the cut you accept going unchecked. The release workflow checks the tag push
+out at full depth for that reason.
 
 Keep one heading per impact, in the order the file uses: `Breaking`, then
 `Added`, `Security`, `Changed`, `Fixed`. A change a sender or a Go caller

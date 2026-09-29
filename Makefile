@@ -65,8 +65,28 @@ CHANGELOG_WATCHED = README.md cmd/toktop/help.go docs/openapi.yaml agentusage si
 # changelog does not name reaches the caller who upgrades as a compile error
 # they were never told to expect. A checkout with no released tag before
 # HEAD^ has no base to diff and is let past.
+#
+# A repository's first commit has no HEAD^ either, and there is nothing to
+# compare it against, so it is let past the same way. A shallow checkout is
+# not that: it has a parent in the real history and the clone simply does not
+# carry it, and the gate cannot tell the two apart by looking at HEAD^ alone.
+# It asks whether the clone is shallow, and a shallow one is refused with a
+# message naming the fix rather than passing. The release runner checks out at
+# fetch-depth: 1 by default, which is how an exported removal once reached a
+# published release with every gate reporting green.
 CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
 	if ! git rev-parse HEAD >/dev/null 2>&1; then \
+		echo "make: check-api needs a git checkout; the exported surface is read from the tree" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$$(git rev-parse --is-shallow-repository 2>/dev/null)" = "true" ]; then \
+		echo "make: check-api compares the exported surface against the last release, read from the commit before HEAD" >&2; \
+		echo "  this checkout is shallow and does not carry that history, so the comparison would find nothing and pass." >&2; \
+		echo "  actions/checkout defaults to fetch-depth: 1; the release workflow sets fetch-depth: 0 for this reason." >&2; \
+		echo "  unshallow the clone (git fetch --unshallow), or pass ALLOW_SHALLOW=1 to accept that this cut is unchecked." >&2; \
+		if [ "$(ALLOW_SHALLOW)" != "1" ]; then exit 1; fi; \
+	fi; \
+	if ! git rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null 2>&1; then \
 		echo "make: check-api needs a git checkout; the exported surface is read from the tree" >&2; \
 		exit 1; \
 	fi; \
@@ -1507,8 +1527,16 @@ checksums: sbom buildinfo licenses license ## checksum the dist/ binaries into a
 
 # Binaries of any earlier version are dropped first: leftovers would
 # otherwise ride the toktop_* glob into checksums.txt and the release.
+#
+# dist-clean is a prerequisite here, not a sibling of buildinfo's: the sweep
+# deletes every file in dist/ that this VERSION does not publish, so running it
+# beside the cross-build deletes binaries as they are written and leaves
+# checksums.txt covering fewer files than PLATFORMS. Listing it on both is not
+# ordering, and `make -j buildinfo` would race; .NOTPARALLEL covers only the
+# `release` target's own prerequisites, so the ordering belongs here where the
+# sweep and the build meet.
 .PHONY: test-dist
-test-dist: ## build every release platform without packaging
+test-dist: dist-clean ## build every release platform without packaging
 	@$(CHECK_VERSION)
 	@mkdir -p $(DIST)
 	@rm -f $(DIST)/$(BINARY)_*
@@ -1547,11 +1575,10 @@ host-dist: ## print the path of this host's VERSION artifact in dist/
 # $(TAGS) named a build nobody made, and this file is what a rebuild is read
 # against. `driver_tags` keeps the sqlite gate separable on its own.
 # Named to match the toktop_* glob, so it lands in checksums.txt too.
-# dist-clean is a prerequisite, not a sibling: as a sibling it raced
-# test-dist under `make -j release`, deleting binaries while they were being
-# written and leaving checksums.txt covering fewer files than PLATFORMS.
+# dist-clean is reached through test-dist, which depends on it, so the sweep
+# cannot run beside the cross-build that fills dist/ again.
 .PHONY: buildinfo
-buildinfo: dist-clean test-dist ## record the toolchain, commit, and flags behind dist/ into a manifest
+buildinfo: test-dist ## record the toolchain, commit, and flags behind dist/ into a manifest
 	@mkdir -p $(DIST)
 	@{ \
 		echo "name: $(BINARY)"; \

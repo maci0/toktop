@@ -230,6 +230,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   a request that caps the generation and names no sampling value, instead of
   failing every wave. The refusal walk covers that spelling too, and the shape
   that drops it is last, so no request an engine already accepted moves.
+- The sweep that clears `dist/` can no longer run beside the cross-build that
+  fills it under `make -j`. `buildinfo` listed `dist-clean` and `test-dist` as
+  siblings, which orders nothing: the two could delete a binary as it was
+  written and leave `checksums.txt` covering fewer files than the release
+  ships. `.NOTPARALLEL` covered the `release` target's own prerequisites but
+  not this pair. `dist-clean` is now reached through `test-dist`, which depends
+  on it, so the ordering holds wherever the two meet.
+- The exported-surface gate on a tag push can no longer pass by comparing
+  nothing. `make check-api` diffs what `agentusage` exports now against what it
+  exported at the last tag, read from the commit before the one being cut. The
+  release workflow checked the tree out at the default `fetch-depth: 1`, which
+  carries neither that commit nor the tags, so the lookup failed and the gate
+  treated the failure as "nothing to compare" and passed: a release could
+  remove an exported symbol, publish it, and report every gate green. The
+  workflow now checks out the full history the gate reads, and a shallow
+  checkout is refused with a message naming `fetch-depth: 0` instead of
+  admitting it. A repository's first commit still passes: it has no parent to
+  compare against either way. `ALLOW_SHALLOW=1` overrides for a cut you accept
+  going unchecked.
 - A tagged release no longer fails after it has published. The release job
   uploads every file in `dist/`, so the license text added beside the SBOM went
   up as an asset, and the restore drill that runs last compared the published

@@ -51,6 +51,13 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
+          # `make check-api` diffs the exported surface against the last
+          # released tag, which it reads out of the commit before HEAD. The
+          # default fetch-depth: 1 carries neither that commit nor the tags,
+          # so the gate compared nothing and exited 0: a release could remove
+          # an exported symbol and publish. Full history is what makes the
+          # gate answerable, and this job is the only one that needs it.
+          fetch-depth: 0
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e  # v7.0.0
         with:
           go-version-file: go.mod
