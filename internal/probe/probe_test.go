@@ -46,9 +46,13 @@ func TestSelectModel(t *testing.T) {
 			want:   "loaded",
 		},
 		{
+			// core.ModelName composes to NFC before it caps, so a decomposed id
+			// is measured and returned in the composed form: 129 decomposed
+			// accents are 129 clusters either way, and the cap still lands
+			// between clusters rather than splitting one.
 			name:   "whole grapheme cap",
 			models: []core.ModelInfo{{Name: " " + strings.Repeat("e\u0301", core.ModelNameMax+1) + " "}},
-			want:   strings.Repeat("e\u0301", core.ModelNameMax),
+			want:   strings.Repeat("\u00e9", core.ModelNameMax),
 		},
 	}
 	for _, tc := range cases {

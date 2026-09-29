@@ -91,10 +91,17 @@ const SnippetCap = 256
 const ModelNameMax = 256
 
 // ModelName is the one shape an engine-supplied model id takes in this
-// program: trimmed, terminal-sanitized, folded to one line, capped at ModelNameMax. Every
+// program: trimmed, terminal-sanitized, folded to one line, composed to NFC,
+// capped at ModelNameMax. Every
 // ModelInfo built from a listing or a health endpoint goes through it, so an
 // engine cannot put a control character or an unbounded string into the
 // dashboard, into a probe body, or into the machine-readable report. The
+// composition is CanonicalAgent's rule applied to the other identity string
+// in this program: an id that reaches the probe body is one the probe sends
+// back to the engine, so the two spellings of one id (a model directory
+// derived from a macOS filesystem, NFD, beside a precomposed one from a JSON
+// listing) must not be two ids here. NFC is a no-op on the ASCII ids every
+// engine actually ships, so the composition costs nothing on the common case. The
 // probe's own cap is the same bound, so a name that survives here is one the
 // probe will send unchanged. A GPU's reported name takes the same shape: it is
 // driver- and vendor-chosen text, two of its four sources are JSON, and
@@ -102,7 +109,7 @@ const ModelNameMax = 256
 // for a name the system panel measures with lipgloss.Width and splits on
 // newlines.
 func ModelName(s string) string {
-	return SingleLine(TruncateClusters(strings.TrimSpace(s), ModelNameMax))
+	return ClampField(SingleLine(s), ModelNameMax)
 }
 
 // HTTPStatus folds an http.Response.Status line into text a single cell can

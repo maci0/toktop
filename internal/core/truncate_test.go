@@ -131,6 +131,11 @@ func TestModelNameBoundsEngineSuppliedID(t *testing.T) {
 		{"control characters", "ll\x00a\x07m3", "llam3"},
 		{"empty", "", ""},
 		{"only escapes", "\x1b[31m\x1b[0m", ""},
+		// A model id is the one identity string here that rides back out to
+		// the engine in a probe body, so the two spellings of one id must not
+		// be two ids. macOS hands a model directory up decomposed.
+		{"nfd model id", "café-3", "caf\u00e9-3"},
+		{"nfc model id", "caf\u00e9-3", "caf\u00e9-3"},
 	}
 	for _, c := range cases {
 		if got := ModelName(c.in); got != c.want {
@@ -149,5 +154,12 @@ func TestModelNameCapsLongID(t *testing.T) {
 	flags := ModelName(strings.Repeat("\U0001F1E9\U0001F1EA", 400))
 	if n := uniseg.GraphemeClusterCount(flags); n != ModelNameMax || !utf8.ValidString(flags) {
 		t.Errorf("ModelName(400 flags) = %d clusters, valid=%v", n, utf8.ValidString(flags))
+	}
+	// Composition happens before the cap, so a decomposed id is measured in
+	// the form it is stored in: NFD is one cluster more than NFC, and a cap
+	// applied to the composed form is the one the rest of the program sees.
+	nfd := strings.Repeat("café", ModelNameMax)
+	if got := ModelName(nfd); !norm.NFC.IsNormalString(got) {
+		t.Errorf("ModelName(decomposed id) is not NFC: %q", got)
 	}
 }
