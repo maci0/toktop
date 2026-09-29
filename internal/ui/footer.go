@@ -425,8 +425,13 @@ func (m Model) renderMinimal() string {
 	}
 	rates := m.agentRates()
 	if len(m.snap.Providers) == 0 {
+		// Events, not rates, decide this: a run fed only over the ingest
+		// endpoint with nothing inside the rate window holds agents and no
+		// rates, and telling it no engines were detected contradicts the full
+		// layout, which renders the agents view for the same snapshot. The
+		// rule is draw's, restated here.
 		if len(rates) == 0 {
-			if m.cfg.Agents {
+			if m.cfg.Agents || len(m.snap.Agents) > 0 {
 				// This run asked for agents; leading with the engines it was
 				// told not to need reads as a failure instead of a wait.
 				lines = append(lines, dim(clip("watching local agents…", m.w)))

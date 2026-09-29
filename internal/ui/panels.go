@@ -313,7 +313,13 @@ func (m Model) probesTitle(w int) string {
 		return title
 	}
 	rate := styleOK.Render(fmtRate(last.TokPS) + " tok/s")
-	add(" " + dim("last") + " " + fmtMs(last.TTFTms) + " " + rate)
+	// The short form stands in for the long one, not beside it: a pane wide
+	// enough for "last <ttft> <rate>" printed the rate a second time, because
+	// the fallback was appended after the full reading had already joined.
+	full := " " + dim("last") + " " + fmtMs(last.TTFTms) + " " + rate
+	if lipgloss.Width(title)+lipgloss.Width(full) <= w {
+		return title + full
+	}
 	add(" " + rate)
 	return title
 }

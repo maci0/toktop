@@ -3584,3 +3584,44 @@ func TestUntouchedKeysPublishNoTitle(t *testing.T) {
 		}
 	}
 }
+
+// The PROBES title carries its rate once. The short form is the fallback for a
+// pane too narrow for the ttft beside it, not a second half: a wide pane
+// printed "PROBES last 97ms 340 tok/s 340 tok/s", which reads as two
+// measurements where the panel took one.
+func TestProbesTitlePrintsTheRateOnce(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready = 140, 36, true
+	m.snap = core.Snapshot{
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+		Probes: []core.ProbeSample{
+			{At: m.clock, OK: true, Model: "llama3", TokPS: 340, TTFTms: 97},
+		},
+	}
+	title := strip(m.probesTitle(120))
+	if n := strings.Count(title, "340 tok/s"); n != 1 {
+		t.Errorf("PROBES title carries the rate %d times, want 1: %q", n, title)
+	}
+}
+
+// The compact strip reads the same emptiness the full dashboard does. An
+// event pushed over the ingest endpoint that has fallen outside the rate
+// window leaves agents with no rates, and the strip used to answer that with
+// "no inference engines detected" while the full layout rendered the agents
+// view for the same snapshot.
+func TestMinimalViewWithStaleAgentEventsIsNotEngineEmpty(t *testing.T) {
+	now := time.Now()
+	m := New(Config{Version: "t"}, nil)
+	nm, _ := m.Update(snapMsg(core.Snapshot{Agents: []core.AgentEvent{
+		{At: now.Add(-2 * core.AgentRateWindow), Agent: "claude", Kind: "turn", OutputTokens: 40},
+	}}))
+	m = nm.(Model)
+	m.w, m.h, m.ready, m.clock = 40, 12, true, now
+	out := strip(m.View())
+	if strings.Contains(out, "no inference engines detected") {
+		t.Errorf("minimal view calls a run with agent events engine-empty:\n%s", out)
+	}
+	if !strings.Contains(out, "watching local agents") {
+		t.Errorf("minimal view lost the wait hint for a run holding agent events:\n%s", out)
+	}
+}
