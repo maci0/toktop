@@ -148,14 +148,23 @@ jobs:
         run: |
           go vet -mod=readonly -tests=true -tags timetzdata ./...
           go vet -mod=readonly -tests=true -tags "sqlite timetzdata" ./agentusage/...
-      # The bash completion script is shell code this repo prints and a user
-      # sources, and no Go analyzer reads it. shellcheck is in the ubuntu image;
-      # `make check-shell` refuses an older one rather than reporting a pass
-      # from a rule set that predates the script's own disable comment. Linux
-      # only: the script is the same bytes from the same source on every runner.
-      - name: shellcheck (linux only)
+      # The completion scripts are shell code this repo prints and a user
+      # sources, and no Go analyzer reads them. shellcheck is in the ubuntu
+      # image; `make check-shell` refuses an older one rather than reporting a
+      # pass from a rule set that predates the script's own disable comment.
+      # zsh and fish are the readers for the other two scripts, since
+      # shellcheck has no mode for either, and a completion that does not parse
+      # is a script the sourcing shell rejects outright. Neither is part of the
+      # base image's guaranteed tool set, so the step installs them rather than
+      # letting the gate pass or fail on whatever the image happens to carry.
+      # Linux only: the scripts are the same bytes from the same source on every
+      # runner.
+      - name: analyze the completion scripts (linux only)
         if: runner.os == 'Linux'
-        run: make check-shell
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes zsh fish
+          make check-shell
       - name: govulncheck (linux only; both sqlite tag halves)
         if: runner.os == 'Linux'
         # Makefile GOVULNCHECK is the only version string; `go run @version`

@@ -131,17 +131,23 @@ a linter and a deploy tool cannot pull a tree into the repo for themselves.
 `site/wrangler.jsonc` names the compatibility date the Worker is written
 against.
 
-## Shell, the bash completion script only
+## Shell, the completion scripts only
 
-`toktop completion bash` prints a script a user's shell sources, and it is the
-only shell this tree ships. `make check-shell` is the only analyzer that reads
-it: the script is generated from the flag set, handed to shellcheck, and the
-generated file stays under `dist/`. shellcheck is a system package rather than
-a fetched pin, so the Makefile carries a floor (`SHELLCHECK_MIN`) instead of an
+`toktop completion <shell>` prints a script a user's shell sources, one per
+shell, and no other shell code ships from this tree. `make check-shell` is the
+only analyzer that reads them: each script is generated from the flag set,
+handed to an analyzer, and the generated files stay under `dist/`. The bash
+script goes to shellcheck; the zsh and fish scripts go to `zsh -n` and
+`fish --no-execute`, which parse without executing. shellcheck has no mode for
+either of the other two, and the shell that will source the file is the only
+reader that knows the grammar, so a script that would not load fails the gate.
+
+shellcheck, zsh and fish are system packages rather than fetched pins, so the
+Makefile carries a floor (`SHELLCHECK_MIN`, `ZSH_MIN`, `FISH_MIN`) instead of an
 exact version: CI's ubuntu runner and a contributor's package manager are
 different distributions, and a script that clears the floor gains nothing from
-being pinned to one release. The zsh and fish scripts are printed too and stay
-unanalyzed; neither shell is covered by shellcheck.
+being pinned to one release. CI installs zsh and fish rather than depending on
+the runner image carrying them.
 
 ## Gates that keep this honest
 

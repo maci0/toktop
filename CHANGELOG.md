@@ -144,7 +144,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `--help` Environment block, the `--bearer` warning and the `--once` frame
   size all read those tables rather than spelling the names again. No value
   read, and no default, changed.
-
+- The zsh and fish completion scripts are analyzed instead of only the bash one.
+  `toktop completion zsh` and `toktop completion fish` each print a script a
+  user's shell sources, and both shipped with nothing in the tree reading them:
+  a completion that does not parse is a script the sourcing shell rejects
+  outright, and no gate noticed. shellcheck has no mode for either, so each is
+  parsed by the shell that will source it, in `make check-shell` and on the
+  Linux CI leg. `zsh` and `fish` are now prerequisites alongside `shellcheck`.
 - `agentusage.Watcher` now says what a consumer has to release, which is
   nothing. The type held no file handle between calls and `Run` started no
   goroutine of its own, so there is no `Close` to find and none was added, but

@@ -195,17 +195,32 @@ SBOM_TOOL   := github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@v1.12.0
 # manifest plus lockfile would exist only to pin this one linter.
 BIOME_VERSION := 2.5.14
 BIOME         := @biomejs/biome@$(BIOME_VERSION)
-# shellcheck for the bash completion script `toktop completion bash` prints.
-# The floor is the oldest release whose checks this script has to clear under,
-# so a machine with an older shellcheck is told rather than reporting a pass
-# from a rule set that predates the script's own `# shellcheck disable`.
+# The completion scripts `toktop completion <shell>` prints, the order
+# completionShells in cmd/toktop/completion.go publishes them, and the analyzer
+# each one is read by. shellcheck has no zsh or fish mode, so those two are
+# parsed by the shell that will source them, which is the only reader that
+# knows the grammar: `zsh -n` and `fish --no-execute` read a file and report a
+# parse error without running it, so a generated script that would fail to load
+# in a user's shell fails the gate instead. One list, so a shell added to the
+# Go side cannot reach a release with no analyzer and no prereq behind it.
+COMPLETION_SHELLS := bash zsh fish
+# shellcheck for the bash completion script. The floor is the oldest release
+# whose checks this script has to clear under, so a machine with an older
+# shellcheck is told rather than reporting a pass from a rule set that predates
+# the script's own `# shellcheck disable`. The two parser floors are the oldest
+# releases carrying the flags above, for the same reason.
 SHELLCHECK_MIN := 0.10.0
 SHELLCHECK     := shellcheck
-# Defines the shellcheck_too_old function ($1 is a version; it returns true when
-# that version is below $(SHELLCHECK_MIN)), the same shape as UV_TOO_OLD below
+ZSH_MIN        := 5.0.0
+ZSH            := zsh
+FISH_MIN       := 3.0.0
+FISH           := fish
+# Defines version_too_old ($1 is the floor, $2 the version on PATH; it returns
+# true when that version is below the floor), the same shape as UV_TOO_OLD below
 # and for the same reason: a definition and its call in one shell, or the
-# function is undefined at the call and every version passes.
-SHELLCHECK_OLD = shellcheck_too_old() { awk -v min='$(SHELLCHECK_MIN)' -v have="$$1" 'BEGIN { n = split(min, a, "."); m = split(have, b, "."); for (i = 1; i <= (n > m ? n : m); i++) { x = a[i] + 0; y = b[i] + 0; if (y < x) exit 0; if (y > x) exit 1 } exit 1 }'; }
+# function is undefined at the call and every version passes. The floor is an
+# argument rather than baked in, so shellcheck, zsh and fish share one compare.
+VERSION_OLD = version_too_old() { awk -v min="$$1" -v have="$$2" 'BEGIN { n = split(min, a, "."); m = split(have, b, "."); for (i = 1; i <= (n > m ? n : m); i++) { x = a[i] + 0; y = b[i] + 0; if (y < x) exit 0; if (y > x) exit 1 } exit 1 }'; }
 # Cloudflare deploy tool for site/. Deploying with whatever `wrangler` a
 # machine happens to have installed (or a bare `cf deploy`) makes the upload
 # depend on PATH, so the pin is named here and every deploy path reads it.
@@ -421,7 +436,7 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	ok() { printf '  ok       %s\n' "$$1"; }; \
 	gap() { printf '  MISSING  %s\n' "$$1" >&2; fail=1; }; \
 	$(UV_TOO_OLD); \
-	$(SHELLCHECK_OLD); \
+	$(VERSION_OLD); \
 	if command -v $(GO) >/dev/null 2>&1; then \
 		ok "go $$($(GO) env GOVERSION) (go.mod pins $(GO_VERSION); make selects it)"; \
 	else \
@@ -462,13 +477,33 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	fi; \
 	if command -v $(SHELLCHECK) >/dev/null 2>&1; then \
 		have=$$($(SHELLCHECK) --version | awk '/^version:/ { sub(/^version: */, ""); print; exit }'); \
-		if shellcheck_too_old "$$have"; then \
+		if version_too_old "$(SHELLCHECK_MIN)" "$$have"; then \
 			gap "shellcheck $$have on PATH, make check-shell needs >= $(SHELLCHECK_MIN)"; \
 		else \
 			ok "shellcheck $$have (>= $(SHELLCHECK_MIN))"; \
 		fi; \
 	else \
 		gap "shellcheck is not on PATH (make check-shell analyzes the bash completion script)"; \
+	fi; \
+	if command -v $(ZSH) >/dev/null 2>&1; then \
+		have=$$($(ZSH) --version | awk '{ print $$2; exit }'); \
+		if version_too_old "$(ZSH_MIN)" "$$have"; then \
+			gap "$(ZSH) $$have on PATH, make check-shell needs >= $(ZSH_MIN)"; \
+		else \
+			ok "$(ZSH) $$have (>= $(ZSH_MIN))"; \
+		fi; \
+	else \
+		gap "$(ZSH) is not on PATH (make check-shell parses the zsh completion script)"; \
+	fi; \
+	if command -v $(FISH) >/dev/null 2>&1; then \
+		have=$$($(FISH) --version | sed -n 's/.*version //p'); \
+		if version_too_old "$(FISH_MIN)" "$$have"; then \
+			gap "$(FISH) $$have on PATH, make check-shell needs >= $(FISH_MIN)"; \
+		else \
+			ok "$(FISH) $$have (>= $(FISH_MIN))"; \
+		fi; \
+	else \
+		gap "$(FISH) is not on PATH (make check-shell parses the fish completion script)"; \
 	fi; \
 	if [ "$$fail" != "0" ]; then \
 		echo "make prereqs: install the MISSING tools above; CONTRIBUTING.md 'Prerequisites' explains each" >&2; \
@@ -1130,33 +1165,53 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 # deliberately rather than linting by accident on whatever a glob returned.
 YAML_FILES := $(WORKFLOWS) .github/dependabot.yml docs/openapi.yaml
 
-# One shell script ships from this tree: the bash completion `toktop completion
-# bash` prints, which a user's shell sources. It carried a `# shellcheck
-# disable=SC2207` for a rule no gate here ever ran, which is worse than no
-# suppression at all: it reads as a check that passed. It is checked by
-# generating it and handing the output to shellcheck, because a copy kept
-# beside the Go source goes stale the day a flag moves, and the flag list is
-# built from the FlagSet at run time. The generated file is under dist/, which
-# .gitignore covers.
+# Three shell scripts ship from this tree, one per shell in $(COMPLETION_SHELLS),
+# and each is a completion a user's shell sources. The bash one carried a
+# `# shellcheck disable=SC2207` for a rule no gate here ever ran, which is worse
+# than no suppression at all: it reads as a check that passed. They are all
+# checked by generating them and handing the output to an analyzer, because a
+# copy kept beside the Go source goes stale the day a flag moves, and the flag
+# list is built from the FlagSet at run time. The generated files are under
+# dist/, which .gitignore covers.
 #
-# The zsh and fish scripts go unanalyzed: no tree-wide shell checker in this
-# repo covers them, and the bash one is the one the completion path installs
-# with a bare redirect.
+# The zsh and fish scripts were the two that shipped with no analyzer at all,
+# which is the state this target existed in for bash before it was fixed. A
+# completion that does not parse is not a degraded feature, it is a script the
+# sourcing shell rejects outright, and nothing in the tree noticed because
+# nothing read them. shellcheck has no zsh or fish mode, so the reader is the
+# shell itself: `zsh -n` and `fish --no-execute` parse without executing, which
+# is the grammar that would have rejected the file anyway.
 .PHONY: check-shell
-check-shell: ## shellcheck the bash completion script 'toktop completion bash' prints
-	@command -v $(SHELLCHECK) >/dev/null 2>&1 || { \
-		echo "make check-shell: $(SHELLCHECK) is not on PATH; the bash completion script in cmd/toktop/completion.go is shell code and no other analyzer reads it" >&2; \
-		exit 1; \
-	}
-	@$(SHELLCHECK_OLD); \
+check-shell: ## analyze the bash, zsh and fish completion scripts 'toktop completion <shell>' prints
+	@for tool in $(SHELLCHECK) $(ZSH) $(FISH); do \
+		command -v $$tool >/dev/null 2>&1 || { \
+			echo "make check-shell: $$tool is not on PATH; the $(COMPLETION_SHELLS) completion scripts in cmd/toktop/completion.go are shell code and no other analyzer reads them" >&2; \
+			exit 1; \
+		}; \
+	done
+	@$(VERSION_OLD); \
 	have=$$($(SHELLCHECK) --version | awk '/^version:/ { sub(/^version: */, ""); print; exit }'); \
-	if shellcheck_too_old "$$have"; then \
+	if version_too_old "$(SHELLCHECK_MIN)" "$$have"; then \
 		echo "make check-shell: $(SHELLCHECK) $$have is older than $(SHELLCHECK_MIN), so the run below would clear a script against a rule set that predates its own '# shellcheck disable' comment" >&2; \
+		exit 1; \
+	fi; \
+	have=$$($(ZSH) --version | awk '{ print $$2; exit }'); \
+	if version_too_old "$(ZSH_MIN)" "$$have"; then \
+		echo "make check-shell: $(ZSH) $$have is older than $(ZSH_MIN), so the parse below would clear a script against a parser that predates the flag it passes" >&2; \
+		exit 1; \
+	fi; \
+	have=$$($(FISH) --version | sed -n 's/.*version //p'); \
+	if version_too_old "$(FISH_MIN)" "$$have"; then \
+		echo "make check-shell: $(FISH) $$have is older than $(FISH_MIN), so the parse below would clear a script against a parser that predates the flag it passes" >&2; \
 		exit 1; \
 	fi
 	@mkdir -p $(DIST)
-	@$(GO) run -mod=readonly $(GOTAGS) $(CMD) completion bash > $(DIST)/completion.bash
+	@for shell in $(COMPLETION_SHELLS); do \
+		$(GO) run -mod=readonly $(GOTAGS) $(CMD) completion $$shell > $(DIST)/completion.$$shell || exit 1; \
+	done
 	@$(SHELLCHECK) $(DIST)/completion.bash
+	@$(ZSH) -n $(DIST)/completion.zsh
+	@$(FISH) --no-execute $(DIST)/completion.fish
 
 .PHONY: check-yaml
 check-yaml: ## fail if a workflow, .github/dependabot.yml or docs/openapi.yaml is invalid YAML or breaks the .yamllint rule set
@@ -1321,7 +1376,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 	$(SCRIPTS_BIN)/python scripts/screenshot.py $(CAPTURE) $(OUT) $(SCALE) $(COLS) $(ROWS)
 
 .PHONY: check
-check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the bash completion script, the workflow YAML and the doc guards (CI parity)
+check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion scripts, the workflow YAML and the doc guards (CI parity)
 	@$(MAKE) --no-print-directory check-test-flags
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-env
