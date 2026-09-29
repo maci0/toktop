@@ -217,8 +217,18 @@ exit 0`
 // it, exactly as a local listing holds one.
 func parseProcScan(out string) []procs.Info {
 	var infos []procs.Info
-	for line := range strings.SplitSeq(out, "\n") {
-		fields := strings.Fields(line)
+	for raw := range strings.SplitSeq(out, "\n") {
+		// The sweep's cut is a byte cut (procScanScript pins LC_ALL=C), so
+		// the last character of a clipped command line can be the leading
+		// bytes of a multi-byte one: a process whose argument past
+		// CmdlinePrefix starts with an emoji, a CJK word or a combining
+		// mark ships a line ending in half a character. Every other text
+		// field in this program is valid UTF-8 before anything reads it
+		// (core.SanitizeText drops ill-formed bytes for the same reason),
+		// and a half a character is not one: a fold that walks runes
+		// rewrites it to U+FFFD, so the same process is matched under a
+		// different spelling on the far side of a fold than this side.
+		fields := strings.Fields(strings.ToValidUTF8(raw, ""))
 		if len(fields) < 2 {
 			continue
 		}

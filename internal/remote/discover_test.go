@@ -3,9 +3,11 @@ package remote
 import (
 	"os/exec"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/procs"
 )
@@ -159,6 +161,33 @@ func TestProcScanScriptCapsCmdline(t *testing.T) {
 	infos := parseProcScan("42 " + strings.Repeat("x", procs.CmdlinePrefix+1))
 	if len(infos) != 1 || len(infos[0].Args) == 0 {
 		t.Fatalf("parseProcScan of a clipped line = %+v", infos)
+	}
+}
+
+// The sweep's cut is a byte cut, so a line clipped inside a multi-byte
+// character arrives holding half of one. A name and an argument that are not
+// valid UTF-8 are not text: a fold walking runes rewrites them to U+FFFD, so
+// the same process reads under two spellings depending on which side of the
+// fold looked at it.
+func TestParseProcScanDropsPartialCharacter(t *testing.T) {
+	// "ollama run --model café-" with the last byte of a further "é" left
+	// dangling, which is what a byte cut at that offset ships.
+	infos := parseProcScan("42 ollama run --model caf\xc3\xa9-\xc3")
+	if len(infos) != 1 {
+		t.Fatalf("parseProcScan = %+v, want one info", infos)
+	}
+	i := infos[0]
+	for _, s := range append([]string{i.Name}, i.Args...) {
+		if !utf8.ValidString(s) {
+			t.Errorf("field %q is not valid UTF-8", s)
+		}
+	}
+	if i.Name != "ollama" {
+		t.Errorf("Name = %q, want ollama", i.Name)
+	}
+	// Only the half character goes; every whole one before it survives.
+	if !slices.Contains(i.Args, "café-") {
+		t.Errorf("Args = %q, want the whole characters kept", i.Args)
 	}
 }
 
