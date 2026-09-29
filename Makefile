@@ -102,6 +102,12 @@ export GOWORK := off
 # Instruction-set baselines: an ambient GOAMD64=v3 would change amd64 artifacts.
 export GOAMD64 := v1
 export GOARM64 := v8.0
+# The crypto module, the same class of hole. GOFIPS140 is read by the
+# compiler, so an ambient GOFIPS140=latest on a developer machine links a
+# different crypto implementation than the released binary carries, from
+# identical source. off is the toolchain default and what CI has no value
+# for, so naming it here is what keeps the two in step.
+export GOFIPS140 := off
 # Race tests turn cgo on in their recipes. Everything else matches the
 # released artifacts, including vet/staticcheck so they analyze the same
 # net resolver the binaries ship.
@@ -1171,7 +1177,7 @@ checksums: sbom buildinfo ## checksum the dist/ binaries into a byte-reproducibl
 		else \
 			shasum -a 256 "$$@" > checksums.txt && shasum -a 256 -c checksums.txt; \
 		fi
-	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > toktop_$(VERSION)_checksums.tar.gz && rm checksums.txt
+	@cd $(DIST) && $(TAR) $(TAR_REPRO) -c -f - checksums.txt | gzip -n -6 > $(BINARY)_$(VERSION)_checksums.tar.gz && rm checksums.txt
 
 # Binaries of any earlier version are dropped first: leftovers would
 # otherwise ride the toktop_* glob into checksums.txt and the release.
@@ -1218,6 +1224,7 @@ buildinfo: dist-clean test-dist ## record the toolchain, commit, and flags behin
 		echo "cgo_enabled: $(CGO_ENABLED)"; \
 		echo "goamd64: $(GOAMD64)"; \
 		echo "goarm64: $(GOARM64)"; \
+		echo "gofips140: $(GOFIPS140)"; \
 	} > $(DIST)/$(BINARY)_$(VERSION)_buildinfo.txt
 
 # A published release is only a backup once something has fetched from it and

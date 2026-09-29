@@ -27,6 +27,7 @@ jobs:
       TZ: UTC
       GOAMD64: v1
       GOARM64: v8.0
+      GOFIPS140: "off"
       CGO_ENABLED: "0"
       GOFLAGS: ""
       GOEXPERIMENT: ""

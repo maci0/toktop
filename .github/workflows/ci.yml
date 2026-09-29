@@ -13,15 +13,16 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 # Match the Makefile: locale/timezone must not follow the runner into
-# formatting, glob order, or timestamps. Instruction-set baselines and
-# CGO_ENABLED=0 match the released artifacts; race-test steps turn cgo on.
-# Empty GOFLAGS/GOEXPERIMENT so a runner-level extra flag cannot change
-# compile or test results relative to `make`.
+# formatting, glob order, or timestamps. Instruction-set baselines, the
+# non-FIPS crypto module and CGO_ENABLED=0 match the released artifacts;
+# race-test steps turn cgo on. Empty GOFLAGS/GOEXPERIMENT so a runner-level
+# extra flag cannot change compile or test results relative to `make`.
 env:
   LC_ALL: C
   TZ: UTC
   GOAMD64: v1
   GOARM64: v8.0
+  GOFIPS140: "off"
   CGO_ENABLED: "0"
   GOFLAGS: ""
   GOEXPERIMENT: ""
