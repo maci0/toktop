@@ -37,12 +37,6 @@ func (m Model) canSwapFocus() bool {
 	return len(m.snap.Providers) > 0 && (len(m.snap.Agents) > 0 || m.cfg.Agents || m.focusAgents)
 }
 
-// noticeMinCells is the shortest notice the footer will print beside the key
-// list. Below it the two cannot share a row, and the key list is what gives way:
-// the notice names its own key ("p: …"), so on its own it still answers the
-// press, where the key list alone would drop the answer off the clipped edge.
-const noticeMinCells = 16
-
 func (m Model) renderFooter() string {
 	base := styleInfo.Render("q") + dim(" quit  ") +
 		styleInfo.Render("space") + dim(" pause  ")
@@ -64,25 +58,44 @@ func (m Model) renderFooter() string {
 		}
 		opt = append(opt, styleInfo.Render("a")+dim(label))
 	}
-	foot := func() string { return base + strings.Join(opt, "") + styleInfo.Render("?") + dim(" help") }
+	foot := func(opt []string) string {
+		return base + strings.Join(opt, "") + styleInfo.Render("?") + dim(" help")
+	}
 	tag := ""
 	if m.cfg.Demo {
 		tag = styleWarn.Render(fmt.Sprintf(" DEMO seed %d ", m.cfg.DemoSeed)) + " "
 	}
-	keys := foot()
+	keys := foot(opt)
 	for m.w > 0 && len(opt) > 0 && widthOf(tag)+widthOf(keys) > m.w {
 		opt = opt[:len(opt)-1]
-		keys = foot()
+		keys = foot(opt)
 	}
 	if m.notice == "" {
 		return tag + keys
 	}
 	// The notice shares the footer row so a key that did nothing is answered
-	// where the key itself is printed.
-	sep := dim("  ·  ")
-	if avail := m.w - widthOf(tag) - widthOf(keys) - widthOf(sep); avail >= noticeMinCells {
-		return tag + keys + sep + styleWarn.Render(m.notice)
+	// where the key itself is printed. Sharing is bought by shedding the
+	// optional keys, and then by closing the gap between the two, rather than by
+	// dropping the list: a pane narrow enough for the full list lost every key,
+	// q quit and ? help included, for as long as the notice stood, so the key
+	// that did nothing took the reader's map of the app away with it. The
+	// notice itself is printed whole or not at all; cut mid-sentence it stops
+	// answering the press it exists to answer.
+	notice := styleWarn.Render(m.notice)
+	for _, sep := range []string{dim("  ·  "), " "} {
+		kept := slices.Clone(opt)
+		for {
+			if widthOf(tag+foot(kept)+sep+notice) <= m.w {
+				return tag + foot(kept) + sep + notice
+			}
+			if len(kept) == 0 {
+				break
+			}
+			kept = kept[:len(kept)-1]
+		}
 	}
+	// Nothing beside the notice fits, and the notice names its own key, so it
+	// takes the row on its own rather than being clipped off it.
 	room := max(m.w-widthOf(tag), 0)
 	return tag + styleWarn.Render(shorten(m.notice, room))
 }

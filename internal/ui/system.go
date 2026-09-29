@@ -131,7 +131,10 @@ func packSegs(segs []string, w int, extraHidden int) string {
 		kept--
 		hidden++
 	}
-	return dim(moreForms(hidden)[1])
+	// Nothing fit to sit beside the count, so the count takes the row on its
+	// own, in its shortest spelling: the row is packed to w and a longer marker
+	// would run off the end of it.
+	return dim(bareMoreForm(hidden))
 }
 
 // spreadRow joins segs with the strip's separator, for the one place that has

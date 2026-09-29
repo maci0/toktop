@@ -315,7 +315,7 @@ const HTML = htmlForWire(`<!doctype html>
      section titles stay where the scale puts them, because they are read
      one at a time and every one of them fits a 360px column at 1.3rem.
      The section list wraps there rather than scrolling sideways: at the
-     micro step the five labels need about 285px beside a 71px wordmark,
+     micro step the six labels need about 320px beside a 71px wordmark,
      which is more than a 360px phone has, so an overflow-x scroller put
      the last link past the edge with no scrollbar on a phone to reveal
      it. A second row of links costs the reader one line of the screen;
@@ -343,6 +343,7 @@ const HTML = htmlForWire(`<!doctype html>
     <a href="#shows" aria-label="What it shows">Shows</a>
     <a href="#keys">Keys</a>
     <a href="#feed">Feed</a>
+    <a href="#measured" aria-label="Measured, or nothing">Measured</a>
   </nav>
 </header>
 <main id="top" tabindex="-1">

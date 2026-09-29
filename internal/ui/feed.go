@@ -82,7 +82,7 @@ func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 			add("  " + s)
 		}
 	} else if statsN < nRows {
-		add("  " + dim(fmt.Sprintf("+%d more", nRows-statsN)))
+		add(moreMarker(title, w, nRows-statsN))
 	}
 	if m.feedDown == "" && m.cfg.IngestAddr != "" {
 		// Sanitized like every other render of this address (renderEmpty,

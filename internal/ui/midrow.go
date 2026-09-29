@@ -4,6 +4,7 @@ package ui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -42,24 +43,47 @@ func (m Model) engineStateTitle(w, shown int) string {
 	return moreTitle("ENGINE STATE", w, healthy-shown)
 }
 
-// moreTitle counts what the body dropped. The count alone is a dead end: a
-// panel that says "+3 more" and offers no way to reach those three reads as
-// three engines the tool cannot see, which is a different and wrong conclusion
-// from the one that is true. The way out is a bigger pane, so the title says
-// so, the way the compact strip's overflow line already does. A column too
-// narrow for the sentence keeps the bare count rather than losing the count:
-// an engine the reader cannot account for is the worse of the two.
+// moreTitle counts what the body dropped: the title and the marker beside it.
 func moreTitle(title string, w, hidden int) string {
+	return title + moreMarker(title, w, hidden)
+}
+
+// moreMarker is the overflow marker's spacing and spelling for a title: the
+// leading gap plus the longest form that fits beside the title it hangs on, or
+// nothing at all when not even the bare number does. Every title that drops
+// rows takes it from here, so one pane's overflow is worded the same way
+// wherever it is counted.
+//
+// The count alone is a dead end: a panel that says "+3 more" and offers no way
+// to reach those three reads as three engines the tool cannot see, which is a
+// different and wrong conclusion from the one that is true. The way out is a
+// bigger pane, so the marker says so wherever it has the cells.
+//
+// A title too narrow for the marker on its usual gap keeps the count rather
+// than losing it: a reading the reader cannot account for is the worse of the
+// two. The gap closes before the wording does, and the bare number is the last
+// form, so a title never drops the count to buy a longer sentence beside it.
+func moreMarker(title string, w, hidden int) string {
 	if hidden <= 0 {
-		return title
+		return ""
 	}
-	for _, form := range moreForms(hidden) {
-		if lipgloss.Width(title)+lipgloss.Width(form)+2 <= w {
-			return title + "  " + dim(form)
+	forms := append(moreForms(hidden), bareMoreForm(hidden))
+	for _, form := range forms {
+		for gap := 2; gap >= 1; gap-- {
+			if lipgloss.Width(title)+lipgloss.Width(form)+gap <= w {
+				return strings.Repeat(" ", gap) + dim(form)
+			}
 		}
 	}
-	return title
+	return ""
 }
+
+// bareMoreForm is the overflow marker with nothing beside it but the number,
+// for a column too narrow for the word "more" on its usual gap. It is not one
+// of moreForms: a row that can shed a reading to keep the sentence naming the
+// way out must go on doing that, and the bare number is the last resort of a
+// column that has nothing left to shed.
+func bareMoreForm(hidden int) string { return fmt.Sprintf("+%d", hidden) }
 
 // moreForms is the overflow marker's spellings, longest first: the count with
 // the way out, then the count alone. Every row that drops readings takes the

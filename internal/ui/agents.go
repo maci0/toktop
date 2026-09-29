@@ -232,8 +232,11 @@ func (m Model) renderAgentsOnly() string {
 	if r := m.probeReadout(); r != "" {
 		add("  " + r)
 	}
-	if len(rows) > midIn && midIn > 0 {
-		add("  " + dim(fmt.Sprintf("+%d more", len(rows)-midIn)))
+	// The rows the row budget could not take, worded as the mid-row titles
+	// word theirs: the same overflow marker from moreMarker, so one pane does
+	// not spell the same count two ways.
+	if hidden := len(rows) - midIn; hidden > 0 && midIn > 0 {
+		add(moreMarker(title, w, hidden))
 	}
 
 	feed := feedLines(m.snap.Agents, feedIn, w)

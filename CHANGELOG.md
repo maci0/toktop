@@ -13,6 +13,33 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Changed
+
+- A footer notice no longer takes the key list with it. On a pane too narrow
+  for the full list and the notice together, every key, `q quit` and `? help`
+  included, gave way for the length of the notice, so the key that did nothing
+  took the reader's map of the app away with it. The optional keys shed first
+  and the gap between the two closes before the notice does; the notice itself
+  is printed whole or not at all, since cut mid-sentence it stops answering
+  the press it exists to answer.
+- A panel that drops rows counts them the same way everywhere. The agent table
+  and the AGENT FEED stats spelled their overflow a bare `+3 more` beside
+  engine columns spelling `+3 more (enlarge window)`, so one frame named the
+  same overflow two ways and only one of them named the way out of it. All
+  three take the marker from one place now.
+- A panel title too narrow for the count beside it keeps the count. The 31%
+  `ENGINE STATE` takes on the 62-cell minimum dashboard is 15 cells, two short
+  of the bare count on its usual two-cell gap, and the count was dropped whole
+  there: a panel that silently drew fewer engines than the fleet has. The gap
+  closes before the wording does, and the bare number is the last form.
+
+### Added
+
+- The site bar links the closing section, `#measured`, beside the other five.
+  A section reachable only by scrolling past everything else is a section the
+  bar does not describe. The phone view already wrapped the link list to a
+  second row, so the sixth label costs no extra line there.
+
 ### Fixed
 
 - `make site-rollback` and `make site-deploy` cleared the rolled-back record

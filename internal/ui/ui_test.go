@@ -1123,6 +1123,33 @@ func TestFeedTitleSanitizesIngestAddr(t *testing.T) {
 	assertFitsPane(t, "feed", m.View(), m.w, m.h)
 }
 
+// A panel that drops rows counts them, and the count is worded the same way
+// everywhere it appears: the engine columns, the agent table and the feed
+// stats all take the marker from moreMarker, so one frame cannot spell the
+// same overflow "more (enlarge window)" in one title and a bare "more" in the
+// title beside it.
+func TestEveryOverflowCountNamesTheWayOut(t *testing.T) {
+	now := time.Now()
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.w, m.h, m.ready = 120, 30, true
+	m.snap = core.Snapshot{At: now, Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	for i := range 7 {
+		m.snap.Agents = append(m.snap.Agents, core.AgentEvent{
+			Agent: fmt.Sprintf("agent-%d", i), Kind: core.AgentKindTurn, At: now, OutputTokens: 100,
+		})
+	}
+	rates := m.agentRates()
+	feed := strip(m.feedTitle(m.w-4, 1, len(rates), rates))
+	if !strings.Contains(feed, fmt.Sprintf("+%d more (enlarge window)", len(rates)-1)) {
+		t.Errorf("AGENT FEED title = %q, want the count and the way out", feed)
+	}
+	_, midIn, _ := m.sectionHeights()
+	agents := strip(moreTitle("AGENTS", m.w-4, len(rates)-midIn))
+	if !strings.Contains(agents, "more (enlarge window)") {
+		t.Errorf("AGENTS title = %q, want the count and the way out", agents)
+	}
+}
+
 // The help screen mutes every action key and swallows q and esc, so the
 // reference it prints has to say so: a reader who presses q on a list that
 // said "quit" and lands back on the dashboard reads it as a dropped key.
@@ -2075,6 +2102,16 @@ func TestEngineStateCountsShortBlocksByRow(t *testing.T) {
 	if got := strip(m.engineStateTitle(22, shown)); got != "ENGINE STATE  +1 more" {
 		t.Errorf("narrow ENGINE STATE title = %q, want the bare count", got)
 	}
+	// Narrower still: the 31% ENGINE STATE takes on the 62-cell minimum
+	// dashboard is 15 cells, and the count was dropped whole there, leaving a
+	// panel that silently drew fewer engines than the fleet has. The gap
+	// closes before the wording does, and the bare number is the last form.
+	if got := strip(m.engineStateTitle(20, shown)); got != "ENGINE STATE +1 more" {
+		t.Errorf("15-cell ENGINE STATE title = %q, want the count on a one-cell gap", got)
+	}
+	if got := strip(m.engineStateTitle(15, shown)); got != "ENGINE STATE +1" {
+		t.Errorf("narrowest ENGINE STATE title = %q, want the bare number", got)
+	}
 }
 
 // A notice is the answer to a key that changed nothing. On a pane too narrow to
@@ -2091,6 +2128,23 @@ func TestFooterNoticeSurvivesANarrowPane(t *testing.T) {
 	}
 	if w := lipgloss.Width(got); w > minDashW {
 		t.Errorf("footer is %d columns wide on a %d-column pane: %q", w, minDashW, got)
+	}
+	// The key that did nothing is not the row's whole contents: the standing
+	// reference, the way out and the way to the help, stay beside the notice.
+	// They used to give way with the rest, so the press that earned the notice
+	// also took the reader's map of the app away for the length of it.
+	for _, key := range []string{"q", "quit", "space", "pause", "help"} {
+		if !strings.Contains(got, key) {
+			t.Errorf("notice on a %d-column pane dropped %q: %q", minDashW, key, got)
+		}
+	}
+	// A pane too narrow for the notice beside even q and space leaves the
+	// notice the row, whole rather than cut: cut mid-sentence it stops
+	// answering the press it exists to answer.
+	m.w = 40
+	got = strip(m.renderFooter())
+	if got != "p: no engines to probe" {
+		t.Errorf("narrowest footer = %q, want the notice alone and whole", got)
 	}
 	// Where both fit, the notice answers beside the key it belongs to.
 	m.w = 120
