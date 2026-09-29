@@ -1,0 +1,391 @@
+# The agent feed API toktop serves on its ingest port.
+#
+# Machine-readable form of the table and the field list in the README's "Agent
+# feed API" section, for a client generator or a contract test. The prose
+# there is the reference; this file must not say anything the handlers do not
+# do. internal/ingest/openapi_test.go drives the real server and fails when a
+# served path, a served method or an answer the handlers can give is missing
+# here, and when a status is documented that no path serves.
+#
+# Anything not served answers 404 (unknown path) or 405 (wrong method on a
+# served path), both as a one-line text/plain reason; neither is an operation
+# of its own, so they are named in the server description rather than attached
+# to a path.
+
+openapi: 3.1.0
+info:
+  title: toktop agent feed
+  version: "0.1.0"
+  license:
+    name: MIT
+    identifier: MIT
+  summary: Push LLM token-usage events into the toktop dashboard.
+  description: |
+    toktop binds a small HTTP endpoint by default on 127.0.0.1:8420 so agents
+    and harnesses can push the token usage toktop then renders. It
+    authenticates nothing: any process that can reach the port can write
+    events, which is why the default bind is loopback and why a bind off
+    loopback (`--ingest ADDR`) is the operator's own call.
+
+    Every answer is text/plain, a JSON acknowledgement, or neither, and there
+    is no error envelope to parse: a failure is a status plus a one-line
+    reason naming the field or the shape the sender got wrong. A body sent as
+    `null` reads as an absent field, and unknown fields are ignored, so a
+    harness can send its own alongside.
+
+    A request whose `Host` names anything but loopback is refused with 403
+    before routing when the listener is loopback-bound, and a POST carrying an
+    `Origin` header is refused with 403, so a web page cannot write rows into
+    a running dashboard.
+
+    An unknown path answers 404 naming every served endpoint and the methods
+    each one takes; a wrong method on a served path answers 405 with an `Allow`
+    header and a body naming the path and the methods it takes.
+servers:
+  - url: http://127.0.0.1:8420
+    description: The default bind. --ingest ADDR moves it, --no-ingest turns it off.
+
+paths:
+  /v1/events:
+    post:
+      summary: Record one event or a stream of them
+      description: |
+        One JSON object, or a newline-delimited stream of them. Events decode
+        and record line by line: a body that fails halfway keeps everything
+        before the failing line, and the answer says how many were recorded
+        and how to recover.
+
+        The body is read as JSON or NDJSON whatever the `Content-Type` says,
+        so a plain `curl -d` works unmodified.
+      operationId: recordEvents
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+        - $ref: "#/components/parameters/RequestId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Event"
+          application/x-ndjson:
+            schema:
+              type: string
+            description: One Event object per line.
+      responses:
+        "202":
+          description: |
+            Every event in the body decoded. `accepted` counts what the wire
+            carried, `stored` what the retained feed took, so a replay, or an
+            event stamped behind the whole retained window, shows the two
+            apart. The pair is on the request's log line as well.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Ack"
+        "400":
+          description: |
+            The body is not a JSON object or NDJSON stream, a `ts` is not an
+            RFC 3339 string, a token count or `span_ms` is outside the 64-bit
+            range or is not a number, or an `id` cannot be stored whole. The
+            reason names the field. A stream that failed partway names how
+            many earlier events were recorded and whether to resend the rest
+            or replay the whole request.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "403":
+          description: |
+            The POST carried an `Origin` header, so it came from a page rather
+            than from a script, or its `Host` named another machine on a
+            loopback-bound listener.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "405":
+          description: The path takes POST only.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: POST
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "408":
+          description: |
+            The stream stalled mid-body. The reason names which bound broke:
+            no bytes for a minute, or the ten minute lifetime.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "413":
+          description: The body passed the 1 MiB cap. Trim it rather than re-encoding it.
+          headers:
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "503":
+          description: |
+            64 bodies were already decoding. This is a pile-up, not a fault:
+            wait the second `Retry-After` names and resend the same request,
+            under the same `Idempotency-Key` if it had one.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+            X-Request-Id:
+              $ref: "#/components/headers/RequestId"
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: |
+        Answers `ok`. While every event slot is held the endpoint is refusing
+        every POST, so the probe reports `degraded` with 503 and the
+        in-flight count rather than a status describing a service that
+        accepts nothing. The probe is not logged: it runs continuously and
+        would drown the event log.
+      operationId: health
+      responses:
+        "200":
+          description: The endpoint is accepting events.
+          headers:
+            Content-Length:
+              description: The length the body would have had; a HEAD states it with no body.
+              schema:
+                type: integer
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: "ok\n"
+        "405":
+          description: The path takes GET and HEAD only.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: GET, HEAD
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+        "503":
+          description: |
+            Every event slot is held, so every POST is being refused. The body
+            names how many streams are in flight.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+            Content-Length:
+              description: The length the body would have had; a HEAD states it with no body.
+              schema:
+                type: integer
+          content:
+            text/plain:
+              schema:
+                $ref: "#/components/schemas/Reason"
+    head:
+      summary: Liveness probe, headers only
+      description: |
+        Carries the GET's status and headers and no body, `Content-Length`
+        included, so a probe reads the same answer either way.
+      operationId: healthHead
+      responses:
+        "200":
+          description: The endpoint is accepting events.
+          headers:
+            Content-Length:
+              description: The length the body would have had.
+              schema:
+                type: integer
+        "405":
+          description: The path takes GET and HEAD only.
+          headers:
+            Allow:
+              schema:
+                type: string
+                const: GET, HEAD
+        "503":
+          description: Every event slot is held, so every POST is being refused.
+          headers:
+            Retry-After:
+              $ref: "#/components/headers/RetryAfter"
+            Content-Length:
+              description: The length the body would have had.
+              schema:
+                type: integer
+
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: |
+        Names one logical operation, for a turn or a request, and nothing
+        else. Events that carry no `id` of their own get one derived from it:
+        the first eight bytes of its SHA-256 hash as 16 hex characters, then
+        the 1-based line index (`<hash>:1`, `<hash>:2`). So retrying the whole
+        request under the same key counts once, and a key built from the clock
+        is a different key on every attempt, which counts every attempt. Mint
+        it per operation and namespace it per sender.
+      schema:
+        type: string
+    RequestId:
+      name: X-Request-Id
+      in: header
+      required: false
+      description: |
+        A correlation id for this request. Echoed back on every answer,
+        single-lined and cut to 64 characters, and read as no more than that:
+        it never names an event.
+      schema:
+        type: string
+        maxLength: 64
+
+  headers:
+    RequestId:
+      description: The request's `X-Request-Id`, echoed, or one minted when the sender set none.
+      schema:
+        type: string
+    RetryAfter:
+      description: Seconds to wait before resending, the same delay every refusal on this port names.
+      schema:
+        type: string
+        const: "1"
+
+  schemas:
+    Ack:
+      type: object
+      required: [accepted, stored]
+      additionalProperties: false
+      properties:
+        accepted:
+          type: integer
+          description: Events decoded off the wire.
+          examples: [12]
+        stored:
+          type: integer
+          description: |
+            Events the retained feed took. Below `accepted` on a replay of ids
+            the feed already holds, and on events stamped behind the whole
+            retained window.
+          examples: [10]
+
+    Reason:
+      type: string
+      description: A one-line reason naming the field, the bound or the shape the sender got wrong.
+      examples:
+        - "bad json: ts must be an RFC 3339 string"
+        - "not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)"
+
+    Event:
+      type: object
+      description: |
+        Every field is optional. A field sent as `null` reads as one left out,
+        and unknown fields are ignored.
+      additionalProperties: true
+      properties:
+        id:
+          type: string
+          maxLength: 128
+          description: |
+            The caller's own key for this event, at most 128 characters. A
+            repeat of a key recorded within the last 15 minutes is ignored,
+            while the ledger still holds fewer than 4096 ids. An id past the
+            cap, or one that is nothing printable, is a 400 naming the field
+            rather than a truncated key, because two keys clamped onto one
+            stored id would drop the second event as a duplicate. Omitted, a
+            request `Idempotency-Key` is used instead.
+        ts:
+          type: string
+          format: date-time
+          description: |
+            RFC 3339, offset required. Absent, null or blank takes the arrival
+            instant; whitespace around the stamp is ignored; anything else
+            unparseable is a 400 naming the field. A stamp more than two
+            minutes from arrival in either direction is clamped to arrival.
+        agent:
+          type: string
+          maxLength: 64
+          default: anonymous
+          description: The agent the event came from.
+        model:
+          type: string
+          maxLength: 128
+          description: The model that served it.
+        kind:
+          type: string
+          maxLength: 24
+          default: turn
+          description: |
+            One of `turn`, `tool`, `error`, `note`, matched whatever case it
+            is written in. A custom kind passes through ASCII-lowercased, so a
+            non-ASCII letter keeps its case.
+        prompt_tokens:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            Prompt tokens billed. A negative count or one above 2^40 clamps to
+            0; a whole JSON number such as `100.0` counts; a value outside the
+            64-bit range is a 400 naming the field.
+        output_tokens:
+          type: integer
+          minimum: 0
+          default: 0
+          description: Output tokens generated, under the same bounds as prompt_tokens.
+        thinking_tokens:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            The reasoning share of the output, under the same bounds as
+            prompt_tokens.
+        via_engine:
+          type: string
+          maxLength: 128
+          description: |
+            A monitored engine already counting this output; the aggregates
+            skip the event so its tokens are not added twice.
+        span_ms:
+          type: integer
+          minimum: 0
+          default: 0
+          description: |
+            How long the model spent on this event's tokens, in milliseconds.
+            It is the rate denominator, so it beats the gap between events. A
+            negative value or one above 86400000 clamps to 0, which leaves the
+            gap in charge; a value that is not a number is a 400 naming the
+            field.
+        note:
+          type: string
+          maxLength: 512
+          description: |
+            Free text. A note that is nothing but a directory is reduced to
+            its last two components, with a path under `$HOME` folded to `~`.

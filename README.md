@@ -358,6 +358,9 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 
 A field sent as `null` is the same as one left out, so a sender assembling a
 payload from optional values can send the key either way.
+[`docs/openapi.yaml`](docs/openapi.yaml) is the same contract in OpenAPI 3.1,
+for a generated client; a test drives the server and fails when a path, a
+method or an answer the handlers give is missing from it.
 
 Event fields are all optional; anything omitted gets the default:
 
