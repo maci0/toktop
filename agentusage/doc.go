@@ -80,6 +80,11 @@
 // spelling out: two spellings of one directory differ byte for byte on macOS
 // and Windows and name two directories on Linux.
 //
+// A program that replays a run rather than waiting it out takes both halves of
+// the timeline: SetNow stamps the samples a Run publishes, and SetPacer
+// replaces what paces the loop with a VirtualPacer the driver fires, so the
+// readings a callback sees are a function of the steps the driver took.
+//
 // Agents differ in what they print to stdout: some report token usage as they
 // stream, some only at exit, some never. They agree on something else, though,
 // which is that they keep a structured session transcript, and that transcript

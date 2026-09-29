@@ -617,15 +617,15 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 }
 
 // SetPacer replaces what paces [Watcher.Run]. Production leaves it on
-// core.WallPacer, so the loop still waits out the interval it was given. A
-// caller replaying a run passes a core.VirtualPacer and fires it, and the
+// [WallPacer], so the loop still waits out the interval it was given. A
+// caller replaying a run passes a [VirtualPacer] and fires it, and the
 // watcher reads the transcripts once per fire rather than once per elapsed
 // interval: with the loop on the wall clock the same seed read however many
 // records happened to be written while it waited, and the ledger it reported
 // was a function of real time. A nil pacer restores the wall clock.
 //
 // Call it before Run. Run reads it once, when the loop's ticker is built.
-func (w *Watcher) SetPacer(p core.Pacer) {
+func (w *Watcher) SetPacer(p Pacer) {
 	if w == nil {
 		return
 	}

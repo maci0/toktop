@@ -287,7 +287,11 @@ samples, so a program driving a simulated timeline gets samples stamped on
 it, and the recency and rescan windows age on that clock rather than on wall
 time. Transcript mtimes and `since` stay wall time, because that is the clock
 the filesystem and the session stores record in; anchor the injected clock to
-the instant the run started and the two agree.
+the instant the run started and the two agree. `Watcher.SetPacer` replaces
+what paces the `Run` loop: `WallPacer` is the wall clock a run uses unless it
+is told otherwise, and a `NewVirtualPacer` fires one pass per call instead, so
+a test that replays a run reads the same transcripts per step however long
+they took to grow. Both halves of a replayed run then come from the driver.
 
 `Agents` lists every agent name the package knows (built in, defined, or
 registered), and `Supported` says whether one of them can be read here. A

@@ -306,6 +306,64 @@ func ExampleWatcher_SetNow() {
 	w.SetNow(func() time.Time { return base })
 }
 
+// A test that replays a run rather than waiting it out puts the watcher's
+// passes on a virtual timeline: the driver fires them, so the readings a
+// callback sees are a function of the steps the test took and not of how long
+// the transcripts took to grow. Paired with SetNow, which stamps what the
+// watcher publishes, both halves of a run are then the driver's.
+func ExampleWatcher_SetPacer() {
+	dir, err := os.MkdirTemp("", "agentusage-example")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer os.RemoveAll(dir)
+	if err := agentusage.RegisterSpec("replayed", agentusage.Spec{Roots: []string{dir}}); err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer agentusage.UnregisterSpec("replayed")
+
+	w := agentusage.Watch("replayed", "/home/me/project", time.Now())
+	if w.Err() != nil {
+		fmt.Println(w.Err())
+		return
+	}
+	pace := agentusage.NewVirtualPacer()
+	now := time.Date(2026, time.March, 1, 9, 0, 0, 0, time.UTC)
+	w.SetNow(func() time.Time { return now })
+	w.SetPacer(pace)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Run(ctx, agentusage.DefaultPollInterval, func(cur agentusage.Sample) {
+			fmt.Println(cur.Output)
+		})
+	}()
+
+	// One pass per step, with the transcript written in between, so every
+	// callback sees the same readings whatever the wall clock did.
+	path := filepath.Join(dir, "session.jsonl")
+	f, err := os.Create(path)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer f.Close()
+	for step := range 3 {
+		if _, err := fmt.Fprintf(f, `{"usage":{"output_tokens":%d}}`+"\n", 10*(step+1)); err != nil {
+			fmt.Println(err)
+			return
+		}
+		pace.Fire(now.Add(time.Duration(step) * agentusage.DefaultPollInterval))
+	}
+	cancel()
+	<-done
+}
+
 // The engine-overlap check: endpoints an engine is advertised on, and the
 // agents connected to any of them. A pid with no match is absent from the map.
 func ExampleMatchingEndpoints() {

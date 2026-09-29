@@ -88,6 +88,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   braille charts as dot-pattern noise, and giving up the live view. The live
   report scrolls normally rather than repainting an alternate screen, and
   `space`, `p` and `q` work as they do in the drawn frame.
+- `agentusage` names the pacer `Watcher.SetPacer` takes: `Pacer`, `Ticker`,
+  `WallPacer`, `VirtualPacer` and `NewVirtualPacer`. The method took a type
+  from `internal/core`, which a program outside this module cannot name, so
+  the replay the doc comment describes had no way to be written. The names are
+  the same types, so every existing call still compiles.
 
 ### Changed
 
