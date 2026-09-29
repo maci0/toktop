@@ -1492,7 +1492,8 @@ func TestReadKnownHostsNamesTheCopyToRestoreFrom(t *testing.T) {
 	if !strings.Contains(msg, backupPath(path)) {
 		t.Errorf("error should name the copy that parses, got: %v", err)
 	}
-	if !strings.Contains(msg, "cp "+backupPath(path)+" "+path) {
+	wantCmd := "cp " + shellWord(backupPath(path)) + " " + shellWord(path)
+	if !strings.Contains(msg, wantCmd) {
 		t.Errorf("error should carry the command that puts the copy back, got: %v", err)
 	}
 	// The refusal stands: the pins in the copy are not read in place of the
@@ -1512,7 +1513,7 @@ func TestReadKnownHostsNamesTheCopyToRestoreFrom(t *testing.T) {
 	// the way the run actually fails rather than only the read underneath it.
 	if _, err := tofu(); err == nil {
 		t.Fatal("a connect accepted a store whose record cannot be parsed")
-	} else if !strings.Contains(err.Error(), "cp "+backupPath(path)+" "+path) {
+	} else if !strings.Contains(err.Error(), wantCmd) {
 		t.Errorf("the connect error should carry the repair, got: %v", err)
 	}
 }

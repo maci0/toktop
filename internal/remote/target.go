@@ -398,49 +398,32 @@ func validTargetField(s string) error {
 // a '*' that is not a wildcard, so only the two wildcards below are
 // special.
 func patternMatch(pat, s string) bool {
-	// Iterative backtracking: two wildcards, so the state is a slice of
-	// (pattern index, name index) pairs and the memory is bounded by the
-	// name's length.
-	type cursor struct{ pat, name int }
-	frontier := []cursor{{0, 0}}
-	backing := []cursor(nil)
-	for len(frontier) > 0 {
-		backing = backing[:0]
-		for _, c := range frontier {
-			for {
-				if c.pat == len(pat) {
-					if c.name == len(s) {
-						return true
-					}
-					break
-				}
-				switch pat[c.pat] {
-				case '*':
-					// The wildcard can stand for the empty run, or for one
-					// more character. Both are queued: the empty run moves
-					// the pattern on without consuming the name, so '*name'
-					// still matches name, and the consuming arm lets 'a*b'
-					// match ab.
-					backing = append(backing, cursor{c.pat + 1, c.name})
-					c.pat++
-				case '?':
-					if c.name == len(s) {
-						break
-					}
-					c.pat++
-					c.name++
-				default:
-					if c.name == len(s) || s[c.name] != pat[c.pat] {
-						break
-					}
-					c.pat++
-					c.name++
-				}
-			}
+	pIdx, sIdx := 0, 0
+	starIdx := -1
+	sTmpIdx := -1
+
+	for sIdx < len(s) {
+		if pIdx < len(pat) && (pat[pIdx] == '?' || pat[pIdx] == s[sIdx]) {
+			pIdx++
+			sIdx++
+		} else if pIdx < len(pat) && pat[pIdx] == '*' {
+			starIdx = pIdx
+			sTmpIdx = sIdx
+			pIdx++
+		} else if starIdx != -1 {
+			pIdx = starIdx + 1
+			sTmpIdx++
+			sIdx = sTmpIdx
+		} else {
+			return false
 		}
-		frontier, backing = backing, frontier
 	}
-	return false
+
+	for pIdx < len(pat) && pat[pIdx] == '*' {
+		pIdx++
+	}
+
+	return pIdx == len(pat)
 }
 
 // ResolveKeyFile expands a leading tilde in file and checks that the result

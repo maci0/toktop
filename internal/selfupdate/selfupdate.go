@@ -198,7 +198,7 @@ func githubDownloadHost(host string) bool {
 // GitHub URL, so nothing legitimate stops working.
 func TrustedReleaseURL(raw string) bool {
 	if raw == "" || strings.ContainsFunc(raw, func(r rune) bool {
-		return !isReleaseURLByte(byte(r)) && r > 0x7f
+		return r > 0x7f || !isReleaseURLByte(byte(r))
 	}) {
 		return false
 	}
