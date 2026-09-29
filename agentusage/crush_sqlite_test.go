@@ -240,9 +240,10 @@ func TestCrushWatchCountsOnlyGrowthAfterAttach(t *testing.T) {
 	}
 }
 
-// A store that cannot be read at attach must not be treated as empty: the
-// first successful poll would otherwise count every continued session's
-// history as growth. Snapshot then, and count only what is added after.
+// A store that cannot be read at attach must not be treated as empty, and it
+// must not become an empty baseline either: either way the first successful
+// poll counts a continued session's whole history as growth. Snapshot only
+// once a real store is attached, and count just what is added after.
 func TestCrushWatchRetriesFailedAttachSnapshot(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".crush", "crush.db")
@@ -257,39 +258,6 @@ func TestCrushWatchRetriesFailedAttachSnapshot(t *testing.T) {
 		t.Fatal("crush is readable in this build, so Watch must return a watcher")
 	}
 	if err := os.Remove(path); err != nil {
-		t.Fatal(err)
-	}
-	crushDB(t, dir, map[string][3]int64{
-		"s": {5000, 0, time.Now().Add(-time.Hour).UnixMilli()},
-	})
-	w.poll(nil)
-	if got := w.Sample().Output; got != 0 {
-		t.Fatalf("counted tokens from a store that was unreadable at attach: %d", got)
-	}
-	putCrushSession(t, dir, "s", 5100, 0, time.Now().Add(time.Second).UnixMilli())
-	w.poll(nil)
-	if got := w.Sample().Output; got != 100 {
-		t.Fatalf("output %d, want the 100 generated after the store became readable", got)
-	}
-}
-
-// An unreadable store at attach must not become an empty baseline. Replacing
-// the file with a real database that already has tokens would otherwise
-// dump that history into this attach the first time it could be read.
-func TestCrushWatchDoesNotCountHistoryWhenAttachBaselineFails(t *testing.T) {
-	dir := t.TempDir()
-	db := filepath.Join(dir, ".crush", "crush.db")
-	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(db, []byte("not a database"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	w := Watch("crush", dir, time.Now())
-	if w == nil {
-		t.Fatal("crush is readable in this build, so Watch must return a watcher")
-	}
-	if err := os.Remove(db); err != nil {
 		t.Fatal(err)
 	}
 	crushDB(t, dir, map[string][3]int64{

@@ -55,9 +55,11 @@ type VirtualPacer struct {
 // fires them.
 func NewVirtualPacer() *VirtualPacer { return &VirtualPacer{} }
 
-// New registers a ticker with the pacer, so a later Fire reaches it.
-func (p *VirtualPacer) New(d time.Duration) Ticker {
-	t := &virtualTicker{p: p, every: d, c: make(chan time.Time, 1)}
+// New registers a ticker with the pacer, so a later Fire reaches it. The
+// interval is the driver's to apply: Fire decides when a tick lands, so a
+// ticker that kept it would only be a second source of schedule.
+func (p *VirtualPacer) New(time.Duration) Ticker {
+	t := &virtualTicker{p: p, c: make(chan time.Time, 1)}
 	p.mu.Lock()
 	p.tickers = append(p.tickers, t)
 	p.mu.Unlock()
@@ -77,7 +79,6 @@ func (p *VirtualPacer) Fire(at time.Time) {
 }
 
 type virtualTicker struct {
-	every   time.Duration
 	c       chan time.Time
 	mu      sync.Mutex
 	p       *VirtualPacer

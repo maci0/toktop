@@ -938,13 +938,10 @@ func TestSystemStripCountsFilteredTempsInMore(t *testing.T) {
 	}
 }
 
-// The SYS strip packs its readings left to right and sheds from the right, so
-// a host with several accelerators loses all but the first one on a narrow
-// pane. A row that silently stops mid-list reads as one GPU on the machine, so
-// what it dropped has to be counted, on both rows.
-func TestSystemStripCountsShedSegments(t *testing.T) {
-	m := New(Config{Version: "t"}, nil)
-	m.snap = core.Snapshot{
+// fourGPUs is the host the SYS strip overflow tests render: one vendor, four
+// accelerators, more readings than a narrow pane has room for.
+func fourGPUs() core.Snapshot {
+	return core.Snapshot{
 		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
 		Sys: &core.SysSample{
 			MemTotal: 32 << 30, MemUsed: 16 << 30,
@@ -956,6 +953,15 @@ func TestSystemStripCountsShedSegments(t *testing.T) {
 			},
 		},
 	}
+}
+
+// The SYS strip packs its readings left to right and sheds from the right, so
+// a host with several accelerators loses all but the first one on a narrow
+// pane. A row that silently stops mid-list reads as one GPU on the machine, so
+// what it dropped has to be counted, on both rows.
+func TestSystemStripCountsShedSegments(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = fourGPUs()
 	m.w, m.h, m.ready = 100, 40, true
 	out := strip(m.renderSystem())
 	if !strings.Contains(out, "nv0") {
@@ -976,18 +982,7 @@ func TestSystemStripCountsShedSegments(t *testing.T) {
 // narrow to carry it.
 func TestSystemStripOverflowNamesTheWayOut(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
-	m.snap = core.Snapshot{
-		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
-		Sys: &core.SysSample{
-			MemTotal: 32 << 30, MemUsed: 16 << 30,
-			GPUs: []core.GPUDevice{
-				{Vendor: "nvidia", Index: 0, MilliC: 70000, MemTotal: 80 << 30, MemUsed: 40 << 30, PowerW: 297},
-				{Vendor: "nvidia", Index: 1, MilliC: 71000, MemTotal: 80 << 30, MemUsed: 41 << 30, PowerW: 301},
-				{Vendor: "nvidia", Index: 2, MilliC: 72000, MemTotal: 80 << 30, MemUsed: 42 << 30, PowerW: 288},
-				{Vendor: "nvidia", Index: 3, MilliC: 73000, MemTotal: 80 << 30, MemUsed: 43 << 30, PowerW: 290},
-			},
-		},
-	}
+	m.snap = fourGPUs()
 	m.w, m.h, m.ready = 120, 40, true
 	got := strip(m.renderSystem())
 	if !strings.Contains(got, "more (enlarge window)") {
