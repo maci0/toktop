@@ -226,8 +226,9 @@ func (w *Watcher) Run(ctx context.Context) {
 // then replays two different process tables. A nil pacer restores the wall
 // clock.
 //
-// Safe to call before Run; a call during one reaches the next tick, not the
-// pass in flight, which is why the loop reads it through pacer.
+// Safe to call at any time, but Run reads it once, when it builds the
+// discovery ticker: a call during a live Run leaves that ticker on the old
+// pacer and takes effect on the next Run.
 func (w *Watcher) SetPacer(p core.Pacer) {
 	if p == nil {
 		p = core.WallPacer

@@ -62,9 +62,6 @@ func defaultKnownHostsPath() string {
 var storeMu sync.Map // path -> *sync.Mutex
 
 func storeMutex(path string) *sync.Mutex {
-	if m, ok := storeMu.Load(path); ok {
-		return m.(*sync.Mutex)
-	}
 	m, _ := storeMu.LoadOrStore(path, new(sync.Mutex))
 	return m.(*sync.Mutex)
 }

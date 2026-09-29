@@ -255,9 +255,9 @@ func (c *Collector) clock() (time.Time, time.Time) {
 // clock, one seed reproduces the run's frames. A nil pacer restores the wall
 // clock.
 //
-// Safe to call before Run; a call during one reaches the next tick of each
-// loop rather than the pass in flight, which is why the three loops read it
-// through pacer.
+// Safe to call at any time, but each loop reads it once, when that loop
+// starts: a call during a live Run leaves the three tickers already built on
+// the old pacer and takes effect on the next Run.
 func (c *Collector) SetPacer(p core.Pacer) {
 	if p == nil {
 		p = core.WallPacer

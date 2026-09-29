@@ -104,8 +104,10 @@ func fadeClamped(c lipgloss.Color, f, min float64) lipgloss.Color {
 		return lipgloss.Color(formatHexRGB(r, g, b))
 	}
 
-	// The blend is monotonic (less factor = darker = lower ratio), so the
-	// shallowest factor still above the floor can be bisected without
+	// The early return above means contrast(f) is below the floor, so over
+	// [f,1] the only region meeting it is the one the full-strength color is
+	// in: a single interval ending at 1, whatever the base luminance is. The
+	// shallowest factor still above the floor can therefore be bisected without
 	// allocating intermediate strings.
 	lo, hi := f, 1.0
 	for range 16 {
