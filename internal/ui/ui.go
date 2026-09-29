@@ -337,6 +337,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setNotice("p: probing is not available in this run")
 			case len(m.snap.Providers) == 0:
 				m.setNotice("p: no engines to probe")
+			case !m.probeReq.IsZero():
+				// A terminal repeats a held key, and every dispatch is a real
+				// generation on someone's engine. Without this the dashboard
+				// queues one per repeat while the "probing…" badge on screen
+				// says the press went nowhere: the key looks dropped and the
+				// work still happens. The marker is the answer to the first
+				// press, so the repeats are the ones that need saying.
+				m.setNotice("p: already probing, wait for the result")
 			default:
 				// A command, not a bare goroutine: the program owns this
 				// task's lifetime, so a held key (terminals repeat key

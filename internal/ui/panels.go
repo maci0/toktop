@@ -248,21 +248,42 @@ func (m Model) probeReadout() string {
 	return dim("probe") + " " + fmtMs(last.TTFTms) + " " + styleOK.Render(fmtRate(last.TokPS)+" tok/s")
 }
 
-func (m Model) probesTitle() string {
-	t := "PROBES"
-	if !m.probeReq.IsZero() {
-		return t + "  " + styleWarn.Render("● probing…")
-	}
-	if last, ok := m.lastProbe(); ok {
-		if last.OK {
-			t += " " + dim("last") + " " + fmtMs(last.TTFTms) + " " + styleOK.Render(fmtRate(last.TokPS)+" tok/s")
-		} else {
-			// A failed last result used to print "last - 0.0/s" in the success
-			// color, which reads as a measurement of nothing.
-			t += " " + styleBad.Render("last failed")
+// probesTitle is the PROBES heading, built the way feedTitle and the AGENTS
+// title build theirs: the optional part joins only while it fits, because a
+// panel title is not clipped by the panel and an over-wide one stretches every
+// row below it. renderMidRow still clips the title as a last resort, and that
+// clip is what cut the widest reading in half ("last 120ms 4…"), leaving a
+// number no reader can use. A title that carries the measurement whole, or
+// drops it whole, reads at every width the mid-row can give this column.
+//
+// The rate alone is the shorter form: PROBES takes the narrowest third of the
+// mid-row, so on a 62-cell pane the ttft does not fit beside the rate and the
+// rate is the half worth keeping.
+func (m Model) probesTitle(w int) string {
+	title := "PROBES"
+	add := func(part string) {
+		if lipgloss.Width(title)+lipgloss.Width(part) <= w {
+			title += part
 		}
 	}
-	return t
+	if !m.probeReq.IsZero() {
+		add("  " + styleWarn.Render("● probing…"))
+		return title
+	}
+	last, ok := m.lastProbe()
+	if !ok {
+		return title
+	}
+	if !last.OK {
+		// A failed last result used to print "last - 0.0/s" in the success
+		// color, which reads as a measurement of nothing.
+		add(" " + styleBad.Render("last failed"))
+		return title
+	}
+	rate := styleOK.Render(fmtRate(last.TokPS) + " tok/s")
+	add(" " + dim("last") + " " + fmtMs(last.TTFTms) + " " + rate)
+	add(" " + rate)
+	return title
 }
 
 // probeModelMin is the fewest cells a model name is worth on a probe row: a

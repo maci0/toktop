@@ -117,7 +117,18 @@ func (m Model) feedEmptyLines(w int) []string {
 	if m.cfg.IngestAddr != "" {
 		where = "point your harness at the endpoint above"
 	}
-	return []string{dim(feedEmptyHint(m.cfg, where))}
+	// A form the column can show whole. The sentence names what to do in its
+	// second clause, and clipping it there left the reader with "…are picked"
+	// and no instruction, which is the one half of the sentence they needed.
+	// The first form that fits wins; the longest is the fallback, clipped as
+	// every panel line is when nothing fits.
+	forms := feedEmptyForms(m.cfg, where)
+	for _, f := range forms {
+		if widthOf(f) <= w {
+			return []string{dim(f)}
+		}
+	}
+	return []string{dim(forms[0])}
 }
 
 // feedEmptyHint is the one sentence an empty agent feed carries. The dashboard
@@ -126,18 +137,33 @@ func (m Model) feedEmptyLines(w int) []string {
 // wording drifted, and a reader who had seen both had no reason to expect the
 // same advice in two shapes.
 //
-// where names where to send events, or is empty for a run with no ingest
-// endpoint to name, which falls through to the flag the reader has to quit and
-// re-run with. The two views differ only in whether they can point at the
-// endpoint or have to spell the address out.
+// It is the first of feedEmptyForms, the spelling the plain report takes: that
+// report has no width to fit in.
 func feedEmptyHint(cfg Config, where string) string {
+	return feedEmptyForms(cfg, where)[0]
+}
+
+// feedEmptyForms is the empty agent feed's advice in every spelling a panel
+// column can show, longest first. The short forms are not a rewording: they
+// carry the same instruction, so a column too narrow for the sentence still
+// ends on something the reader can act on rather than on half of one.
+func feedEmptyForms(cfg Config, where string) []string {
 	switch {
 	case cfg.Agents:
-		return "no agent activity yet: agents running locally are picked up automatically"
+		return []string{
+			"no agent activity yet: agents running locally are picked up automatically",
+			"no agent activity yet: local agents are picked up",
+		}
 	case where != "":
-		return "no agent activity yet: " + where
+		return []string{
+			"no agent activity yet: " + where,
+			"no agent activity yet: POST to the endpoint above",
+		}
 	default:
-		return "no agent activity yet: run with --agents to watch coding agents on this machine"
+		return []string{
+			"no agent activity yet: run with --agents to watch coding agents on this machine",
+			"no agent activity yet: run with --agents",
+		}
 	}
 }
 

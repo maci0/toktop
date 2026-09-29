@@ -247,20 +247,32 @@ func testHelpOverlayMutesActionKeys(t *testing.T) {
 	if key(" "); !m.paused {
 		t.Error("space did not pause after help closed")
 	}
-	for i, k := range []string{"p", "P"} {
-		// p dispatches through a program command, so the test runs it: there
-		// is no detached goroutine left to wait on.
-		probe := key(k)
-		if probe == nil {
-			t.Fatalf("%s after help closed returned no probe command", k)
-		}
-		probe()
-		if got := probes.Load(); got != int32(i+1) {
-			t.Errorf("%s after help closed: probes = %d, want %d", k, got, i+1)
-		}
-		if m.probeReq.IsZero() {
-			t.Errorf("%s did not set the probing marker after help closed", k)
-		}
+	// p dispatches through a program command, so the test runs it: there
+	// is no detached goroutine left to wait on.
+	probe := key("p")
+	if probe == nil {
+		t.Fatal("p after help closed returned no probe command")
+	}
+	probe()
+	if got := probes.Load(); got != 1 {
+		t.Errorf("p after help closed: probes = %d, want 1", got)
+	}
+	if m.probeReq.IsZero() {
+		t.Errorf("p did not set the probing marker after help closed")
+	}
+	// A held key repeats, and every dispatch is a real generation on the
+	// engine: the repeat while one is in flight is answered, not fired.
+	if repeat := key("P"); repeat != nil {
+		repeat()
+		t.Error("P repeated a probe that was already running")
+	}
+	if got := probes.Load(); got != 1 {
+		t.Errorf("probes = %d after the repeat, want 1", got)
+	}
+	if m.notice == "" {
+		t.Error("the repeat was answered with nothing on the footer")
+	} else if !strings.Contains(m.notice, "already probing") {
+		t.Errorf("the repeat was answered with %q, want the pending-probe reason", m.notice)
 	}
 }
 
@@ -2052,7 +2064,7 @@ func TestFailedProbeShowsError(t *testing.T) {
 			t.Errorf("failed probe missing %q:\n%s", want, out)
 		}
 	}
-	title, row := strip(m.probesTitle()), strip(m.probesBody(40, 8))
+	title, row := strip(m.probesTitle(60)), strip(m.probesBody(40, 8))
 	if strings.Contains(title, "tok/s") || strings.Contains(row, "tok/s") || strings.Contains(row, "/s") {
 		t.Errorf("failed probe still prints a rate: title %q row %q", title, row)
 	}
@@ -2064,7 +2076,7 @@ func TestSuccessfulProbeUsesTokPerSec(t *testing.T) {
 		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
 		Probes:    []core.ProbeSample{{At: time.Now(), Model: "llama3", OK: true, TokPS: 340, TTFTms: 97}},
 	}
-	if got := strip(m.probesTitle()); !strings.Contains(got, "tok/s") {
+	if got := strip(m.probesTitle(60)); !strings.Contains(got, "tok/s") {
 		t.Errorf("probe title = %q, want tok/s like the rest of the dashboard", got)
 	}
 	if got := strip(m.probesBody(40, 8)); !strings.Contains(got, "tok/s") {
@@ -3357,4 +3369,73 @@ func joinSpreadLeftRows(segs []string, w int) (string, int) {
 		kept++
 	}
 	return b.String(), kept
+}
+
+// The PROBES heading carries its measurement whole or not at all: the title is
+// not clipped by the panel, so the mid-row's clip was the last thing to touch
+// it, and it cut the widest reading in half ("last 120ms 4…") on every pane
+// narrower than the reading. PROBES takes the narrowest third of the mid-row,
+// so this is the width most readers meet first.
+func TestProbesTitleNeverTruncatesAMeasurement(t *testing.T) {
+	for _, w := range []int{62, 64, 66, 70, 76, 80, 90, 100, 120, 170, 200} {
+		m := New(Config{Version: "t", Prober: func() {}}, nil)
+		m.w, m.h, m.ready = w, 36, true
+		m.snap = core.Snapshot{
+			Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+			Probes: []core.ProbeSample{
+				{At: m.clock, OK: true, Model: "llama3", TokPS: 9664, TTFTms: 147},
+			},
+		}
+		title := strip(m.renderMidRow())
+		if !strings.Contains(title, "PROBES") {
+			t.Fatalf("width %d: mid-row has no PROBES panel:\n%s", w, title)
+		}
+		line := ""
+		for _, ln := range strings.Split(title, "\n") {
+			if strings.Contains(ln, "PROBES") {
+				line = ln
+			}
+		}
+		// A cut reading ends in the ellipsis clip appends, and a dropped
+		// half-measurement is a number the reader cannot act on.
+		if strings.Contains(line, "…") {
+			t.Errorf("width %d: PROBES title truncated: %q", w, line)
+		}
+		if strings.Contains(line, "9664") && !strings.Contains(line, "tok/s") {
+			t.Errorf("width %d: rate printed without its unit: %q", w, line)
+		}
+	}
+}
+
+// The empty feed's advice names what to do in its second clause, so a column
+// too narrow for the sentence has to carry a shorter spelling of it: clipping
+// ended on "…are picked", which is the half with nothing to do.
+func TestEmptyFeedAdviceFitsTheNarrowestPane(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		cfg  Config
+		want string
+	}{
+		{"agents", Config{Version: "t", Agents: true}, "picked up"},
+		{"ingest", Config{Version: "t", IngestAddr: "127.0.0.1:8420"}, "endpoint above"},
+		{"bare", Config{Version: "t"}, "run with --agents"},
+	} {
+		// Every spelling of each mode's advice ends on the same instruction, so
+		// the pane width is free to pick among them without changing what the
+		// reader is told to do.
+		for _, w := range []int{62, 80, 110} {
+			m := New(tc.cfg, nil)
+			m.w, m.h, m.ready = w, 36, true
+			body := strip(m.renderFeed())
+			if !strings.Contains(body, "no agent activity yet") {
+				t.Fatalf("%s at %d: the feed does not say it is empty:\n%s", tc.name, w, body)
+			}
+			if !strings.Contains(body, tc.want) {
+				t.Errorf("%s at %d: advice = %q, want it to reach %q", tc.name, w, body, tc.want)
+			}
+			if strings.Contains(body, "…") {
+				t.Errorf("%s at %d: advice cut mid-sentence: %q", tc.name, w, body)
+			}
+		}
+	}
 }

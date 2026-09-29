@@ -225,6 +225,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - The release workflow's `contents: write` now sits on the job that publishes
   the release rather than on the workflow, so a job added beside it starts from
   the read-only default the rest of the repository's workflows use.
+- The PROBES heading no longer loses half of a measurement on a narrow pane.
+  It printed `last 120ms 42.0 tok/s` and let the mid-row's clip cut it to
+  `last 120ms 4…`, so the panel's own reading of the last probe was a number
+  nobody could use. It now takes the longest spelling that fits, falling back
+  to the rate alone, the way every other panel title already did.
+- An empty AGENT FEED no longer loses the instruction it carries. The advice
+  names what to do in its second clause, and the narrowest legal pane clipped
+  the sentence there, leaving `…are picked`. A pane too narrow for the sentence
+  now gets a shorter spelling of the same advice, and the sentence a wider pane
+  shows is unchanged.
+- Holding `p` no longer queues a probe generation per key repeat. Each dispatch
+  is a real request on the engine, and the `probing…` badge on screen said the
+  press went nowhere while the work still happened. A press while a probe is
+  already running is answered on the footer instead of fired.
 - A probe against a reasoning model that answers 400 to any `temperature` but
   its own default (o1, o3, gpt-5 and the gateways in front of them) now lands on
   a request that caps the generation and names no sampling value, instead of

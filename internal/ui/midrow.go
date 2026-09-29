@@ -19,7 +19,7 @@ func (m Model) renderMidRow() string {
 	gaugBody, gaugShown := m.gaugesBody(gw-4, midIn)
 	prov := panel(m.enginesTitle(pw-4, provShown), provBody, pw-4, midIn)
 	gaug := panel(m.engineStateTitle(gw-4, gaugShown), gaugBody, gw-4, midIn)
-	prb := panel(clip(m.probesTitle(), rw), m.probesBody(rw-4, midIn), rw-4, midIn)
+	prb := panel(m.probesTitle(rw), m.probesBody(rw-4, midIn), rw-4, midIn)
 
 	return joinAcross(prov, gaug, prb)
 }
