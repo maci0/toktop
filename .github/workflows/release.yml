@@ -200,6 +200,11 @@ jobs:
     # the published assets the way a downloader does, and attests those bytes.
     needs: release
     runs-on: ubuntu-24.04
+    # A download and a transparency-log upload, on a tag that already exists:
+    # there is nothing here a six-hour hang can finish, and every other job in
+    # both workflows bounds itself. 15 minutes covers the fetch and the
+    # per-file attestations the release job's 50 already allows for.
+    timeout-minutes: 15
     permissions:
       contents: read
       id-token: write
