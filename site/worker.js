@@ -190,12 +190,22 @@ const HTML = htmlForWire(`<!doctype html>
      below, for the same reason: --fg names a boundary, --line divides the
      page. */
   .bar { position: sticky; top: 0; z-index: 10; display: flex; gap: 1.25rem;
-    align-items: center; padding: .7rem 0; margin: 0 -1.25rem; padding-inline: 1.25rem;
+    row-gap: .3rem; flex-wrap: wrap; align-items: center; padding: .7rem 0;
+    margin: 0 -1.25rem; padding-inline: 1.25rem;
     background: var(--bg); border-bottom: 1px solid var(--fg); }
   .brand { font-weight: 700; font-size: var(--fs-lead); text-decoration: none; color: var(--fg);
     white-space: nowrap; }
   .brand .cursor { color: var(--accent); }
-  nav { display: flex; gap: 1.1rem; font-size: var(--fs-small); margin-inline-start: auto; }
+  /* The section list wraps rather than shrinking or scrolling. The bar has no
+     horizontal scroller, so a nav that did not wrap had two ways out at
+     1.4.4 text sizes above the default: it pushed the wordmark off the left
+     edge, or the last link past the right one with nothing to scroll to it.
+     Every label in the list is the only route to its section, so a link that
+     cannot be seen is a section that cannot be reached. The row gap is the
+     phone step; the wrap itself is on at every width, because a 700px pane
+     with enlarged text is as tight as a 360px phone with the default. */
+  nav { display: flex; gap: 1.1rem; flex-wrap: wrap; font-size: var(--fs-small);
+    margin-inline-start: auto; }
   nav a { color: var(--dim); white-space: nowrap; padding: .3rem 0; }
   .hero { padding-top: 2.6rem; }
   /* The h1 is bold for the same reason the wordmark above it is: the dashboard
@@ -332,19 +342,20 @@ const HTML = htmlForWire(`<!doctype html>
   /* A phone is one screen wide, so only the wordmark drops a step: the
      section titles stay where the scale puts them, because they are read
      one at a time and every one of them fits a 360px column at 1.3rem.
-     The section list wraps there rather than scrolling sideways: at the
-     micro step the six labels need about 320px beside a 71px wordmark,
-     which is more than a 360px phone has, so an overflow-x scroller put
-     the last link past the edge with no scrollbar on a phone to reveal
-     it. A second row of links costs the reader one line of the screen;
-     a section that cannot be reached from the bar costs the whole
-     section. */
+     The section list wraps to a second row here rather than scrolling
+     sideways: at the micro step the six labels need about 320px beside a
+     71px wordmark, which is more than a 360px phone has, so an overflow-x
+     scroller put the last link past the edge with no scrollbar on a phone
+     to reveal it. A second row of links costs the reader one line of the
+     screen; a section that cannot be reached from the bar costs the whole
+     section. The wrap itself is not this breakpoint's to grant: it is on
+     in the base rules, because enlarged text makes a wide pane as tight as
+     a phone. */
   @media (max-width: 640px) {
     body { padding: 0 .85rem 4rem; }
-    .bar { margin: 0 -.85rem; padding-inline: .85rem; gap: .8rem; row-gap: .25rem;
-      flex-wrap: wrap; }
+    .bar { margin: 0 -.85rem; padding-inline: .85rem; gap: .8rem; row-gap: .25rem; }
     nav { gap: .8rem; row-gap: .15rem; font-size: var(--fs-micro);
-      flex-wrap: wrap; justify-content: flex-end; }
+      justify-content: flex-end; }
     h1 { font-size: 2rem; }
     .hero { padding-top: 2rem; }
     .grid { grid-template-columns: 1fr; }

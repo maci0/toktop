@@ -48,6 +48,7 @@ const FOCUS_KILLED_RE = /main\s*:\s*focus[^{]*\{\s*outline:\s*none/;
 const SHELL_PROMPT_RE = /<figcaption><span class="dim" aria-hidden="true">\$<\/span>/;
 const KBD_RULE_RE = /kbd\s*\{[^}]*\}/;
 const BAR_RULE_RE = /\.bar \{[^}]*\}/;
+const NAV_CSS_RE = /nav \{[^}]*\}/;
 const PRE_RULE_RE = /pre \{[^}]*\}/;
 const paletteVarRE = (name) => new RegExp(`--dark-${name}: (#[0-9a-f]{6});`, "i");
 
@@ -324,7 +325,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4500);
+    expect(bytes.byteLength).toBe(4506);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1171,6 +1172,20 @@ test("the sticky bar and the code block meet the 3:1 boundary floor", () => {
   }
 });
 
+// Every label in the bar is the only route to its section, so no width may
+// push one out of reach. Text is sized in rem, so a reader at a 1.4.4 text
+// size gets the same layout at fewer pixels across, and the bar has no
+// horizontal scroller: a nav that did not wrap pushed the last link past the
+// right edge with nothing to scroll to it. The wrap belongs in the base rules
+// rather than the phone breakpoint, because enlarged text makes a wide pane as
+// tight as a narrow one.
+test("the section list wraps at every width, not only on a phone", () => {
+  for (const rule of [BAR_RULE_RE, NAV_CSS_RE]) {
+    const body = identityBody.match(rule)?.[0] ?? "";
+    expect(body, `${rule} matched no rule`).toContain("flex-wrap: wrap");
+  }
+});
+
 // RFC 6928 initcwnd: ten ~1460-byte segments (~14 KB). Identity bytes plus
 // inline CSS are everything there is, so staying under this keeps first paint
 // at one round trip. The identity size is the record: a copy change that
@@ -1184,9 +1199,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13072);
-  expect(gzipped).toBe(4500);
-  expect(brotli).toBe(3804);
+  expect(identity).toBe(13093);
+  expect(gzipped).toBe(4506);
+  expect(brotli).toBe(3814);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1217,7 +1232,7 @@ test("the README records the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_381);
+  expect(visit[0][1]).toBe(14_391);
 });
 
 const PUBLIC = join(import.meta.dir, "public");
@@ -1270,7 +1285,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_381);
+  expect(visit).toBe(14_391);
   expect(visit).toBeLessThan(25_000);
 });
 

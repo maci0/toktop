@@ -235,11 +235,49 @@ func tickClock() tea.Cmd {
 
 // --- model ----------------------------------------------------------------
 
+// windowTitle is the name the terminal gives this window: the title bar a
+// window manager lists, the tab label, and the name a screen reader announces
+// when focus moves onto the window.
+//
+// A terminal leaves that name to the shell, and a shell leaves it to whatever
+// ran last: a screen-reader user moving between windows hears the name of a
+// program they left, or of the shell that started this one, and nothing on
+// screen says which is toktop. The frame's own text is no help there, because
+// the alternative screen is repainted in place, so every focus move lands on
+// the same wall of braille with no announcement that anything changed. The
+// title is the one piece of the frame a screen reader reads without being
+// pointed at it.
+//
+// The segments are the states a reader who arrives at the window cannot see:
+// a demo frame's numbers are simulated, a paused frame is not moving, and the
+// agents view is not the engines view. They are appended in that order and
+// cost nothing at rest.
+func (m Model) windowTitle() string {
+	title := "toktop"
+	if m.cfg.Demo {
+		title += " (demo)"
+	}
+	if m.focusAgents {
+		title += " (agents)"
+	}
+	if m.paused {
+		title += " (paused)"
+	}
+	return title
+}
+
+// titleCmd republishes windowTitle. Issued where the title's own state changes
+// and nowhere else: a key that leaves the model alone leaves the terminal
+// alone too, so a no-op key still returns no command.
+func (m Model) titleCmd() tea.Cmd { return tea.SetWindowTitle(m.windowTitle()) }
+
 // Init starts the header clock, the snapshot wait and, when the feed can
 // degrade, the channel that reports it. Each waits in a goroutine bubbletea
-// owns, so none of them blocks the first render.
+// owns, so none of them blocks the first render. The window title goes out
+// first, before the first frame paints a terminal that is still named after
+// whatever ran in it before.
 func (m Model) Init() tea.Cmd {
-	cmds := []tea.Cmd{tickClock(), waitSnap(m.ch)}
+	cmds := []tea.Cmd{m.titleCmd(), tickClock(), waitSnap(m.ch)}
 	if m.cfg.FeedErr != nil {
 		cmds = append(cmds, waitFeedErr(m.cfg.FeedErr))
 	}
@@ -328,7 +366,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case " ", "space":
 			m.paused = !m.paused
-			return m, nil
+			return m, m.titleCmd()
 		case "p", "P":
 			// No engines: ProbeAll is a silent no-op and the PROBES panel
 			// (where "probing…" lives) is absent. Say why rather than look dead.
@@ -401,7 +439,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			m.focusAgents = !m.focusAgents
-			return m, nil
+			return m, m.titleCmd()
 		case "?", "h", "H":
 			m.help = !m.help
 			// Reopening starts at the top: a reader who scrolled to the flags

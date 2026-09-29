@@ -3439,3 +3439,70 @@ func TestEmptyFeedAdviceFitsTheNarrowestPane(t *testing.T) {
 		}
 	}
 }
+
+// The terminal title is the one line of the frame a screen reader reads
+// without being pointed at it, so it has to name the app and carry the states
+// a reader who arrives at the window cannot see from the frame itself.
+func TestWindowTitleNamesTheAppAndItsStates(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	if got := m.windowTitle(); got != "toktop" {
+		t.Errorf("live run title = %q, want %q", got, "toktop")
+	}
+	if got := New(Config{Version: "t", Demo: true}, nil).windowTitle(); got != "toktop (demo)" {
+		t.Errorf("demo title = %q, want it to name the simulated frame", got)
+	}
+}
+
+// The title follows the keys that change what the frame is, and only those:
+// space freezes the frame, a swaps which dashboard is on it.
+func TestWindowTitleFollowsPauseAndFocus(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.w, m.h, m.ready, m.clock = 110, 36, true, time.Now()
+	nm, _ := m.Update(snapMsg(core.Snapshot{
+		Agents:    []core.AgentEvent{{Agent: "ops", Kind: core.AgentKindTurn}},
+		Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}},
+	}))
+	m = nm.(Model)
+
+	nm, cmd := m.Update(keyMsg(" "))
+	m = nm.(Model)
+	if !m.paused {
+		t.Fatal("space did not pause the frame")
+	}
+	if msg := fmt.Sprintf("%v", cmd()); msg != "toktop (paused)" {
+		t.Errorf("pause published title %q, want it to say the frame is still", msg)
+	}
+	if got := m.windowTitle(); got != "toktop (paused)" {
+		t.Errorf("paused title = %q, want the paused segment", got)
+	}
+	nm, _ = m.Update(keyMsg(" "))
+	m = nm.(Model)
+	if m.paused {
+		t.Fatal("space did not resume the frame")
+	}
+
+	nm, cmd = m.Update(keyMsg("a"))
+	m = nm.(Model)
+	if !m.focusAgents {
+		t.Fatal("a did not move the focus to the agents dashboard")
+	}
+	if msg := fmt.Sprintf("%v", cmd()); msg != "toktop (agents)" {
+		t.Errorf("focus swap published title %q, want it to name the agents view", msg)
+	}
+}
+
+// A key that leaves the model alone leaves the terminal alone: a title
+// republished on every keystroke is an escape sequence written per press for a
+// string that did not change.
+func TestUntouchedKeysPublishNoTitle(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.w, m.h, m.ready, m.clock = 110, 36, true, time.Now()
+	// No engines, so p has nothing to fire and t has nothing to plot.
+	for _, k := range []string{"p", "t", "?"} {
+		nm, cmd := m.Update(keyMsg(k))
+		m = nm.(Model)
+		if cmd != nil {
+			t.Errorf("%s published %v with the frame unchanged", k, cmd())
+		}
+	}
+}

@@ -104,6 +104,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the seed is what makes a captured frame reproducible. The compact strip
   carries it as a line of its own, which is where it has the room.
 
+- The live dashboard now names its own terminal window. The title reads
+  `toktop`, and takes a `(demo)`, `(agents)` or `(paused)` segment when the
+  frame is one of those, republished by the key that changes it. A terminal
+  left the name to the shell, so a screen reader announcing windows announced
+  whatever ran in that terminal before; the alternate screen repaints in
+  place, so nothing inside the frame says which program it belongs to either.
+
 ### Security
 
 - Every free-form field on `POST /v1/events` now folds the home of whichever
