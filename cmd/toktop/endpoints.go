@@ -58,7 +58,7 @@ func warnInsecureAdd(adds []string) {
 		if err != nil || u.Scheme != "http" || localHost(u.Hostname()) {
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "toktop: warning: %s is plain http, so the bearer token crosses the network in cleartext\n", u.Host)
+		fmt.Fprintf(os.Stderr, "toktop: warning: %s is plain http, so the bearer token crosses the network in cleartext\n", operatorText(u.Host))
 	}
 }
 

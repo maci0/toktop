@@ -152,7 +152,7 @@ func runMain() int {
 		return 2
 	}
 	for _, dup := range dupTargets {
-		fmt.Fprintf(os.Stderr, "toktop: %s named more than once; attaching it once\n", dup.Host)
+		fmt.Fprintf(os.Stderr, "toktop: %s named more than once; attaching it once\n", operatorText(dup.Host))
 	}
 
 	explicit := map[string]bool{}
@@ -359,7 +359,7 @@ func runMain() int {
 				// The operator explicitly asked for this endpoint; continuing
 				// would run the dashboard without the event feed they asked
 				// for, with only a stderr line lost under the alt screen.
-				fmt.Fprintf(os.Stderr, "toktop: --ingest %s unusable: %v\n", f.ingest, err)
+				fmt.Fprintf(os.Stderr, "toktop: --ingest %s unusable: %v\n", operatorText(f.ingest), err)
 				return 2
 			}
 			fmt.Fprintf(os.Stderr, "toktop: ingest disabled (%v)\n", err)
@@ -381,7 +381,7 @@ func runMain() int {
 			// way to post to what answered it.
 			logcfg.Logger().Info("toktop: ingest listening", "addr", logcfg.Field(feedAddr, 256))
 			if routableBind(feedAddr) {
-				fmt.Fprintf(os.Stderr, "toktop: warning: ingest endpoint %s accepts unauthenticated events from any reachable peer\n", feedAddr)
+				fmt.Fprintf(os.Stderr, "toktop: warning: ingest endpoint %s accepts unauthenticated events from any reachable peer\n", operatorText(feedAddr))
 				// The one state change in the run that widens who can write to
 				// this machine's feed, and the only record of it was a stderr
 				// line the alt screen hides for the life of the run.

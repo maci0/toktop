@@ -21,6 +21,16 @@ import (
 // the environment, and the warnings for flags and env vars that were set but
 // cannot take effect.
 
+// operatorText prepares a value the operator supplied for a startup line on
+// stderr. The audit record already runs every one of these through
+// logcfg.Field, which folds control characters and the bidi overrides that
+// would reorder the line; the terminal copy did not, so the same string was
+// safe in the log and live in the terminal, and a flag or env var carrying an
+// escape sequence repainted the operator's screen (or named an endpoint with
+// glyphs it does not have). Same fold, so the line an operator reads and the
+// record they paste into an issue are the same text.
+func operatorText(s string) string { return logcfg.Field(s, 256) }
+
 func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	if set["opencode-db"] && !f.agents {
 		fmt.Fprintln(os.Stderr, "toktop: --opencode-db has no effect without --agents")

@@ -1898,6 +1898,26 @@ func TestLogActiveConfig(t *testing.T) {
 			t.Fatalf("logActiveConfig() = %q, want ingest=off", buf.String())
 		}
 	})
+	// The line on stderr reaches a terminal, so a value carrying an escape
+	// sequence or a bidi override repainted the operator's screen while the
+	// audit record of the same value, folded, was safe in the log. Both
+	// copies come from one fold, and both name the same text.
+	t.Run("control characters are folded in the line and the record alike", func(t *testing.T) {
+		var line, record strings.Builder
+		restore := swapConfigLog(&record)
+		defer restore()
+		f := &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420\x1b[31m\x1b[0m\u202e"}
+		logActiveConfig(&line, f, map[string]bool{}, 0, 0, false)
+		got, logged := line.String(), record.String()
+		for _, out := range []string{got, logged} {
+			if strings.ContainsRune(out, 0x1b) || strings.ContainsRune(out, '\u202e') {
+				t.Errorf("logActiveConfig() wrote %q, want the value folded", out)
+			}
+		}
+		if !strings.Contains(got, "ingest=127.0.0.1:8420") {
+			t.Errorf("logActiveConfig() = %q, want the address itself still named", got)
+		}
+	})
 	// A capture run is reproduced from the startup line: the render is a
 	// bitmap that says nothing about the size it was asked for, so an
 	// override the frame took must be on the line. The two reports that

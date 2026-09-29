@@ -138,8 +138,11 @@ func logActiveConfig(w io.Writer, f *cliFlags, explicit map[string]bool, nAdd, n
 			attrs = append(attrs, c.key, true)
 			continue
 		}
-		fmt.Fprintf(&b, " %s=%s", c.key, c.value)
-		attrs = append(attrs, c.key, logcfg.Field(c.value, 128))
+		// One fold for both copies, so the line on stderr and the record in
+		// the audit log cannot disagree about what the knob was set to.
+		v := operatorText(c.value)
+		fmt.Fprintf(&b, " %s=%s", c.key, v)
+		attrs = append(attrs, c.key, v)
 	}
 	fmt.Fprintln(w, b.String())
 	configLog().Info("toktop: config", attrs...)

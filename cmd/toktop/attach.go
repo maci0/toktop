@@ -41,7 +41,7 @@ func attachLocal(ctx context.Context, providers []provider.Provider, raw string)
 	if p := provider.Attach(ctx, strings.TrimRight(raw, "/")); p.Poll != nil {
 		return append(providers, p)
 	}
-	fmt.Fprintf(os.Stderr, "toktop: nothing recognized at %s; polling as generic openai anyway\n", raw)
+	fmt.Fprintf(os.Stderr, "toktop: nothing recognized at %s; polling as generic openai anyway\n", operatorText(raw))
 	attachLog().Warn("toktop: nothing recognized at endpoint", "endpoint", logcfg.Field(raw, 256))
 	return append(providers, provider.NewOpenAICompat(raw, raw, core.KindOpenAI))
 }
@@ -73,7 +73,7 @@ func attachTarget(ctx context.Context, tgt remote.Target, sshKey string, sysFn f
 			"error", logcfg.Field(tgt.RedactUser(err.Error()), 256))
 		return nil, sysFn, err
 	}
-	fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n", len(rp), tgt.Host)
+	fmt.Fprintf(os.Stderr, "toktop: attached %d engine(s) via ssh on %s\n", len(rp), operatorText(tgt.Host))
 	attachLog().Info("toktop: ssh target attached",
 		"target", logcfg.Field(tgt.LogHost(), 256),
 		"port", tgt.Port,
@@ -163,7 +163,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 	for _, p := range ports {
 		if _, ok := fwd[p]; !ok {
 			fmt.Fprintf(os.Stderr, "toktop: %s:%d could not be forwarded locally; engines on that port are invisible\n",
-				tgt.Host, p)
+				operatorText(tgt.Host), p)
 			attachLog().Warn("toktop: remote port not forwarded",
 				"target", logcfg.Field(tgt.LogHost(), 256),
 				"remote_port", p)
@@ -178,7 +178,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 				// (read tcp 10.0.0.5:52001->203.0.113.9:22), both of which
 				// the audit twin for this drop already drops. A user's
 				// terminal is not the one place the account may stand.
-				fmt.Fprintf(os.Stderr, "toktop: ssh connection to %s lost (%s)\n", tgt.Host,
+				fmt.Fprintf(os.Stderr, "toktop: ssh connection to %s lost (%s)\n", operatorText(tgt.Host),
 					logcfg.RedactedField(tgt.RedactUser(core.RedactHome(cli.Err().Error())), 256))
 			}
 		}
@@ -201,7 +201,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 	var providers []provider.Provider
 	for i, kind := range kinds {
 		if kind != "" {
-			label := fmt.Sprintf("%s:%d", tgt.Host, rports[i])
+			label := fmt.Sprintf("%s:%d", operatorText(tgt.Host), rports[i])
 			p := provider.NewOpenAICompat(bases[i], label, kind)
 			if kind == core.KindOllama {
 				p = provider.NewOllama(bases[i])
@@ -211,7 +211,7 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 			continue
 		}
 		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
-			tgt.Host, rports[i])
+			operatorText(tgt.Host), rports[i])
 		attachLog().Warn("toktop: remote port skipped",
 			"target", logcfg.Field(tgt.LogHost(), 256),
 			"remote_port", rports[i],
