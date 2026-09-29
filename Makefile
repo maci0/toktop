@@ -260,8 +260,12 @@ SITE_ROLLED_BACK  := $(DIST)/site.rolled-back
 # Empty -buildid= so the GNU build-id note is not a second, toolchain-hash-shaped
 # input to the bytes.
 LDFLAGS     := -s -w -buildid= -bindnow -X main.version=$(VERSION)
-# gofmt from the selected toolchain, not a different major on PATH.
-GOFMT = $$($(GO) env GOROOT)/bin/gofmt
+# gofmt from the selected toolchain, not a different major on PATH. Quoted
+# because the default Windows install lives under "C:\Program Files\Go", and
+# an unquoted $(GOFMT) word-splits there: `make fmt` reports the first half as
+# a missing command, and the gate in `check` captures an empty file list and
+# passes with nothing checked.
+GOFMT = "$$($(GO) env GOROOT)/bin/gofmt"
 
 # nounset/errexit/pipefail on every recipe. bash because Debian's /bin/sh
 # is dash, which has no pipefail; macOS /bin/bash 3.2 does.
@@ -325,7 +329,11 @@ endif
 # the list is the whole closure, and a tool whose requirements outgrow the
 # file fails at the first run instead of pulling a package nobody pinned.
 SCRIPTS_ENV := $(CURDIR)/$(DIST)/scripts-env
-SCRIPTS_BIN := $(SCRIPTS_ENV)/bin
+# uv lays a venv out as bin/ on POSIX and Scripts\ on Windows, and $(OS) is
+# the one variable make itself sets per host. Without this every tool in the
+# env resolved to a path that does not exist on a Windows developer, which
+# CONTRIBUTING.md asks for support.
+SCRIPTS_BIN := $(SCRIPTS_ENV)/$(if $(OS),Scripts,bin)
 # True when $1 is a uv version below UV_MIN. Defined once so `make
 # scripts-check` and `make prereqs` cannot accept different uv. One line, so
 # it drops into a recipe that is a single continued command.
@@ -1794,6 +1802,15 @@ repro-check-pair: ## repro-check over REPRO_PLATFORMS (what the PR gate runs)
 # binary outside any prefix. install refuses that instead.
 PREFIX ?= $(if $(HOME),$(HOME)/.local)
 
+# The name install writes. Windows resolves a command by its PATHEXT, so a
+# copy without .exe runs from Git Bash and from nowhere else; the artifact
+# rules above already spell the same extension per target.
+ifeq ($(OS),Windows_NT)
+INSTALL_NAME = $(BINARY).exe
+else
+INSTALL_NAME = $(BINARY)
+endif
+
 # Staging file for the install, so the copy lands beside the destination and
 # the rename below is atomic. `install` in place replaces the destination's
 # inode (it unlinks first), so there is a window where PREFIX/bin/toktop is a
@@ -1815,7 +1832,7 @@ install: build ## install into PREFIX/bin (default ~/.local/bin)
 	@tmp=$$(mktemp "$(PREFIX)/bin/$(INSTALL_TMP)XXXXXX") || exit 1; \
 	trap 'rm -f "$$tmp"' EXIT INT TERM; \
 	install -m 0755 $(BINARY) "$$tmp" || exit 1; \
-	mv -f "$$tmp" "$(PREFIX)/bin/$(BINARY)" || exit 1; \
+	mv -f "$$tmp" "$(PREFIX)/bin/$(INSTALL_NAME)" || exit 1; \
 	trap - EXIT INT TERM
 	@case ":$$PATH:" in \
 		*":$(PREFIX)/bin:"*) ;; \
@@ -1834,7 +1851,7 @@ uninstall: ## remove the binary from PREFIX/bin (default ~/.local/bin)
 		exit 1; \
 	fi
 	@found=0; \
-	if [ -f "$(PREFIX)/bin/$(BINARY)" ]; then rm -f "$(PREFIX)/bin/$(BINARY)" && found=1; fi; \
+	if [ -f "$(PREFIX)/bin/$(INSTALL_NAME)" ]; then rm -f "$(PREFIX)/bin/$(INSTALL_NAME)" && found=1; fi; \
 	for stale in "$(PREFIX)/bin/$(INSTALL_TMP)"*; do \
 		[ -e "$$stale" ] || continue; \
 		rm -f "$$stale" && found=1; \

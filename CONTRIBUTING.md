@@ -5,8 +5,12 @@
 - Go, at the version pinned in `go.mod`. `make` sets `GOTOOLCHAIN` to that
   exact version so a newer compiler on the host cannot change the artifact.
   CI installs the same version via `go-version-file: go.mod`.
-- GNU Make and bash (`SHELL := /bin/bash` in the Makefile). On Windows, Git
-  Bash plus `make`, or WSL.
+- GNU Make and bash (`SHELL := /bin/bash` in the Makefile). Make 3.82 or
+  newer: `.SHELLFLAGS` carries `errexit` and `pipefail` into every recipe, and
+  the stock macOS make is 3.81, where that variable is an unknown name and
+  the recipes run without either, so a gate whose first command fails
+  reports the last one's status. `brew install make` supplies a newer one. On
+  Windows, Git Bash plus `make`, or WSL.
 - A C compiler (`gcc` or `clang`) for `go test -race`. `make test`,
   `make test-pkg` and `make cover` default to `-race` and `CGO_ENABLED=1`,
   and `make ci` runs `make test RACE=1`. `RACE=0` skips the race flag (no C

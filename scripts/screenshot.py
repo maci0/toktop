@@ -253,8 +253,8 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
     except ImportError as e:
         print(f"screenshot.py: missing dependency ({e})", file=sys.stderr)
         print(
-            "install with: make scripts-env, then run "
-            "dist/scripts-env/bin/python scripts/screenshot.py",
+            "install with: make scripts-env, then run: "
+            "make screenshot CAPTURE=<file> OUT=<file>",
             file=sys.stderr,
         )
         raise SystemExit(1) from e
