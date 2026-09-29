@@ -248,6 +248,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   followed by the same path unredacted. The wrapped error is rebuilt with the
   redacted path, keeping the operation and the cause that `errors.Is` and
   `errors.As` reach.
+
+- A token count or a `span_ms` above 2^53 is read as the integer a client
+  wrote, instead of a nearby one. The wire decoder only read a whole JSON
+  number back through `big.Rat` above 2^62, on the belief that a `float64`
+  names every integer up to there. It stops at 2^53, where its ulp becomes 2,
+  so `700000000001000000` was stored as `700000000000999936`: a number the
+  client never sent, and a rate derived from it off by the difference. The
+  read-back now starts at 2^53 and covers every count, not only the ones near
+  an `int64` extreme.
+
 - `docs/openapi.yaml` names the toktop release it describes in
   `info.version`, which is the field a client generator pins. It said `0.1.0`
   through every change to the answers `/healthz` gives, to the `X-Request-Id`

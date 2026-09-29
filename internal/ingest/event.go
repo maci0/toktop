@@ -323,7 +323,8 @@ var (
 )
 
 // exactWholeInt reads back the integer a whole JSON number spells, for the
-// magnitudes where a float64 rounds it onto an int64 extreme: every count
+// magnitudes where a float64 stops naming every integer it holds: a count
+// above 2^53 is rounded to a float64 that is a different number, and one
 // within half an ulp of 2^63 or of -2^63 parses as the extreme itself, so the
 // rounded value cannot tell -2^63 (inside the range) from the integers below
 // it (outside). Below exactFloatRange a float64 holds every integer of that
@@ -344,9 +345,12 @@ func exactWholeInt(s string, f float64) (*big.Int, bool) {
 	return r.Num(), true
 }
 
-// exactFloatRange is 2^62, the magnitude from which a float64 has an ulp
-// above 1 and so can no longer name every integer it holds.
-const exactFloatRange = 4.611686018427388e+18
+// exactFloatRange is 2^53, the magnitude past which a float64's ulp is 2 and
+// so it can no longer name every integer it holds. The read-back covers every
+// integer count, not only the ones near an int64 extreme: 700000000001000000
+// written by a sender is a real count, and a float64 rounds it to
+// 700000000000999936, a number the sender never wrote.
+const exactFloatRange = 9.007199254740992e+15
 
 // isJSONNumber reports whether s is a JSON number, the one spelling
 // big.Rat.SetString would otherwise also read: it also takes a rational like

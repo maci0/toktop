@@ -442,6 +442,35 @@ func TestIngestAcceptsWholeJSONNumberTokenCounts(t *testing.T) {
 	}
 }
 
+// A whole JSON number above 2^53 is a count a float64 cannot name: its ulp is
+// 2 there, so 700000000001000000 rounds to 700000000000999936. Both spellings
+// below are the same integer, and the answer has to be that integer, not the
+// one the float64 landed on. Found by FuzzEventFromWire.
+func TestParseTokenJSONReadsBackPastFloatPrecision(t *testing.T) {
+	const want = int64(700000000001000000)
+	for _, spelling := range []string{
+		"700000000001000000",
+		"700000000001000000.0",
+		"7.00000000001e17",
+	} {
+		t.Run(spelling, func(t *testing.T) {
+			got, err := parseTokenJSON([]byte(spelling), "output_tokens")
+			if err != nil {
+				t.Fatalf("parseTokenJSON(%s) = %v", spelling, err)
+			}
+			if got != want {
+				t.Fatalf("parseTokenJSON(%s) = %d, want %d", spelling, got, want)
+			}
+		})
+	}
+	// 2^53 is the first magnitude whose neighbour is not representable, so it
+	// is where the read-back has to start. This one is the same integer read
+	// back a decimal place above it.
+	if got, err := parseTokenJSON([]byte("9007199254740993"), "output_tokens"); err != nil || got != 9007199254740993 {
+		t.Fatalf("parseTokenJSON(9007199254740993) = %d, %v", got, err)
+	}
+}
+
 // -2^63 is the last value int64 holds, and a float64 cannot tell it from the
 // integers below it: every one of them rounds onto it. Both spellings are
 // inside the range and negative, so both record a clamped 0.
