@@ -17,12 +17,25 @@ import "time"
 // minute of a busy fleet's events, so a sender whose POST is retried after a
 // lost response and a client-side backoff of a minute finds its ids already
 // evicted and every line of the replay counted a second time. The horizon
-// below is the retry window a sender may reasonably hold to; the count cap
-// bounds the ledger for a fleet that emits faster than that, so neither bound
-// can be reached without the other holding.
+// below is the retry window a sender may reasonably hold to.
+//
+// The count cap is what keeps the ledger bounded, and it is sized from the
+// horizon rather than from the feed: it holds exactly the ids a fleet
+// arriving at agentIDPeakRate events a second produces across the whole
+// horizon. That is what makes the horizon the guarantee. A cap derived from
+// the feed instead reaches first under load (a fleet averaging four events a
+// second exhausted the old cap in thirteen of its fifteen minutes), and a
+// replay inside the horizon was then stored a second time and counted twice.
+// Past agentIDPeakRate the cap does bite before the horizon does, so the
+// guarantee holds to the rate a dashboard actually sees, not to a rate no
+// fleet reaches.
 const (
 	AgentIDHorizon   = 15 * time.Minute
-	AgentIDLedgerMax = 8 * AgentHistoryLen
+	AgentIDLedgerMax = agentIDPeakRate * int(AgentIDHorizon/time.Second)
+
+	// agentIDPeakRate is the busiest arrival the cap is sized for, in events
+	// a second: a fleet of agents each finishing a turn every few seconds.
+	agentIDPeakRate = 8
 )
 
 // agentIDEntry is one id and the instant it was recorded at, held in

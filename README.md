@@ -368,7 +368,7 @@ Event fields are all optional; anything omitted gets the default:
 
 | field | type | default | notes |
 |---|---|---|---|
-| `id` | string | - | caller-chosen key, at most 128 characters; an id past the cap, or one that is nothing but whitespace or control characters, is a `400` naming the field rather than a truncated key, because the id is what the feed deduplicates on and two keys clamped onto one stored id would drop the second event as a duplicate. A repeat of a key recorded within the last 15 minutes is ignored, as long as the feed has taken fewer than 4096 ids in that window: the ledger holds that many, and a fleet that pushes events faster than that retires the oldest first, so a sender retrying a very old request under a new key is not deduplicated. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
+| `id` | string | - | caller-chosen key, at most 128 characters; an id past the cap, or one that is nothing but whitespace or control characters, is a `400` naming the field rather than a truncated key, because the id is what the feed deduplicates on and two keys clamped onto one stored id would drop the second event as a duplicate. A repeat of a key recorded within the last 15 minutes is ignored, as long as the feed has taken fewer than 7200 ids in that window: the ledger holds 15 minutes' worth of events at 8 a second, and a fleet pushing faster than that retires the oldest first, so a sender retrying a very old request under a new key is not deduplicated. When omitted, a request `Idempotency-Key` header is used: the first eight bytes of its SHA-256 hash, encoded as 16 hexadecimal characters, followed by the 1-based line index (`<hash>:1`, `<hash>:2`, and so on). The handler hashes the received key NFC-normalized, without truncation or whitespace collapsing; hash collisions remain possible |
 | `ts` | RFC 3339 string | arrival instant | offset required (`2026-01-02T03:04:05Z`); whitespace around the stamp is ignored, an empty or whitespace-only string takes the arrival instant like an absent one, and anything else unparseable is a `400` naming the field; stamps more than two minutes from arrival in either direction are clamped to the arrival instant |
 | `agent` | string | `anonymous` | capped at 64 characters |
 | `model` | string | - | capped at 128 characters |
@@ -479,7 +479,10 @@ nothing else: mint it per operation, and namespace it per sender. Two POSTs
 under the same key derive the same ids, so the second one's events decode
 and store nothing: they show up only as `stored` below `accepted` on that
 POST and on its log line, and the agent's token totals silently miss them.
-A key is not a session, a turn counter, or a fixed string, and the server
+The ids a run has recorded live in that run's memory, so the deduplication
+window is a restart: a replay reaching a toktop that has since restarted, or
+been re-exec'd by `toktop update`, is stored and counted again. A key is not
+a session, a turn counter, or a fixed string, and the server
 cannot tell a retry from a second sender that picked the same one.
 
 ## Zero vendor libraries

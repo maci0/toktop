@@ -86,3 +86,31 @@ func TestAgentIDLedgerCountCapEvictsOldest(t *testing.T) {
 		t.Fatalf("the newest id %q was evicted", id(AgentIDLedgerMax+7))
 	}
 }
+
+// The count cap is a memory bound; the horizon is the guarantee. An id must
+// stay a duplicate for the whole horizon, and the cap is sized so that a
+// fleet arriving at agentIDPeakRate still has its first id remembered when
+// the horizon retires it. A cap that bites first would report every replay
+// from a busy fleet as fresh, and the feed would count the turn twice.
+func TestAgentIDLedgerHoldsTheHorizonAtPeakRate(t *testing.T) {
+	base := time.Unix(1_700_000_000, 0).UTC()
+	var l AgentIDLedger
+	l.Add("turn-1", base)
+
+	// A fleet posting agentIDPeakRate events a second for the whole horizon
+	// behind it: peakRate * the horizon's seconds is the arrival the cap has
+	// to absorb before the horizon, not the cap, decides what is a duplicate.
+	step := time.Second / agentIDPeakRate
+	for i := 1; time.Duration(i)*step < AgentIDHorizon; i++ {
+		l.Add(fmt.Sprintf("e%d", i), base.Add(time.Duration(i)*step))
+	}
+
+	if !l.Seen("turn-1", base.Add(AgentIDHorizon-time.Second)) {
+		t.Fatalf("the count cap retired an id %s old, inside the %s horizon",
+			AgentIDHorizon-time.Second, AgentIDHorizon)
+	}
+	if l.Len() > AgentIDLedgerMax || l.Tracked() > AgentIDLedgerMax {
+		t.Fatalf("ledger holds %d ids in %d slots, want at most %d",
+			l.Len(), l.Tracked(), AgentIDLedgerMax)
+	}
+}
