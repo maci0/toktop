@@ -91,9 +91,8 @@ func FuzzConsumeZstdRecordWalk(f *testing.F) {
 		}
 		// The walk audits a frame it could not decode, which is expected here.
 		// Silence it so a failing run reports the failure, not the log.
-		quiet := audit
-		audit = func() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
-		t.Cleanup(func() { audit = quiet })
+		restore := swapAudit(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		t.Cleanup(restore)
 
 		// The uncapped read is the oracle, so it runs with a window that
 		// cannot truncate the file.

@@ -41,36 +41,38 @@ type foldedErr struct {
 	text   string
 }
 
-// foldErr is the folded text of err, memoized per key. The fold is a pure
-// function of the error string and the home directory, and a downed engine
-// repeats its failed poll's error verbatim every interval, so folding once
-// per distinct error replaces a multi-megabyte re-fold per second per downed
-// engine. The home is re-read each time and part of the memo key, so a
-// process whose $HOME changes does not keep serving a fold made against the
-// old one.
-func (c *Collector) foldErr(key string, err error) string {
+// foldErr is the folded text of err, memoized per key, and whether the home
+// lookup the fold depends on failed. The fold is a pure function of the error
+// string and the home directory, and a downed engine repeats its failed poll's
+// error verbatim every interval, so folding once per distinct error replaces a
+// multi-megabyte re-fold per second per downed engine. The home is re-read each
+// time and part of the memo key, so a process whose $HOME changes does not keep
+// serving a fold made against the old one.
+//
+// The home failure is reported rather than logged here, because this runs under
+// c.mu and the caller publishes it after the lock. Call with c.mu held.
+func (c *Collector) foldErr(key string, err error) (text string, homeUnknown bool) {
 	raw := err.Error()
 	digest := sha256.Sum256([]byte(raw))
 	home, herr := os.UserHomeDir()
 	if f, ok := c.errFold[key]; ok && f.digest == digest && f.home == home {
-		return f.text
+		return f.text, false
 	}
 	if herr != nil {
 		// RedactHome folds the home on the same lookup and gives up with the
 		// message unchanged, so the text published below and on every
 		// --json run keeps the account's paths. That is a consequence of the
 		// environment, not a choice, and the operator is the one who can fix
-		// it, so it is said once per distinct engine error rather than left
-		// to be discovered in a path that was supposed to be folded.
-		audit().Warn("toktop: home directory unknown; engine errors keep their home paths",
-			"error", logcfg.RedactedField(herr.Error(), logcfg.FieldCap))
+		// it, so it is said once per sweep rather than left to be
+		// discovered in a path that was supposed to be folded.
+		homeUnknown = true
 	}
-	text := core.Snippet([]byte(core.RedactHome(raw)))
+	text = core.Snippet([]byte(core.RedactHome(raw)))
 	if c.errFold == nil {
 		c.errFold = make(map[string]foldedErr)
 	}
 	c.errFold[key] = foldedErr{digest: digest, home: home, text: text}
-	return text
+	return text, homeUnknown
 }
 
 // providerSnapshot builds one engine's snapshot entry from its poll result,
@@ -81,8 +83,9 @@ func (c *Collector) foldErr(key string, err error) string {
 // collect the whole sweep's transitions and log them after the lock: an engine
 // going away is the dependency failure an operator needs named, and a slow
 // stderr must not stall the poll loop the snapshot depends on. The list is
-// empty when this engine crossed neither boundary.
-func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, changes []healthChange) {
+// empty when this engine crossed neither boundary. homeUnknown reports the same
+// deferral for the fold's own audit line.
+func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Time, byPort map[int]procs.Info) (ps core.ProviderSnapshot, changes []healthChange, homeUnknown bool) {
 	ps = core.ProviderSnapshot{
 		Label: p.Label,
 		Kind:  p.Kind,
@@ -110,7 +113,7 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		// line rides the same string, so this is where both are made safe,
 		// once, at the boundary every other engine-supplied string already
 		// uses.
-		ps.Err = c.foldErr(key, r.err)
+		ps.Err, homeUnknown = c.foldErr(key, r.err)
 	case r.m == nil:
 		ps.Err = "empty poll result"
 	default:
@@ -178,7 +181,7 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		// cannot report a slowdown that ended before the outage began.
 		delete(c.slow, key)
 	}
-	return ps, changes
+	return ps, changes, homeUnknown
 }
 
 // providerKey is the per-provider state key: the endpoint when known, else
@@ -260,4 +263,17 @@ func logChanges(changes []healthChange, level slog.Level, msg, heldKey string) {
 		}
 		lg.Log(context.Background(), level, msg, attrs...)
 	}
+}
+
+// logHomeUnknown audits that engine errors keep their home paths, which is
+// what RedactHome's own home lookup failing does to them. Called after c.mu is
+// released, like logChanges, because a stalled stderr must not stall the poll
+// loop the fold is part of.
+func logHomeUnknown() {
+	_, err := os.UserHomeDir()
+	if err == nil {
+		return
+	}
+	audit().Warn("toktop: home directory unknown; engine errors keep their home paths",
+		"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 }

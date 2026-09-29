@@ -510,9 +510,8 @@ func TestCrushSinceQueryCanUseUpdatedAtIndex(t *testing.T) {
 // an unlatched audit line is terminal spam for as long as the dashboard runs.
 func TestStoreReadFailureIsLatchedPerOutage(t *testing.T) {
 	var lines bytes.Buffer
-	old := audit
-	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
 
 	forgetStoreRead("opencode", "/tmp/store")
 	auditStoreRead("opencode", "/tmp/store", errors.New("disk image is malformed"))
@@ -537,9 +536,8 @@ func TestStoreReadFailureIsLatchedPerOutage(t *testing.T) {
 // and the next failure of that store would read as a new outage.
 func TestStoreReadLatchSurvivesEvictionChurn(t *testing.T) {
 	var lines lockedBuffer
-	old := audit
-	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
 
 	forgetStoreRead("crush", "/tmp/churned")
 	defer forgetStoreRead("crush", "/tmp/churned")

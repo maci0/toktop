@@ -6,6 +6,7 @@ package agentusage
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -331,9 +332,8 @@ func appendLine(t *testing.T, path string, out int) {
 // caller re-walks, and the failure must be audited.
 func TestWalkFailureIsNotCachedAsAFreshListing(t *testing.T) {
 	var lines bytes.Buffer
-	old := audit
-	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
 	t.Cleanup(func() {
 		rootListMu.Lock()
 		rootLists = map[string]rootListing{}
@@ -381,9 +381,8 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 	t.Setenv("USERPROFILE", home) // os.UserHomeDir on windows
 
 	var lines bytes.Buffer
-	old := audit
-	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
 
 	// A store path that is a file: the open fails, and the error names the
 	// path under $HOME the walk could not open.
@@ -420,9 +419,8 @@ func TestWalkFailureAuditFoldsTheHomeDirectory(t *testing.T) {
 // is listed.
 func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 	var lines bytes.Buffer
-	old := audit
-	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
 
 	root := filepath.Join(t.TempDir(), "state")
 	key := rootListKey(root, []string{"token_stats.jsonl"})
@@ -475,9 +473,8 @@ func TestMissingTranscriptRootIsAnEmptyStore(t *testing.T) {
 // warn, and a log that shows up afterwards is still counted.
 func TestClankerMissingStateDirIsQuiet(t *testing.T) {
 	var lines bytes.Buffer
-	old := audit
-	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer restore()
 
 	work := t.TempDir()
 	w := Watch("clanker", work, time.Now())
@@ -513,8 +510,8 @@ func TestClankerMissingStateDirIsQuiet(t *testing.T) {
 // the previous logger installed would keep a handler the host has let go of
 // wired into every later walk.
 func TestSetLoggerInstallsAndRestores(t *testing.T) {
-	old := audit
-	defer func() { audit = old }()
+	restore := swapAudit(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer restore()
 	var lines bytes.Buffer
 	host := slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
@@ -525,6 +522,36 @@ func TestSetLoggerInstallsAndRestores(t *testing.T) {
 	SetLogger(nil)
 	if got := audit(); got != slog.Default() {
 		t.Fatal("SetLogger(nil) did not restore the process logger")
+	}
+}
+
+// swapAudit is the guarded inverse of SetLogger, and a caller that has to put
+// the old value back is exactly the caller a watcher goroutine is polling
+// across. The restore must hand back the func value that was there, not a
+// logger wrapping it: a previous non-default logger has to come back as itself.
+func TestSwapAuditRestoresThePreviousLogger(t *testing.T) {
+	restore := swapAudit(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	first := audit()
+	restore()
+	if got := audit(); got == first {
+		t.Fatal("swapAudit left its own logger installed")
+	}
+
+	// A second swap must restore the first swap's logger, not the process one:
+	// a host that swaps, runs a read, and restores gets its handler back.
+	restoreFirst := swapAudit(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
+	second := audit()
+	restoreSecond := swapAudit(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if got := audit(); got == second {
+		t.Fatal("swapAudit did not install the logger it was given")
+	}
+	restoreSecond()
+	if got := audit(); got != second {
+		t.Fatal("swapAudit did not restore the logger the previous swap installed")
+	}
+	restoreFirst()
+	if got := audit(); got == first {
+		t.Fatal("swapAudit did not restore through a nested swap")
 	}
 }
 

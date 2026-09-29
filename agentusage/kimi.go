@@ -213,15 +213,26 @@ type kimiListing struct {
 // kimiStoreDirs returns the directory names under store, from the shared
 // listing when it is fresh. A store that cannot be read is not remembered, so
 // the next caller tries again rather than serving an empty store for a window.
+//
+// The read runs with kimiListMu released, the same shape agyIndex uses for its
+// two loads: os.ReadDir is the one blocking syscall here, and this store is the
+// same hundreds-of-thousands-of-entries directory the poll goroutine walks, so
+// holding the process-global mutex across it would let one stalled mount wedge
+// every other watcher's root derivation. A concurrent miss on the same store
+// re-reads rather than waits: the entry is published whole and never mutated
+// after, and a listing read under a stale stamp is still this window's.
 func kimiStoreDirs(store string, now time.Time) []string {
 	kimiListMu.Lock()
-	defer kimiListMu.Unlock()
-	if c, ok := kimiListMap[store]; ok && core.Age(now, c.at) < kimiStoreEvery {
+	c, ok := kimiListMap[store]
+	kimiListMu.Unlock()
+	if ok && core.Age(now, c.at) < kimiStoreEvery {
 		return c.dirs
 	}
 	entries, err := os.ReadDir(store)
 	if err != nil {
+		kimiListMu.Lock()
 		delete(kimiListMap, store)
+		kimiListMu.Unlock()
 		return nil
 	}
 	dirs := make([]string, 0, len(entries))
@@ -230,9 +241,11 @@ func kimiStoreDirs(store string, now time.Time) []string {
 			dirs = append(dirs, e.Name())
 		}
 	}
+	kimiListMu.Lock()
 	if len(kimiListMap) >= kimiListMax {
 		clear(kimiListMap)
 	}
 	kimiListMap[store] = kimiListing{dirs: dirs, at: now}
+	kimiListMu.Unlock()
 	return dirs
 }

@@ -48,15 +48,25 @@ var amdCards struct {
 	at    time.Time
 }
 
+// amdCardDirs is the cached half of the discovery. The walk itself runs with
+// amdCards released, the same shape the sibling caches use: it globs and then
+// opens a file per card, and Sample is reached from more than one goroutine, so
+// holding the lock across it would make one walk's sysfs reads every other
+// sampler's wait. A concurrent miss re-walks rather than waits; the slice is
+// published whole and never mutated after, so a reader that took it under the
+// lock holds the same cards forever.
 func amdCardDirs() []amdCard {
 	amdCards.Lock()
-	defer amdCards.Unlock()
-	if core.Age(instant(), amdCards.at) < toolRetry {
-		return amdCards.cards
+	cards, at := amdCards.cards, amdCards.at
+	amdCards.Unlock()
+	if core.Age(instant(), at) < toolRetry {
+		return cards
 	}
-	amdCards.cards = findAmdCards(defaultDrmRoot)
-	amdCards.at = instant()
-	return amdCards.cards
+	cards = findAmdCards(defaultDrmRoot)
+	amdCards.Lock()
+	amdCards.cards, amdCards.at = cards, instant()
+	amdCards.Unlock()
+	return cards
 }
 
 // findAmdCards is the discovery half of the sysfs walk: the cards under

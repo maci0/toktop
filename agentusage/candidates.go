@@ -110,6 +110,33 @@ func SetLogger(l *slog.Logger) {
 	audit = func() *slog.Logger { return l }
 }
 
+// swapAudit points audit at l and returns a function restoring the previous
+// logger. It is SetLogger's inverse, for a caller that has to put the old value
+// back: a test that captures what the package audits, or a host that configures
+// logging per read rather than once. The write and the restore are both under
+// auditMu, so a watcher goroutine that is still polling from the generation
+// this replaces never reads a half-swapped func value.
+func swapAudit(l *slog.Logger) (restore func()) {
+	auditMu.Lock()
+	prev := audit
+	if l == nil {
+		audit = slog.Default
+	} else {
+		audit = func() *slog.Logger { return l }
+	}
+	auditMu.Unlock()
+	return func() { swapAuditFunc(prev) }
+}
+
+// swapAuditFunc publishes prev, the unevaluated func value swapAudit captured,
+// rather than the slog.Logger it wrapped: restoring through a logger would lose
+// the default, which SetLogger's nil cannot tell apart from an intentional one.
+func swapAuditFunc(prev func() *slog.Logger) {
+	auditMu.Lock()
+	audit = prev
+	auditMu.Unlock()
+}
+
 // rootListKey names a listing by the root and the whole suffix set it was
 // walked for, not by one suffix: an adapter with two suffixes (dsh's zstd and
 // plain session logs) reads both out of the same tree, and a key per suffix

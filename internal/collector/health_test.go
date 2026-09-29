@@ -17,8 +17,8 @@ func TestFoldErrMemoAnswersRepeat(t *testing.T) {
 	c := New(nil, 0)
 	err := errors.New("dial tcp 127.0.0.1:11434: connect: connection refused")
 
-	first := c.foldErr("127.0.0.1:11434", err)
-	second := c.foldErr("127.0.0.1:11434", err)
+	first, _ := c.foldErr("127.0.0.1:11434", err)
+	second, _ := c.foldErr("127.0.0.1:11434", err)
 	if first != second {
 		t.Fatalf("repeat of the same error folded twice: %q then %q", first, second)
 	}
@@ -29,8 +29,8 @@ func TestFoldErrMemoAnswersRepeat(t *testing.T) {
 
 func TestFoldErrMemoIsPerError(t *testing.T) {
 	c := New(nil, 0)
-	a := c.foldErr("k", errors.New("connection refused"))
-	b := c.foldErr("k", errors.New("no such host"))
+	a, _ := c.foldErr("k", errors.New("connection refused"))
+	b, _ := c.foldErr("k", errors.New("no such host"))
 	if a == b {
 		t.Fatalf("two distinct errors shared one fold: %q", a)
 	}
@@ -47,7 +47,7 @@ func TestFoldErrRetainsBoundedState(t *testing.T) {
 	c := New(nil, 0)
 	huge := errors.New(strings.Repeat("9", 8<<20))
 
-	text := c.foldErr("127.0.0.1:8000", huge)
+	text, _ := c.foldErr("127.0.0.1:8000", huge)
 	if len(text) > 4096 {
 		t.Fatalf("published error text is %d bytes, not bounded: %.60q", len(text), text)
 	}
@@ -67,7 +67,7 @@ func TestFoldErrRetainsBoundedState(t *testing.T) {
 		}
 	}
 	// A repeat of the oversized error is still answered from the memo.
-	if again := c.foldErr("127.0.0.1:8000", huge); again != text {
+	if again, _ := c.foldErr("127.0.0.1:8000", huge); again != text {
 		t.Fatalf("oversized error did not hit the memo: %q then %q", text, again)
 	}
 }

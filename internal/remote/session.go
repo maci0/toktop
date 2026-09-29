@@ -238,12 +238,17 @@ func (c *Client) openSession(ctx context.Context) (*ssh.Session, error) {
 			"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
 			"wait", sessionOpenTimeout)
 		c.conn.Close()
-		// conn.Close is what releases the parked open; the session it may
-		// still hand back belongs to the connection that just went away.
-		r := <-done
-		if r.sess != nil {
-			r.sess.Close()
-		}
+		// Reaped in the background, not read inline, the same as the cancel
+		// branch below: conn.Close is what releases the parked open, and a
+		// session it may still hand back belongs to the connection that just
+		// went away. Joining here would make the deadline the only thing
+		// bounding the caller's return, and the whole point of this branch is
+		// that the peer is wedged and cannot be waited out.
+		go func() {
+			if r := <-done; r.sess != nil {
+				r.sess.Close()
+			}
+		}()
 		return nil, fmt.Errorf("ssh channel open unanswered after %s: %w", sessionOpenTimeout, context.DeadlineExceeded)
 	case <-ctx.Done():
 		// Shutdown: Close owns the connection and the channel with it, so

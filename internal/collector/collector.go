@@ -404,11 +404,13 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// log level at the call below rather than falling through a switch that
 	// quietly reports it at the wrong one.
 	var buckets [changeFast + 1][]healthChange
+	homeUnknown := false
 	snap.Agents = slices.Clone(c.agents)
 	snap.Probes = slices.Clone(c.probes)
 	snap.Sys = cloneSys(sys)
 	for i, r := range results {
-		ps, changes := c.providerSnapshot(c.providers[i], r, now, byPort)
+		ps, changes, hu := c.providerSnapshot(c.providers[i], r, now, byPort)
+		homeUnknown = homeUnknown || hu
 		for _, change := range changes {
 			buckets[change.kind] = append(buckets[change.kind], change)
 		}
@@ -423,6 +425,11 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	logChanges(buckets[changeSlow], slog.LevelWarn, "toktop: engine poll slow", "slow_for")
 	logChanges(buckets[changeFast], slog.LevelInfo, "toktop: engine poll back to normal", "slow_for")
 	logWindowRefusals(refused)
+	// One line per sweep, not one per engine: the condition is the process's,
+	// not a given engine's, and the engines that saw it said the same thing.
+	if homeUnknown {
+		logHomeUnknown()
+	}
 	// Send outside the critical section: a stalled consumer must neither pin
 	// emit past cancellation nor freeze RecordAgent/RecordProbe/ProbeAll
 	// behind c.mu while this send waits for buffer space.
