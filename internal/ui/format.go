@@ -36,6 +36,11 @@ func norm(v, vMax float64) float64 {
 // 999.95 to "%.1f" prints 1000.0. The unit is chosen on the rounded value, so
 // a count reads 1.0M rather than 1000.0k, and the same magnitude does not
 // change spelling across a boundary.
+//
+// Both are thresholds on the scaled value, not on the number the caller
+// passed: k and ms/1000, never the tok/s or millisecond count itself. That
+// distinction is the whole rule, and reading one against the other is what
+// puts a k on a rate below a thousand.
 const (
 	unitRound   = 999.95
 	unitRoundTo = 999.5
@@ -51,6 +56,12 @@ const (
 	countNoDecimal = 1000000
 )
 
+// The k suffix starts at a whole thousand, the same place fmtCount starts
+// it: 999.5 rendered "1.0k" while 999 read "999", so a rate under a thousand
+// carried the unit of a rate over it. unitRoundTo is the threshold for a
+// value about to be divided by a larger unit (fmtMs, where ms is compared
+// against it before the switch to seconds), not one to compare a raw
+// tok/s count against.
 func fmtRate(v float64) string {
 	if math.IsNaN(v) || math.IsInf(v, 0) {
 		return "0.0"
@@ -59,7 +70,7 @@ func fmtRate(v float64) string {
 	switch {
 	case v >= rateNoDecimal || k >= unitRound:
 		return fmt.Sprintf("%.0fk", k)
-	case v >= unitRoundTo:
+	case v >= 1000:
 		return fmt.Sprintf("%.1fk", k)
 	case v >= 100:
 		return fmt.Sprintf("%.0f", v)

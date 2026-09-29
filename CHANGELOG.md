@@ -23,6 +23,10 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   of the process, behind a published text already bounded to a snippet. The
   memo is keyed on a digest of the error now, so a repeat is still answered
   from memory and the retained state is the same size whatever the peer sent.
+- A throughput rate under a thousand no longer renders with a `k`: 999.5 tok/s
+  printed `1.0k tok/s`, the same spelling as 1000. The k starts at a whole
+  thousand, the way a count's does, so the two scales agree on where the unit
+  changes.
 - The site's `unhandled` line carries the stack behind the throw, folded onto
   the one JSON object Workers Logs reads. A throw that reached the top of
   `fetch` is the one failure on the site nobody can reproduce: the request

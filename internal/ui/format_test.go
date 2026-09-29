@@ -196,8 +196,13 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 		want string
 	}{
 		{99.94, "99.9"},
-		{999.4, "999"},
-		{999.5, "1.0k"},
+		{999, "999"},
+		// A rate under a thousand must not wear the k: 999.5 rounds to
+		// "1000" on the plain scale, and "1.0k" spelled a rate ten
+		// thousand times smaller one line above 1000 reading "1.0k".
+		{999.5, "1000"},
+		{999.9, "1000"},
+		{1000, "1.0k"},
 		{9999, "10.0k"},
 		{9999.9, "10.0k"},
 		{10000, "10k"},
