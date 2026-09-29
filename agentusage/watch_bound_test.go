@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -102,6 +103,105 @@ func TestIncompleteWalkCapsFailureLatches(t *testing.T) {
 	}
 	if !w.readFailed[live] || !w.ownsFailed[live] {
 		t.Error("the walk cleared the latches of a transcript the last complete listing still held")
+	}
+}
+
+// A verdict of false is released by the age-out sweep the moment its file
+// leaves the walk, and the sweep cannot run on a walk that missed part of the
+// store. So the foreign half of the owner map, with the stamps and skip
+// positions behind it, was bounded by nothing at all while a store kept
+// failing to walk. The stores behind the per-file-owner adapters are per-user,
+// so every session another project on the host started is a key here.
+func TestIncompleteWalkCapsForeignVerdicts(t *testing.T) {
+	store := withStore(t, "copilot")
+	other := t.TempDir() // a different checkout: every session in it is foreign
+	w := Watch("copilot", t.TempDir(), time.Now())
+	if w == nil {
+		t.Fatal("no copilot adapter")
+	}
+
+	for i := range foreignCap + 8 {
+		copilotSession(t, store, "foreign"+strconv.Itoa(i), other)
+	}
+	w.Poll()
+	n := foreignCap + 8
+	if got := len(w.owner); got != n {
+		t.Fatalf("%d verdicts recorded, want %d", got, n)
+	}
+	for _, mine := range w.owner {
+		if mine {
+			t.Fatalf("a session in %s was judged ours", other)
+		}
+	}
+
+	key := rootListKey(store, w.ad.fileSuffixes())
+	stalled := make(chan struct{})
+	rootListMu.Lock()
+	rootLists[key] = rootListing{at: time.Now(), walk: stalled}
+	rootListMu.Unlock()
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		delete(rootLists, key)
+		rootListMu.Unlock()
+	})
+	w.scanned = time.Time{}
+	// The last complete listing is the store's contents, all of them, so it
+	// would spare every verdict below. A store that has been failing to walk
+	// since has one that is short or gone, which is the case the cap exists
+	// for.
+	w.cached = nil
+
+	w.walkCandidates(w.instant().Add(-recencyWindow), true)
+
+	if got := len(w.owner); got > foreignCap {
+		t.Fatalf("a walk that missed part of the store left %d foreign verdicts, over the %d cap", got, foreignCap)
+	}
+	if got := len(w.offsets); got > foreignCap {
+		t.Fatalf("a walk that missed part of the store left %d skip positions, over the %d cap", got, foreignCap)
+	}
+	if got := len(w.stamps); got > foreignCap {
+		t.Fatalf("a walk that missed part of the store left %d stamps, over the %d cap", got, foreignCap)
+	}
+}
+
+// A cap on the foreign verdicts is a cap on the map, not a change of verdict:
+// a session released by it is judged again on its next sighting, and since a
+// foreign path short-circuits on its size alone, re-judging reads the header
+// and re-offers nothing. What it must not do is release a verdict for a
+// transcript the last complete listing still held.
+func TestIncompleteWalkSpareIsAVerdictTheLastListingHeld(t *testing.T) {
+	store := withStore(t, "copilot")
+	other := t.TempDir()
+	w := Watch("copilot", t.TempDir(), time.Now())
+
+	live := copilotSession(t, store, "live", other)
+	for i := range foreignCap + 8 {
+		copilotSession(t, store, "foreign"+strconv.Itoa(i), other)
+	}
+	w.Poll()
+	if _, ok := w.owner[live]; !ok {
+		t.Fatal("the live session was not judged at all")
+	}
+	w.cached = []string{live}
+
+	key := rootListKey(store, w.ad.fileSuffixes())
+	stalled := make(chan struct{})
+	rootListMu.Lock()
+	rootLists[key] = rootListing{at: time.Now(), walk: stalled}
+	rootListMu.Unlock()
+	t.Cleanup(func() {
+		rootListMu.Lock()
+		delete(rootLists, key)
+		rootListMu.Unlock()
+	})
+	w.scanned = time.Time{}
+
+	w.walkCandidates(w.instant().Add(-recencyWindow), true)
+
+	if mine, ok := w.owner[live]; !ok {
+		t.Error("the walk released the verdict of a transcript the last complete listing still held")
+	} else if mine {
+		t.Error("the verdict flipped to ours")
 	}
 }
 

@@ -11,3 +11,10 @@ import "os/exec"
 // without a Job Object, so a wrapper that hangs leaks its tree once per poll
 // for as long as it keeps hanging.
 func GroupKill(*exec.Cmd) {}
+
+// KillGroup has nothing to signal here, for the reason GroupKill has: with no
+// process group of the command's own there is no group to address, so the
+// deferred call every caller makes after it is a no-op rather than a missing
+// one. The tree a hung Windows wrapper leaves behind is the gap the comment
+// above names.
+func KillGroup(*exec.Cmd) {}

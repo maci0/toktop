@@ -28,6 +28,9 @@ func listDarwin() ([]raw, error) {
 	cmd := exec.CommandContext(ctx, "ps", "-axo", "pid=,%cpu=,rss=,command=")
 	cmd.WaitDelay = listPipeGrace
 	core.GroupKill(cmd)
+	// Deferred beside the group: ps is polled on a timer, and a helper it
+	// spawned that outlives it would be one more process per sweep.
+	defer core.KillGroup(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("ps -axo pid=,%%cpu=,rss=,command=: %w", err)

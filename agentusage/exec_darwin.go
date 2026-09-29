@@ -24,5 +24,9 @@ func commandOutput(ctx context.Context, name string, args ...string) ([]byte, er
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.WaitDelay = pipeGrace
 	core.GroupKill(cmd)
+	// Deferred beside the group: Output returns after the wait, and exec never
+	// signals the group itself on the WaitDelay path, so a grandchild holding
+	// the pipe outlives the probe that started it.
+	defer core.KillGroup(cmd)
 	return cmd.Output()
 }

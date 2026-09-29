@@ -688,10 +688,9 @@ func (w *Watcher) trimCounted(inWalk map[string]struct{}) {
 // stateCap bounds the per-file bookkeeping of transcripts a per-file-owner
 // adapter judged to belong to this watcher but that no longer appear in the
 // walk: the owner verdict, the stamp, the skip position and any zstd carry.
-// A foreign verdict is not counted, since forgetIdle releases one the moment
-// its file ages out; an own verdict is kept because losing it re-reads the
-// whole transcript on its next appearance, and trimCounted's release of the
-// counts is what hands the path here.
+// An own verdict is kept because losing it re-reads the whole transcript on
+// its next appearance, and trimCounted's release of the counts is what hands
+// the path here.
 //
 // Same value as countedCap, and the same release order: least recently
 // written first. Without it a store that starts sessions faster than they age
@@ -708,13 +707,41 @@ func (w *Watcher) trimCounted(inWalk map[string]struct{}) {
 // appended to are the ones the cap spends that on.
 const stateCap = countedCap
 
-// trimOwned releases the oldest judged transcripts past stateCap, so the
-// bookkeeping behind a verdict that outlived the recency window cannot grow by
-// every session the agent has ever started.
+// foreignCap bounds the same bookkeeping for verdicts of false, which used to
+// be trimmed by no cap at all. forgetIdle releases a foreign verdict as soon
+// as its file ages out, but forgetIdle only runs on a complete walk, and a
+// store whose walk keeps failing is exactly the store a machine-wide watch is
+// pointed at: one root on a stale NFS handle, one hung mount, one
+// permission-changed subtree, while the other root keeps starting sessions.
+// Every foreign verdict, stamp and skip position that walk never reached then
+// stayed for the life of the process, one per session another project started.
+//
+// The key space is the whole machine for the adapters this applies to: the
+// stores behind microagent, dsh, copilot, codex, kimi, gemini, agy and grok
+// are per-user, so a foreign session is any other project's session.
+const foreignCap = stateCap
+
+// trimOwned releases the oldest judged transcripts past the cap for their
+// verdict, so the bookkeeping behind a verdict that outlived the recency
+// window cannot grow by every session the agent has ever started. The two
+// verdicts are capped apart: a foreign one costs only the header re-read when
+// it comes back (readNew short-circuits a foreign path on size alone, so
+// nothing is recounted), while losing an own verdict re-reads and recounts
+// the transcript, so the own budget is not spent on foreign sessions.
 func (w *Watcher) trimOwned(inWalk map[string]struct{}) {
+	w.trimVerdicts(inWalk, true, stateCap)
+	w.trimVerdicts(inWalk, false, foreignCap)
+}
+
+// trimVerdicts releases the least recently written judged transcripts that
+// the walk did not reach and that are carrying no counts, down to limit of
+// them. What a release costs is dropFile: the verdict, the stamp, the skip
+// position, the carry and the latches go, and the next sighting is judged
+// again.
+func (w *Watcher) trimVerdicts(inWalk map[string]struct{}, mine bool, limit int) {
 	var cut []aged
-	for path, mine := range w.owner {
-		if !mine {
+	for path, judgedMine := range w.owner {
+		if judgedMine != mine {
 			continue
 		}
 		if _, ok := inWalk[path]; ok {
@@ -725,11 +752,11 @@ func (w *Watcher) trimOwned(inWalk map[string]struct{}) {
 		}
 		cut = append(cut, aged{path: path, mtimeNanos: w.stamps[path].mtimeNanos})
 	}
-	if len(cut) <= stateCap {
+	if len(cut) <= limit {
 		return
 	}
 	slices.SortFunc(cut, func(a, b aged) int { return cmp.Compare(a.mtimeNanos, b.mtimeNanos) })
-	for _, a := range cut[:len(cut)-stateCap] {
+	for _, a := range cut[:len(cut)-limit] {
 		w.dropFile(a.path)
 	}
 }
