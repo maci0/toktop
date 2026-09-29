@@ -171,6 +171,18 @@ func TestSatAddSaturates(t *testing.T) {
 	}
 }
 
+func TestSatAdd64Saturates(t *testing.T) {
+	if got := satAdd64(3, 4); got != 7 {
+		t.Fatalf("satAdd64(3, 4) = %d", got)
+	}
+	if got := satAdd64(maxSaneTokens, 4); got != int64(maxSaneTokens) {
+		t.Fatalf("satAdd64 past maxSaneTokens = %d, want %d", got, maxSaneTokens)
+	}
+	if got := satAdd64(math.MaxInt64, 4); got != int64(maxSaneTokens) {
+		t.Fatalf("satAdd64 overflow = %d, want %d", got, maxSaneTokens)
+	}
+}
+
 func TestSatAddSpanSaturates(t *testing.T) {
 	if got := satAddSpan(3*time.Second, 4*time.Second); got != 7*time.Second {
 		t.Fatalf("satAddSpan(3s, 4s) = %v", got)

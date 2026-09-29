@@ -14,7 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -237,6 +239,36 @@ func TestCrushWatchCountsOnlyGrowthAfterAttach(t *testing.T) {
 	}
 	if got.Input != 300 {
 		t.Fatalf("input %d, want the 300 prompt tokens billed after attach", got.Input)
+	}
+}
+
+// Two corrupt sessions whose totals pass the ceiling must read as enormous,
+// the way a transcript with absurd counts does, and not as nothing. Refusing
+// the reading instead loses every poll: the store is re-read from the attach
+// instant each time, so the same total comes back and the agent is blind for
+// as long as the rows stand.
+func TestCrushWatchSaturatesCorruptSessionTotals(t *testing.T) {
+	if strconv.IntSize < 64 {
+		t.Skip("the ceiling does not fit in an int on this platform")
+	}
+	dir := t.TempDir()
+	crushDB(t, dir, map[string][3]int64{})
+	since := time.Now()
+	w := Watch("crush", dir, since)
+	if w == nil {
+		t.Fatal("crush is readable in this build, so Watch must return a watcher")
+	}
+	at := since.Add(time.Second).UnixMilli()
+	putCrushSession(t, dir, "a", maxSaneTokens, 0, at)
+	putCrushSession(t, dir, "b", maxSaneTokens, 0, at)
+	got := w.Poll()
+	if got.Output != maxSaneTokens {
+		t.Fatalf("output %d, want the ceiling %d rather than a dropped reading", got.Output, maxSaneTokens)
+	}
+	// A second poll sees the same rows and must report the same level, not
+	// fall back to the last sample now that the totals have saturated.
+	if next := w.Poll(); next.Output != got.Output {
+		t.Fatalf("repeated poll reported %d, want %d", next.Output, got.Output)
 	}
 }
 
@@ -498,6 +530,65 @@ func TestStoreReadFailureIsLatchedPerOutage(t *testing.T) {
 	forgetStoreRead("opencode", "/tmp/store")
 }
 
+// The latch a failure writes is the one the table keeps, so concurrent
+// failures of one store log one line even while other stores churn the table
+// past its cap. A caller that released the lock between finding the latch and
+// writing it could write to an entry the eviction sweep had already dropped,
+// and the next failure of that store would read as a new outage.
+func TestStoreReadLatchSurvivesEvictionChurn(t *testing.T) {
+	var lines lockedBuffer
+	old := audit
+	SetLogger(slog.New(slog.NewTextHandler(&lines, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer func() { audit = old }()
+
+	forgetStoreRead("crush", "/tmp/churned")
+	defer forgetStoreRead("crush", "/tmp/churned")
+
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 50 {
+				auditStoreRead("crush", "/tmp/churned", errors.New("disk image is malformed"))
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range maxStoreReads * 2 {
+			storeReadState.Lock()
+			storeReadForLocked(fmt.Sprintf("crush\x00/tmp/churn-%d", i))
+			storeReadState.Unlock()
+		}
+	}()
+	wg.Wait()
+
+	if got := strings.Count(lines.String(), "agent usage store read failed"); got != 1 {
+		t.Fatalf("one store failing under churn logged %d lines, want 1", got)
+	}
+}
+
+// lockedBuffer collects audit lines from several goroutines at once, which a
+// plain bytes.Buffer cannot do.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 // forgetStoreRead drops one store's latch, so a test does not inherit the
 // state of an earlier one under the shared table.
 func forgetStoreRead(agent, path string) {
@@ -519,7 +610,9 @@ func TestStoreReadLatchTableIsCapped(t *testing.T) {
 	defer forgetStoreRead("crush", "/tmp/capped")
 
 	for i := range maxStoreReads + 16 {
-		storeReadFor(storeReadKey("crush", fmt.Sprintf("/tmp/capped/%d", i)))
+		storeReadState.Lock()
+		storeReadForLocked(storeReadKey("crush", fmt.Sprintf("/tmp/capped/%d", i)))
+		storeReadState.Unlock()
 	}
 	storeReadState.Lock()
 	n, order := len(storeReadState.states), len(storeReadState.order)

@@ -690,16 +690,10 @@ func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
 		for id, tokens := range sess {
 			b := base[id]
 			if d := tokens.output - b.output; d > 0 {
-				if outN > int64(maxSaneTokens)-d {
-					return values{}, false
-				}
-				outN += d
+				outN = satAdd64(outN, d)
 			}
 			if d := tokens.input - b.input; d > 0 {
-				if inN > int64(maxSaneTokens)-d {
-					return values{}, false
-				}
-				inN += d
+				inN = satAdd64(inN, d)
 			}
 		}
 	}

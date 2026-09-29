@@ -242,13 +242,11 @@ type storeRead struct {
 
 func storeReadKey(agent, path string) string { return agent + "\x00" + path }
 
-// storeReadFor returns the latch for one store, recording its first sighting
-// so the order carries every live key. An eviction drops the oldest key rather
-// than the entry the caller is about to touch, so a store at the cap keeps its
-// own latch.
-func storeReadFor(key string) *storeRead {
-	storeReadState.Lock()
-	defer storeReadState.Unlock()
+// storeReadForLocked returns the latch for one store, recording its first
+// sighting so the order carries every live key. An eviction drops the oldest
+// key rather than the entry the caller is about to touch, so a store at the
+// cap keeps its own latch. Caller holds storeReadState.
+func storeReadForLocked(key string) *storeRead {
 	if r, ok := storeReadState.states[key]; ok {
 		return r
 	}
@@ -262,6 +260,21 @@ func storeReadFor(key string) *storeRead {
 	return r
 }
 
+// markStoreFailed latches one store's failure and reports whether this call
+// opened the outage, so the caller logs a line once per outage. The lookup, the
+// write and the eviction sweep run under one lock: a caller that released the
+// lock between finding the latch and writing it could be holding an entry the
+// sweep has since evicted, and the next failure of that store would then find
+// a fresh latch and log the same outage again.
+func markStoreFailed(key string) (first bool) {
+	storeReadState.Lock()
+	defer storeReadState.Unlock()
+	r := storeReadForLocked(key)
+	first = !r.failed
+	r.failed = true
+	return first
+}
+
 // auditStoreRead records a read failure against a store that does exist. It
 // names the agent and the store so the operator can tell a corrupt or
 // permission-denied database from an idle agent, and keeps the driver's message
@@ -269,12 +282,7 @@ func storeReadFor(key string) *storeRead {
 // recorded as failing adds nothing: the line naming the start of the outage
 // said the reason, and every later poll would only repeat it.
 func auditStoreRead(agent, path string, err error) {
-	r := storeReadFor(storeReadKey(agent, path))
-	storeReadState.Lock()
-	first := !r.failed
-	r.failed = true
-	storeReadState.Unlock()
-	if !first {
+	if !markStoreFailed(storeReadKey(agent, path)) {
 		return
 	}
 	auditLogger().Warn("agent usage store read failed",

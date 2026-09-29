@@ -30,6 +30,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A crush store whose sessions total more token counters are meant to hold now
+  reads as enormous rather than as nothing. The reading was refused outright,
+  and since the store is re-read from the attach instant on every poll, the same
+  refusal came back each time and the agent reported nothing for as long as the
+  rows stood.
 - An ssh_config `Host` block written for a name with an accent now matches
   that host. `?` matched one byte rather than one character, so `Host cafe?`
   stopped inside the last rune of "café" and reported no match, and the block's

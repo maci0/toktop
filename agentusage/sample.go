@@ -240,6 +240,19 @@ func satAdd(a, b int) int {
 	return s
 }
 
+// satAdd64 is satAdd for counters that arrive from a session store as int64.
+// It saturates at the same ceiling, and for the same reason: a store holding
+// sessions that total more than the ceiling is corrupt, and the reading that
+// says so is enormous rather than nothing. Refusing the reading instead loses
+// every poll while the offending rows stand, since the store is re-read from
+// the attach instant each time and the same total comes back each time.
+func satAdd64(a, b int64) int64 {
+	if a > int64(maxSaneTokens)-b {
+		return int64(maxSaneTokens)
+	}
+	return a + b
+}
+
 func satSub(a, b int) int {
 	if a < b {
 		return 0
