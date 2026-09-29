@@ -248,11 +248,18 @@ func TestUsageQueryPlaceholdersMatchBoundDirectories(t *testing.T) {
 	dirs := []string{"/work", "/work/Équipe", "/work/sub"}
 	for _, fold := range []bool{false, true} {
 		for n := 1; n <= len(dirs); n++ {
-			query := usageQuery(n, fold)
+			query := usageQuery(n, fold, true)
 			// The trailing bound value is the since timestamp.
 			want := len(dirArgs(dirs[:n], fold)) + 1
 			if got := strings.Count(query, "?"); got != want {
 				t.Errorf("usageQuery(%d, fold=%v) has %d placeholders, want %d",
+					n, fold, got, want)
+			}
+			// A zero since means no lower bound, so the statement carries
+			// no timestamp placeholder to bind an argument to.
+			unbounded := usageQuery(n, fold, false)
+			if got, want := strings.Count(unbounded, "?"), len(dirArgs(dirs[:n], fold)); got != want {
+				t.Errorf("unbounded usageQuery(%d, fold=%v) has %d placeholders, want %d",
 					n, fold, got, want)
 			}
 		}
@@ -666,5 +673,29 @@ func TestFoldDirKeepsDirectoriesFullFoldingMerges(t *testing.T) {
 		if foldDir(pair[1]) != foldDir(pair[0]) {
 			t.Errorf("foldDir(%q) = %q, want it to equal foldDir(%q) = %q", pair[1], foldDir(pair[1]), pair[0], foldDir(pair[0]))
 		}
+	}
+}
+
+// A zero since is the unattached reading: the whole store counts, including
+// messages written before the process started. Binding the zero time's
+// UnixMilli instead would ask for a bound of year 1, which every real message
+// precedes, so the statement has to drop the lower bound instead of spelling
+// it.
+func TestOpenCodeDBZeroSinceReadsTheWholeStore(t *testing.T) {
+	path := opencodeDB(t)
+	work := t.TempDir()
+	addSession(t, path, "s-mine", work)
+	// Written long before any attach could name it.
+	addMessage(t, path, "m0", "s-mine", time.Unix(1_000_000, 0).UTC(),
+		`{"role":"assistant","tokens":{"output":9000,"reasoning":100,"total":50000}}`)
+	withOpenCodeDB(t, path)
+
+	w := Watch("opencode", work, time.Time{})
+	if w == nil {
+		t.Fatal("opencode should be readable once the database is enabled")
+	}
+	w.poll(nil)
+	if got := w.Sample().Output; got != 9000 {
+		t.Fatalf("output = %d, want the 9000 written before the process existed", got)
 	}
 }

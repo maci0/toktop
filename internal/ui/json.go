@@ -212,12 +212,13 @@ func originStamp(at time.Time) string {
 // format, one zone.
 //
 // A stamp in a report is not one machine's clock reading. A pushed agent's
-// events keep the offset their sender wrote (ingest parses RFC 3339 and
+// events carry the offset their sender wrote (ingest parses RFC 3339 and
 // collector.RecordAgent subtracts a clock lead, neither of which converts),
-// while probes and the frame's own `at` carry the local one, so a single
-// report can hold 14:02:03+05:30 beside 08:35:12-07:00 and a consumer that
-// reads the wall time out of the string without applying the offset places the
-// two five hours apart. UTC is the same instant, so this changes no reading
+// while probes and the frame's own `at` carry the local one, so a stamp
+// formatted directly would give a single report 14:02:03+05:30 beside
+// 08:35:12-07:00, and a consumer that reads the wall time out of the string
+// without applying the offset places the two five hours apart. UTC is the
+// same instant, so this changes no reading
 // and leaves the offset in the string, where a conforming parser still finds
 // it.
 func stamp(t time.Time) time.Time {

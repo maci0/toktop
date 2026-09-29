@@ -97,6 +97,16 @@ func openCodeDBPath() string {
 // message: opencode indexes session_id, not (session_id, time_created) and
 // not directory. CAST keeps MAX numeric: json_extract of a JSON string is
 // TEXT, and SQLite ranks TEXT above INTEGER, so MAX('9', 100) would be '9'.
+//
+// The since bound is a spliced predicate, not a placeholder, because a
+// zero since means no lower bound at all and a bound still needs a value to
+// compare against. Splice it a lower bound that no message can precede and
+// the statement reads as unbounded, which is what the caller meant, but the
+// spelling is then a fact about how far back timestamps reach rather than
+// about the caller's intent, and it moves the day the arithmetic that
+// produced it is wrong for. A watcher attaches with since = time.Now(), so a
+// zero one is the unattached reading of a tree that ran before this process
+// did; it means the whole store.
 const usageQueryFormat = `
 	SELECT
 		COALESCE(CAST(SUM(MAX(CAST(%[1]s AS REAL), 0)) AS INTEGER), 0),
@@ -106,8 +116,8 @@ const usageQueryFormat = `
 	FROM session
 	CROSS JOIN message m
 	WHERE m.session_id = session.id
-	  AND %[5]s AND m.time_created > ?
-	  AND %[6]s = 'assistant'`
+	  AND %[5]s AND %[6]s
+	  AND %[7]s = 'assistant'`
 
 // jsonToken builds the extraction of one JSON path from a message payload,
 // guarded so a row that is not well-formed JSON reads as absent instead of
@@ -144,36 +154,39 @@ func init() {
 	foldSessionDirectory.Store(runtime.GOOS == "windows" || runtime.GOOS == "darwin")
 }
 
-// usageQueryFor builds the query for n directory spellings. Only the number of
-// placeholders varies: every value still travels as a bound parameter.
+// usageQueryFor builds the bounded query for n directory spellings: the one
+// that filters on a since instant. Only the number of placeholders varies:
+// every value still travels as a bound parameter.
 func usageQueryFor(n int) string {
-	return usageQuery(n, foldSessionDirectory.Load())
+	return usageQuery(n, foldSessionDirectory.Load(), true)
 }
 
-// usageQuery is usageQueryFor with the directory folding fixed by the caller.
-// The flag decides how many placeholders the statement carries and how many
-// arguments are bound to them, so one read of it has to govern both: a
-// statement built folded against a flat argument list, or the reverse, binds a
+// usageQuery is usageQueryFor with the directory folding and the presence of a
+// since bound fixed by the caller. Both decide how many placeholders the
+// statement carries and how many arguments are bound to them, so one read of
+// them has to govern both: a statement built folded against a flat argument
+// list, or a bounded statement bound to an unbounded argument list, binds a
 // directory where the timestamp belongs and reads another directory's usage as
 // this one's.
 //
-// Memoized on (n, fold): the two are a directory-spelling count and a bool, so
-// the statement is one of a handful for the life of the process, while the
-// un-memoized form spent five Sprintf calls building it on every poll of
-// every opencode watcher. The cache is bounded by n, which is the number of
-// spellings dirSpellings produced (one or two off macOS, up to ten on it),
-// and a count above the bound is built and discarded rather than retained.
-func usageQuery(n int, fold bool) string {
+// Memoized on (n, fold, bounded): those are a directory-spelling count and two
+// bools, so the statement is one of a handful for the life of the process,
+// while the un-memoized form spent five Sprintf calls building it on every
+// poll of every opencode watcher. The cache is bounded by n, which is the
+// number of spellings dirSpellings produced (one or two off macOS, up to ten
+// on it), and a count above the bound is built and discarded rather than
+// retained.
+func usageQuery(n int, fold, bounded bool) string {
 	if n < 0 || n > maxCachedQuerySpellings {
-		return buildUsageQuery(n, fold)
+		return buildUsageQuery(n, fold, bounded)
 	}
-	key := queryKey{n: n, fold: fold}
+	key := queryKey{n: n, fold: fold, bounded: bounded}
 	queryCacheMu.Lock()
 	defer queryCacheMu.Unlock()
 	if q, ok := queryCache[key]; ok {
 		return q
 	}
-	q := buildUsageQuery(n, fold)
+	q := buildUsageQuery(n, fold, bounded)
 	queryCache[key] = q
 	return q
 }
@@ -186,8 +199,9 @@ func usageQuery(n int, fold bool) string {
 const maxCachedQuerySpellings = 8
 
 type queryKey struct {
-	n    int
-	fold bool
+	n       int
+	fold    bool
+	bounded bool
 }
 
 var (
@@ -195,14 +209,26 @@ var (
 	queryCache   = map[queryKey]string{}
 )
 
-func buildUsageQuery(n int, fold bool) string {
+func buildUsageQuery(n int, fold, bounded bool) string {
 	return fmt.Sprintf(usageQueryFormat,
 		jsonToken("$.tokens.output"),
 		jsonToken("$.tokens.reasoning"),
 		jsonToken("$.tokens.total"),
 		jsonToken("$.tokens.input"),
 		directoryPred(n, fold),
+		sincePred(bounded),
 		jsonToken("$.role"))
+}
+
+// sincePred is the lower bound on message.time_created, or no bound at all
+// when the caller passed a zero since. The two forms carry different numbers
+// of placeholders, so the caller binding the arguments is the one that has to
+// ask for the form.
+func sincePred(bounded bool) string {
+	if bounded {
+		return "m.time_created > ?"
+	}
+	return "1"
 }
 
 func directoryPred(n int, fold bool) string {
@@ -267,13 +293,20 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok boo
 	// One read of the folding flag decides the statement and its arguments
 	// together, so the placeholder count and the bound values cannot disagree.
 	fold := foldSessionDirectory.Load()
-	args := append(dirArgs(dirs, fold), since.UnixMilli())
+	// A zero since is the unattached reading: the whole store counts, and the
+	// statement drops its lower bound rather than binding an instant no
+	// message can precede.
+	bounded := !since.IsZero()
+	args := dirArgs(dirs, fold)
+	if bounded {
+		args = append(args, since.UnixMilli())
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
 	defer cancel()
 
 	var out, thinking, total, input sql.NullInt64
-	row := db.QueryRowContext(ctx, usageQuery(len(dirs), fold), args...)
+	row := db.QueryRowContext(ctx, usageQuery(len(dirs), fold, bounded), args...)
 	if err := row.Scan(&out, &thinking, &total, &input); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) && !storeAbsent(o.path) {
 			auditStoreRead("opencode", o.path, err)
