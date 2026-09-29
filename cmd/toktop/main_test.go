@@ -2156,6 +2156,25 @@ func TestLogActiveConfig(t *testing.T) {
 			t.Fatalf("logActiveConfig() = %q, want no seed outside a demo run", buf.String())
 		}
 	})
+	// --plain without --once is the live text report, not a no-op, so the
+	// line names it there too: the record of a live run is what tells a
+	// reader which report it was carrying.
+	t.Run("a live plain run names the report", func(t *testing.T) {
+		var buf strings.Builder
+		logActiveConfig(&buf, &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420", plain: true}, map[string]bool{}, 0, 0, false)
+		got := buf.String()
+		if !strings.Contains(got, " plain") {
+			t.Errorf("logActiveConfig() = %q, want plain named on a live --plain run", got)
+		}
+		if strings.Contains(got, "once") {
+			t.Errorf("logActiveConfig() = %q, want no once: this run is live", got)
+		}
+		buf.Reset()
+		logActiveConfig(&buf, &cliFlags{interval: time.Second, ingest: "127.0.0.1:8420"}, map[string]bool{}, 0, 0, false)
+		if got := buf.String(); strings.Contains(got, "plain") {
+			t.Errorf("logActiveConfig() = %q, want no plain on a dashboard run", got)
+		}
+	})
 	// The line records the knobs that will actually apply, so a --plain that
 	// --json replaced is not named: "once plain json" reads as two reports.
 	t.Run("only the report that renders is named", func(t *testing.T) {

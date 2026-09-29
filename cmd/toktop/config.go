@@ -76,9 +76,6 @@ func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, open
 		// Only the report that is actually rendered is named: --json
 		// replaces the text report, so a line reading "once plain json"
 		// claims a knob is in force that the run ignored.
-		if f.plain && !f.jsonOut {
-			cfg = append(cfg, configFlag{key: "plain", bare: true})
-		}
 		if f.jsonOut {
 			cfg = append(cfg, configFlag{key: "json", bare: true})
 		}
@@ -96,6 +93,14 @@ func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, open
 				}
 			}
 		}
+	}
+	// --plain on its own is the live text report, so it is a knob in force
+	// with or without --once: warnIgnoredFlags says the flag stays live and
+	// keeps the keys, and only --json replaces it. A run that rendered the
+	// linear report with nothing on the line saying so left the record of
+	// which report it was carrying to the shape of the next few lines.
+	if f.plain && !f.jsonOut {
+		cfg = append(cfg, configFlag{key: "plain", bare: true})
 	}
 	if f.probeSecs > 0 {
 		cfg = append(cfg, configFlag{key: "probe", value: fmt.Sprintf("%ds", f.probeSecs)})
