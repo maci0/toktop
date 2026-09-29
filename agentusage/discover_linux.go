@@ -78,7 +78,6 @@ const (
 	procCommFile    = "comm"
 	procCmdlineFile = "cmdline"
 	procCwdFile     = "cwd"
-	procStatFile    = "stat"
 )
 
 // procReader carries the scratch one /proc walk needs: the path it is opening
