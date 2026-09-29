@@ -239,6 +239,9 @@ func main() {
 ```
 
 The example watches the discovered processes concurrently for ten seconds.
+`Discover` returns one `Process` per agent CLI (pid, agent name, working
+directory), in ascending pid order, and `Process.Watch` is the per-process
+form of `Watch`.
 Only usage written after attachment is reported; existing transcript counts
 are skipped. Keep an agent generating during that window to see output.
 There is nothing to release afterwards: a `Watcher` opens and closes each
@@ -276,8 +279,15 @@ location registered for an agent, roots as written, which is how a program
 finds out which entries a definitions file registered and which it skipped
 (the agents read by a compiled-in adapter are not reported, so a `usage` entry
 naming one is skipped on load rather than registered). Use `RegisterSpec` to
-read such an agent elsewhere. A definition does replace a compiled-in
-*definition*, pi, prime-agent, feynman and omp. `Supported` covers every agent.
+read such an agent elsewhere. `UnknownUsageKeys` is the other half of that read
+side: one "agent: key" entry per usage key the file named that this build has
+no field for, which `UsageKeyNames` names the known set of. A misspelled `root`
+leaves an agent with no usable root, and nothing else distinguishes it from an
+agent that was never defined. A refused load leaves the previous answer in
+place, since the file that named those keys is not the one in force; a path
+with no file at it is not a refusal and clears it. A definition does replace a
+compiled-in *definition*, pi, prime-agent, feynman and omp. `Supported` covers
+every agent.
 `Watch` returns a nil `*Watcher` when an agent keeps nothing readable, and
 `Watcher.Err` reports that as `ErrUnsupportedTool`. A sample is the total
 since the watcher attached, so a program reporting events takes the growth
@@ -301,12 +311,22 @@ what paces the `Run` loop: `WallPacer` is the wall clock a run uses unless it
 is told otherwise, and a `NewVirtualPacer` fires one pass per call instead, so
 a test that replays a run reads the same transcripts per step however long
 they took to grow. Both halves of a replayed run then come from the driver.
+A caller supplying its own `Pacer` implements `New`, which hands back a
+`Ticker`: the channel the loop selects on, and the `Stop` that releases
+whatever paces it.
 
 `Agents` lists every agent name the package knows (built in, defined, or
 registered), and `Supported` says whether one of them can be read here. A
 transcript store that cannot be walked is reported rather than read as empty,
 on the process logger from `log/slog` unless `SetLogger` is handed the logger
-the embedding program already writes to (nil restores the default).
+the embedding program already writes to (nil restores the default). A program
+that has to decide directory identity itself asks `SameDir` rather than
+comparing bytes, since on macOS and Windows two spellings of one directory
+differ byte for byte and still name one directory, and `DirKey` is that same
+comparison as the key a map is built on. `HomeDir` is the directory every
+built-in store is built from, and the empty string when it is not an absolute
+path, which is the case the stores drop rather than follow the working
+directory.
 
 A
 dashboard also needs to know when an agent's tokens are already being counted
