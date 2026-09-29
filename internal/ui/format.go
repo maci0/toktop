@@ -367,9 +367,29 @@ func clip(s string, w int) string {
 // terminal. Width clipping is clip's job, and happens after this.
 func strip(s string) string { return core.SanitizeText(s) }
 
+// blanks is the pad every layout helper fills with. Slicing a constant
+// instead of calling strings.Repeat keeps a row that needs padding from
+// allocating one: padBlock pads every line of every panel and joinBlocks and
+// joinAcross pad every row of every block, once per frame. A gap wider than
+// the table falls back to strings.Repeat, which no terminal reaches.
+const blanks = "                                                                " +
+	"                                                                " +
+	"                                                                " +
+	"                                                                "
+
+func spaces(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	if n <= len(blanks) {
+		return blanks[:n]
+	}
+	return strings.Repeat(" ", n)
+}
+
 func padTo(s string, w int) string {
 	if gap := w - widthOf(s); gap > 0 {
-		return s + strings.Repeat(" ", gap)
+		return s + spaces(gap)
 	}
 	return s
 }
@@ -377,7 +397,7 @@ func padTo(s string, w int) string {
 // padStart right-aligns s within w visible cells.
 func padStart(s string, w int) string {
 	if gap := w - widthOf(s); gap > 0 {
-		return strings.Repeat(" ", gap) + s
+		return spaces(gap) + s
 	}
 	return s
 }
@@ -387,7 +407,7 @@ func joinSpread(left, right string, width int) string {
 	lw := widthOf(left)
 	rw := widthOf(right)
 	gap := max(width-lw-rw, 1)
-	return left + strings.Repeat(" ", gap) + right
+	return left + spaces(gap) + right
 }
 
 func dim(s string) string { return styleDim.Render(s) }
@@ -430,7 +450,7 @@ func joinBlocks(blocks ...string) string {
 		for j, ln := range lines {
 			out.WriteString(ln)
 			if gap := widest - widths[i][j]; gap > 0 {
-				out.WriteString(strings.Repeat(" ", gap))
+				out.WriteString(spaces(gap))
 			}
 			out.WriteByte('\n')
 		}
@@ -482,12 +502,12 @@ func joinAcross(blocks ...string) string {
 		}
 		for i, lines := range rows {
 			if row >= len(lines) {
-				out.WriteString(strings.Repeat(" ", widths[i]))
+				out.WriteString(spaces(widths[i]))
 				continue
 			}
 			out.WriteString(lines[row])
 			if gap := widths[i] - rowWidths[i][row]; gap > 0 {
-				out.WriteString(strings.Repeat(" ", gap))
+				out.WriteString(spaces(gap))
 			}
 		}
 	}

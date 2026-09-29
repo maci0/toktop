@@ -203,12 +203,12 @@ func padBlock(content string, innerW, innerH int) string {
 			w = widthOf(ln)
 		}
 		if gap := innerW - w; gap > 0 {
-			ln += strings.Repeat(" ", gap)
+			ln += spaces(gap)
 		}
 		lines[i] = ln
 	}
 	for len(lines) < innerH {
-		lines = append(lines, strings.Repeat(" ", innerW))
+		lines = append(lines, spaces(innerW))
 	}
 	return strings.Join(lines, "\n")
 }

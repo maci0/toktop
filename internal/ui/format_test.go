@@ -360,3 +360,34 @@ func TestSingleCellRuneRejectsWideAndZeroWidth(t *testing.T) {
 		}
 	}
 }
+
+// The pad table is sliced by cell count, so every boundary it has has to hand
+// back exactly n spaces, and a gap wider than the table has to fall through
+// to strings.Repeat rather than truncate.
+func TestSpacesReturnsExactlyNGaps(t *testing.T) {
+	for _, n := range []int{
+		-8, -1, 0, 1, 2, 7, 63, 64, 65, 127, 128,
+		len(blanks) - 1, len(blanks), len(blanks) + 1, len(blanks) * 3,
+	} {
+		got := spaces(n)
+		if len(got) != max(n, 0) {
+			t.Errorf("spaces(%d) is %d bytes, want %d", n, len(got), max(n, 0))
+		}
+		if strings.Contains(strings.TrimRight(got, " "), " ") {
+			t.Errorf("spaces(%d) = %q, which is not all blanks", n, got)
+		}
+	}
+}
+
+// The table is there to be read, not copied: a pad that allocates is a pad
+// the frame paid for on every row. The wide case necessarily allocates.
+func TestSpacesDoesNotAllocateWithinTheTable(t *testing.T) {
+	allocs := testing.AllocsPerRun(200, func() {
+		if s := spaces(len(blanks)); len(s) != len(blanks) {
+			t.Fatalf("spaces(%d) is %d bytes", len(blanks), len(s))
+		}
+	})
+	if allocs != 0 {
+		t.Errorf("spaces allocated %v times per call; the table is sliced, not built", allocs)
+	}
+}

@@ -29,14 +29,18 @@ func (m Model) providersBody(w, rows int) (string, int) {
 	var b strings.Builder
 	used, shown := 0, 0
 	for _, p := range m.providersByStatus() {
-		block := providerBlock(p, w)
-		if used+len(block) > rows {
+		// The row budget is settled before the block is built. An engine block
+		// is always providerBlockRows rows whatever the engine reports, so the
+		// last engine a short panel does not have room for can be dropped for
+		// the price of a comparison instead of a badge, three styled strings,
+		// a gauge and a clip that are then thrown away.
+		if used+providerBlockRows > rows {
 			break
 		}
-		for _, ln := range block {
+		for _, ln := range providerBlock(p, w) {
 			b.WriteString(ln + "\n")
 		}
-		used += len(block)
+		used += providerBlockRows
 		shown++
 	}
 	return b.String(), shown
@@ -75,6 +79,12 @@ const (
 	minGaugeBar = 3
 	maxGaugeBar = 14
 )
+
+// providerBlockRows is what an engine block costs in panel rows, healthy or
+// not: the stats or error line sits under the name either way, and neither
+// path drops one. providersBody settles the row budget against this before
+// building a block it may not draw.
+const providerBlockRows = 2
 
 func providerBlock(p core.ProviderSnapshot, w int) []string {
 	dot := dotUp
@@ -152,6 +162,12 @@ func engineStats(p core.ProviderSnapshot, w int) string {
 	return row
 }
 
+// gaugesBlockRows is the floor a gauge block costs: the name and the kv bar.
+// A third row for the process line is added per engine that reports one, and
+// a blank spacer between blocks, so the budget is settled on procLine's answer
+// before the block is built.
+const gaugesBlockRows = 2
+
 // gaugesBody renders the healthy engines' detail blocks, three rows each (or
 // two when the engine reports neither vram, context length, rss nor ttft for
 // one) into the row
@@ -167,13 +183,15 @@ func (m Model) gaugesBody(w, rows int) (string, int) {
 		if !p.OK {
 			continue
 		}
-		name := styleDim.Render(clip(shorten(core.SanitizeText(p.Label), w-6), w-6))
-		kv := "kv  " + GaugeBar(p.KVPct, min(max(w-10, 4), 20), kvHeat)
-		block := []string{name, kv}
-		if third := procLine(p); third != "" {
-			block = append(block, third)
+		// Only procLine decides how tall the block is, so the budget is
+		// settled on it before the label and the gauge are built: the engine a
+		// short panel cannot fit costs one procLine rather than a sanitized,
+		// clipped and styled label plus a gauge bar.
+		third := procLine(p)
+		need := gaugesBlockRows
+		if third != "" {
+			need++
 		}
-		need := len(block)
 		if shown > 0 {
 			need++
 		}
@@ -182,6 +200,11 @@ func (m Model) gaugesBody(w, rows int) (string, int) {
 		}
 		if shown > 0 {
 			b.WriteString("\n")
+		}
+		name := styleDim.Render(clip(shorten(core.SanitizeText(p.Label), w-6), w-6))
+		block := []string{name, "kv  " + GaugeBar(p.KVPct, min(max(w-10, 4), 20), kvHeat)}
+		if third != "" {
+			block = append(block, third)
 		}
 		for _, ln := range block {
 			b.WriteString(clip(ln, w) + "\n")

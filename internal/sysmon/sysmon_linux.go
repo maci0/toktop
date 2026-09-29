@@ -510,10 +510,26 @@ func sensorLayout(key, root string, build func(string) []sensorInput) []sensorIn
 	return inputs
 }
 
+// sensorBufBytes is the size of the buffer every sensor read is made into. A
+// hwmon temp*_input holds a decimal number of millidegrees and a newline; a
+// pathologically wide value is truncated rather than split across two reads,
+// since the parse rejects anything that is not an integer anyway.
+const sensorBufBytes = 64
+
+// readSensors samples every input the layout walk found. The read is made
+// into one buffer reused across the whole sweep rather than through
+// os.ReadFile, which allocated a file-sized slice per sensor: a sensor-farm
+// host with a discrete GPU carries tens of inputs and this runs on every
+// sample. The result is sized to the input count, so a sweep of known length
+// does not regrow it.
 func readSensors(inputs []sensorInput) []core.TempReading {
-	var out []core.TempReading
+	if len(inputs) == 0 {
+		return nil
+	}
+	out := make([]core.TempReading, 0, len(inputs))
+	buf := make([]byte, sensorBufBytes)
 	for _, in := range inputs {
-		mc, ok := readMilliC(in.path)
+		mc, ok := readMilliCBuf(buf, in.path)
 		if !ok {
 			continue
 		}
@@ -591,6 +607,32 @@ func readMilliC(path string) (int, bool) {
 	if err != nil {
 		return 0, false
 	}
+	v, ok := parseMilliC(b)
+	return v, ok
+}
+
+// readMilliCBuf is readMilliC against a caller-owned buffer, so a sweep over
+// many sensors allocates for the buffer once rather than once per sensor. A
+// value too long for the buffer is refused rather than silently read short:
+// the buffer is a bound, not a truncation, and a sensor reporting more digits
+// than any temperature has is not one to guess at.
+func readMilliCBuf(buf []byte, path string) (int, bool) {
+	f, err := os.Open(path)
+	if err != nil {
+		return 0, false
+	}
+	n, err := f.Read(buf)
+	cerr := f.Close()
+	if err != nil || cerr != nil {
+		return 0, false
+	}
+	if n == len(buf) {
+		return 0, false
+	}
+	return parseMilliC(buf[:n])
+}
+
+func parseMilliC(b []byte) (int, bool) {
 	v, err := strconv.Atoi(strings.TrimSpace(string(b)))
 	if err != nil {
 		return 0, false

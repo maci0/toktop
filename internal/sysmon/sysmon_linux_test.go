@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -589,4 +590,77 @@ func TestParseCPUModelKernelText(t *testing.T) {
 	if !strings.HasPrefix(got, "Intel") || !strings.Contains(got, "Core i7") {
 		t.Errorf("parseCPUModel = %q, want the brand with the bad byte replaced", got)
 	}
+}
+
+// The buffer read has to answer exactly what the os.ReadFile read it replaced,
+// on the same files: a value it can hold, one it cannot, and contents that are
+// not a number at all.
+func TestReadMilliCBufMatchesReadMilliC(t *testing.T) {
+	dir := t.TempDir()
+	cases := map[string]string{
+		"plain":    "42000\n",
+		"tight":    "42000",
+		"spaced":   "  42000  \n\n",
+		"negative": "-1000\n",
+		"huge":     strings.Repeat("9", sensorBufBytes),
+		"empty":    "",
+		"word":     "not a number\n",
+		"float":    "42000.5\n",
+	}
+	buf := make([]byte, sensorBufBytes)
+	for name, body := range cases {
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		wantV, wantOK := readMilliC(path)
+		gotV, gotOK := readMilliCBuf(buf, path)
+		if gotV != wantV || gotOK != wantOK {
+			t.Errorf("%s (%q): buffer read gave (%d, %v), want (%d, %v)",
+				name, body, gotV, gotOK, wantV, wantOK)
+		}
+	}
+	if _, ok := readMilliCBuf(buf, filepath.Join(dir, "absent")); ok {
+		t.Error("a missing sensor read as a reading")
+	}
+}
+
+// The shared read buffer has to stay cheaper than the os.ReadFile-per-sensor
+// sweep it replaced, by the per-sensor file-sized slice it removed. The
+// remainder is what os.Open and strconv.Atoi cost per sensor, which the
+// buffer cannot remove.
+func TestReadSensorsCheaperThanAReadFilePerSensor(t *testing.T) {
+	dir := t.TempDir()
+	perSensorFileRead := func(inputs []sensorInput) []core.TempReading {
+		var out []core.TempReading
+		for _, in := range inputs {
+			mc, ok := readMilliC(in.path)
+			if !ok {
+				continue
+			}
+			out = append(out, core.TempReading{Label: in.label, MilliC: mc, IsGPU: in.gpu})
+		}
+		return out
+	}
+	inputs := make([]sensorInput, 0, 32)
+	for i := range 32 {
+		path := filepath.Join(dir, "temp"+strconv.Itoa(i)+"_input")
+		if err := os.WriteFile(path, []byte("42000\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		inputs = append(inputs, sensorInput{path: path, label: "t" + strconv.Itoa(i), gpu: i == 0})
+	}
+	if got := readSensors(inputs); len(got) != len(inputs) {
+		t.Fatalf("read %d sensors, want %d", len(got), len(inputs))
+	} else if !got[0].IsGPU || got[0].MilliC != 42000 {
+		t.Errorf("first reading = %+v, want the GPU's 42000", got[0])
+	}
+	before := testing.AllocsPerRun(100, func() { perSensorFileRead(inputs) })
+	after := testing.AllocsPerRun(100, func() { readSensors(inputs) })
+	if after >= before {
+		t.Errorf("shared-buffer sweep allocates %v times, the os.ReadFile sweep it replaced %v; the buffer is a loss",
+			after, before)
+	}
+	t.Logf("sensor sweep over %d inputs: %v allocations with the shared buffer, %v with one os.ReadFile each",
+		len(inputs), after, before)
 }

@@ -4,7 +4,6 @@ package ui
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -71,7 +70,7 @@ func moreMarker(title string, w, hidden int) string {
 	if !ok {
 		return ""
 	}
-	return strings.Repeat(" ", gap) + dim(form)
+	return spaces(gap) + dim(form)
 }
 
 // moreNote is the same marker for a row that carries nothing else, so the
