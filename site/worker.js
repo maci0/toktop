@@ -731,6 +731,24 @@ function notAcceptable(request, started) {
   return failRequest(request, started, 406, "not-acceptable", "not acceptable", { vary: VARY });
 }
 
+// The edge's own clock, for measuring how long this Worker took.
+//
+// Date.now() is not that clock. The runtime freezes time across a synchronous
+// stretch and only advances it at I/O, so a request that spends its work in
+// env.ASSETS.fetch or a compression stream reads the same millisecond before
+// and after, and the log line and the Server-Timing header both report 0 for an
+// answer that took a second to reach the client. performance.now() is the
+// monotonic reading the runtime keeps running across those waits, and it cannot
+// step backwards the way a wall clock can. Fractional milliseconds are rounded
+// because the header is an integer and the logs are read as whole numbers.
+function edgeNow() {
+  return performance.now();
+}
+
+function edgeElapsedMs(started) {
+  return Math.round(edgeNow() - started);
+}
+
 // The request fields every failure line carries, so a filter on method, path
 // or duration works across every event rather than only the ones that
 // happened to pass them in. The duration is what the edge spent to reach the
@@ -739,7 +757,7 @@ function requestFields(request, started) {
   return {
     method: request.method,
     path: new URL(request.url).pathname,
-    duration_ms: Date.now() - started,
+    duration_ms: edgeElapsedMs(started),
   };
 }
 
@@ -763,7 +781,7 @@ function failRequest(request, started, status, event, body, extraHeaders = {}, f
 // regression here is invisible in a byte-count test: it is a change in how
 // long the edge takes, not in how much it sends.
 function serverTiming(started) {
-  return `edge;dur=${Math.max(0, Date.now() - started)}`;
+  return `edge;dur=${edgeElapsedMs(started)}`;
 }
 
 // How many lines one isolate writes for one event before it stops writing
@@ -908,7 +926,7 @@ export default {
   // with the same plain-text envelope every other failure here uses, so a
   // client can still act on it.
   async fetch(request, env) {
-    const started = Date.now();
+    const started = edgeNow();
     try {
       return await handle(request, env, started);
     } catch (err) {
