@@ -103,7 +103,7 @@ func readAmdCards(cards []amdCard) []core.GPUDevice {
 	var devs []core.GPUDevice
 	for _, card := range cards {
 		dev := filepath.Join(card.dir, "device")
-		d := core.GPUDevice{Vendor: "amd", Name: card.name}
+		d := core.GPUDevice{Vendor: core.VendorAMD, Name: card.name}
 		if _, rest, ok := strings.Cut(filepath.Base(card.dir), "card"); ok {
 			d.Index, _ = strconv.Atoi(rest)
 		}

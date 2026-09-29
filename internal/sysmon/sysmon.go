@@ -171,8 +171,8 @@ func Sample() core.SysSample {
 		s.Drivers = map[string]string{}
 	}
 	for _, g := range s.GPUs { // vendor tools often know their own driver
-		if g.Vendor == "nvidia" && g.Driver != "" && s.Drivers["nvidia"] == "" {
-			s.Drivers["nvidia"] = g.Driver
+		if g.Vendor == core.VendorNvidia && g.Driver != "" && s.Drivers[core.VendorNvidia] == "" {
+			s.Drivers[core.VendorNvidia] = g.Driver
 		}
 	}
 	if platformCPUModel != nil {

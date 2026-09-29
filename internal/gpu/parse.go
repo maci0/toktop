@@ -59,7 +59,7 @@ func ParseNvidiaSMI(b []byte) []core.GPUDevice {
 			driver = ""
 		}
 		devs = append(devs, core.GPUDevice{
-			Vendor:   "nvidia",
+			Vendor:   core.VendorNvidia,
 			Index:    index,
 			Name:     core.ModelName(name),
 			MilliC:   core.SatInt(flexF(tail[0]) * 1000),

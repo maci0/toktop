@@ -128,7 +128,7 @@ func appleGPUs(ctx context.Context) []core.GPUDevice {
 // one binary on one Mac report the same VRAM for the same card and the
 // identity cache can hold that total for the life of the process.
 func appleGPUFromDisplay(d map[string]any) (core.GPUDevice, bool) {
-	dev := core.GPUDevice{Vendor: "apple"}
+	dev := core.GPUDevice{Vendor: core.VendorApple}
 	if name, ok := d["_name"].(string); ok {
 		dev.Name = core.ModelName(name)
 	}

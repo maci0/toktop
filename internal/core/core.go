@@ -284,10 +284,23 @@ type TempReading struct {
 	IsGPU  bool
 }
 
+// Accelerator vendors, the closed set GPUDevice.Vendor draws from. Named
+// rather than spelled at each use for the reason the provider kinds above are:
+// the parsers that produce a vendor, the sampler that orders by it, the
+// renderer that shortens it and the remote reader that keys drivers on it are
+// four packages, and a literal in each is four chances to disagree about which
+// vendors exist.
+const (
+	VendorNvidia = "nvidia"
+	VendorAMD    = "amd"
+	VendorIntel  = "intel"
+	VendorApple  = "apple"
+)
+
 // GPUDevice is one accelerator as reported by sysfs/vendor CLIs (no vendor
 // libraries linked).
 type GPUDevice struct {
-	Vendor   string // nvidia | amd | intel | apple
+	Vendor   string // one of the Vendor* constants
 	Index    int
 	Name     string
 	MilliC   int
@@ -315,9 +328,17 @@ type SysSample struct {
 	Load15 float64
 
 	HostUptime time.Duration
-	Drivers    map[string]string // vendor -> version
-	NPUs       []string          // detected accelerator drivers
-	RemoteHost string            // set when stats come via ssh
+	// Drivers is the accelerator software a host has loaded, keyed by name and
+	// rendered as one chip each. Two namespaces share the map and are told
+	// apart by nothing but the spelling: a Vendor* key, which is also the key
+	// a remote's GPU section produces, and a kernel module or runtime key
+	// ("amdgpu", "i915", "cuda") that only a locally read host contributes. It
+	// is one map because a reader wants the whole set in one place; it is
+	// guarded by an explicit len(GPUs) check wherever the two are combined, so
+	// a locally read module chip is never shown beside a remote's devices.
+	Drivers    map[string]string
+	NPUs       []string // detected accelerator drivers
+	RemoteHost string   // set when stats come via ssh
 	// RemoteErr is why the last remote vitals poll failed, empty while the
 	// ssh target is answering. It rides along with RemoteHost past the
 	// staleness window so a target that went dark names itself and its

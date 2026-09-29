@@ -227,8 +227,12 @@ func TestSaturatesAbsurdVendorNumbers(t *testing.T) {
 // drives Sample and pins the order the dashboard actually draws. What is left
 // to pin here is the table itself: every vendor the dashboard knows is ranked,
 // no vendor is ranked twice, and the ranks say which order those panels take.
+//
+// The list is spelled with the core constants rather than literals, so a vendor
+// the orderer ranks and a vendor a parser emits cannot be two spellings of one
+// decision.
 func TestVendorOrdering(t *testing.T) {
-	want := []string{"nvidia", "amd", "intel", "apple"}
+	want := []string{core.VendorNvidia, core.VendorAMD, core.VendorIntel, core.VendorApple}
 	if len(vendorOrder) != len(want) {
 		t.Fatalf("vendorOrder ranks %d vendors, want %d: %v", len(vendorOrder), len(want), vendorOrder)
 	}

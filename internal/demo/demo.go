@@ -322,7 +322,7 @@ func (s *Source) sysSample() core.SysSample {
 	}
 	gpuBase := 62 + 20*math.Abs(math.Sin(s.t/16))
 	a100 := core.GPUDevice{
-		Vendor: "nvidia", Index: 0, Name: "A100-SXM4-80GB",
+		Vendor: core.VendorNvidia, Index: 0, Name: "A100-SXM4-80GB",
 		MilliC: int(gpuBase * 1000), MemTotal: 80 * GiB,
 		MemUsed: uint64(float64(80*GiB) * clamp(45+30*math.Sin(s.t/12), 5, 99) / 100),
 		UtilPct: clamp(55+40*math.Sin(s.t/9), 0, 100),

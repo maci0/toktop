@@ -119,3 +119,29 @@ func TestClampEventSpanDropsRatherThanPullsBack(t *testing.T) {
 		}
 	}
 }
+
+// The vendor constants are the spelling of GPUDevice.Vendor, and that string
+// reaches the --json report, the --plain report and the keys of
+// SysSample.Drivers. Renaming one is a change an upgrading reader can observe,
+// so the values are pinned here rather than only at the parser that writes
+// them, and the set is pinned closed so a new vendor cannot appear in a parser
+// without a rank and a renderer to go with it.
+func TestVendorConstantsAreThePinnedSet(t *testing.T) {
+	want := map[string]string{
+		VendorNvidia: "nvidia",
+		VendorAMD:    "amd",
+		VendorIntel:  "intel",
+		VendorApple:  "apple",
+	}
+	got := []string{VendorNvidia, VendorAMD, VendorIntel, VendorApple}
+	if len(got) != len(want) {
+		t.Fatalf("%d vendor constants, want the %d pinned values", len(got), len(want))
+	}
+	for _, v := range got {
+		if pinned, ok := want[v]; !ok {
+			t.Errorf("vendor %q is not one of the pinned vendors", v)
+		} else if pinned != v {
+			t.Errorf("vendor constant %q, want the published spelling %q", v, pinned)
+		}
+	}
+}

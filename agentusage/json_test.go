@@ -172,6 +172,29 @@ func TestSatAddSaturates(t *testing.T) {
 	}
 }
 
+// The transcript ceiling and the event boundary's are one bound, read two
+// ways. A counter this package reads is carried into a core.AgentEvent, so a
+// ceiling raised on either side alone would let a transcript line report a
+// count the boundary refuses to carry: the value is read off the file, counted
+// in the totals and then dropped on the way into the feed.
+func TestTokenCeilingIsTheEventBoundaryCeiling(t *testing.T) {
+	if maxSaneTokens != core.MaxEventTokens {
+		t.Fatalf("transcript ceiling = %d, event boundary ceiling = %d", maxSaneTokens, core.MaxEventTokens)
+	}
+	if got := core.ClampEventTokens(maxSaneTokens); got != maxSaneTokens {
+		t.Fatalf("ClampEventTokens at the ceiling = %d, want %d", got, maxSaneTokens)
+	}
+	if got := core.ClampEventTokens(maxSaneTokens + 1); got != 0 {
+		t.Fatalf("ClampEventTokens past the ceiling = %d, want 0", got)
+	}
+	if got := counter(maxSaneTokens + 1); got != 0 {
+		t.Fatalf("counter past the ceiling = %d, want 0", got)
+	}
+	if got := counter(maxSaneTokens); got != maxSaneTokens {
+		t.Fatalf("counter at the ceiling = %d, want %d", got, maxSaneTokens)
+	}
+}
+
 func TestSatAdd64Saturates(t *testing.T) {
 	if got := satAdd64(3, 4); got != 7 {
 		t.Fatalf("satAdd64(3, 4) = %d", got)

@@ -389,6 +389,22 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The `agentusage` transcript counter ceiling is now `core.MaxEventTokens`
+  rather than a second literal spelling of it. A counter read from a transcript
+  is carried into a `core.AgentEvent`, and `core.ClampEventTokens` drops
+  anything past *its* ceiling to zero, so raising one bound alone would let a
+  transcript line report a count the event boundary refuses to carry: the
+  tokens are counted in the totals and then dropped on the way into the feed.
+  The span ceiling beside it already read `core.MaxEventSpan` by reference;
+  the token one now does the same, and a test pins the two together.
+
+- The accelerator vendor names `GPUDevice.Vendor` draws from are named in
+  `core` (`VendorNvidia`, `VendorAMD`, `VendorIntel`, `VendorApple`) instead of
+  written out at each use. The parsers that produce a vendor, the sampler that
+  orders the panels by it, the renderer that shortens it and the remote reader
+  that keys drivers on it are four packages, and the published strings are
+  unchanged, so the `--json` and `--plain` reports read exactly as before.
+
 - Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
   stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
   the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting

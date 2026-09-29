@@ -265,9 +265,9 @@ func gpuSegments(sy *core.SysSample) []string {
 
 func shortVendor(v string) string {
 	switch v {
-	case "nvidia":
+	case core.VendorNvidia:
 		return "nv"
-	case "amd", "intel", "apple":
+	case core.VendorAMD, core.VendorIntel, core.VendorApple:
 		return v
 	default:
 		return "gpu"

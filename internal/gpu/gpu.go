@@ -60,7 +60,12 @@ func rocmDecode(devs *[]core.GPUDevice) func([]byte) error {
 	}
 }
 
-var vendorOrder = map[string]int{"nvidia": 0, "amd": 1, "intel": 2, "apple": 3}
+var vendorOrder = map[string]int{
+	core.VendorNvidia: 0,
+	core.VendorAMD:    1,
+	core.VendorIntel:  2,
+	core.VendorApple:  3,
+}
 
 // maxXpuDevices caps how many Intel devices one tick spawns a metrics
 // process for.
@@ -160,7 +165,7 @@ func sampleXPU(ctx context.Context, name, xpu string) []core.GPUDevice {
 			if !ok {
 				return
 			}
-			dev.Vendor = "intel"
+			dev.Vendor = core.VendorIntel
 			dev.Name = d.Name
 			devs[i] = &dev
 		})

@@ -233,7 +233,14 @@ const (
 // maxSaneTokens bounds one counter a transcript line may contribute. Real
 // usage never approaches it; anything larger is corruption or hostility, and
 // reporting nothing beats displaying a lie (or overflowing the totals).
-const maxSaneTokens int64 = 1 << 40
+//
+// core.MaxEventTokens, spelled by reference rather than copied: a counter this
+// package reads is carried into a core.AgentEvent, and core.ClampEventTokens
+// drops anything past its own ceiling to zero, so a ceiling raised here alone
+// would let a transcript line report a count the event boundary refuses to
+// carry. One definition, the same reason maxSaneSpan below carries
+// core.MaxEventSpan rather than a literal of its own.
+const maxSaneTokens int64 = core.MaxEventTokens
 
 // maxSaneTokensInt is maxSaneTokens as an int. The ceiling does not fit a 32-bit
 // int, so a 32-bit build saturates at the largest counter its int can hold

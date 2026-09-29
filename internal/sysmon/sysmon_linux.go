@@ -214,7 +214,7 @@ func hostInfoLinux(s *core.SysSample) {
 		s.Drivers = map[string]string{}
 	}
 	if h.nvidiaDrv != "" {
-		s.Drivers["nvidia"] = h.nvidiaDrv
+		s.Drivers[core.VendorNvidia] = h.nvidiaDrv
 	}
 	if h.cuda != "" {
 		s.Drivers["cuda"] = h.cuda
