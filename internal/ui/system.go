@@ -14,8 +14,6 @@ import (
 	"github.com/maci0/toktop/internal/core"
 )
 
-// row 2 is identity and sensors (cpu, os, drivers, temps).
-
 // shownCPUTemps is how many core temperature readings either renderer prints.
 // The rest become a "+N more" count in the dashboard and are dropped by the
 // text report, which has no width to fit them in.

@@ -31,9 +31,11 @@ import (
 // on Linux, system_profiler on macOS).
 var platformExtras func(ctx context.Context) []core.GPUDevice
 
-// nvidiaDecode is nvidiaUsable with its parse kept, so the sampler reads
-// nvidia-smi's CSV once per poll instead of once to judge it and again to
-// report it. Same shape as the xpu metrics decode in sampleXPU.
+// nvidiaDecode reads nvidia-smi's headerless CSV once per poll and judges it
+// by the same walk: output this build cannot read is a driver upgrade that
+// changed the column set, or a tool that cannot reach the driver, and both
+// leave the GPU row blank while the tool looks healthy. Same shape as the
+// xpu metrics decode in sampleXPU.
 func nvidiaDecode(devs *[]core.GPUDevice) func([]byte) error {
 	return func(b []byte) error {
 		*devs = ParseNvidiaSMI(b)
@@ -44,8 +46,8 @@ func nvidiaDecode(devs *[]core.GPUDevice) func([]byte) error {
 	}
 }
 
-// rocmDecode is rocmUsable with its parse kept, for the same reason as
-// nvidiaDecode.
+// rocmDecode is nvidiaDecode for rocm-smi, whose output is JSON keyed by
+// card.
 func rocmDecode(devs *[]core.GPUDevice) func([]byte) error {
 	return func(b []byte) error {
 		*devs = ParseRocmSMI(b)

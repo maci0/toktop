@@ -174,11 +174,10 @@ func logWindowRefusals(run windowRun) {
 // process memory, so that window does not cross a restart: a replay that
 // arrives after a restart or a `toktop update` re-exec is stored and counted
 // again, and only the sender holding the key can recognize it as its own.
-// An event that
-// sorts behind the whole retained window is refused too, so the answer stays
-// what a sender is told: the feed took this, or it did not. Only the window
-// refusal is latched for the audit log: a duplicate is the sender's own replay
-// and says nothing about the run's health.
+// An event that sorts behind the whole retained window is refused too, so the
+// answer stays what a sender is told: the feed took this, or it did not. Only
+// the window refusal is latched for the audit log: a duplicate is the sender's
+// own replay and says nothing about the run's health.
 func (c *Collector) RecordAgent(ev core.AgentEvent) bool {
 	now := c.instant()
 	if ev.At.IsZero() {

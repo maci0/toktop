@@ -109,18 +109,12 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 		return values{}, "", false
 	}
 	u := rec.Params.Update.Usage
-	in := counter(u.InputTokens)
-	out := counter(u.OutputTokens)
-	think := counter(u.ReasoningTokens)
-	cache := satAdd(counter(u.CachedReadTokens), counter(u.CacheCreationTokens))
-	tot := counter(u.TotalTokens)
-	parts := satAdd(in, out)
-	if cache > 0 && tot >= satAdd(parts, cache) && tot != parts {
-		in = satAdd(in, cache)
-	}
-	v := values{output: out, thinking: think, input: in, total: tot}
-	if v.total == 0 {
-		v.total = satAdd(in, out)
+	// reasoningTokens here sit outside output, and both cached counters are
+	// reads of the prompt, so this is the same fold Gemini's two shapes use.
+	v, ok := foldCounters(u.InputTokens, u.OutputTokens, u.ReasoningTokens,
+		satAdd(counter(u.CachedReadTokens), counter(u.CacheCreationTokens)), u.TotalTokens)
+	if !ok {
+		return values{}, "", false
 	}
 	// apiDurationMs is time spent in the model. elapsed_ms is the whole
 	// turn, tools included, and a turn that mostly ran tools would otherwise
@@ -135,9 +129,6 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 			n = maxTurnMS
 		}
 		v.span = time.Duration(n) * time.Millisecond
-	}
-	if !v.present() {
-		return values{}, "", false
 	}
 	return v, "", true
 }

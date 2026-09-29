@@ -151,25 +151,6 @@ func run(ctx context.Context, name, path string, decode func([]byte) error, args
 	return b, true
 }
 
-// nvidiaUsable reports output this build cannot read as nvidia-smi's
-// headerless CSV. A driver upgrade that changes the column set, or a tool
-// that cannot reach the driver, answers with rows that yield no device or
-// none at all: both leave the GPU row blank while the tool looks healthy.
-func nvidiaUsable(b []byte) error {
-	if len(ParseNvidiaSMI(b)) == 0 {
-		return errors.New("no device rows in nvidia-smi CSV output")
-	}
-	return nil
-}
-
-// rocmUsable is nvidiaUsable for rocm-smi, whose output is JSON keyed by card.
-func rocmUsable(b []byte) error {
-	if len(ParseRocmSMI(b)) == 0 {
-		return errors.New("no cards in rocm-smi JSON output")
-	}
-	return nil
-}
-
 // xpuUsable checks that xpu-smi answered in the JSON its -j flag promises. An
 // empty device list is a legitimate answer (a host with no Intel device), so
 // this judges the encoding and not the emptiness: a banner, an error string,

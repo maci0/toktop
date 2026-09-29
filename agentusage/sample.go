@@ -188,6 +188,33 @@ func (v values) present() bool {
 	return v.output > 0 || v.thinking > 0 || v.total > 0 || v.input > 0
 }
 
+// foldCounters folds one provider's counter set, the shape several JSON
+// transcripts report: separate prompt, output, thoughts and cached counters
+// beside a total. cached is added to the prompt only when the total is larger
+// than prompt+output+thoughts by that share; when the total already equals
+// that sum, cached is inside the prompt. thoughts is 0 for a source that
+// folds reasoning into output already, and the total is rebuilt from the
+// parts when the source omits it.
+func foldCounters(prompt, output, thoughts, cached, total int) (values, bool) {
+	in := counter(prompt)
+	out := counter(output)
+	think := counter(thoughts)
+	cache := counter(cached)
+	tot := counter(total)
+	parts := satAdd(in, satAdd(out, think))
+	if cache > 0 && tot >= satAdd(parts, cache) && tot != parts {
+		in = satAdd(in, cache)
+	}
+	v := values{output: out, thinking: think, input: in, total: tot}
+	if v.total == 0 {
+		v.total = satAdd(in, satAdd(out, think))
+	}
+	if !v.present() {
+		return values{}, false
+	}
+	return v, true
+}
+
 // valueKind says how an adapter's numbers accumulate.
 type valueKind uint8
 

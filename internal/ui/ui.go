@@ -564,15 +564,6 @@ func (m Model) agentSum() core.AgentSummary {
 // agentRates is the frame's per-agent list, busiest first.
 func (m Model) agentRates() []core.AgentRate { return m.agentSum().Rates }
 
-// aggBothAt sums provider rates with unattributed agent rates in one pass.
-// renderHeader and PlainTextFrame need both directions, and two separate
-// calls would each run Summarize (map + sort) over the same feed, so the
-// output and input halves of a snapshot cost one walk of the agent feed
-// rather than two.
-func aggBothAt(s core.Snapshot, now time.Time) (out, in float64) {
-	return aggBoth(s, core.Summarize(s.Agents, now))
-}
-
 // sumOwn adds up the unattributed agent rates a frame already accounted.
 func sumOwn(own []core.AgentRate) (out, in float64) {
 	for _, r := range own {

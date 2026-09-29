@@ -70,10 +70,10 @@ func parseGeminiRecord(line []byte) (values, string, bool) {
 	if cwd == "" {
 		cwd = rec.Workspace
 	}
-	if v, ok := geminiTokens(rec.Tokens.Input, rec.Tokens.Output, rec.Tokens.Thoughts, rec.Tokens.Cached, rec.Tokens.Total); ok {
+	if v, ok := foldCounters(rec.Tokens.Input, rec.Tokens.Output, rec.Tokens.Thoughts, rec.Tokens.Cached, rec.Tokens.Total); ok {
 		return v, cwd, true
 	}
-	if v, ok := geminiTokens(rec.Usage.PromptTokenCount, rec.Usage.CandidatesTokenCount, rec.Usage.ThoughtsTokenCount, rec.Usage.CachedContentTokenCount, rec.Usage.TotalTokenCount); ok {
+	if v, ok := foldCounters(rec.Usage.PromptTokenCount, rec.Usage.CandidatesTokenCount, rec.Usage.ThoughtsTokenCount, rec.Usage.CachedContentTokenCount, rec.Usage.TotalTokenCount); ok {
 		// usageMetadata's thoughts are part of the billed output, the same
 		// fold parseQwen applies to this shape. tokens.thoughts is already
 		// outside tokens.output, which is why that branch leaves them apart.
@@ -81,29 +81,6 @@ func parseGeminiRecord(line []byte) (values, string, bool) {
 		return v, cwd, true
 	}
 	return values{}, "", false
-}
-
-// geminiTokens folds one Gemini counter set. cached is added to the prompt
-// only when the total is larger than prompt+output+thoughts by that share.
-// When the total already equals that sum, cached is inside the prompt.
-func geminiTokens(prompt, output, thoughts, cached, total int) (values, bool) {
-	in := counter(prompt)
-	out := counter(output)
-	think := counter(thoughts)
-	cache := counter(cached)
-	tot := counter(total)
-	parts := satAdd(in, satAdd(out, think))
-	if cache > 0 && tot >= satAdd(parts, cache) && tot != parts {
-		in = satAdd(in, cache)
-	}
-	v := values{output: out, thinking: think, input: in, total: tot}
-	if v.total == 0 {
-		v.total = satAdd(in, satAdd(out, think))
-	}
-	if !v.present() {
-		return values{}, false
-	}
-	return v, true
 }
 
 // geminiToolCallsRepeat reports the second copy of a turn, the one written

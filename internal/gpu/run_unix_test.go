@@ -15,6 +15,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // The context deadline kills the direct child, but Output also waits for the
@@ -275,13 +277,14 @@ func TestRunAuditsUnreadableOutput(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	var devs []core.GPUDevice
 	cases := []struct {
 		tool   string
 		shout  string
 		decode func([]byte) error
 	}{
-		{"toktop-vendor-cli-nvidia", "echo 'not,a,device,row,at,all'", nvidiaUsable},
-		{"toktop-vendor-cli-rocm", "echo '<not json>'", rocmUsable},
+		{"toktop-vendor-cli-nvidia", "echo 'not,a,device,row,at,all'", nvidiaDecode(&devs)},
+		{"toktop-vendor-cli-rocm", "echo '<not json>'", rocmDecode(&devs)},
 		{"toktop-vendor-cli-xpu", "echo '<not json>'", xpuUsable},
 	}
 	for _, c := range cases {
@@ -304,7 +307,7 @@ func TestRunAuditsUnreadableOutput(t *testing.T) {
 	lines.Reset()
 	const good = "toktop-vendor-cli-good"
 	runState.Delete(good)
-	if out, ok := run(ctx, good, "sh", nvidiaUsable, "-c", "echo '0,NVIDIA A,40,1,8192,10,50,550.00'"); !ok {
+	if out, ok := run(ctx, good, "sh", nvidiaDecode(&devs), "-c", "echo '0,NVIDIA A,40,1,8192,10,50,550.00'"); !ok {
 		t.Fatalf("run rejected readable nvidia-smi output: %q", out)
 	}
 	if strings.Contains(lines.String(), "gpu vendor tool failed") {

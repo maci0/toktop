@@ -127,7 +127,7 @@ func TestAggSkipsViaEngineTokens(t *testing.T) {
 			ev("codex", -time.Second, 40, 10, ""),
 		},
 	}
-	out, in := aggBothAt(s, now)
+	out, in := aggBoth(s, core.Summarize(s.Agents, now))
 	if out != 180 {
 		t.Errorf("aggOut = %v, want 180 (engine 100 + codex 80, claude skipped)", out)
 	}
@@ -152,7 +152,7 @@ func TestAggCountsOwnTokensWhenAgentSwitchesOntoAnEngine(t *testing.T) {
 				OutputTokens: 100, PromptTokens: 80, ViaEngine: "127.0.0.1:11434"},
 		},
 	}
-	out, in := aggBothAt(s, now)
+	out, in := aggBoth(s, core.Summarize(s.Agents, now))
 	if out != 80 {
 		t.Errorf("aggOut = %v, want 80 (own 80 tok/s, via event skipped)", out)
 	}
@@ -167,7 +167,7 @@ func TestAggAgentsOnlyUsesUnattributedRates(t *testing.T) {
 		{At: now.Add(-2 * time.Second), Agent: "claude", Kind: "turn", OutputTokens: 30, PromptTokens: 90},
 		{At: now.Add(-time.Second), Agent: "claude", Kind: "turn", OutputTokens: 30, PromptTokens: 90},
 	}}
-	out, in := aggBothAt(s, now)
+	out, in := aggBoth(s, core.Summarize(s.Agents, now))
 	if out != 60 {
 		t.Errorf("aggOut = %v, want 60", out)
 	}
