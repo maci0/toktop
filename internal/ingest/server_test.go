@@ -1689,6 +1689,41 @@ func TestIngestFoldsAnotherAccountsHomeOutOfFreeTextFields(t *testing.T) {
 	}
 }
 
+// The request path is sender-shaped text like every other field a client
+// writes, and the audit line is the copy that outlives the run. A client
+// addressing a path it read off its own file system (a session file it is
+// reporting on, a callback it forwards to) puts the account that owns its
+// $HOME into the 404 line, and the local home fold cannot reach that account.
+func TestIngestFoldsAnotherAccountsHomeOutOfTheLoggedPath(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "private-user")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	lg, buf := captureLogger()
+	rec := &memRecorder{}
+	s := startIngestLog(t, rec, lg)
+
+	resp, err := http.Get("http://" + s.Addr() + "/home/asmith/.claude/projects/app/a.jsonl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", resp.StatusCode)
+	}
+
+	got := buf.String()
+	if countLogLines(got) != 1 {
+		t.Fatalf("404 log lines = %d (%q), want 1", countLogLines(got), got)
+	}
+	if strings.Contains(got, "asmith") {
+		t.Errorf("audit line kept the account: %s", got)
+	}
+	if want := `path=~/.claude/projects/app/a.jsonl`; !strings.Contains(got, want) {
+		t.Errorf("audit line missing %q: %s", want, got)
+	}
+}
+
 // A note that is nothing but a working directory is shortened the way a
 // locally watched one is. Everything above the checkout is where a client's
 // name and a project index sit, and the feed only needs the checkout.

@@ -113,6 +113,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Security
 
+- The request path on an ingest audit line now folds the home of whichever
+  account a path names, like every other sender-shaped field already does. A
+  client addressing a path it read off its own file system (a session file it
+  reports on, a callback it forwards to) put the account that owns its `$HOME`
+  into the 404 line, and the fold that covers this process's own home could not
+  reach it. The line is the copy that outlives the run and gets pasted into an
+  issue.
+
 - Every free-form field on `POST /v1/events` now folds the home of whichever
   account a path names, not only the one this process runs as. The fold the
   ingest endpoint already did covers `$HOME`, which is the client's account

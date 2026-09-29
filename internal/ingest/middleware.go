@@ -216,11 +216,15 @@ func (s *Server) logRequest(r *http.Request, reqID string, status, accepted, sto
 	if s.log == nil {
 		return
 	}
-	path := r.URL.Path
+	// The sender's home fold, the note's and the request id's: the path is
+	// sender-shaped text like any other, and a client addressing a path it
+	// read off its own file system (a webhook target, a debug URL) writes the
+	// account that owns $HOME into a 404 line. The audit log is the copy that
+	// outlives the run and gets pasted into an issue.
 	attrs := []any{
 		"req", reqID,
 		"method", logcfg.Field(r.Method, 16),
-		"path", logcfg.Field(path, 64),
+		"path", logcfg.Field(foldSenderHome(r.URL.Path), 64),
 		"remote", logcfg.Remote(r.RemoteAddr),
 		"status", status,
 		"accepted", accepted,

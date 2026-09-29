@@ -126,7 +126,10 @@ that operator's screen, not on a service's.
 
 The audit log `toktop` writes to stderr (`$TOKTOP_LOG_LEVEL`) records the
 request id, method, path, status, and a peer address reduced to `loopback` or
-`remote`. Event fields are not logged. It also records the run's active
+`remote`. Event fields are not logged. The request id and the request path are
+sender-shaped text, so both are folded the way a pushed field is: a client
+addressing a path it read off its own file system does not put its account into
+the 404 line. It also records the run's active
 configuration (the interval, the listen addresses, the log floor, the mode
 flags, and the ssh target count, with the bearer token named as `set` and
 never by its value), the address the ingest endpoint actually bound, and the
