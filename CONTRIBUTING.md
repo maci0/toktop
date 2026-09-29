@@ -222,7 +222,7 @@ in day-to-day work:
 | `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
-| `make check-api` | verify VERSION drops no declaration `agentusage` exported at the last release (`make release` runs it; a minor bump is allowed, a patch is refused) |
+| `make check-api` | verify VERSION drops no declaration `agentusage` exported at the last release (`make release` runs it; a patch is refused, a minor bump passes only once CHANGELOG.md records the removal under `Breaking`) |
 | `make check-release-source` | fail unless a non-dev VERSION builds from a clean, git-backed tree with a nonzero `SOURCE_DATE_EPOCH` (`make release` runs it; `ALLOW_DIRTY=1` overrides the tree check) |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
 | `make release-verify` | fetch every asset a published `VERSION` holds back from GitHub and re-verify each digest against that release's own `checksums.txt` (the restore drill the release job runs) |
@@ -350,8 +350,10 @@ declarations `agentusage` carries now and the ones it carried at the last
 release, and refuses a version that drops one, since a Go caller meets that as
 a compile error in their own tree while this one still builds and tests clean.
 The rule is the changelog gate's rule: 0.x, so a breaking change rides a minor
-bump and a patch is refused, and a minor bump is let through with a note to
-record each removal under `Breaking`. Run it with
+bump and a patch is refused. A minor bump is let through, and only against a
+`### Breaking` heading under the version being cut: the gate refuses the
+release when a removal it found has nowhere in the changelog to be recorded,
+since the caller upgrading reads those notes and not the diff. Run it with
 `make check-api VERSION=0.15.0`. A checkout with no released tag before the
 commit being cut has nothing to compare against and passes.
 

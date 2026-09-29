@@ -41,7 +41,10 @@ PUBLIC_PKGS = ./agentusage
 # nothing here can see it: this tree still builds, the tests still pass, and the
 # CI platforms still cross-compile. The rule matches the changelog gate's, since
 # both answer the same question: the project is 0.x, so a breaking change rides
-# a minor bump and a patch is refused. A checkout with no released tag before
+# a minor bump and a patch is refused. A minor bump is let through, but only
+# against a 'Breaking' heading under the version being cut: a removal the
+# changelog does not name reaches the caller who upgrades as a compile error
+# they were never told to expect. A checkout with no released tag before
 # HEAD^ has no base to diff and is let past.
 CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
 	if ! git rev-parse HEAD >/dev/null 2>&1; then \
@@ -73,7 +76,14 @@ CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
 			else \
 				echo "make: $(VERSION) removes from $$pkg, what $$base exported (a minor bump, so this is allowed):" >&2; \
 				printf '%s\n' "$$gone" | sed 's/^/  /' >&2; \
-				echo "  record each one under a 'Breaking' heading in CHANGELOG.md" >&2; \
+				if awk -v v='$(VERSION)' 'BEGIN{b=0} index($$0, "\#\# [" v "]") == 1 {f=1; next} /^\#\# \[/ {f=0} f && /^\#\#\# Breaking$$/ {b=1} END{exit (b==0)}' CHANGELOG.md; then \
+					echo "  recorded under the 'Breaking' heading in CHANGELOG.md" >&2; \
+				else \
+					echo "  and CHANGELOG.md has no 'Breaking' heading under its $(VERSION) section" >&2; \
+					echo "  a caller upgrading reads the changelog, not this message: a removal nothing there names" >&2; \
+					echo "  is a break the release notes do not admit" >&2; \
+					fail=1; \
+				fi; \
 			fi; \
 		fi; \
 	done; \

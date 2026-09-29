@@ -11,8 +11,8 @@
 // on.
 //
 // An agent is read one of two ways. Transcript agents (agy, claude,
-// clanker, codex, copilot, cursor-agent, dsh, gemini, grok, kimi, qwen)
-// appear in the adapters table, each naming where its logs live under a
+// clanker, codex, copilot, cursor-agent, dsh, gemini, grok, kimi, microagent,
+// qwen) appear in the adapters table, each naming where its logs live under a
 // working directory and how one line becomes a Sample.
 // RegisterSpec adds one this package does not ship with, and LoadDefinitions
 // reads the same declaration from a JSON file, DefinitionsPath being the
