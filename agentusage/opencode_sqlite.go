@@ -98,10 +98,10 @@ func openCodeDBPath() string {
 // TEXT, and SQLite ranks TEXT above INTEGER, so MAX('9', 100) would be '9'.
 const usageQueryFormat = `
 	SELECT
-		COALESCE(SUM(MAX(CAST(%[1]s AS INTEGER), 0)), 0),
-		COALESCE(SUM(MAX(CAST(%[2]s AS INTEGER), 0)), 0),
+		COALESCE(CAST(SUM(MAX(CAST(%[1]s AS REAL), 0)) AS INTEGER), 0),
+		COALESCE(CAST(SUM(MAX(CAST(%[2]s AS REAL), 0)) AS INTEGER), 0),
 		COALESCE(MAX(CAST(%[3]s AS INTEGER)), 0),
-		COALESCE(SUM(MAX(CAST(%[4]s AS INTEGER), 0)), 0)
+		COALESCE(CAST(SUM(MAX(CAST(%[4]s AS REAL), 0)) AS INTEGER), 0)
 	FROM session
 	CROSS JOIN message m
 	WHERE m.session_id = session.id
@@ -117,6 +117,15 @@ const usageQueryFormat = `
 // The CASE guards the extract rather than adding a json_valid term beside it,
 // because the aggregate is a SELECT list where no predicate orders the
 // evaluation. A NULL payload keeps reading as NULL, as json_extract(NULL) did.
+//
+// The three sums accumulate in REAL and cast back on the way out. SQLite's
+// integer sum() raises "integer overflow" rather than wrapping, and a store
+// this program cannot constrain can hold a row no agent wrote: CAST of a
+// 1e30 JSON number to INTEGER is MaxInt64, so one such row beside any other
+// overflowed the sum and failed the statement. Every read of the agent then
+// failed the same way, for as long as the row survived. A real sum cannot
+// overflow, and the cast back clamps a value past int64 to MaxInt64, which
+// counter64 already refuses, the same answer one absurd row gets on its own.
 func jsonToken(path string) string {
 	return fmt.Sprintf("CASE WHEN json_valid(m.data) THEN json_extract(m.data, '%s') END", path)
 }

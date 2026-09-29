@@ -169,6 +169,30 @@ func TestOpenCodeDBDropsAbsurdCounts(t *testing.T) {
 	}
 }
 
+// An absurd counter beside a real one must not fail the statement. SQLite's
+// integer sum() raises "integer overflow" where a wrapped sum would answer,
+// and the read then failed for as long as the row survived: the agent read as
+// permanently idle, and the real message beside it was never counted.
+func TestOpenCodeDBSumsPastAbsurdCounter(t *testing.T) {
+	path := opencodeDB(t)
+	work := t.TempDir()
+	addSession(t, path, "s1", work)
+	start := time.Now()
+	addMessage(t, path, "m1", "s1", start.Add(time.Second),
+		`{"role":"assistant","tokens":{"output":1e30}}`)
+	addMessage(t, path, "m2", "s1", start.Add(2*time.Second),
+		`{"role":"assistant","tokens":{"output":120,"input":40}}`)
+	withOpenCodeDB(t, path)
+	w := Watch("opencode", work, start)
+	if w == nil {
+		t.Fatal("opencode should be readable once the database is enabled")
+	}
+	w.poll(nil)
+	if got := w.Sample(); got.Empty() {
+		t.Fatal("the read failed, so the real message beside the absurd one was not counted")
+	}
+}
+
 // A payload that is not well-formed JSON reads as absent. json_extract raises
 // on one, and the store belongs to another program that toktop only reads, so
 // an unguarded extraction would fail the whole statement and report nothing
