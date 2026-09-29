@@ -832,7 +832,11 @@ ports that are then exposed on local loopback (client.go).
   poll path uses, so a listener that answers a scan can no longer stream
   without bound inside the 700ms window. Probe
   generation is 32 tokens with think disabled, a content-byte hang-up, a
-  16 KiB line cap, and 429/503 backoff (M10).
+  16 KiB line cap, 429/503 backoff (M10), and a
+  `ProbeBackendGap` 10s floor per engine on the `--probe` path, which is the
+  bound that makes the ticker a rate rather than a spend multiplier on an
+  endpoint that bills every generation (`p` is the operator asking for a
+  number now and is not held to it).
 - *Elevation*: none; response bytes never reach execution or unsanitized
   output. Probe interpolates a capped model id (probe.go).
 

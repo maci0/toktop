@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/maci0/toktop/agentusage"
+	"github.com/maci0/toktop/internal/collector"
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
 	"github.com/maci0/toktop/internal/remote"
@@ -327,6 +328,11 @@ func warnUnusedEnv(bearerFlag, demo, noIngest, agents bool, nAdd, nRemote int) {
 // probeSecsMax caps auto-probe scheduling at 24h, well below the point where
 // time.Duration(n)*time.Second overflows and NewTicker would panic.
 const probeSecsMax = 24 * 60 * 60
+
+// probeCadenceFloor is the per-engine floor the --probe ticker runs under,
+// named here so the flag help states the rate an operator's billing will see
+// rather than the tick they typed.
+const probeCadenceFloor = collector.ProbeBackendGap
 
 // Poll interval bounds apply after flag.Duration parses a unit-bearing value
 // (or zero). The 50ms floor prevents excessive polling; a provider request is

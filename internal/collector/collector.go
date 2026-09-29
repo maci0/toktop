@@ -113,6 +113,7 @@ type Collector struct {
 	probeCursor   int       // rotation offset into the wave's targets: see probeWaveMax
 	probeInflight map[string]bool
 	probeBackoff  map[string]time.Time
+	probeLast     map[string]time.Time // last launch per endpoint: probeBackendGap
 	probeDown     map[string]*probeDownState
 
 	// clockMu guards the two fields SetNow writes together. Reads are not
@@ -173,6 +174,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		slow:          map[string]time.Time{},
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
+		probeLast:     map[string]time.Time{},
 		probeDown:     map[string]*probeDownState{},
 		now:           time.Now,
 		pace:          core.WallPacer,

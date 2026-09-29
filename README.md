@@ -354,7 +354,9 @@ result from any of them means "cannot tell", which reads as "not connected".
   Agents with no local engine (or whose engine is not monitored) add their
   own rates; tokens already counted by a watched engine are not added again.
 - **Probes** (`p`, `--probe N`) - tiny streaming generations measuring real
-  TTFT and decode speed per engine.
+  TTFT and decode speed per engine. `p` runs on demand; `--probe N` fires every
+  N seconds but still holds each engine to one probe every 10s, so a 1s tick
+  does not turn into a per-second generation on an endpoint that bills them.
 - **Agent feed** - any harness can POST usage events:
   ```
   curl -X POST localhost:8420/v1/events \
@@ -743,9 +745,9 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 --opencode-db     with --agents: read opencode's SQLite session database
                   (default on; needs a build with the sqlite tag; pass
                   --opencode-db=false to skip it)
---probe N         auto-probe every N seconds (0=off, max 86400; with
-                  --demo, every N simulated seconds, so the run still
-                  replays)
+--probe N         auto-probe every N seconds (0=off, max 86400; each engine
+                  is probed at most every 10s; with --demo, every N
+                  simulated seconds, so the run still replays)
 --interval D      poll interval (Go duration such as 1s or 500ms; default 1s;
                   min 50ms, max 1h; nonzero values require a unit)
 --ingest ADDR     agent event listen address, host:port

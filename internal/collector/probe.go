@@ -41,6 +41,25 @@ var probeWaveGap = 500 * time.Millisecond
 // probed rather than the first few over and over.
 const probeWaveMax = 4
 
+// ProbeBackendGap is how long one backend is left alone between two
+// *automatic* waves. Every other bound here limits a wave's shape (how many,
+// how wide, one at a time per backend) and none of them limits its rate:
+// --probe 1 re-runs the same wave every second, and a backend that answers in
+// 100ms is free to be measured 36,000 times an hour, each one a real
+// generation that an OpenAI-compatible gateway bills. The gap is what turns
+// the ticker into a rate cap rather than a multiplier.
+//
+// It is long because the measurement does not need to be denser: the probe
+// pane keeps minutes of history and the dashboard's timescales start at a
+// minute, so a backend re-measured every ten seconds is denser than anything
+// on screen, and a backend that changed since its last sample is caught by
+// the next poll rather than by the next probe.
+//
+// The gap covers the automatic cadence only. A press of 'p' is the operator
+// asking for a number now, and gating it would leave the key answering with
+// nothing and no way to say why.
+const ProbeBackendGap = 10 * time.Second
+
 // probeTarget pairs a probe request with the collector state key it belongs
 // to. The key is not always the request's Base: providers with no endpoint
 // (see providerKey) share Base "", so inflight and backoff bookkeeping keyed
@@ -139,9 +158,19 @@ func (c *Collector) auditProbe(t probeTarget, s core.ProbeSample, took time.Dura
 // ProbeAll launches one probe per backend whose last poll named a model, at
 // most probeWaveMax of them; a wider fleet rotates in on the next wave. A
 // backend with no known model is skipped rather than probed against a guess.
+// This is the operator-driven path ('p'), and it holds no backend to the
+// ProbeBackendGap cadence: a press is a request for a number now.
+//
 // Probes ride the Run context so shutdown cancels in-flight generations
 // instead of leaving them running for the client's full timeout.
-func (c *Collector) ProbeAll() {
+func (c *Collector) ProbeAll() { c.probeWave(false) }
+
+// ProbeCadenced is ProbeAll as the --probe ticker drives it: the same wave,
+// with each backend additionally held to ProbeBackendGap since its last
+// probe. Without that floor the ticker is a spend multiplier, not a cadence.
+func (c *Collector) ProbeCadenced() { c.probeWave(true) }
+
+func (c *Collector) probeWave(cadenced bool) {
 	c.mu.Lock()
 	var targets []probeTarget
 	for _, p := range c.providers {
@@ -190,8 +219,20 @@ func (c *Collector) ProbeAll() {
 		if until, ok := c.probeBackoff[key]; ok && time.Now().Before(until) {
 			continue // 429/503: wait out Retry-After before POSTing again
 		}
+		if cadenced {
+			if last, ok := c.probeLast[key]; ok && time.Since(last) < ProbeBackendGap {
+				continue // --probe cadence: this backend was measured recently
+			}
+		}
 		delete(c.probeBackoff, key)
 		c.probeInflight[key] = true
+		// Stamped at launch, so the gap measures the rate generations are
+		// started at rather than how fast they happen to finish. The wall
+		// clock, for the reason the 429 backoff below is: this is a real wait
+		// against a real provider bill, not a position on the collector's
+		// replayable timeline, and a seeded demo must not hold a backend to a
+		// gap measured in simulated seconds.
+		c.probeLast[key] = time.Now()
 		live = append(live, t)
 	}
 	// Only a wave that examined a target moves the rotation: a wave whose

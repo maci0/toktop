@@ -316,8 +316,11 @@ func TestCrushWatchSaturatesCorruptSessionTotals(t *testing.T) {
 	putCrushSession(t, dir, "a", maxSaneTokens, 0, at)
 	putCrushSession(t, dir, "b", maxSaneTokens, 0, at)
 	got := w.Poll()
-	if got.Output != maxSaneTokensInt() {
-		t.Fatalf("output %d, want the ceiling %d rather than a dropped reading", got.Output, maxSaneTokensInt())
+	// maxSaneTokensInt, not maxSaneTokens: Poll totals into an int, and on a
+	// 32-bit build the ceiling it saturates at is the largest int, not the
+	// magnitude the constant spells.
+	if want := maxSaneTokensInt(); got.Output != want {
+		t.Fatalf("output %d, want the ceiling %d rather than a dropped reading", got.Output, want)
 	}
 	// A second poll sees the same rows and must report the same level, not
 	// fall back to the last sample now that the totals have saturated.

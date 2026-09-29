@@ -58,7 +58,8 @@ alongside them would be a layer importing sideways into itself.
   `collector.go` is the poll loop and the snapshot it builds, `host.go` the
   vitals and process-table pollers, `rates.go` the counter baselines and
   history rings, `health.go` one engine's entry and its outage latches,
-  `agents.go` the agent event feed, `probe.go` the probe wave.
+  `agents.go` the agent event feed, `probe.go` the probe wave and the
+  `ProbeBackendGap` floor the `--probe` ticker runs under.
 - `internal/core`: `Snapshot` and everything in it, plus generic sorted-ring
   helpers (`AppendSorted`, `AppendRetained`) and the `Tick`
   cadence every poller uses.

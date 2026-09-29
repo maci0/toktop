@@ -320,9 +320,11 @@ func runMain() int {
 		if f.probeSecs > 0 {
 			// Fire one probe at startup rather than waiting out the first
 			// interval: --probe should put a request on the wire when the
-			// dashboard comes up. Nothing joins the returned channel, so the
-			// loop ends with ctx.
-			core.Tick(ctx, time.Duration(f.probeSecs)*time.Second, prober, prober)
+			// dashboard comes up. The ticker runs the cadenced wave, which
+			// holds each backend to its own floor; 'p' keeps the uncapped one
+			// so a press is answered when asked. Nothing joins the returned
+			// channel, so the loop ends with ctx.
+			core.Tick(ctx, time.Duration(f.probeSecs)*time.Second, col.ProbeCadenced, col.ProbeCadenced)
 		}
 	}
 

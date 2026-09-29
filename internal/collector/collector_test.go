@@ -2598,3 +2598,53 @@ func TestProbeAllCapsWaveWidthAndRotates(t *testing.T) {
 		t.Fatalf("probed %d of %d backends; the ones past the cap starved", got, fleet)
 	}
 }
+
+// The --probe ticker bills: every wave is a real generation on whatever the
+// backend is. --probe 1 would otherwise re-run the same wave every second, so
+// the cadenced path holds each backend to ProbeBackendGap. ProbeAll ('p') is
+// the operator asking for a number now and is not held to it.
+func TestProbeCadencedBackendGap(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		io.WriteString(w, "{\"response\":\"one\",\"done\":true,\"eval_count\":1,\"eval_duration\":1000000}\n")
+	}))
+	defer srv.Close()
+
+	oldWave := probeWaveGap
+	probeWaveGap = 0 // isolate the per-backend floor from the wave gate
+	defer func() { probeWaveGap = oldWave }()
+
+	c := New([]provider.Provider{(&fakeProvider{label: "c", addr: srv.URL}).asProvider()}, time.Second)
+	c.lastModel[srv.URL] = "m"
+
+	idle := func() {
+		t.Helper()
+		waitFor(t, func() bool {
+			c.probeMu.Lock()
+			defer c.probeMu.Unlock()
+			return len(c.probeInflight) == 0
+		}, "probe never cleared")
+	}
+
+	c.ProbeCadenced()
+	waitFor(t, func() bool { return hits.Load() == 1 }, "first cadenced wave never reached the engine")
+	idle()
+
+	// A 1s --probe tick inside the floor finds nothing to do: this is the
+	// generation the gap is refusing to buy.
+	c.ProbeCadenced()
+	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 1 },
+		"cadenced wave re-probed a backend inside ProbeBackendGap")
+
+	// The operator's press is not gated.
+	c.ProbeAll()
+	waitFor(t, func() bool { return hits.Load() == 2 }, "manual wave was held to the cadence floor")
+	idle()
+
+	// ... and it arms the floor in turn, so the ticker does not buy the same
+	// generation again right behind it.
+	c.ProbeCadenced()
+	waitStay(t, 50*time.Millisecond, func() bool { return hits.Load() == 2 },
+		"a manual probe did not arm ProbeBackendGap for the ticker")
+}
