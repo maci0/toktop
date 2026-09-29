@@ -197,8 +197,14 @@ func (p *passwordSource) claimChallenge() error {
 // password prompt at all.
 const agentDialTimeout = 2 * time.Second
 
+// AgentSockEnv is the environment variable naming the ssh-agent socket.
+// Exported so a caller that documents or warns about it spells it the way
+// agentSock reads it, the way PasswordEnv is shared with the top-level
+// command.
+const AgentSockEnv = "SSH_AUTH_SOCK"
+
 // platformAgentSock is the platform's default agent endpoint when
-// SSH_AUTH_SOCK is unset. Unix has none; Windows OpenSSH uses a named pipe
+// AgentSockEnv is unset. Unix has none; Windows OpenSSH uses a named pipe
 // and does not set the env var. Tests may replace it.
 var platformAgentSock = defaultAgentSock
 
@@ -212,7 +218,7 @@ var platformAgentSock = defaultAgentSock
 // naming nothing about the cause. A value that is only whitespace is the same
 // misreading and resolves to the platform default rather than a path.
 func agentSock() string {
-	if s := strings.TrimSpace(os.Getenv("SSH_AUTH_SOCK")); s != "" {
+	if s := strings.TrimSpace(os.Getenv(AgentSockEnv)); s != "" {
 		return s
 	}
 	return platformAgentSock()

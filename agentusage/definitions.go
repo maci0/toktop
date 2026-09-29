@@ -614,10 +614,23 @@ func readCapped(path string) ([]byte, error) {
 	return data, nil
 }
 
+// GauntletHomeEnv is the environment variable that relocates agents.json.
+// Exported so the startup warning that names a value it cannot use spells it
+// the way DefinitionsPath reads it, the way logcfg.LevelEnv and
+// remote.PasswordEnv are shared with the top-level command.
+const GauntletHomeEnv = "GAUNTLET_HOME"
+
+// XDGDataHomeEnv is the XDG base directory opencode's session database is
+// read under. Declared here rather than beside openCodeDBPath because that
+// reader is behind the sqlite build tag and the startup warning that names a
+// relative value is not: a build without the driver still has to say which
+// variable the operator set.
+const XDGDataHomeEnv = "XDG_DATA_HOME"
+
 // DefinitionsPath is where agent definitions live by default. It follows
 // gauntlet's location so one file serves both tools.
 //
-// GAUNTLET_HOME is honored only when absolute, the same rule the XDG base
+// GauntletHomeEnv is honored only when absolute, the same rule the XDG base
 // directories get in openCodeDBPath and defaultKnownHostsPath. A relative
 // value would place agents.json under whatever directory the run started in,
 // where a missing file is not an error: the defined agents would simply never
@@ -625,7 +638,7 @@ func readCapped(path string) ([]byte, error) {
 // documented default keeps the run reading the file it always read; the
 // startup warning (warnIgnoredGauntletHome) names the ignored value.
 func DefinitionsPath() string {
-	if h := os.Getenv("GAUNTLET_HOME"); filepath.IsAbs(h) {
+	if h := os.Getenv(GauntletHomeEnv); filepath.IsAbs(h) {
 		return filepath.Join(h, "agents.json")
 	}
 	home := HomeDir()

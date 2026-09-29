@@ -66,8 +66,14 @@ func parseKimi(line []byte) (values, string, bool) {
 	return v, "", true
 }
 
+// KimiHomeEnv is the environment variable that relocates kimi's session
+// store. Exported so the startup warning that names a value it cannot use
+// spells it the way kimiStore reads it, the way logcfg.LevelEnv and
+// remote.PasswordEnv are shared with the top-level command.
+const KimiHomeEnv = "KIMI_CODE_HOME"
+
 // KimiStorePath is the directory kimi's session logs are read from, after
-// KIMI_CODE_HOME is applied. Exported so the startup warning that names a
+// KimiHomeEnv is applied. Exported so the startup warning that names a
 // variable pointing at no session store resolves the path the same way the
 // reader does, the way logcfg.LevelEnv and remote.PasswordEnv are shared with
 // the top-level command.
@@ -75,12 +81,12 @@ func KimiStorePath() string { return kimiStore() }
 
 // kimiStore is the directory Kimi Code CLI keeps its sessions in.
 //
-// KIMI_CODE_HOME is honored only when absolute, the rule the XDG base
-// directories and GAUNTLET_HOME get: a relative value would place the store
+// KimiHomeEnv is honored only when absolute, the rule the XDG base
+// directories and GauntletHomeEnv get: a relative value would place the store
 // under whatever directory the run started in, where it is simply empty and
 // every kimi session reads as an agent producing no tokens.
 func kimiStore() string {
-	if h := os.Getenv("KIMI_CODE_HOME"); filepath.IsAbs(h) {
+	if h := os.Getenv(KimiHomeEnv); filepath.IsAbs(h) {
 		return filepath.Join(h, "sessions")
 	}
 	return home(".kimi-code", "sessions")

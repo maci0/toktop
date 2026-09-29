@@ -135,6 +135,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Changed
 
+- Every environment variable is now named in one place. `agentusage` and
+  `internal/remote` each export the base-directory and secret variables their
+  readers consult (`GauntletHomeEnv`, `KimiHomeEnv`, `XDGDataHomeEnv`,
+  `XDGConfigHomeEnv`, `AgentSockEnv`), so a startup warning can no longer name
+  a variable the code stopped reading. The two frame overrides and the bearer
+  chain are likewise single tables, and the unrecognized-`TOKTOP_*` check, the
+  `--help` Environment block, the `--bearer` warning and the `--once` frame
+  size all read those tables rather than spelling the names again. No value
+  read, and no default, changed.
+
 - `agentusage.Watcher` now says what a consumer has to release, which is
   nothing. The type held no file handle between calls and `Run` started no
   goroutine of its own, so there is no `Close` to find and none was added, but
@@ -201,6 +211,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- An empty `--bearer` no longer reports overriding a bearer variable that
+  holds only whitespace. `resolveBearer` skips such a value, so nothing was
+  overridden; the warning read the variable untrimmed, named the fallback, and
+  sent the operator after a chain that was never suppressed. It now reads the
+  variables the way the chain does and names every one of them, so a third
+  source added to the chain is named too.
 - The compact agent strip names an engine-routed agent where its rate would
   go, as the full row, the feed and the plain report already did. The strip
   printed both, so a run through a gateway read one agent's tokens twice at

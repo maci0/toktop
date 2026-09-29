@@ -636,11 +636,22 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 				h = min(th, frameLinesMax)
 			}
 		}
-		if v, set, err := frameEnv("TOKTOP_COLUMNS", frameColumnsMin, frameColumnsMax); err == nil && set {
-			w = v
-		}
-		if v, set, err := frameEnv("TOKTOP_LINES", frameLinesMin, frameLinesMax); err == nil && set {
-			h = v
+		// Over frameEnvVars, not as two named reads: the names and the bounds
+		// live in that table, and spelling either here would let the size a
+		// --once frame is rendered with and the one the startup line reports
+		// come from different variables. A read that fails is skipped rather
+		// than sized wrong: validateOnceEnv already rejected one before this
+		// ran, so the value cannot be set and unreadable at the same time.
+		for _, e := range frameEnvVars {
+			v, set, err := frameEnv(e.name, e.least, e.most)
+			if err != nil || !set {
+				continue
+			}
+			if e.width {
+				w = v
+			} else {
+				h = v
+			}
 		}
 	}
 	wait := max(onceWaitFloor, onceWaitPolls*cfg.PollEvery)

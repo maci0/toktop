@@ -109,7 +109,7 @@ func warnIgnoredFrameEnv(once, plain, jsonOut bool) {
 	}
 }
 
-// warnIgnoredGauntletHome names a $GAUNTLET_HOME that is set but cannot
+// warnIgnoredGauntletHome names an $GAUNTLET_HOME that is set but cannot
 // deliver the agent definitions it points at. agentusage honors the variable
 // only when absolute, so a relative value silently falls back to
 // ~/.gauntlet; an absolute one resolves to $GAUNTLET_HOME/agents.json, and a
@@ -125,20 +125,21 @@ func warnIgnoredGauntletHome(agents bool) {
 	if !agents {
 		return
 	}
-	v := os.Getenv("GAUNTLET_HOME")
+	v := os.Getenv(agentusage.GauntletHomeEnv)
 	if v == "" {
 		return
 	}
 	if !filepath.IsAbs(v) {
-		fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n", core.RedactHome(v))
+		fmt.Fprintf(os.Stderr, "toktop: $%s must be an absolute path; ignoring %q and reading ~/.gauntlet/agents.json\n",
+			agentusage.GauntletHomeEnv, core.RedactHome(v))
 		return
 	}
 	path := agentusage.DefinitionsPath()
 	if _, err := os.Stat(path); err == nil {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "toktop: $GAUNTLET_HOME points at no agent definitions (%s is missing); no in-house agents are watched\n",
-		core.RedactHome(path))
+	fmt.Fprintf(os.Stderr, "toktop: $%s points at no agent definitions (%s is missing); no in-house agents are watched\n",
+		agentusage.GauntletHomeEnv, core.RedactHome(path))
 }
 
 // warnIgnoredUserHome names a home directory the built-in agent stores cannot
@@ -200,14 +201,23 @@ func warnIgnoredUserHome() {
 // a variable naming a directory the reader creates: the ssh host-key store is
 // written on first contact, and most machines running this have no opencode at
 // all.
+// Each entry names the reader that decides the consequence, rather than
+// branching on the variable's spelling: a table keyed by name sends the two
+// special cases to whichever row happens to carry the string, and a rename
+// there would silently downgrade both to the generic line.
 func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 	for _, e := range [...]struct {
 		name string
 		read bool
+		// noStore is the warning for a relative value that leaves the reader
+		// with no path at all, rather than a fallback. It reports whether it
+		// printed, so the generic line and this one never both fire for one
+		// variable. Nil for the readers that have a default to fall back to.
+		noStore func() bool
 	}{
-		{"XDG_DATA_HOME", opencodeDB},
-		{"XDG_CONFIG_HOME", sshTargets},
-		{"KIMI_CODE_HOME", agents},
+		{name: agentusage.XDGDataHomeEnv, read: opencodeDB},
+		{name: remote.XDGConfigHomeEnv, read: sshTargets, noStore: warnNoHostKeyStore},
+		{name: agentusage.KimiHomeEnv, read: agents},
 	} {
 		if !e.read {
 			continue
@@ -225,17 +235,29 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 			// XDG_CONFIG_HOME on Linux and so names no store at all, failing
 			// every connect. Asked of the package that resolves it, so the
 			// warning and the connect cannot disagree.
-			if e.name == "XDG_CONFIG_HOME" && remote.HostKeyStorePath() == "" {
-				fmt.Fprintf(os.Stderr, "toktop: $XDG_CONFIG_HOME names no host-key store on this platform; every ssh:// target will fail to connect\n")
-			} else {
-				fmt.Fprintf(os.Stderr, "toktop: reading the default directory instead\n")
+			if e.noStore != nil && e.noStore() {
+				continue
 			}
+			fmt.Fprintln(os.Stderr, "toktop: reading the default directory instead")
 			continue
 		}
-		if e.name == "KIMI_CODE_HOME" {
+		if e.name == agentusage.KimiHomeEnv {
 			warnMissingKimiStore()
 		}
 	}
+}
+
+// warnNoHostKeyStore reports whether a relative $XDG_CONFIG_HOME leaves the ssh
+// host-key store with no path on this platform, printing the line naming that
+// consequence when it does. The caller prints the generic fallback line when it
+// returns false, so the two never both fire for one variable.
+func warnNoHostKeyStore() bool {
+	if remote.HostKeyStorePath() != "" {
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "toktop: $%s names no host-key store on this platform; every ssh:// target will fail to connect\n",
+		remote.XDGConfigHomeEnv)
+	return true
 }
 
 // warnMissingKimiStore names an absolute $KIMI_CODE_HOME with no sessions
@@ -249,8 +271,8 @@ func warnMissingKimiStore() {
 	if info, err := os.Stat(store); err == nil && info.IsDir() {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "toktop: $KIMI_CODE_HOME points at no kimi sessions (%s is missing); no kimi agent is watched\n",
-		core.RedactHome(store))
+	fmt.Fprintf(os.Stderr, "toktop: $%s points at no kimi sessions (%s is missing); no kimi agent is watched\n",
+		agentusage.KimiHomeEnv, core.RedactHome(store))
 }
 
 // warnUnusedEnv names secret and log-level variables that are set but will
@@ -516,16 +538,28 @@ func warnBlankBearer(nAdd int, demo, inForce bool) {
 // warnBearerFlag names the two --bearer footguns: a token on argv is
 // readable from process listings, and an explicit empty value suppresses
 // the env fallbacks rather than meaning "unset".
+//
+// The fallbacks are named from bearerEnvVars and read the way resolveBearer
+// reads them, so the list and the presence test cannot disagree with the
+// precedence chain. A name spelled here that the chain does not consult
+// reports an override that does not happen, and a whitespace-only value read
+// untrimmed reports one that does not happen either, since resolveBearer
+// skips it.
 func warnBearerFlag(flagSet bool, flagVal string) {
 	if !flagSet {
 		return
 	}
+	names := "$" + strings.Join(bearerEnvVars[:], " / $")
 	if flagVal != "" {
-		fmt.Fprintln(os.Stderr, "toktop: --bearer is visible in process listings; prefer $TOKTOP_BEARER or $OMNIROUTE_API_KEY")
+		fmt.Fprintf(os.Stderr, "toktop: --bearer is visible in process listings; prefer %s\n", names)
 		return
 	}
-	if os.Getenv("OMNIROUTE_API_KEY") != "" || os.Getenv("TOKTOP_BEARER") != "" {
-		fmt.Fprintln(os.Stderr, "toktop: empty --bearer overrides $OMNIROUTE_API_KEY / $TOKTOP_BEARER")
+	for _, name := range bearerEnvVars {
+		if strings.TrimSpace(os.Getenv(name)) == "" {
+			continue
+		}
+		fmt.Fprintf(os.Stderr, "toktop: empty --bearer overrides %s\n", names)
+		return
 	}
 }
 
@@ -541,15 +575,18 @@ const (
 )
 
 // frameEnvVars are the TOKTOP_COLUMNS / TOKTOP_LINES overrides, each with the
-// bounds it is validated against and the key the startup line reports it
-// under. One table so the range check, the unused-variable warning and the
-// startup line cannot name a different pair or a different bound.
+// bounds it is validated against, the key the startup line reports it under,
+// and the frame dimension it sizes. One table so the range check, the
+// unused-variable warning, the startup line and the size a --once frame is
+// rendered with cannot name a different pair, a different bound, or a
+// different dimension.
 var frameEnvVars = [...]struct {
 	name        string
 	key         string
+	width       bool
 	least, most int
 }{
-	{name: "TOKTOP_COLUMNS", key: "columns", least: frameColumnsMin, most: frameColumnsMax},
+	{name: "TOKTOP_COLUMNS", key: "columns", width: true, least: frameColumnsMin, most: frameColumnsMax},
 	{name: "TOKTOP_LINES", key: "lines", least: frameLinesMin, most: frameLinesMax},
 }
 
@@ -581,17 +618,33 @@ func validateOnceEnv() error {
 	return nil
 }
 
-// toktopEnvVars are the TOKTOP_* names this process recognizes. Most are
-// read here; TOKTOP_SCREENSHOT_FONT is used only by scripts/screenshot.py
-// and is listed so a developer export is not reported as a typo.
-// See also OMNIROUTE_API_KEY, SSH_AUTH_SOCK and the ssh defaults.
-var toktopEnvVars = map[string]bool{
-	"TOKTOP_BEARER":          true,
-	"TOKTOP_SSH_PASSWORD":    true,
-	"TOKTOP_COLUMNS":         true,
-	"TOKTOP_LINES":           true,
-	logcfg.LevelEnv:          true,
-	"TOKTOP_SCREENSHOT_FONT": true, // scripts/screenshot.py; this binary ignores it
+// screenshotFontEnv is used only by scripts/screenshot.py. Listed here so a
+// developer export of it is not reported as a typo by warnUnknownEnv.
+const screenshotFontEnv = "TOKTOP_SCREENSHOT_FONT"
+
+// toktopEnvVars are the TOKTOP_* names this process recognizes. Derived from
+// the tables the readers use, so a name the code stops reading cannot stay
+// listed as known, and a new one cannot start as an unrecognized typo. The
+// bearer chain contributes only the names it spells TOKTOP_*, since the
+// others (OMNIROUTE_API_KEY) are not this program's to claim.
+// See also SSH_AUTH_SOCK and the ssh defaults.
+var toktopEnvVars = knownToktopEnv()
+
+func knownToktopEnv() map[string]bool {
+	names := []string{remote.PasswordEnv, logcfg.LevelEnv, screenshotFontEnv}
+	for _, e := range frameEnvVars {
+		names = append(names, e.name)
+	}
+	for _, name := range bearerEnvVars {
+		if strings.HasPrefix(name, "TOKTOP_") {
+			names = append(names, name)
+		}
+	}
+	m := make(map[string]bool, len(names))
+	for _, name := range names {
+		m[name] = true
+	}
+	return m
 }
 
 // warnUnknownEnv reports unrecognized TOKTOP_* variables once at startup:
@@ -653,7 +706,7 @@ func reportedField(s string) string {
 func loadAgentDefs() error {
 	path := agentusage.DefinitionsPath()
 	if path == "" {
-		return errors.New("cannot locate agents.json: no home directory and no absolute GAUNTLET_HOME")
+		return fmt.Errorf("cannot locate agents.json: no home directory and no absolute $%s", agentusage.GauntletHomeEnv)
 	}
 	if err := agentusage.LoadDefinitions(path); err != nil {
 		return err

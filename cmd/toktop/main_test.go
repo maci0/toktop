@@ -725,29 +725,43 @@ func TestUsage(t *testing.T) {
 // a complete reference on its own. A knob only the README mentions is one a
 // user learns by reading source, and a new variable added to the code without
 // a row here fails this test rather than shipping undocumented.
+//
+// Every name a reader in this tree exports is listed by that constant, so a
+// rename in agentusage or internal/remote moves the expectation with it rather
+// than leaving a row here naming a variable nothing reads.
 func TestUsageDocumentsEveryEnvVar(t *testing.T) {
 	var buf strings.Builder
 	usage(&buf)
 	got := buf.String()
-	for _, name := range []string{
-		"OMNIROUTE_API_KEY",
-		"TOKTOP_BEARER",
-		"TOKTOP_SSH_PASSWORD",
-		"TOKTOP_COLUMNS",
-		"TOKTOP_LINES",
-		"TOKTOP_LOG_LEVEL",
-		"GAUNTLET_HOME",
-		"XDG_DATA_HOME",
-		"XDG_CONFIG_HOME",
-		"GITHUB_TOKEN",
-		"SSH_AUTH_SOCK",
-		"NO_COLOR",
-		"TOKTOP_SCREENSHOT_FONT",
-	} {
+	for _, name := range documentedEnvVars() {
 		if !strings.Contains(got, name) {
 			t.Errorf("usage() Environment block does not document $%s", name)
 		}
 	}
+}
+
+// documentedEnvVars is every environment variable the run reads, named the
+// way its reader spells it. The three the program does not own (the GitHub
+// token, the ssh-agent socket, the terminal renderer's NO_COLOR) are named
+// where they live.
+func documentedEnvVars() []string {
+	names := []string{
+		selfupdate.TokenEnv,
+		remote.AgentSockEnv,
+		agentusage.GauntletHomeEnv,
+		agentusage.XDGDataHomeEnv,
+		agentusage.KimiHomeEnv,
+		remote.XDGConfigHomeEnv,
+		remote.PasswordEnv,
+		logcfg.LevelEnv,
+		screenshotFontEnv,
+		"NO_COLOR",
+	}
+	names = append(names, bearerEnvVars[:]...)
+	for _, e := range frameEnvVars {
+		names = append(names, e.name)
+	}
+	return names
 }
 
 // Every flag is documented in the same long form the examples, the prose and
@@ -2246,6 +2260,72 @@ func TestWarnBearerFlag(t *testing.T) {
 			t.Fatalf("printed %q, want silence", got)
 		}
 	})
+	// resolveBearer skips a blank value, so a whitespace-only variable
+	// overrides nothing; naming it as overridden reports a fallback that
+	// never happened.
+	t.Run("whitespace-only env is not reported as overridden", func(t *testing.T) {
+		t.Setenv("TOKTOP_BEARER", " \t")
+		t.Setenv("OMNIROUTE_API_KEY", "")
+		if got := captureStderr(t, func() { warnBearerFlag(true, "") }); got != "" {
+			t.Fatalf("printed %q, want silence", got)
+		}
+	})
+	t.Run("every env fallback is named", func(t *testing.T) {
+		for _, name := range bearerEnvVars {
+			t.Setenv(name, "")
+		}
+		t.Setenv(bearerEnvVars[0], "x")
+		got := captureStderr(t, func() { warnBearerFlag(true, "") })
+		for _, name := range bearerEnvVars {
+			if !strings.Contains(got, "$"+name) {
+				t.Errorf("printed %q, want it to name $%s", got, name)
+			}
+		}
+	})
+}
+
+// toktopEnvVars is derived from the tables the readers use, so a rename
+// cannot leave the typo check answering about a name the code no longer
+// reads. A name a reader does use and the map does not list is the failure
+// this pins: warnUnknownEnv would report every export of it as a typo.
+func TestKnownToktopEnvCoversEveryReader(t *testing.T) {
+	want := []string{remote.PasswordEnv, logcfg.LevelEnv, screenshotFontEnv}
+	for _, e := range frameEnvVars {
+		want = append(want, e.name)
+	}
+	for _, name := range bearerEnvVars {
+		if strings.HasPrefix(name, "TOKTOP_") {
+			want = append(want, name)
+		}
+	}
+	for _, name := range want {
+		if !toktopEnvVars[name] {
+			t.Errorf("toktopEnvVars does not list $%s, which a reader uses", name)
+		}
+	}
+	for _, e := range frameEnvVars {
+		if !strings.HasPrefix(e.name, "TOKTOP_") {
+			t.Errorf("frameEnvVars carries %q, which warnUnknownEnv never checks", e.name)
+		}
+	}
+}
+
+// The --once frame is rendered from frameEnvVars, so a variable the table
+// lists has to be one it sizes: a table entry that names a pair and bounds
+// the renderer ignores produces a capture sized by something other than what
+// the startup line reported.
+func TestFrameEnvVarsSizeTheOnceFrame(t *testing.T) {
+	var width, lines int
+	for _, e := range frameEnvVars {
+		if e.width {
+			width++
+		} else {
+			lines++
+		}
+	}
+	if width != 1 || lines != 1 {
+		t.Fatalf("frameEnvVars has %d width entries and %d height entries, want one each", width, lines)
+	}
 }
 
 func TestRoutableBind(t *testing.T) {

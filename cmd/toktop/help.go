@@ -172,12 +172,7 @@ Environment (a flag always wins over the variable it mirrors):
                           trimmed; a blank value carries no token and is
                           skipped in favor of the next source
   TOKTOP_SSH_PASSWORD     ssh password for ssh:// targets, for headless runs
-`+fmt.Sprintf(`  TOKTOP_COLUMNS          --once frame width, %d-%d (default: the terminal,
-                          else %d when stdout is not one)
-  TOKTOP_LINES            --once frame height, %d-%d (default: the terminal,
-                          else %d when stdout is not one)`,
-		frameColumnsMin, frameColumnsMax, frameColumnsDefault,
-		frameLinesMin, frameLinesMax, frameLinesDefault)+`
+`+frameEnvHelp()+`
   TOKTOP_LOG_LEVEL        audit log floor for every subsystem that writes one
                           (engine, ssh, ingest): debug, info, warn (or
                           warning), error; the name is case-insensitive
@@ -218,6 +213,27 @@ read stdout without filtering status lines out of it.
 `)
 	_, err := io.WriteString(w, buf.String())
 	return err
+}
+
+// frameEnvHelp renders the TOKTOP_COLUMNS / TOKTOP_LINES rows of the
+// Environment block from frameEnvVars, so a bound the run enforces and a
+// bound the screen prints cannot differ. The default each row names is the
+// fallback --once renders at when stdout is not a terminal, taken from the
+// same constants runOnce starts those two values at.
+func frameEnvHelp() string {
+	var b strings.Builder
+	for i, e := range frameEnvVars {
+		what, def := "height", frameLinesDefault
+		if e.width {
+			what, def = "width", frameColumnsDefault
+		}
+		if i > 0 {
+			b.WriteString("\n")
+		}
+		fmt.Fprintf(&b, "  %-24s --once frame %s, %d-%d (default: the terminal,\n", e.name, what, e.least, e.most)
+		fmt.Fprintf(&b, "%28selse %d when stdout is not one)", "", def)
+	}
+	return b.String()
 }
 
 // flagParseError renders a parse failure in the long flag spelling. The flag

@@ -34,6 +34,9 @@ var publicTypes = map[string][]string{
 var publicConsts = []string{
 	"DefaultPollInterval",
 	"DefaultSuffix",
+	"GauntletHomeEnv",
+	"KimiHomeEnv",
+	"XDGDataHomeEnv",
 }
 
 var publicFuncs = []string{

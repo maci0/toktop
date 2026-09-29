@@ -21,9 +21,15 @@ import (
 	"github.com/maci0/toktop/internal/logcfg"
 )
 
+// XDGConfigHomeEnv is the XDG base directory the host-key store lives under.
+// Exported so the startup warning that names a value it cannot use spells it
+// the way defaultKnownHostsPath reads it, the way PasswordEnv is shared with
+// the top-level command.
+const XDGConfigHomeEnv = "XDG_CONFIG_HOME"
+
 // knownHostsFile is the trust-on-first-use store. Overridable in tests.
 //
-// XDG_CONFIG_HOME is honored only when absolute. The XDG base-directory spec
+// XDGConfigHomeEnv is honored only when absolute. The XDG base-directory spec
 // calls a relative value invalid, and honoring one would place the host-key
 // pin store under whatever directory the run happens to start in: the store
 // would vanish with the cwd, and a second run would re-TOFU. A relative value
@@ -31,14 +37,14 @@ import (
 // fails at connect instead of quietly writing pins somewhere else.
 //
 // The fallback gets the same check. os.UserConfigDir builds its answer from
-// $HOME when XDG_CONFIG_HOME is unset, and a relative $HOME yields a relative
+// $HOME when XDGConfigHomeEnv is unset, and a relative $HOME yields a relative
 // config directory, which is the store that vanishes with the cwd all over
 // again. An unusable home therefore names no store, and the run fails at
 // connect rather than writing pins under the working directory.
 var knownHostsPath = defaultKnownHostsPath
 
 func defaultKnownHostsPath() string {
-	if dir := os.Getenv("XDG_CONFIG_HOME"); filepath.IsAbs(dir) {
+	if dir := os.Getenv(XDGConfigHomeEnv); filepath.IsAbs(dir) {
 		return filepath.Join(dir, "toktop", "known_hosts")
 	}
 	dir, err := os.UserConfigDir()
