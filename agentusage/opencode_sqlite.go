@@ -51,10 +51,11 @@ func init() {
 //	message.data       {"role":"assistant","tokens":{"output":324,"reasoning":52,…}}
 //	message.time_created  milliseconds, which bounds the since filter
 //
-// The database is opened read-only for each reading and closed again, so a
-// long-lived dashboard never holds a handle on a database the agent is
-// writing. Sessions for this directory are few; their messages are found
-// through the session_id index rather than a scan of the message table.
+// The database is opened read-only and the handle is kept across polls (see
+// sqlite.go), dropped when a read fails or the file is replaced, so the
+// dashboard re-establishes it once rather than per reading. Sessions for this
+// directory are few; their messages are found through the session_id index
+// rather than a scan of the message table.
 type openCodeDBSource struct{ path string }
 
 func setOpenCodeDB(on bool) bool {

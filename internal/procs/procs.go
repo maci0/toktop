@@ -122,10 +122,9 @@ func NewSampler() *Sampler {
 	return &Sampler{prev: map[int]uint64{}, refreshMin: defaultSamplerRefresh}
 }
 
-// packageSampler is the process-wide engine sampler. Discovery and the
-// collector both list through it so Windows CIM listings and CPU tick
-// deltas are not taken twice. OnceValue so NewSampler runs after platform
-// init has set defaultSamplerRefresh.
+// packageSampler is the process-wide engine sampler Discovery lists through.
+// The collector keeps its own, because it lists on its own clock. OnceValue
+// so NewSampler runs after platform init has set defaultSamplerRefresh.
 var packageSampler = sync.OnceValue(NewSampler)
 
 // Snapshot lists engine processes using the process-wide sampler.

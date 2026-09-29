@@ -80,9 +80,9 @@ type Watcher struct {
 	// next failure a new thing to report.
 	readFailed map[string]bool
 	// ownsFailed latches the same for the attribution scan, which never
-	// commits and so has no read to clear the latch. An undecided file is
-	// retried on every poll for the life of the watcher, so without this the
-	// one case that never resolves reports nothing at all.
+	// commits and so has no read to clear the latch. A file the walk still
+	// reaches is retried on every poll for the life of the watcher, so without
+	// this the one case that never resolves reports nothing at all.
 	ownsFailed map[string]bool
 
 	// sourceBase is per-session counters at attach for a sessionSource

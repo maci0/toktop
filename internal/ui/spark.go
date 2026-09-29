@@ -41,9 +41,9 @@ func seriesPeak(vals []float64) float64 {
 	return peak
 }
 
-// brailleRowMask is the pair of dots a filled sub-row sets. Dots 1-4 are the
-// left column and 5-8 the right, so the two middle entries span both columns
-// and the outer two (1+4 and 7+8) sit wholly in one.
+// brailleRowMask is the pair of dots a filled sub-row sets. Dots 1-3 are the
+// left column and 4-6 the right, and 7 and 8 are the bottom sub-row, so each
+// entry is one sub-row filled across both columns of the cell.
 var brailleRowMask = [4]byte{0x09, 0x12, 0x24, 0xC0}
 
 // brailleGuideDot is the left dot of the bottom sub-row, drawn alone.

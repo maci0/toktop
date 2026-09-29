@@ -39,8 +39,9 @@ const forwardBindAttempts = 8
 // once. A loopback port handed to a client is not a secret, so nothing bounds
 // how many connections can arrive; each costs a file descriptor, two copy
 // goroutines and an ssh channel, and a peer that holds the socket open without
-// speaking holds all three until teardown. Past the cap a connection is
-// accepted and closed, which the local client sees as a refused connection.
+// speaking holds all three until teardown. Past the cap the accepted
+// connection is closed without being piped, so the local client sees the
+// connection dropped with nothing read.
 const maxConcurrentRelays = 64
 
 // Forward binds a local listener per remote port and pipes every accepted

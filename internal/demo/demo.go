@@ -70,12 +70,13 @@ type Source struct {
 	agents  []core.AgentEvent
 	probes  []core.ProbeSample
 	// agentIDs is the id ledger a replayed POST is answered from. The
-	// retained feed is a poor stand-in for it: it holds a couple of minutes
-	// of generated events, so a sender retrying an Idempotency-Key after its
-	// first copy has rolled out of the ring finds nothing to match and counts
-	// its stream twice. The live collector keeps the same ledger for the same
-	// reason, so both are one core.AgentIDLedger and a change to the dedup
-	// window reaches a replay answered here and there alike.
+	// retained feed is a poor stand-in for it: one generated event every two
+	// to six intervals puts 512 of them tens of minutes into a run, so a
+	// sender retrying an Idempotency-Key after its first copy has rolled out
+	// of the ring finds nothing to match and counts its stream twice. The
+	// live collector keeps the same ledger for the same reason, so both are
+	// one core.AgentIDLedger and a change to the dedup window reaches a
+	// replay answered here and there alike.
 	agentIDs core.AgentIDLedger
 }
 

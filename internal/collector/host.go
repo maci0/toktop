@@ -13,8 +13,9 @@ import (
 // table. Both are read from background pollers that emit never waits on, so
 // a slow vendor CLI or a slow Win32 CIM enumeration cannot stall a frame.
 
-// procSampler is the shared engine-process sampler; nil-safe when the
-// platform has no process table access.
+// procSampler is the collector's own engine-process sampler, listed through
+// with the collector's clock rather than the one procs.Snapshot hands
+// discovery; nil-safe when the platform has no process table access.
 var procSampler = procs.NewSampler()
 
 // SetSysFn overrides the host-vitals sampler (used for ssh targets whose

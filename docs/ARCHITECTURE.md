@@ -34,8 +34,8 @@ alongside them would be a layer importing sideways into itself.
   its exported API.
 - `cmd/toktop`: flag parsing, validation and warnings (`flags.go`,
   `validate.go`), endpoint and target wiring (`attach.go`, `endpoints.go`), the
-  subcommands (`help.go`, `update.go`, `version.go`), and `main.go`, whose
-  `runMain` is the whole startup sequence in one function.
+  subcommands (`help.go`, `update.go`, `version.go`, `completion.go`), and
+  `main.go`, whose `runMain` is the whole startup sequence in one function.
 - `internal/bearer`: one process-wide optional `Bearer` token for gateways
   that require an API key.
 - `internal/collector`: polls providers on an interval, derives rates, and is
