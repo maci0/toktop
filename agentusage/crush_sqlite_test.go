@@ -283,8 +283,8 @@ func TestCrushWatchSaturatesCorruptSessionTotals(t *testing.T) {
 	putCrushSession(t, dir, "a", maxSaneTokens, 0, at)
 	putCrushSession(t, dir, "b", maxSaneTokens, 0, at)
 	got := w.Poll()
-	if got.Output != maxSaneTokens {
-		t.Fatalf("output %d, want the ceiling %d rather than a dropped reading", got.Output, maxSaneTokens)
+	if got.Output != maxSaneTokensInt() {
+		t.Fatalf("output %d, want the ceiling %d rather than a dropped reading", got.Output, maxSaneTokensInt())
 	}
 	// A second poll sees the same rows and must report the same level, not
 	// fall back to the last sample now that the totals have saturated.
