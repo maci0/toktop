@@ -30,7 +30,7 @@ func (m Model) renderCharts() string {
 	// with no labels on either. Left on the uniform cadence, pressing t made the
 	// pair disagree about how much wall clock a column spans, and a reader
 	// comparing the two traces had no way to tell the mode had split them.
-	inVals, _ := m.rateSeries(w, cad, false)
+	inVals := m.rateValues(w, cad, false)
 	in := panel(
 		// Same text alternative as THROUGHPUT: the prompt plot is one braille
 		// row, so the current rate in the title is the only number on the frame
@@ -60,6 +60,16 @@ func (m Model) rateSeries(w int, cadence time.Duration, out bool) ([]float64, ma
 	}
 	vals, bounds := compressSeries(timedSeries(m.snap, out, cadence), w, compressBlock)
 	return vals, bounds
+}
+
+// rateValues is rateSeries for the second chart of a pair, which draws on the
+// first chart's grid and needs no boundaries of its own.
+func (m Model) rateValues(w int, cadence time.Duration, out bool) []float64 {
+	if !m.chartCompressed {
+		return aggHist(m.snap, out, w, cadence)
+	}
+	vals, _ := compressSeriesOpts(timedSeries(m.snap, out, cadence), w, compressBlock, false)
+	return vals
 }
 
 // throughputTitle is the chart heading: the current rate, the peak the plot is
@@ -223,6 +233,14 @@ func timedSeries(s core.Snapshot, out bool, cadence time.Duration) []timedVal {
 // sample count instead would scale the chart down by the engine count and
 // make the two timescale modes disagree about what a column means.
 func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
+	return compressSeriesOpts(tv, w, block, true)
+}
+
+// compressSeriesOpts is compressSeries with the grid boundaries made optional.
+// Building them is a map insert per compressBlock columns; a caller that draws
+// on another chart's grid discards them, and the second chart of a frame is
+// exactly that caller.
+func compressSeriesOpts(tv []timedVal, w, block int, wantBounds bool) ([]float64, map[int]bool) {
 	if len(tv) == 0 || w <= 0 || block <= 0 {
 		return nil, nil
 	}
@@ -247,10 +265,13 @@ func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
 		cum[j+1] = total
 	}
 
-	bounds := map[int]bool{}
-	for j := range w {
-		if (w-1-j)%block == 0 && j < w-1 {
-			bounds[j] = true
+	var bounds map[int]bool
+	if wantBounds {
+		bounds = make(map[int]bool, w/block+1)
+		for j := range w {
+			if (w-1-j)%block == 0 && j < w-1 {
+				bounds[j] = true
+			}
 		}
 	}
 

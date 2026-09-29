@@ -4,6 +4,7 @@
 package sysmon
 
 import (
+	"bytes"
 	"context"
 	"math"
 	"strconv"
@@ -187,12 +188,14 @@ func ParseMeminfo(b []byte, s *core.SysSample) {
 	var vals struct {
 		total, avail, swapTotal, swapFree uint64
 	}
-	for line := range strings.Lines(string(b)) {
+	for line := range bytes.Lines(b) {
 		k, v, ok := cutMeminfoLine(line)
 		if !ok {
 			continue
 		}
-		switch k {
+		// A byte-keyed lookup, so none of the ~54 lines a poll reads pays to
+		// materialize the key it does not want.
+		switch string(k) {
 		case "MemTotal":
 			vals.total = v
 		case "MemAvailable":
@@ -235,20 +238,35 @@ func satAdd4(a, b, c, d uint64) uint64 {
 	return core.SatAddU64(core.SatAddU64(a, b), core.SatAddU64(c, d))
 }
 
-func cutMeminfoLine(line string) (string, uint64, bool) {
-	k, rest, ok := strings.Cut(line, ":")
-	if !ok {
-		return "", 0, false
+// cutMeminfoLine reads one "Key:   12345 kB" line, returning the key and the
+// first field after the colon.
+//
+// The line is scanned in place rather than copied and split. This runs on all
+// ~54 lines of /proc/meminfo on every poll, and the string form cost two
+// allocations per line: a fresh []string from strings.Fields for a value that
+// is one number, and the trimmed key, neither of which outlives the call. The
+// keys are compared as bytes below, so no key is materialized either.
+func cutMeminfoLine(line []byte) ([]byte, uint64, bool) {
+	c := bytes.IndexByte(line, ':')
+	if c < 0 {
+		return nil, 0, false
 	}
-	f := strings.Fields(rest)
-	if len(f) == 0 {
-		return "", 0, false
+	// strings.Fields drops every run of spaces, tabs and newlines; a line
+	// carrying no field at all is the empty or all-blank remainder.
+	rest := bytes.TrimLeft(line[c+1:], " \t\r\n")
+	end := bytes.IndexAny(rest, " \t\r\n")
+	if end < 0 {
+		end = len(rest)
 	}
-	v, err := strconv.ParseUint(f[0], 10, 64)
+	if end == 0 {
+		return nil, 0, false
+	}
+	f := rest[:end]
+	v, err := strconv.ParseUint(string(f), 10, 64)
 	if err != nil {
-		return "", 0, false
+		return nil, 0, false
 	}
-	return strings.TrimSpace(k), v, true
+	return bytes.TrimSpace(line[:c]), v, true
 }
 
 // ParseLoadavg reads "1.5 0.7 0.3 extra..." into three load averages.

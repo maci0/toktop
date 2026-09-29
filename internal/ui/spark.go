@@ -50,6 +50,11 @@ var brailleRowMask = [4]byte{0x09, 0x12, 0x24, 0xC0}
 // brailleGuideDot is the left dot of the bottom sub-row, drawn alone.
 const brailleGuideDot = 0x40
 
+// brailleRuneBytes is the encoded width of one braille cell: a U+2800..U+28FF
+// rune, which is 3 bytes in UTF-8. A chart row's buffer is reserved against
+// it, so it is named once here rather than assumed at the reservation.
+const brailleRuneBytes = 3
+
 // ChartStyle tunes BrailleChart rendering.
 type ChartStyle struct {
 	Heat func(float64) lipgloss.Color
@@ -252,8 +257,18 @@ func BrailleChart(vals []float64, w, h int, st ChartStyle) string {
 	}
 
 	rows := make([]strings.Builder, h)
+	// A drawn cell is the color run, the 3-byte braille rune, and the reset
+	// run; a blank cell is one byte. The budget is the widest drawn cell, taken
+	// from the runs themselves, because a fixed per-cell constant under-reserves
+	// under a color profile (truecolor runs are ~19 bytes in, 4 out) and made
+	// every row regrow and memmove several times a frame. A run-free profile
+	// draws a bare rune, and the budget follows it to 3.
+	cellBytes := brailleRuneBytes
+	for _, sd := range colSides {
+		cellBytes = max(cellBytes, len(sd[0])+brailleRuneBytes+len(sd[1]))
+	}
 	for cy := range h {
-		rows[cy].Grow(w * 4)
+		rows[cy].Grow(w * cellBytes)
 		for cx := range w {
 			level := levels[cx]
 			pattern := 0

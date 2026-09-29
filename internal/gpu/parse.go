@@ -158,12 +158,23 @@ func parseXpuDiscovery(b []byte) []xpuDevice {
 			Devices []device `json:"devices"`
 		}
 	)
+	// The shape is read off the first token rather than by trying the wrapper
+	// and falling back to the bare array. `xpu-smi discovery` answers with the
+	// bare array, and a top-level array never decodes into the wrapper struct,
+	// so the fallback order parsed every discovery payload twice on the one
+	// shape that ships. This runs per device discovery poll.
 	var list []device
-	switch {
-	case json.Unmarshal(b, &wrap) == nil && wrap.Devices != nil:
-		list = wrap.Devices
-	case json.Unmarshal(b, &bare) == nil:
+	switch firstJSONToken(b) {
+	case '[':
+		if json.Unmarshal(b, &bare) != nil {
+			return nil
+		}
 		list = bare
+	case '{':
+		if json.Unmarshal(b, &wrap) != nil || wrap.Devices == nil {
+			return nil
+		}
+		list = wrap.Devices
 	default:
 		return nil
 	}
@@ -172,6 +183,20 @@ func parseXpuDiscovery(b []byte) []xpuDevice {
 		order = append(order, xpuDevice{ID: d.DeviceID, Name: core.ModelName(d.DeviceName)})
 	}
 	return order
+}
+
+// firstJSONToken returns the first non-whitespace byte of a JSON payload, or 0
+// when the payload holds none. It answers the shape question the decoder would
+// otherwise answer twice, by failing, on the shape that does not apply.
+func firstJSONToken(b []byte) byte {
+	i := 0
+	for i < len(b) && (b[i] == ' ' || b[i] == '\t' || b[i] == '\n' || b[i] == '\r') {
+		i++
+	}
+	if i == len(b) {
+		return 0
+	}
+	return b[i]
 }
 
 // parseXpuMetrics reads `xpu-smi metrics -d N -j`; values arrive as
