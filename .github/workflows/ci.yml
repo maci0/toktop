@@ -17,8 +17,10 @@ concurrency:
 # non-FIPS crypto module and CGO_ENABLED=0 match the released artifacts;
 # race-test steps turn cgo on. Empty GOFLAGS/GOEXPERIMENT/GODEBUG so a
 # runner-level extra flag cannot change compile or test results relative to
-# `make`. GOENV=off and the empty GOPRIVATE/GONOSUMDB/GOINSECURE keep the go
-# command off the runner's own config file and the checksum database, which
+# `make`. GOENV=off, GOWORK=off and the empty
+# GOPRIVATE/GONOSUMDB/GOINSECURE keep the go
+# command off the runner's own config file, out of workspace mode, and off the
+# checksum database, which
 # is what the Makefile exports for the steps that go through it. `make
 # check-ci-env` fails when these and the Makefile's exports stop agreeing.
 env:
@@ -32,6 +34,7 @@ env:
   GOEXPERIMENT: ""
   GODEBUG: ""
   GOENV: "off"
+  GOWORK: "off"
   GOPRIVATE: ""
   GONOSUMDB: ""
   GOINSECURE: ""

@@ -98,6 +98,10 @@ ifeq ($(GO_VERSION),)
 $(error go.mod has no 'go' line; cannot pin GOTOOLCHAIN)
 endif
 export GOTOOLCHAIN := go$(GO_VERSION)
+# A go.work in this directory or any parent puts the build in workspace mode
+# and resolves the module graph through it, so the same source builds a
+# different binary depending on what sits above the checkout. Off is the
+# one-tree answer, and check-ci-env holds the workflows to it too.
 export GOWORK := off
 # Instruction-set baselines: an ambient GOAMD64=v3 would change amd64 artifacts.
 export GOAMD64 := v1
@@ -982,7 +986,7 @@ CI_WORKFLOW := .github/workflows/ci.yml
 CI_ENV_REQUIRED := \
 	LC_ALL=C TZ=UTC \
 	GOAMD64=v1 GOARM64=v8.0 GOFIPS140=off CGO_ENABLED=0 \
-	GOFLAGS= GOEXPERIMENT= GODEBUG= GOENV=off \
+	GOFLAGS= GOEXPERIMENT= GODEBUG= GOENV=off GOWORK=off \
 	GOPRIVATE= GONOSUMDB= GOINSECURE=
 
 .PHONY: check-ci-env

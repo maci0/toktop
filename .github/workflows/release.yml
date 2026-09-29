@@ -24,7 +24,8 @@ jobs:
     timeout-minutes: 50
     # The Makefile's build exports, spelled here because `make` applies them
     # only to its own recipes: a `go env -w` on the runner image, an inherited
-    # GOEXPERIMENT or a GOPRIVATE that skips the checksum database would move
+    # GOEXPERIMENT, a GOPRIVATE that skips the checksum database, or a go.work
+    # above the checkout would move
     # the bytes this job publishes without moving anything in the repository.
     # `make check-ci-env` (run by ci.yml on every PR) fails when this block and
     # the Makefile's exports disagree on a name or a value.
@@ -39,6 +40,7 @@ jobs:
       GOEXPERIMENT: ""
       GODEBUG: ""
       GOENV: "off"
+      GOWORK: "off"
       GOPRIVATE: ""
       GONOSUMDB: ""
       GOINSECURE: ""
