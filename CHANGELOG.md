@@ -13,6 +13,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-09-29
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.22.0).
+
 ### Added
 
 - The `--json` report carries `schema`, its own revision, beside the
@@ -21,6 +26,35 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   ago. `schema` moves when a published field is removed, renamed, or changes
   meaning or unit, and does not move when the report merely gains one, so a
   consumer reading named fields keeps working across an addition. It is `1`.
+
+### Changed
+
+- An agent's usage store is now opened once and kept, rather than opened and
+  closed on every poll. crush and opencode are read several times a second,
+  and rebuilding the read-only connection each time meant SQLite parsed the
+  DSN, applied six connection parameters and prepared the statement again for
+  a store that had not moved. Against a store holding a handful of sessions
+  the read measures 42us with the handle held open against 157us without it.
+  A store the agent replaces is opened afresh, so a handle never outlives the
+  file behind it, a read that fails drops its handle so the next poll retries
+  from a new one, and the table is capped the way the outage latch beside it
+  is.
+- The host strip's overflow count now names the way out the panel titles
+  already name it: `+2 more (enlarge window)` where the row has the cells,
+  and the bare count where it does not. A count with no way to reach it
+  reads as readings the tool cannot see.
+- The empty PROBES panel spells the automatic probe route as a sentence
+  where its column has room for one (`quit, re-run with --probe N`),
+  keeping the short `quit, --probe N` for the narrowest dashboard.
+- A set-but-blank `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` is named as
+  ignored, rather than as leaving the `--add` endpoints unauthenticated,
+  on the runs where another source (the sibling variable or `--bearer`)
+  supplies the token in force.
+- `--once --plain` reports the PROBES window the way it already reports the
+  THROUGHPUT one: the peak rate over the span the plot covers, and, for a run
+  with no probes at all, the flag that produces them. The PROBES braille plot
+  had no text alternative anywhere, and the report is the only surface a
+  screen reader has.
 
 ### Fixed
 
@@ -73,44 +107,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   which is the stream a `--check` run is piped and pasted from.
 - The agent-watch banner, the `$GAUNTLET_HOME` warning and the unusable-home
   warning no longer carry an unredacted error, path or account name.
-
-### Changed
-
-- An agent's usage store is now opened once and kept, rather than opened and
-  closed on every poll. crush and opencode are read several times a second,
-  and rebuilding the read-only connection each time meant SQLite parsed the
-  DSN, applied six connection parameters and prepared the statement again for
-  a store that had not moved. Against a store holding a handful of sessions
-  the read measures 42us with the handle held open against 157us without it.
-  A store the agent replaces is opened afresh, so a handle never outlives the
-  file behind it, a read that fails drops its handle so the next poll retries
-  from a new one, and the table is capped the way the outage latch beside it
-  is.
-- The host strip's overflow count now names the way out the panel titles
-  already name it: `+2 more (enlarge window)` where the row has the cells,
-  and the bare count where it does not. A count with no way to reach it
-  reads as readings the tool cannot see.
-- The empty PROBES panel spells the automatic probe route as a sentence
-  where its column has room for one (`quit, re-run with --probe N`),
-  keeping the short `quit, --probe N` for the narrowest dashboard.
-- A set-but-blank `$TOKTOP_BEARER` / `$OMNIROUTE_API_KEY` is named as
-  ignored, rather than as leaving the `--add` endpoints unauthenticated,
-  on the runs where another source (the sibling variable or `--bearer`)
-  supplies the token in force.
-- `--once --plain` reports the PROBES window the way it already reports the
-  THROUGHPUT one: the peak rate over the span the plot covers, and, for a run
-  with no probes at all, the flag that produces them. The PROBES braille plot
-  had no text alternative anywhere, and the report is the only surface a
-  screen reader has.
-
-### Fixed
-
 - Panel borders were drawn in a color measuring 2.50:1 against the dashboard
   background, under the 3:1 that identifies a component's edges. The two chart
   panels stack with no blank row between them, so the frame was the only thing
   marking where one panel ended and the next began. The border now measures
   3.49:1, still quieter than the secondary text it encloses.
-
 - The system panel decoded kernel and firmware strings (uname release and
   sysname, the `/proc/device-tree/model` board string, the NVIDIA driver
   version, `/sys/module/*/version`) as UTF-8 without checking. A board or
@@ -119,7 +120,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   marked. Each ill-formed byte now becomes U+FFFD at the boundary, so the
   panel shows that the string is unreadable there instead of a name the
   hardware never reported.
-
 - A definition pointed at a Gemini, dsh or Grok transcript read that store
   through the envelope-agnostic walker, which did not know three spellings the
   per-agent decoders read: Gemini's `tokens.thoughts`, and the cached prompt
@@ -127,48 +127,39 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `cacheWriteTokens`, `cachedReadTokens`, `cacheCreationTokens`). A turn
   billed on thought tokens alone read as no usage at all, and a dsh or Grok
   turn read its uncached prompt alone, short by the bulk of the prompt.
-
 - A record holding a number no float64 can represent, in a field no adapter
   models, took the whole record down with it: the walker decoded into
   float64, so the failure reached past the field to the turn's own counters,
   while the per-agent decoders skipped the field and read the record. Numbers
   are now decoded as written and range-checked once they reach a recognized
   field.
-
 - A vendor GPU tool that exits 0 with output this build cannot read is now
   audited instead of being marked healthy. A driver upgrade that changes
   `nvidia-smi`, `rocm-smi`, or `xpu-smi` output left the GPU row permanently
   blank with no line naming the cause, and the audit log could even say the
   tool was "answering again". The outage latch now clears only once the
   output parses.
-
 - The Ollama stream probe no longer skips a frame it cannot decode. The
   tokens that frame carried were gone, and the frames after it were counted
   as if they were the whole generation, so the sample reported a short,
   plausible measurement with OK set. The OpenAI path already refused this.
-
 - A stat failure on an agent transcript is audited. Every other failure on
   that file was reported; this one left the session reporting no tokens at
   all with nothing in the log.
-
 - Remote discovery logs when it could not read `/proc/net/tcp`. The sweep
   script ends in `true`, so its exit status never reported the failure the
   warning was written for, and a hardened kernel hiding the table produced a
   silent empty sweep that read as a host with no listening ports.
-
 - A wall-clock step backwards no longer discards the tokens generated since
   the previous sample, and no longer restarts the smoothed rate from zero.
   The interval the step made reports nothing, as before; the next one now
   accounts for the same tokens the zero-elapsed branch already kept.
-
 - A peer's host-identity field and a model id sent to a probe both take the
   one shape `core.ModelName` gives such a string. Each had its own near-copy
   of the trim and cap, and the probe's dropped the one-line fold, so a model
   id carrying a control character reached the generation body unfolded.
-
 - An engine serving a `/readyz` body that merely contains `ok` inside a longer
   word is no longer identified as LocalAI. The needle has to stand on its own.
-
 - An ingest failure reaching the feed notice folds the home directory, like
   the agent-watch notice beside it.
 
@@ -2659,7 +2650,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/maci0/toktop/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/maci0/toktop/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/maci0/toktop/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/maci0/toktop/compare/v0.18.2...v0.19.0
