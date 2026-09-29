@@ -550,7 +550,7 @@ func (w *Watcher) capFileState(live []string) {
 	for _, path := range live {
 		inWalk[path] = struct{}{}
 	}
-	w.trimCounted(inWalk, len(inWalk))
+	w.trimCounted(inWalk)
 	w.trimOwned(inWalk)
 	w.trimLatches(inWalk)
 }
@@ -627,7 +627,7 @@ type aged struct {
 // A path released here re-enters trimOwned's budget below on the next rescan:
 // the counts are gone, so it is a judged transcript carrying nothing, and the
 // skip position alone is what the owner verdict exists to keep.
-func (w *Watcher) trimCounted(inWalk map[string]struct{}, live int) {
+func (w *Watcher) trimCounted(inWalk map[string]struct{}) {
 	if len(w.seen) <= countedCap {
 		return
 	}
@@ -638,7 +638,10 @@ func (w *Watcher) trimCounted(inWalk map[string]struct{}, live int) {
 		}
 		cut = append(cut, aged{path: path, mtimeNanos: w.stamps[path].mtimeNanos})
 	}
-	room := countedCap - live
+	// The paths still in the walk are spared, so the budget left for the rest
+	// is the cap less however many the walk reached. inWalk is built from live
+	// alone, so its length is that count.
+	room := countedCap - len(inWalk)
 	if room < 0 {
 		room = 0
 	}
