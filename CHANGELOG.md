@@ -13,6 +13,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Security
+
+- A release download now refuses a port other than https's own. The GitHub
+  host allowlist matched the host alone, and `Hostname()` drops the port, so a
+  `browser_download_url` naming `https://github.com:8443/...` passed a check
+  that answers for the authority an operator trusts, at a hop and an asset URL
+  alike.
+
 ### Fixed
 
 - A downed engine no longer sizes the collector's memory. The fold that keeps

@@ -173,6 +173,16 @@ func githubDownloadHost(host string) bool {
 	return strings.HasSuffix(h, ".githubusercontent.com")
 }
 
+// httpsPort reports whether a URL's port is the one https is served on. A
+// port is compared rather than ignored because Hostname() drops it: without
+// this, "https://github.com:8443/..." names an allowed host and the check
+// admits it, so the allowlist answers for a service GitHub does not serve on
+// the name the operator trusts. An absent port is https's own.
+func httpsPort(u *url.URL) bool {
+	p := u.Port()
+	return p == "" || p == "443"
+}
+
 // TrustedReleaseURL reports whether raw is a GitHub URL over https. Every
 // release download and redirect hop is held to it, and so is the release page
 // `toktop update --check` prints for a shell expansion: that page is never
@@ -196,7 +206,7 @@ func TrustedReleaseURL(raw string) bool {
 	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {
 		return false
 	}
-	return githubDownloadHost(u.Hostname())
+	return httpsPort(u) && githubDownloadHost(u.Hostname())
 }
 
 // isReleaseURLByte reports whether a byte can appear in a release URL that is
@@ -235,7 +245,7 @@ func githubRedirect(req *http.Request, via []*http.Request) error {
 	if len(via) >= maxRedirects {
 		return fmt.Errorf("stopped after %d redirects", maxRedirects)
 	}
-	if req.URL.Scheme != "https" || req.URL.User != nil || !githubDownloadHost(req.URL.Hostname()) {
+	if req.URL.Scheme != "https" || req.URL.User != nil || !httpsPort(req.URL) || !githubDownloadHost(req.URL.Hostname()) {
 		return fmt.Errorf("refusing redirect to %s", req.URL.Redacted())
 	}
 	if core.FoldASCII(norm.NFC.String(req.URL.Hostname())) != "api.github.com" && req.Header != nil {

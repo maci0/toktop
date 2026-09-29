@@ -94,12 +94,34 @@ func TestGitHubAssetURL(t *testing.T) {
 		"https://githubusercontent.com.evil.example/x",
 		"https://169.254.169.254/latest",
 		"https://user:pass@github.com/maci0/toktop/releases/download/v1/toktop",
+		"https://github.com:8443/maci0/toktop/releases/download/v1/toktop",
+		"https://objects.githubusercontent.com:8443/github-production-release-asset/1",
 		"file:///etc/passwd",
 		"",
 	}
 	for _, u := range bad {
 		if TrustedReleaseURL(u) {
 			t.Errorf("TrustedReleaseURL(%q) = true, want false", u)
+		}
+	}
+}
+
+// A hop the redirect policy follows carries the same authority as an asset
+// URL, so the port is held to the same bound there: an allowlist that matched
+// the host alone would admit a service GitHub does not serve on the name the
+// operator trusts.
+func TestGitHubRedirectRefusesNonHTTPSPort(t *testing.T) {
+	for _, raw := range []string{
+		"https://github.com:8443/maci0/toktop/releases/download/v1/toktop",
+		"https://release-assets.githubusercontent.com:8443/asset",
+	} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatalf("url.Parse(%q) = %v", raw, err)
+		}
+		req := &http.Request{URL: u, Header: http.Header{}}
+		if err := githubRedirect(req, []*http.Request{{URL: &url.URL{Scheme: "https", Host: "api.github.com"}}}); err == nil {
+			t.Errorf("githubRedirect(%q) = nil, want refusal", raw)
 		}
 	}
 }
