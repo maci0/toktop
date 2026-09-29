@@ -13,6 +13,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- A release now ships the license text of every module the binary links, as
+  `toktop_<version>_licenses.txt` beside the SBOM. The SBOM records a license
+  identifier and nothing else, and MIT, BSD-3-Clause and Apache-2.0 each ask
+  the notice or the license itself to travel with the redistributed bytes.
+
 ### Security
 
 - A release download now refuses a port other than https's own. The GitHub

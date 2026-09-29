@@ -32,6 +32,16 @@ modernc.org/sqlite ships the SQLite sources in the public domain. Both are
 compatible with this repository's MIT license; the release SBOM records them per
 release (`make sbom`).
 
+The SBOM records a license identifier per module and nothing else, and MIT,
+BSD-3-Clause and Apache-2.0 each require the notice or the license itself to
+travel with redistributed bytes. So the texts ship too: `make licenses` copies
+each linked module's own license file out of the module cache into
+`dist/toktop_<version>_licenses.txt`, one section per module the built binary
+links, and `make release` publishes and checksums it like every other asset.
+The list is read from the build tags the binaries carry, so a module only the
+sqlite half links is covered, and a module whose directory holds no license
+file fails the target instead of shipping a section that says nothing.
+
 ## Go, never linked into a release binary
 
 | Module | License | Why it is here |

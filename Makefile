@@ -584,6 +584,63 @@ sbom: ## generate CycloneDX SBOM of all dependencies into dist/
 	$(GO) run $(SBOM_TOOL) \
 		mod -licenses -std -noserial -notimestamp -json -output $(DIST)/toktop-sbom-$(VERSION).cdx.json .
 
+# The names a dependency uses for its license text, in the order they are
+# preferred. A module that grants under a name not on this list ships no grant
+# with the binary, so the list is the whole of the search rather than the first
+# few names that happen to cover today's tree.
+LICENSE_FILES := LICENSE LICENSE.txt LICENSE.md LICENSE-APACHE LICENSE-MIT COPYING COPYING.txt NOTICE
+
+# The SBOM names a license identifier per module; it does not carry the text,
+# and MIT, BSD-3-Clause and Apache-2.0 each require the copyright notice or the
+# license itself to travel with the redistributed bytes. A bare binary is a
+# redistribution, so the texts ship next to it: one section per module whose
+# packages the binary links, copied out of the module cache, which is the file
+# that module was published with at the version go.mod pins. docs/DEPENDENCIES.md
+# records why the direct dependencies are here; this records the grants.
+#
+# The module list comes from the same build tags the binaries are built with, so
+# a module only the sqlite half links is not read out of go.mod by name. A
+# module whose directory holds no file on LICENSE_FILES fails the target rather
+# than shipping a section that says nothing: an unlocatable grant is the case
+# worth hearing about, and a section that admits it still lets the release go
+# out unlicensed.
+#
+# Named with the `$(BINARY)_` prefix so it rides the toktop_* glob into
+# checksums.txt and dist-clean's keep pattern like buildinfo does. buildinfo is
+# a prerequisite for the ordering, not for anything read here: test-dist opens
+# by deleting every `$(BINARY)_*` in dist/, so a licenses file written beside it
+# under `make -j` would be swept by the build it was meant to describe.
+.PHONY: licenses
+licenses: buildinfo ## write the license text of every module the binary links into dist/
+	@$(CHECK_VERSION)
+	@mkdir -p $(DIST)
+	@{ \
+		echo "$(BINARY) $(VERSION): third-party license texts"; \
+		echo; \
+		echo "One section per module whose packages this binary links, copied from that"; \
+		echo "module's own license file at the version go.mod pins."; \
+		echo; \
+		$(GO) list $(GOTAGS) -deps -f '{{if .Module}}{{.Module.Path}} {{.Module.Version}} {{.Module.Dir}}{{end}}' $(CMD) \
+			| sort -u | grep -v "^$$($(GO) list -m) " \
+			| while read -r path version dir; do \
+				text=""; \
+				for name in $(LICENSE_FILES); do \
+					if [ -f "$$dir/$$name" ]; then text="$$dir/$$name"; break; fi; \
+				done; \
+				if [ -z "$$text" ]; then \
+					echo "make licenses: $$path $$version ships no license file under $$dir (looked for $(LICENSE_FILES))" >&2; \
+					exit 1; \
+				fi; \
+				echo "================================================================"; \
+				echo "$$path $$version"; \
+				echo "================================================================"; \
+				cat "$$text"; \
+				echo; \
+			done; \
+	} > $(DIST)/$(BINARY)_$(VERSION)_licenses.txt
+	@test -s $(DIST)/$(BINARY)_$(VERSION)_licenses.txt || \
+		{ echo "make licenses: wrote no module sections; the module list came back empty" >&2; exit 1; }
+
 # -tests=true turns on vet's tests analyzer, which is off by default. It reads
 # the _test.go files for a Test/Fuzz/Benchmark/Example whose name and signature
 # do not match what `go test` runs: a mis-signed case is never executed and the
@@ -1332,7 +1389,7 @@ dist-clean: ## drop files in dist/ that this $(VERSION) does not publish
 # runs `sbom` first; run on its own, the glob matches nothing and the list is
 # the binaries alone.
 .PHONY: checksums
-checksums: sbom buildinfo ## checksum the dist/ binaries into a byte-reproducible tarball
+checksums: sbom buildinfo licenses ## checksum the dist/ binaries into a byte-reproducible tarball
 	@$(TAR) --sort=name --version >/dev/null 2>&1 || \
 		{ echo "$(TAR) rejects --sort: deterministic packaging needs GNU tar (install it as gtar)" >&2; exit 1; }
 	@cd $(DIST) && \
