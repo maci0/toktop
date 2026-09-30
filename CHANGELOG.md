@@ -13,71 +13,47 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
-### Changed
+## [0.23.0] - 2026-09-30
 
-- `--probe N` holds each engine to one probe every 10s, whatever N is. The
-  wave was bounded in shape (4 at a time, one per engine, 500ms apart) but
-  never in rate, so `--probe 1` re-ran the same wave every second: on an
-  endpoint that bills generations that is a per-second purchase nobody
-  asked for. `p` is unchanged and still probes on demand, and a manual press
-  arms the floor for the ticker behind it.
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.23.0).
 
-### Fixed
+### Breaking
 
-- A throughput reading that is not a finite number reads as no throughput
-  instead of reaching the frame. The collector clamped a rate against a counter
-  reset with `max(v, 0)`, which in Go returns NaN for a NaN and +Inf for an
-  infinity, and took the engine's own tok/s gauge with no check at all. Either
-  one poisons the smoothing and every sample derived from it after, and the JSON
-  report has no spelling for either, so one corrupt reading failed the whole
-  `--json` frame rather than the reading that produced it.
-- Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
-  stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
-  the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting
-  what `clock_gettime` handed it posted a `400` on the line naming it. A stream
-  is refused at its first bad event, so every line after the leap second in that
-  POST body was lost with it. It now lands on the following second, the minute
-  the leap second occupies. A second past 60 stays a `400`.
-- A rename that could not be made durable no longer reports as a write that
-  succeeded. `core.SyncDir` returned nothing, so a failed directory flush on the
-  self-update install and on the `known_hosts` store was dropped on the floor:
-  `toktop update` printed "Installed" for a rename a crash could still undo,
-  leaving the previous binary, and a store write claimed pins a crash could
-  take back. Both now name the path and the reason. Windows is unaffected: a
-  directory handle there cannot be synced and the platform journals the rename
-  itself, so there is no durability left to buy.
+- Five keys of the `--once --json` report were renamed, and the report's
+  `schema` field moved from `1` to `2`: `engines[].proc_rss_mb` is
+  `engines[].proc_rss_mib`, and in `system` the pairs `mem_total_mb` and
+  `mem_used_mb` are `mem_total_mib` and `mem_used_mib`, `swap_total_mb` and
+  `swap_used_mb` are `swap_total_mib` and `swap_used_mib`. The values did not
+  move: a MiB figure is still MiB, as the other `_mib` keys in the report and
+  the `proc_rss_mib` the typed report already published were, and the `_mb`
+  spelling is what disagreed with them. A consumer reading a renamed key
+  decodes a report with no error and reads zero, because the key it asked for
+  is not there and the one beside it is. Read the `schema` field first and
+  treat `2` as the `_mib` spelling, or read whichever key is present. No
+  other published field changed name, meaning or unit, and adding a field is
+  not a schema bump, so a consumer reading named fields needs no change for
+  anything else in this report.
 
-- A staging file that survives a *successful* write is now reported when it
-  cannot be removed, instead of only when the write failed. An install that
-  finds the release already installed returns without renaming, so the staged,
-  checksum-verified download is still sitting there, and a removal that failed
-  said nothing about it.
+- `agentusage.Definition` and `agentusage.Spec` now carry `UnmarshalJSON` and
+  `MarshalJSON`. A program that decoded or encoded either one through
+  `encoding/json` is unaffected, but a program that embedded one in a struct of
+  its own no longer decodes. A `UnmarshalJSON` on an embedded type is promoted
+  to the outer type, so `json.Unmarshal` into a `T` that embeds
+  `agentusage.Definition` calls `Definition`'s method with the whole document
+  and leaves every field of `T` beside it at its zero value. On an `agents.json`
+  entry those fields are where an entry's launch configuration is read into,
+  and the loss is quiet: the entry re-marshals with them, since `MarshalJSON`
+  writes the keys beside `usage` back out, so a read, edit and write cycle
+  drops a field no error names. Decode into a `Definition` and copy it into `T`
+  afterwards, or give `T` its own `UnmarshalJSON`; a program that reads and
+  writes the whole file should decode into `agentusage.Definitions`, which does
+  the split already. The method's doc comment now says so where a caller
+  embedding the type will read it.
 
-- `toktop update` no longer renames the displaced binary over an installed one
-  it could not stat. A `Stat` that failed for any reason other than "not
-  there" read as "not missing", so a binary behind a permission or an immutable
-  entry was replaced by a copy nobody had inspected; the reason is reported
-  instead.
-
-- A health probe whose answer never reached the prober leaves a line. The body
-  write was unchecked, so a peer that stopped reading produced a clean
-  transition with no trace on either side. Latched to one line per episode,
-  like the saturation crossing beside it.
-
-- A connect no longer clears a superseded `known_hosts` copy out from under a
-  write in flight. Every connect retries the removal, and it took the store's
-  locks around reading the store but not around the unlink, so a connect to a
-  second target could delete the displaced copy a concurrent rewrite of the same
-  store was relying on: `replaceFile` renames the store aside and puts it back
-  if the replacement cannot land, and the rollback copy was gone. The removal
-  now runs under the same store mutex and cross-process lock every other writer
-  takes, and re-checks the state under each.
-
-- A crush store handle the kernel did not take back is now logged, on its own
-  latch. The handle is opened on the poll path and its `Close` error was
-  dropped, so a descriptor the kernel refused to reclaim leaked one per project
-  per poll for the life of the dashboard and surfaced much later as an `EMFILE`
-  refusal against some other store.
+- `agentusage.Definition` gained the `Extra` field, so an unkeyed composite
+  literal of it (`agentusage.Definition{spec}`) no longer compiles. A keyed
+  literal, and every read of `Usage`, is unchanged.
 
 ### Added
 
@@ -113,6 +89,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   braille charts as dot-pattern noise, and giving up the live view. The live
   report scrolls normally rather than repainting an alternate screen, and
   `space`, `p` and `q` work as they do in the drawn frame.
+
 - `agentusage` names the pacer `Watcher.SetPacer` takes: `Pacer`, `Ticker`,
   `WallPacer`, `VirtualPacer` and `NewVirtualPacer`. The method took a type
   from `internal/core`, which a program outside this module cannot name, so
@@ -132,23 +109,28 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   exported, since the package is importable and the loop is its public entry
   point; the other three are set from the same process. Production is
   unchanged on `core.WallPacer`, and a nil pacer restores it.
+
 - The site bar links the closing section, `#measured`, beside the other five.
   A section reachable only by scrolling past everything else is a section the
   bar does not describe. The phone view already wrapped the link list to a
   second row, so the sixth label costs no extra line there.
+
 - A poll of an engine that answers and then keeps its body open no longer
   costs the full client timeout. The tail drain after a JSON decode was
   uncapped on the poll path, unlike the discovery drain, so an endpoint that
   never ends its body turned every poll into a 1.5s request, past the
   threshold that latches an engine as slow.
+
 - `toktop --once` in a terminal too short to lay the frame out now reads its
   width. One short dimension used to discard the terminal size entirely and
   render the 120-cell fallback into it, wrapping every row, where the help
   promises the terminal as the default for each of the two.
+
 - The live `--plain` report no longer advertises the `t` and `a` keys. The
   text report has no chart to retime and no panels to swap, so both changed
   nothing on screen, and `a` quietly disarmed `esc` while doing it. Pressing
   either now says so.
+
 - The `/v1/events` id ledger holds 7200 keys, which is 15 minutes at the 8 a
   second the cap is sized for. The README and `docs/openapi.yaml` said 4096
   in two places, so a sender sizing its retries from the spec was answered
@@ -226,43 +208,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   that answers for the authority an operator trusts, at a hop and an asset URL
   alike.
 
-### Breaking
-
-- Five keys of the `--once --json` report were renamed, and the report's
-  `schema` field moved from `1` to `2`: `engines[].proc_rss_mb` is
-  `engines[].proc_rss_mib`, and in `system` the pairs `mem_total_mb` and
-  `mem_used_mb` are `mem_total_mib` and `mem_used_mib`, `swap_total_mb` and
-  `swap_used_mb` are `swap_total_mib` and `swap_used_mib`. The values did not
-  move: a MiB figure is still MiB, as the other `_mib` keys in the report and
-  the `proc_rss_mib` the typed report already published were, and the `_mb`
-  spelling is what disagreed with them. A consumer reading a renamed key
-  decodes a report with no error and reads zero, because the key it asked for
-  is not there and the one beside it is. Read the `schema` field first and
-  treat `2` as the `_mib` spelling, or read whichever key is present. No
-  other published field changed name, meaning or unit, and adding a field is
-  not a schema bump, so a consumer reading named fields needs no change for
-  anything else in this report.
-
-- `agentusage.Definition` and `agentusage.Spec` now carry `UnmarshalJSON` and
-  `MarshalJSON`. A program that decoded or encoded either one through
-  `encoding/json` is unaffected, but a program that embedded one in a struct of
-  its own no longer decodes. A `UnmarshalJSON` on an embedded type is promoted
-  to the outer type, so `json.Unmarshal` into a `T` that embeds
-  `agentusage.Definition` calls `Definition`'s method with the whole document
-  and leaves every field of `T` beside it at its zero value. On an `agents.json`
-  entry those fields are where an entry's launch configuration is read into,
-  and the loss is quiet: the entry re-marshals with them, since `MarshalJSON`
-  writes the keys beside `usage` back out, so a read, edit and write cycle
-  drops a field no error names. Decode into a `Definition` and copy it into `T`
-  afterwards, or give `T` its own `UnmarshalJSON`; a program that reads and
-  writes the whole file should decode into `agentusage.Definitions`, which does
-  the split already. The method's doc comment now says so where a caller
-  embedding the type will read it.
-- `agentusage.Definition` gained the `Extra` field, so an unkeyed composite
-  literal of it (`agentusage.Definition{spec}`) no longer compiles. A keyed
-  literal, and every read of `Usage`, is unchanged.
-
 ### Changed
+
+- `--probe N` holds each engine to one probe every 10s, whatever N is. The
+  wave was bounded in shape (4 at a time, one per engine, 500ms apart) but
+  never in rate, so `--probe 1` re-ran the same wave every second: on an
+  endpoint that bills generations that is a per-second purchase nobody
+  asked for. `p` is unchanged and still probes on demand, and a manual press
+  arms the floor for the ticker behind it.
 
 - `--once --json` now always publishes `agent_rates`, as an empty array when
   no agent is in the window, like `engines`, `agents` and `probes` beside it.
@@ -319,6 +272,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `--help` Environment block, the `--bearer` warning and the `--once` frame
   size all read those tables rather than spelling the names again. No value
   read, and no default, changed.
+
 - The zsh and fish completion scripts are analyzed instead of only the bash one.
   `toktop completion zsh` and `toktop completion fish` each print a script a
   user's shell sources, and both shipped with nothing in the tree reading them:
@@ -326,10 +280,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   outright, and no gate noticed. shellcheck has no mode for either, so each is
   parsed by the shell that will source it, in `make check-shell` and on the
   Linux CI leg. `zsh` and `fish` are now prerequisites alongside `shellcheck`.
+
 - `toktop completion --help` says that its example paths are the directories a
   POSIX shell reads. The three published scripts are the same bytes on Windows
   and work under whatever bash, zsh or fish is installed there, but none of
   the example directories exists, and the screen named only those.
+
 - `agentusage.Watcher` now says what a consumer has to release, which is
   nothing. The type held no file handle between calls and `Run` started no
   goroutine of its own, so there is no `Close` to find and none was added, but
@@ -337,6 +293,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   consumer had to read the implementation to learn it. `Run`'s comment also
   spells out that it blocks the calling goroutine until its context is done,
   and reads the tail of the run on the way out.
+
 - A dashboard frame allocates about a fifth fewer objects, and the opencode
   usage query is no longer rebuilt on every poll. `lipgloss.Style.Render`
   resolves a foreground color against the active terminal profile on each
@@ -348,12 +305,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   source rebuilt its whole SQL statement (five `Sprintf` calls) per poll of per
   watcher, where the statement is one of a handful for the life of the
   process. Rendered bytes are unchanged.
+
 - Two files in this tree no gate read are read by one. The bash completion
   script `toktop completion bash` prints carried a `# shellcheck disable` for a
   rule nothing ever ran, which reads as a check that passed; the script is now
   generated from the flag set and run through shellcheck in `make check` and on
   the Linux CI leg. `docs/openapi.yaml`, the feed contract `internal/ingest`
   parses, joined the workflows in the yamllint run for the same reason.
+
 - A footer notice no longer takes the key list with it. On a pane too narrow
   for the full list and the notice together, every key, `q quit` and `? help`
   included, gave way for the length of the notice, so the key that did nothing
@@ -361,22 +320,26 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   and the gap between the two closes before the notice does; the notice itself
   is printed whole or not at all, since cut mid-sentence it stops answering
   the press it exists to answer.
+
 - A panel that drops rows counts them the same way everywhere. The agent table
   and the AGENT FEED stats spelled their overflow a bare `+3 more` beside
   engine columns spelling `+3 more (enlarge window)`, so one frame named the
   same overflow two ways and only one of them named the way out of it. All
   three take the marker from one place now.
+
 - A panel title too narrow for the count beside it keeps the count. The 31%
   `ENGINE STATE` takes on the 62-cell minimum dashboard is 15 cells, two short
   of the bare count on its usual two-cell gap, and the count was dropped whole
   there: a panel that silently drew fewer engines than the fleet has. The gap
   closes before the wording does, and the bare number is the last form.
+
 - Several per-poll paths stopped repeating work the frame or the poll had
   already done. A vendor GPU CLI's output is now parsed once per poll rather
   than twice (once to judge the output readable, once to report it), an
   amdgpu card's `product_name` is discovered with the card list instead of
   re-read and re-sanitized every interval, and a transcript read takes its
   64 KiB fill buffer from a pool instead of allocating one per file per poll.
+
 - The dashboard measures each rendered line once per frame rather than two or
   three times. Block padding re-walks a line whose width it just computed, the
   side-by-side join re-measures every row in the pass that only pads it, and
@@ -384,6 +347,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   separator) once per segment it dropped. The agent feed is also accounted
   once per snapshot instead of twice: the summary taken when the snapshot
   arrived is the one the frame is drawn from.
+
 - A relative `$XDG_CONFIG_HOME` now names the consequence that follows, since
   it is not the same for the three variables the rule covers. The warning ended
   "reading the default directory", which is true of `--opencode-db` and
@@ -396,21 +360,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
-- The `agentusage` transcript counter ceiling is now `core.MaxEventTokens`
-  rather than a second literal spelling of it. A counter read from a transcript
-  is carried into a `core.AgentEvent`, and `core.ClampEventTokens` drops
-  anything past *its* ceiling to zero, so raising one bound alone would let a
-  transcript line report a count the event boundary refuses to carry: the
-  tokens are counted in the totals and then dropped on the way into the feed.
-  The span ceiling beside it already read `core.MaxEventSpan` by reference;
-  the token one now does the same, and a test pins the two together.
-
-- The accelerator vendor names `GPUDevice.Vendor` draws from are named in
-  `core` (`VendorNvidia`, `VendorAMD`, `VendorIntel`, `VendorApple`) instead of
-  written out at each use. The parsers that produce a vendor, the sampler that
-  orders the panels by it, the renderer that shortens it and the remote reader
-  that keys drivers on it are four packages, and the published strings are
-  unchanged, so the `--json` and `--plain` reports read exactly as before.
+- A throughput reading that is not a finite number reads as no throughput
+  instead of reaching the frame. The collector clamped a rate against a counter
+  reset with `max(v, 0)`, which in Go returns NaN for a NaN and +Inf for an
+  infinity, and took the engine's own tok/s gauge with no check at all. Either
+  one poisons the smoothing and every sample derived from it after, and the JSON
+  report has no spelling for either, so one corrupt reading failed the whole
+  `--json` frame rather than the reading that produced it.
 
 - Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
   stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
@@ -419,6 +375,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   is refused at its first bad event, so every line after the leap second in that
   POST body was lost with it. It now lands on the following second, the minute
   the leap second occupies. A second past 60 stays a `400`.
+
 - A rename that could not be made durable no longer reports as a write that
   succeeded. `core.SyncDir` returned nothing, so a failed directory flush on the
   self-update install and on the `known_hosts` store was dropped on the floor:
@@ -445,11 +402,36 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   transition with no trace on either side. Latched to one line per episode,
   like the saturation crossing beside it.
 
+- A connect no longer clears a superseded `known_hosts` copy out from under a
+  write in flight. Every connect retries the removal, and it took the store's
+  locks around reading the store but not around the unlink, so a connect to a
+  second target could delete the displaced copy a concurrent rewrite of the same
+  store was relying on: `replaceFile` renames the store aside and puts it back
+  if the replacement cannot land, and the rollback copy was gone. The removal
+  now runs under the same store mutex and cross-process lock every other writer
+  takes, and re-checks the state under each.
+
 - A crush store handle the kernel did not take back is now logged, on its own
   latch. The handle is opened on the poll path and its `Close` error was
   dropped, so a descriptor the kernel refused to reclaim leaked one per project
   per poll for the life of the dashboard and surfaced much later as an `EMFILE`
   refusal against some other store.
+
+- The `agentusage` transcript counter ceiling is now `core.MaxEventTokens`
+  rather than a second literal spelling of it. A counter read from a transcript
+  is carried into a `core.AgentEvent`, and `core.ClampEventTokens` drops
+  anything past *its* ceiling to zero, so raising one bound alone would let a
+  transcript line report a count the event boundary refuses to carry: the
+  tokens are counted in the totals and then dropped on the way into the feed.
+  The span ceiling beside it already read `core.MaxEventSpan` by reference;
+  the token one now does the same, and a test pins the two together.
+
+- The accelerator vendor names `GPUDevice.Vendor` draws from are named in
+  `core` (`VendorNvidia`, `VendorAMD`, `VendorIntel`, `VendorApple`) instead of
+  written out at each use. The parsers that produce a vendor, the sampler that
+  orders the panels by it, the renderer that shortens it and the remote reader
+  that keys drivers on it are four packages, and the published strings are
+  unchanged, so the `--json` and `--plain` reports read exactly as before.
 
 - `agentusage.Delta.At` documented itself as the instant the current sample
   was read, "whether or not anything grew", which contradicts `Sample.At` on
@@ -459,6 +441,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   a field that advances only when the counters did. The field is documented as
   the current sample's `At` copied across, and a test pins both halves of the
   claim against a real watcher.
+
 - An audit line naming a store directory no longer spells out the account that
   owns `$HOME` when the directory's own spelling differs from the
   environment's. The slug of a working directory carries the account inside one
@@ -517,6 +500,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   under the bar itself on a phone. The bar wraps to two rows below 640px, so it
   is taller than the 4rem the anchor offset cleared, and the one line naming
   the section a reader had just chosen was the line the bar covered.
+
 - The AGENT FEED title spells a paused frame `‖ PAUSED`, the badge the header,
   the compact strip, the setup card and the plain report all print. It read
   `(paused)`, so one state had two spellings and the title's was the only one
@@ -533,6 +517,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   writes, then either the second blank or the binary-mode asterisk, then the
   name as the rest of the line. A carriage return left by a CRLF listing is no
   longer read as part of the name either.
+
 - A discovery probe no longer misses an engine because of the case of its
   needle. The body was folded to compare case-insensitively and the needle was
   not, so a needle spelled `VLLM` matched nothing in a body spelling it `vllm`
@@ -549,26 +534,31 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `TestOpenAPIVersionNamesTheReleaseItDescribes` in `internal/repogate` holds
   the field to the release the file's last change shipped in, so a contract
   change cannot move without it.
+
 - `IdentityFile none` in `~/.ssh/config` no longer breaks every connection to
   that host. It was read as a path, so the required key was a file named
   `none`, and the missing file aborted the auth chain with a key error naming
   a file nobody wrote. The keyword now turns the default `~/.ssh` identities
   off the way ssh does, and the agent is still tried.
+
 - `~/.ssh/config` values toktop does not act on are named in the audit log
   instead of passing silently: `Include`, whose files are not read, so a Host
   block in one of them steers nothing, and a relative `IdentityFile`, which
   resolves against the working directory rather than the config's own.
   `--ssh-key` still overrides the config's `none`.
+
 - A home directory that is not an absolute path no longer places `~/.ssh/config`
   and the default ssh keys under the working directory, where a missing config
   and a missing key are both silent. It names no path and says so once in the
   audit log, the rule the host-key store and the agent stores already followed.
+
 - An empty `--bearer` no longer reports overriding a bearer variable that
   holds only whitespace. `resolveBearer` skips such a value, so nothing was
   overridden; the warning read the variable untrimmed, named the fallback, and
   sent the operator after a chain that was never suppressed. It now reads the
   variables the way the chain does and names every one of them, so a third
   source added to the chain is named too.
+
 - A home directory reached with a different case is stripped again on macOS,
   so a note no longer carries the operator's account name. `RedactHome` folded
   case on the two platforms whose file systems look names up that way, and
@@ -576,32 +566,38 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   bytes on macOS. A working directory spelled `/users/dev/proj` under a home
   spelled `/Users/dev` came back `..`, the home was not stripped, and the note
   kept the path stripping it exists to remove.
+
 - The agent index cache is keyed by the directory the way every other
   directory comparison in `agentusage` is, so two spellings of one store on
   macOS or Windows no longer re-read `history.jsonl` and
   `last_conversations.json` on every poll.
+
 - The compact agent strip names an engine-routed agent where its rate would
   go, as the full row, the feed and the plain report already did. The strip
   printed both, so a run through a gateway read one agent's tokens twice at
   two rates, and the engine's own row counts them again: the one view a narrow
   pane falls back to was the only one that disagreed.
+
 - `span_ms` in the `--json` report is rounded rather than truncated. The
   schema defines zero as "the sender does not know the span", and
   `Duration.Milliseconds` truncates, so a locally produced span of a few
   hundred microseconds reached a report as that zero: `tok_per_s` could not be
   recomputed from the report's own `span_ms`. A negative span floors at zero
   rather than reporting one the model did not take.
+
 - The compact strip's overflow line spells `+N more` the way every other view
   does. It carried a fourth wording, "(enlarge window to view)", on a row with
   a line to itself, so the count a reader had to have was spelled differently
   in each layout; the marker now picks the longest form that fits, and takes
   the bare count when not even that does.
+
 - A store that stays in failure no longer has its outage re-announced. The
   latch table's sweep dropped the oldest key, which on a host with many long
   gone agent directories was the store that was failing right now, so its next
   poll opened a new outage and wrote the same line again. The sweep drops the
   oldest key that is not failing; every other entry is either failing too or
   has nothing left to lose.
+
 - A sweep that evicts more than one key from the outage latch table no longer
   evicts the caller's own key on the second pass. The index that keeps the
   caller's key out of the table was carried across the passes unchanged, so a
@@ -609,28 +605,34 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   place, and the new key was the only quiet one left. The caller got back a
   latch no table held, and every later failure of the same store read as a new
   outage and logged the same line again.
+
 - The release workflow's `contents: write` now sits on the job that publishes
   the release rather than on the workflow, so a job added beside it starts from
   the read-only default the rest of the repository's workflows use.
+
 - The PROBES heading no longer loses half of a measurement on a narrow pane.
   It printed `last 120ms 42.0 tok/s` and let the mid-row's clip cut it to
   `last 120ms 4…`, so the panel's own reading of the last probe was a number
   nobody could use. It now takes the longest spelling that fits, falling back
   to the rate alone, the way every other panel title already did.
+
 - An empty AGENT FEED no longer loses the instruction it carries. The advice
   names what to do in its second clause, and the narrowest legal pane clipped
   the sentence there, leaving `…are picked`. A pane too narrow for the sentence
   now gets a shorter spelling of the same advice, and the sentence a wider pane
   shows is unchanged.
+
 - Holding `p` no longer queues a probe generation per key repeat. Each dispatch
   is a real request on the engine, and the `probing…` badge on screen said the
   press went nowhere while the work still happened. A press while a probe is
   already running is answered on the footer instead of fired.
+
 - A probe against a reasoning model that answers 400 to any `temperature` but
   its own default (o1, o3, gpt-5 and the gateways in front of them) now lands on
   a request that caps the generation and names no sampling value, instead of
   failing every wave. The refusal walk covers that spelling too, and the shape
   that drops it is last, so no request an engine already accepted moves.
+
 - The sweep that clears `dist/` can no longer run beside the cross-build that
   fills it under `make -j`. `buildinfo` listed `dist-clean` and `test-dist` as
   siblings, which orders nothing: the two could delete a binary as it was
@@ -638,6 +640,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   ships. `.NOTPARALLEL` covered the `release` target's own prerequisites but
   not this pair. `dist-clean` is now reached through `test-dist`, which depends
   on it, so the ordering holds wherever the two meet.
+
 - The exported-surface gate on a tag push can no longer pass by comparing
   nothing. `make check-api` diffs what `agentusage` exports now against what it
   exported at the last tag, read from the commit before the one being cut. The
@@ -650,6 +653,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   admitting it. A repository's first commit still passes: it has no parent to
   compare against either way. `ALLOW_SHALLOW=1` overrides for a cut you accept
   going unchecked.
+
 - A prerelease can no longer carry a breaking change on a patch line. The
   changelog gate reads the version being cut and compares it with the release
   below it, refusing a `### Breaking` section under a patch bump, but it gave
@@ -660,17 +664,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   build suffix and compares what is left, which is the line a caller on
   0.18.2 is on. A prerelease of a minor (`0.19.0-rc.1`) is let through as
   before, since that is the bump the rule asks for anyway.
+
 - A tagged release no longer fails after it has published. The release job
   uploads every file in `dist/`, so the license text added beside the SBOM went
   up as an asset, and the restore drill that runs last compared the published
   list against an expected list that did not name it and called the file
   unexpected. The four non-platform assets are now named once and both the
   recipes that write them and `release-verify` read that one list.
+
 - A crush store whose sessions total more token counters are meant to hold now
   reads as enormous rather than as nothing. The reading was refused outright,
   and since the store is re-read from the attach instant on every poll, the same
   refusal came back each time and the agent reported nothing for as long as the
   rows stood.
+
 - A remote command's failure is now classifiable again. Folding the peer
   account's home directory out of the text a remote run produced rebuilt the
   error from that string, which dropped the cause with it: an `ssh.ExitError`,
@@ -679,6 +686,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   was reachable only by matching words in text that had itself been rebuilt
   from text. The fold is a wrapper now, so `errors.Is` and `errors.As` reach
   the cause while the rendered text stays folded.
+
 - A forwarded port whose listener cannot accept no longer spins at ten
   wakeups a second for the life of the connection. The gap between attempts
   grows, with jitter so several ports failing on one system condition do not
@@ -686,12 +694,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   line also carries how many accepts have failed back to back, since the
   throttle means a port that stays down says one line and then nothing: a
   count climbing into the thousands is a port that is not coming back.
+
 - Polling an engine that answers with an error status no longer pays a fresh
   TCP handshake on every poll. The status is turned into a message read from
   a snippet of the body, and closing the body there sent the connection to
   TIME_WAIT instead of the idle pool, so the paths a struggling engine takes
   most were the ones that could not reuse a socket. The body is now drained
   before it is closed, on both the provider and the probe path.
+
 - An ingest request whose body fails to arrive now says so in the audit log.
   A body that stopped mid-transfer reached both the sender and the log as the
   same text as a sender that sent malformed JSON, because the sender-facing
@@ -699,33 +709,39 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   or cancelled read is now recorded as a body error; a payload the JSON
   decoder classified itself is still reported as a payload error, since its
   message already names the field or offset the sender needs.
+
 - An ssh_config `Host` block written for a name with an accent now matches
   that host. `?` matched one byte rather than one character, so `Host cafe?`
   stopped inside the last rune of "café" and reported no match, and the block's
   HostName, User, Port and IdentityFile never applied. That block is what
   decides which machine toktop dials and whose key it pins, so a non-ASCII
   host name silently reached for the wrong host.
+
 - An engine can no longer advertise a capability by embedding a probe's needle
   inside a different word. The word-boundary test read every byte at or above
   0x80 as a boundary, on the stated assumption that the body's non-ASCII
   letters had been folded onto ASCII. FoldASCII folds A-Z only, so a body of
   "йeep-alive" contained the whole word "eep". Boundaries are now decided on
   the decoded character.
+
 - A CPU model and an OS name written in a non-UTF-8 byte are no longer
   mangled. Both come from firmware or from a distribution's build, the same
   class of source the device-tree model beside them already handled, but both
   reached the system panel as raw bytes. A byte the panel cannot decode was
   then dropped one at a time by the sanitizer, so the name lost characters; it
   is now replaced once, as U+FFFD, at the read.
+
 - An engine naming itself with the same word as its kind no longer prints that
   name twice. The label and the kind badge are compared in both normalization
   forms, so "café" spelled NFD and spelled NFC are one word, matching how the
   model name is composed at its own boundary.
+
 - The site's failure bodies are whole lines again. A `405`, a `406` and a `500`
   answered a bare reason with no newline while an asset `404` and `502` ended
   one, so a client reading a failure the way it reads `/health` got a truncated
   reason on one status and a whole one on another. Every one of them ends in a
   newline now, the shape `ok` is answered in.
+
 - `docs/openapi.yaml` accepts `X-Request-Id` on `/healthz`. The server has
   echoed a caller's id on the probe and on every rejection since the header
   landed, but only the POST declared it as a request parameter, so a client
@@ -739,10 +755,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   of the process, behind a published text already bounded to a snippet. The
   memo is keyed on a digest of the error now, so a repeat is still answered
   from memory and the retained state is the same size whatever the peer sent.
+
 - A throughput rate under a thousand no longer renders with a `k`: 999.5 tok/s
   printed `1.0k tok/s`, the same spelling as 1000. The k starts at a whole
   thousand, the way a count's does, so the two scales agree on where the unit
   changes.
+
 - A recovered host-key store no longer keeps the marks that said it was
   recovered. The staging file or displaced copy a killed write leaves is what
   tells an interrupted write apart from a store an operator deleted to re-pin
@@ -752,11 +770,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   rejected, for as long as the mark survived, which is a day at the earliest.
   A restore now spends the marks it acted on, so a new killed write is the
   only thing that recovers a store again, on its own evidence.
+
 - The site's `unhandled` line carries the stack behind the throw, folded onto
   the one JSON object Workers Logs reads. A throw that reached the top of
   `fetch` is the one failure on the site nobody can reproduce: the request
   belongs to a visitor and the isolate is gone by the time the line is read, so
   a message alone named neither the call nor the deploy it came from.
+
 - `toktop --help` names `$TOKTOP_SCREENSHOT_FONT`, the one variable the binary
   recognizes but never reads: the typo warning exempts it, so the screen that
   lists what a run honors said nothing about the name it exempts.
@@ -764,6 +784,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   trimmed, so `export TOKTOP_SCREENSHOT_FONT=$(cat font.path)` no longer fails
   on a file that is there, and it names the path a face fails to open from
   rather than answering an unreadable font with a traceback.
+
 - `--demo` keeps the header clock on the simulated timeline. The clock is
   ticked by a wall-clock timer, so one second after launch it read a year the
   frames under it did not: `--origin` pinned the fleet, the agent watcher and
@@ -771,6 +792,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   demo source's own instant, so a run captured from two machines renders the
   same bytes and the notice and probe timers expire against the same clock the
   frame they clear belongs to.
+
 - `POST /v1/events` gave the two spellings of `-9223372036854775808`
   different answers. The integer form is inside the int64 range, so it clamped
   to `0`; the whole-float form parsed through a float64, which rounds that
@@ -778,10 +800,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   range. A float branch now reads the exact value back from the text, so
   `-9223372036854775808.0` and `-9223372036854775809.0` answer what the
   integer beside them answers. `span_ms` shares the reader.
+
 - `agentusage.UnknownUsageKeys` kept naming the unknown `usage` keys of an
   earlier definitions file after a load of a path with no file at it. A
   missing file is not a refused one, so the load now clears the answer, as
   the doc already said it would.
+
 - `agentusage.Definitions` keeps the keys of an entry beside its `usage`
   block, so a program that reads an `agents.json` and writes it back no longer
   deletes the launch configuration they carry. The doc comment promised a
@@ -791,6 +815,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   file spelled them with, and a write puts them back. A `usage` value that is
   present but is not an object is refused rather than read as no spec, which
   is the same treatment a `null` entry already got.
+
 - An `agentusage.Spec` no longer reports a `Suffix` that nothing will read,
   on the way in or the way out. A file spelling both `suffix` and `suffixes`
   has always meant the list, and the adapter read it that way, so a program
@@ -800,12 +825,14 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   encoding writes the settled form, so the file a program writes names the one
   field in force. A padded `suffix` is trimmed for the same reason: that is
   also the value the adapter uses.
+
 - `agentusage.Discover` reports processes in ascending pid order on macOS as
   well as Linux. The doc promised one order for every platform, and only the
   `/proc` reader kept it: `ps` orders by its own defaults, so a macOS caller
   listing agents read an order the contract did not name. Both readers sort
   through one function now, and the assertion moved out of the Linux-only
   test file so it covers every platform the package builds for.
+
 - `make site-rollback` and `make site-deploy` cleared the rolled-back record
   with `rmdir`, which cannot remove a marker directory that still holds the
   manifest a previous rollback wrote into it. The `rmdir` failed, was
@@ -814,22 +841,27 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   the version that was undone stopped being readable at the path the docs
   name. Both targets remove the directory instead, so the record is replaced
   rather than buried.
+
 - A remote target can no longer exhaust memory through its own stdout. The
   peer's answer to a discovery sweep or a vitals poll landed in an unbounded
   buffer, so a host that streamed for the length of the command exhausted the
   dashboard. Output is capped at 16 MiB and an over-long answer is an error
   rather than a truncated process list that reads as the real one.
+
 - `toktop update` no longer widens the installed binary's permissions. A
   binary installed `0700` or `0750` came back world-readable and
   world-executable after an update, silently. The replacement now carries the
   mode already on disk forward.
+
 - Update recovery refuses to promote anything but a regular file onto the
   install path. That path runs before the download and the checksum, so a
   symlink or directory left at the displaced name is now an error rather than
   an executable.
+
 - An ingest event's `note` is capped before the path walk that shortens it, not
   after. A note the length of a full request body cost hundreds of path
   resolutions per event on an endpoint that accepts unauthenticated posts.
+
 - Two `toktop update` runs no longer race each other into a lost or missing
   binary. An operator whose first run reported a network failure re-runs it in
   a second terminal, and a dashboard's own watch makes the replacement visible
@@ -847,6 +879,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   lock that cannot be taken because the directory is unwritable falls through
   to the install, which fails on its own with a clearer error, and a lock that
   cannot be released is reported rather than dropped.
+
 - The known-hosts recovery hint is now a command the operator's own shell can
   run. It spelled a POSIX `cp` on every platform, so on Windows it named a
   command that does not exist there, and on both platforms a home directory
@@ -854,6 +887,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   to `/home/a`. The Windows hint is `Copy-Item -LiteralPath ... -Force`, which
   also stops a directory named `a[b]` being read as a wildcard. A path holding
   a quote, a `$()` or a `&` is quoted for the shell it is printed into.
+
 - The remote process sweep no longer reports a clipped command line as
   garbage. The sweep's cut is a byte cut, so the last character of a truncated
   line could be the leading bytes of a multi-byte one: a process whose
@@ -863,6 +897,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   it, and half a character is not, so the same process could be matched under
   one spelling on the far side of a case fold and another on this side. The
   partial character is now dropped, as every other ill-formed byte is.
+
 - The site measures how long an edge request took on a monotonic clock.
   `Date.now()` was the reading, and the runtime freezes it across a
   synchronous stretch and advances it only at I/O, so a request that spent its
@@ -872,6 +907,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   keeps running across those waits and cannot step backwards the way a wall
   clock can, so the header stops needing its clamp against a negative reading
   too. Fractional milliseconds are rounded, the header being an integer.
+
 - The site's sticky bar and its code blocks now have a 3:1 edge. Both took
   `--line`, which sits at 1.3:1 against `--bg`: nothing separated the bar from
   the section passing behind it, and a code block's border was the only cue
@@ -880,6 +916,7 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   bar, and a reader who tabbed into a code block could not tell it from a
   clipped one. Both take `--fg` for the reason `kbd` already did: `--fg` names
   a boundary, `--line` divides the page.
+
 - A host key store removed by something other than toktop is now said so. The
   store's absence is the gesture that re-pins a host on purpose, so nothing
   logged it, and a store dropped by a config reset or a cleanup script was
@@ -888,11 +925,13 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   that every pin it held is dropped, names the copy, and prints the `cp` that
   puts it back. The copy is still not read back, since that is what undoing the
   re-pin gesture means.
+
 - A zero-length `toktop.exe.old` is no longer moved onto the install path. It
   is not a binary any platform can run, so promoting it left a host that could
   not execute the update meant to repair it, the state the restore exists to
   end. The file is left where it is and the checksummed download is installed
   over the missing path instead.
+
 - A `known_hosts.displaced` left behind by a write that landed is now removed
   by the next connect. It holds the pins from before a write the store already
   carries, so beside a store that is there it recovers nothing, while its name
@@ -900,45 +939,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   new key then read as a loss, and the rejected key was handed back and the
   connect refused. A store that is missing keeps the copy, since a restore is
   what reads it then.
-
-- Ingest `ts` takes the leap second `23:59:60` instead of refusing it. The
-  stamp is one RFC 3339 spells and `time.Parse` rejects, and a host stepped into
-  the leap second (`adjtimex` `STA_INSLEEP`) reports it, so a sender formatting
-  what `clock_gettime` handed it posted a `400` on the line naming it. A stream
-  is refused at its first bad event, so every line after the leap second in that
-  POST body was lost with it. It now lands on the following second, the minute
-  the leap second occupies. A second past 60 stays a `400`.
-- A rename that could not be made durable no longer reports as a write that
-  succeeded. `core.SyncDir` returned nothing, so a failed directory flush on the
-  self-update install and on the `known_hosts` store was dropped on the floor:
-  `toktop update` printed "Installed" for a rename a crash could still undo,
-  leaving the previous binary, and a store write claimed pins a crash could
-  take back. Both now name the path and the reason. Windows is unaffected: a
-  directory handle there cannot be synced and the platform journals the rename
-  itself, so there is no durability left to buy.
-
-- A staging file that survives a *successful* write is now reported when it
-  cannot be removed, instead of only when the write failed. An install that
-  finds the release already installed returns without renaming, so the staged,
-  checksum-verified download is still sitting there, and a removal that failed
-  said nothing about it.
-
-- `toktop update` no longer renames the displaced binary over an installed one
-  it could not stat. A `Stat` that failed for any reason other than "not
-  there" read as "not missing", so a binary behind a permission or an immutable
-  entry was replaced by a copy nobody had inspected; the reason is reported
-  instead.
-
-- A health probe whose answer never reached the prober leaves a line. The body
-  write was unchecked, so a peer that stopped reading produced a clean
-  transition with no trace on either side. Latched to one line per episode,
-  like the saturation crossing beside it.
-
-- A crush store handle the kernel did not take back is now logged, on its own
-  latch. The handle is opened on the poll path and its `Close` error was
-  dropped, so a descriptor the kernel refused to reclaim leaked one per project
-  per poll for the life of the dashboard and surfaced much later as an `EMFILE`
-  refusal against some other store.
 
 - A crush session row whose token columns hold something other than an integer
   no longer blinds the whole store. SQLite gives a column the storage class of
@@ -3618,7 +3618,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/maci0/toktop/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/maci0/toktop/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/maci0/toktop/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/maci0/toktop/compare/v0.19.0...v0.20.0
