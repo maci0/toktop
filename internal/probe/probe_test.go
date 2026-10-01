@@ -1,6 +1,7 @@
 package probe
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -756,9 +757,39 @@ func TestRunNamesTheOversizedFrame(t *testing.T) {
 		if strings.Contains(s.Err, "bufio") {
 			t.Errorf("%s: err = %q, want the engine's behaviour named, not the reader's", tc.kind, s.Err)
 		}
-		if !strings.Contains(s.Err, "16384") {
-			t.Errorf("%s: err = %q, want the frame limit (%d) named", tc.kind, s.Err, probeLineMax)
+		// Both numbers the operator is told belong in the sentence: the
+		// token cap the engine ignored, and the frame limit it blew past.
+		// Built from the constants so a retune of either cannot leave the
+		// test asserting a stale diagnosis that no code path emits.
+		want := fmt.Sprintf("%d-token cap", probeTokens)
+		if !strings.Contains(s.Err, want) {
+			t.Errorf("%s: err = %q, want the ignored token cap named (%q)", tc.kind, s.Err, want)
 		}
+		want = fmt.Sprintf("over %d bytes", probeLineMax)
+		if !strings.Contains(s.Err, want) {
+			t.Errorf("%s: err = %q, want the frame limit named (%q)", tc.kind, s.Err, want)
+		}
+	}
+}
+
+// The rewrite is scoped to the one scanner failure it names. Any other reader
+// error is an engine message or a transport failure that already says
+// something useful, and rewriting it would throw away what it said. These pin
+// the pass-through: a diagnosis that swallowed a real error text would leave an
+// operator with neither the engine's words nor the shape of the failure.
+func TestScanErrPassesEveryOtherErrorThrough(t *testing.T) {
+	for _, err := range []error{
+		errors.New("engine ignored the request"),
+		errors.New("token budget exhausted"), // the client hung up, not the reader
+		errors.New("EOF"),
+		bufio.ErrInvalidUnreadByte,
+	} {
+		if got := scanErr(err); got != err {
+			t.Errorf("scanErr(%q) = %q, want the error passed through unchanged", err, got)
+		}
+	}
+	if got := scanErr(nil); got != nil {
+		t.Errorf("scanErr(nil) = %v, want nil", got)
 	}
 }
 

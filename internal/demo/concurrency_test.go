@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -20,6 +21,30 @@ func TestConcurrentFramesProbesAndEvents(t *testing.T) {
 	ch := make(chan core.Snapshot, 4)
 	done := make(chan struct{})
 	go func() { defer close(done); s.Run(ctx, ch) }()
+
+	// The drainer runs from the start, and the writers below do not begin
+	// until the run has published a frame. Started after the writers, it
+	// left Run parked on a full channel with the ctx that unparks it
+	// already cancelled: the writers finished in microseconds, filled the
+	// four-slot buffer, and Run waited out the whole race on ctx.Done()
+	// instead of reading the state they were mutating. The test passed, and
+	// the -race overlap it exists for never happened.
+	var frames atomic.Int64
+	firstFrame := make(chan struct{})
+	go func() {
+		for range ch {
+			if frames.Add(1) == 1 {
+				close(firstFrame)
+			}
+		}
+	}()
+	select {
+	case <-firstFrame:
+	case <-time.After(10 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("Run published no frame; the calls below would race an idle loop")
+	}
 
 	var wg sync.WaitGroup
 	for w := range 8 {
@@ -43,4 +68,7 @@ func TestConcurrentFramesProbesAndEvents(t *testing.T) {
 		}
 	}()
 	<-done
+	if frames.Load() < 2 {
+		t.Fatal("the run published no frame while the writers were calling in: they shared no state with the run they were racing")
+	}
 }

@@ -41,11 +41,30 @@ func TestConcurrentEmitRecordProbeClock(t *testing.T) {
 	// pass, because nothing here asserts that the collector did any work.
 	// Run does not close out, so the counter is read, not waited on.
 	var frames atomic.Int64
+	firstFrame := make(chan struct{})
 	go func() {
 		for range out {
-			frames.Add(1)
+			if frames.Add(1) == 1 {
+				close(firstFrame)
+			}
 		}
 	}()
+	// The writers below are fast (4000 calls to a lock-taking method) and Run
+	// is not: it starts the process poller, takes a cold host-vitals sample and
+	// then polls three unreachable providers, each bounded by PollTimeout,
+	// before its first emit reaches out. On a fast host the writers finished
+	// first, ctx was cancelled inside the very poll that was building frame
+	// zero, and the assertion below read a collector that had provably done
+	// no work because it had not started. Waiting for the run's own first
+	// frame here makes the race the test is about the only thing in flight:
+	// from here on the writers overlap a live emit loop.
+	select {
+	case <-firstFrame:
+	case <-time.After(10 * time.Second):
+		cancel()
+		<-done
+		t.Fatal("Run published no frame; the calls below would race an idle loop")
+	}
 
 	var wg sync.WaitGroup
 	for w := range 8 {
