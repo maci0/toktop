@@ -2,7 +2,9 @@ package ui
 
 import (
 	"fmt"
+	"maps"
 	"math"
+	"math/rand"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -666,6 +668,42 @@ func TestCompressSeriesSumsAcrossEngines(t *testing.T) {
 	grid, _ := compressSeries(tv, 24, compressBlock)
 	if got := grid[len(grid)-1]; got != 300 {
 		t.Fatalf("newest column = %v, want 300 (engines sum, not average)", got)
+	}
+}
+
+// The grid is a function of the samples, not of the order they arrive in.
+// timedSeries stopped sorting its series and hands the axis to
+// compressSeriesOpts as a value, so this is the invariant that lets it: every
+// sample is placed by its own timestamp, so a permuted series must draw an
+// identical chart. A regression that reintroduced a positional read of the
+// series — the axis read back off its last element, as it used to be — would
+// stand the whole series against the wrong window here.
+func TestCompressSeriesIgnoresSampleOrder(t *testing.T) {
+	end := time.Unix(1_000_000_000, 0)
+	tv := []timedVal{
+		{at: end.Add(-90 * time.Second), rate: 5, engine: 0},
+		{at: end.Add(-45 * time.Second), rate: 40, engine: 1},
+		{at: end.Add(-29 * time.Second), rate: 300, engine: 0},
+		{at: end.Add(-time.Second), rate: 100, engine: 1},
+		{at: end.Add(-time.Second), rate: 200, engine: 0},
+	}
+	want, wantBounds := compressSeries(tv, 24, compressBlock)
+	rng := rand.New(rand.NewSource(1))
+	for trial := 0; trial < 50; trial++ {
+		shuffled := slices.Clone(tv)
+		rng.Shuffle(len(shuffled), func(i, j int) {
+			shuffled[i], shuffled[j] = shuffled[j], shuffled[i]
+		})
+		got, bounds := compressSeries(shuffled, 24, compressBlock)
+		for i := range want {
+			if math.Abs(got[i]-want[i]) > 1e-9 {
+				t.Fatalf("trial %d column %d = %v, want %v: sample order changed the grid",
+					trial, i, got[i], want[i])
+			}
+		}
+		if !maps.Equal(bounds, wantBounds) {
+			t.Fatalf("trial %d bounds = %v, want %v", trial, bounds, wantBounds)
+		}
 	}
 }
 

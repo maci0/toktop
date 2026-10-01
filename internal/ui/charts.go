@@ -6,7 +6,6 @@ package ui
 import (
 	"math"
 	"math/bits"
-	"slices"
 	"sort"
 	"time"
 
@@ -58,7 +57,8 @@ func (m Model) rateSeries(w int, cadence time.Duration, out bool) ([]float64, ma
 	if !m.chartCompressed {
 		return aggHist(m.snap, out, w, cadence), nil
 	}
-	vals, bounds := compressSeries(timedSeries(m.snap, out, cadence), w, compressBlock)
+	tv := timedSeries(m.snap, out, cadence)
+	vals, bounds := compressSeriesOpts(tv, newestOf(tv), w, compressBlock, true)
 	return vals, bounds
 }
 
@@ -68,7 +68,8 @@ func (m Model) rateValues(w int, cadence time.Duration, out bool) []float64 {
 	if !m.chartCompressed {
 		return aggHist(m.snap, out, w, cadence)
 	}
-	vals, _ := compressSeriesOpts(timedSeries(m.snap, out, cadence), w, compressBlock, false)
+	tv := timedSeries(m.snap, out, cadence)
+	vals, _ := compressSeriesOpts(tv, newestOf(tv), w, compressBlock, false)
 	return vals
 }
 
@@ -128,6 +129,19 @@ type timedVal struct {
 	engine int
 }
 
+// newestOf is the newest instant a series carries. timedSeries computes the
+// same value while it builds the slice; this is for the callers that hold a
+// series the frame did not build, so the axis is derived the same way in both.
+func newestOf(tv []timedVal) time.Time {
+	var out time.Time
+	for _, v := range tv {
+		if v.at.After(out) {
+			out = v.at
+		}
+	}
+	return out
+}
+
 // historyOf is one provider's rate history and its stamps for a direction:
 // the output series or the prompt series. aggHist and timedSeries both pick
 // their half through it, so the two cannot name opposite halves for the same
@@ -172,6 +186,18 @@ func lastSampleTime(ts []time.Time, n int) time.Time {
 //
 // The slice is pre-sized: the caller replays this every frame, and growing
 // it from nil reallocated per provider row.
+//
+// The result is in no particular order, and its only consumer leaves it that
+// way on purpose. compressSeriesOpts sums each sample into a per-engine
+// bucket chosen from that sample's own timestamp, so the grid is a function
+// of the multiset of samples, not of the order they arrived in; the one thing
+// it read positionally was the newest instant, which it now takes as a
+// maximum over the whole slice. This used to sort the series first to put
+// that instant last: an O(n log n) comparison sort of a 32-byte record on
+// both charts of every frame, about 60us of each chart's budget at 720
+// samples, to guarantee an ordering no reader depended on. The samples still
+// carry their own stamps and the charts still place each sample where it was
+// measured.
 func timedSeries(s core.Snapshot, out bool, cadence time.Duration) []timedVal {
 	n := 0
 	for i := range s.Providers {
@@ -210,13 +236,15 @@ func timedSeries(s core.Snapshot, out bool, cadence time.Duration) []timedVal {
 			}
 		}
 		if nonzero {
+			// The dense grid is cadence-spaced from end, so its last sample
+			// lands exactly on end and the max above already covers every
+			// sample appended here. Nothing below re-derives it.
 			start := end.Add(-time.Duration(n-1) * cadence)
 			for j, v := range hist {
 				tv = append(tv, timedVal{at: start.Add(time.Duration(j) * cadence), rate: v, engine: engine})
 			}
 		}
 	}
-	slices.SortFunc(tv, func(a, b timedVal) int { return a.at.Compare(b.at) })
 	return tv
 }
 
@@ -233,18 +261,23 @@ func timedSeries(s core.Snapshot, out bool, cadence time.Duration) []timedVal {
 // sample count instead would scale the chart down by the engine count and
 // make the two timescale modes disagree about what a column means.
 func compressSeries(tv []timedVal, w, block int) ([]float64, map[int]bool) {
-	return compressSeriesOpts(tv, w, block, true)
+	return compressSeriesOpts(tv, newestOf(tv), w, block, true)
 }
 
 // compressSeriesOpts is compressSeries with the grid boundaries made optional.
 // Building them is a map insert per compressBlock columns; a caller that draws
 // on another chart's grid discards them, and the second chart of a frame is
 // exactly that caller.
-func compressSeriesOpts(tv []timedVal, w, block int, wantBounds bool) ([]float64, map[int]bool) {
-	if len(tv) == 0 || w <= 0 || block <= 0 {
+//
+// end is the newest instant in tv, passed in rather than read off the slice.
+// It used to be tv[len(tv)-1].at, which pinned the whole grid to the slice
+// being sorted and nothing else: it is the only positional read here, so
+// taking it as a value is what lets the series arrive in whatever order its
+// sources produced. Every sample below is placed by its own timestamp.
+func compressSeriesOpts(tv []timedVal, end time.Time, w, block int, wantBounds bool) ([]float64, map[int]bool) {
+	if len(tv) == 0 || w <= 0 || block <= 0 || end.IsZero() {
 		return nil, nil
 	}
-	end := tv[len(tv)-1].at
 	// cum[j] is the age of bucket j's newest edge, cum[0] = 0. It is built
 	// in one pass rather than through a separate spans slice: the per-column
 	// span has no other reader, and materializing it cost a second w-sized

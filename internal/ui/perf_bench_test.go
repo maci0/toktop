@@ -114,6 +114,18 @@ var allocBudget = map[[2]int]float64{
 // the terminal. Per frame at 200x50:
 //
 //	after   11.3M instructions,  2.2M branches, 3.1k allocs (~2.9ms)
+//
+// The last step stopped timedSeries sorting the 720-sample series on both
+// charts of every frame. The sort existed only to put the newest instant last
+// for compressSeriesOpts to read, which was the sole positional read in the
+// bucketing; the axis now arrives as a value and every sample is placed by its
+// own timestamp, so the series needs no order at all. The frame path lost no
+// allocations (the series slice was already built and reserved); it lost the
+// comparison sort's swaps and branches, about 24% of the frame's
+// instructions:
+//
+//	before  8.4M instructions, 1.66M branches
+//	after   6.4M instructions, 1.31M branches
 func TestStaticFrameAllocBudget(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.Ascii)
