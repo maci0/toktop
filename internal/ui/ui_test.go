@@ -440,10 +440,10 @@ func TestProcLineCtxCountFitsInt64(t *testing.T) {
 	}))
 	// 1<<63 token counts: a scan for a minus sign anywhere in the row would
 	// also fire on a model name like llama-3, and a wrapping conversion lands
-	// on 1<<63/1e9 = 9.2M rather than the true 9.2T. The G tier carries it;
+	// on 1<<63/1e9 = 9.2M rather than the true 9.2T. The T tier carries it;
 	// the M form used to print "9223372036854.8M", a count two units below
 	// what its own suffix named.
-	const want = "9223372036.9G"
+	const want = "9223372.0T"
 	if !strings.Contains(got, want) {
 		t.Fatalf("ctx = %q, want the unsigned 1<<63 token count %q", got, want)
 	}

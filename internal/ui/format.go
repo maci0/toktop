@@ -58,6 +58,13 @@ const (
 	rateNoDecimal  = 10000
 	countNoDecimal = 1000000
 	gigaNoDecimal  = 1000000000
+	// teraNoDecimal is the same step one tier further up, and it is not
+	// hypothetical: core.MaxEventTokens (1<<40, the ceiling both event
+	// producers clamp to and every retained sum saturates at) is a magnitude
+	// the G form cannot name. A window that saturated printed "1000000.0G",
+	// so the ladder stopped a magnitude one tier too low and named the next
+	// one instead.
+	teraNoDecimal = 1000000000000
 )
 
 // The k suffix starts at a whole thousand, the same place fmtCount starts
@@ -72,6 +79,13 @@ func fmtRate(v float64) string {
 	}
 	k := v / 1000
 	switch {
+	case k/1000/1000 >= unitRound:
+		// The same overflow one tier further up, for the same reason the G arm
+		// exists at all: a rate that saturates (a sender claiming more tokens
+		// than core.MaxEventTokens over a one-millisecond span is a rate of
+		// 10^15) printed "1000000.0G", the G form naming a magnitude it
+		// cannot hold.
+		return fmt.Sprintf("%.1fT", k/1000/1000/1000)
 	case k/1000 >= unitRound:
 		// Past this point the M form cannot hold the value either, for the
 		// same reason the k form cannot: "%.1f" of 999.95 prints 1000.0, so a
@@ -102,6 +116,16 @@ func fmtRate(v float64) string {
 func fmtCount(n int64) string {
 	k := float64(n) / 1000
 	switch {
+	case n >= teraNoDecimal || k/1000/1000 >= unitRound:
+		// The T tier, for the reason humanBytes has one: a session total that
+		// saturated at core.MaxEventTokens (1<<40) printed "1000000.0G", which
+		// is the same overflow the G arm below was added to stop, one tier up.
+		// The count comparison is on n, the exact int64, because
+		// teraNoDecimal is an exact integer boundary and n carries the whole
+		// value up to 2^53; the scaled comparison covers a count past 2^53,
+		// where k/1000/1000 still orders the value correctly even though the
+		// last division has lost the low digits.
+		return fmt.Sprintf("%.1fT", k/1000/1000/1000)
 	case n >= gigaNoDecimal || k/1000 >= unitRound:
 		// The same overflow the M arm below is guarded against, one tier up:
 		// a session total past a billion tokens printed "1000.0M", which is

@@ -228,10 +228,17 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 		{999949000, "999.9M"},
 		{999950000, "1.0G"},
 		{1500000000, "1.5G"},
+		// The G form runs out of digits at 999.95G on the same schedule the
+		// k and M forms do. A window that saturated at core.MaxEventTokens
+		// holds 2^40 tokens, one tenth of a tera: it printed "1000000.0G",
+		// a count one tier short of the magnitude it named.
+		{999949000000, "999.9G"},
+		{999950000000, "1.0T"},
+		{1500000000000, "1.5T"},
 		// core.MaxEventTokens is the ceiling every producer clamps a
 		// counter to, so this is the largest a retained event can carry:
 		// it must still name its own magnitude.
-		{core.MaxEventTokens, "1099.5G"},
+		{core.MaxEventTokens, "1.1T"},
 	}
 	for _, tc := range counts {
 		if got := fmtCount(tc.n); got != tc.want {
@@ -263,6 +270,12 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 		{999949000, "999.9M"},
 		{999950000, "1.0G"},
 		{2500000000, "2.5G"},
+		// And again one tier further up. A sender claiming MaxEventTokens
+		// tokens across a one-millisecond span is a rate of 10^15, which the
+		// G form printed as "1000000.0G".
+		{999949000000, "999.9G"},
+		{999950000000, "1.0T"},
+		{2500000000000, "2.5T"},
 	}
 	for _, tc := range rates {
 		if got := fmtRate(tc.v); got != tc.want {

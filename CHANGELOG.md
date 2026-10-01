@@ -129,6 +129,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   A test pins those rows and fails if `internal/logcfg` ever opens a file of
   its own, since a log with a path of its own would need a backup step here.
 
+- The token count and rate ladders carry a `T` tier, one step past the `G` tier
+  they already had. Every tier keeps one decimal and changes spelling on the
+  rounded value, so a unit cannot name a magnitude it cannot hold -- but the
+  top tier was set one step below the ceiling the pipeline itself defines:
+  `core.MaxEventTokens` (1<<40) is what both event producers clamp to and what
+  every retained total saturates at, so a window that saturated printed
+  `1000000.0G` for its total and a saturating rate printed the same, the same
+  overflow `1000.0M` was fixed for one tier down. `humanBytes` already carried
+  a `TiB` tier for the same reason. A `1<<63` model context reads `9223372.0T`
+  now instead of `9223372036.9G`. The JSON and text reports carry raw numbers
+  and are unchanged.
+
 ## [0.23.0] - 2026-09-30
 
 Binaries, checksums, and a CycloneDX SBOM are on
