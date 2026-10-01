@@ -14,7 +14,15 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 ## [Unreleased]
 
 ### Fixed
-
+- A staging file the stale-temp sweep could not remove was dropped silently,
+  so `toktop update` reported a clean install and a host-key pin reported a
+  clean write over a directory that still held an unverified download or a
+  partial store write. The sweep is the only thing that ever removes these and
+  its refusal is what kept them, so nothing cleared them on any later run.
+  The sweep now reports what it could not remove: a store write warns and
+  carries on, and an install says so alongside the binary it replaced, beside
+  the same reporting `DiscardStaged` has always done for a staging file its
+  own write left behind.
 - `scripts/screenshot.py` measures a capture row in terminal cells rather than
   in characters, and draws each character from a face that has a glyph for it.
   Both were Latin assumptions in the one tool that produces the dashboard

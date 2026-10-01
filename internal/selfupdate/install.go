@@ -16,7 +16,6 @@ import (
 
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/lockfile"
-	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // Apply downloads, verifies, and installs the release over the running
@@ -101,16 +100,16 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	}
 
 	dir := filepath.Dir(self)
-	// A staging file the sweep could not unlink does not fail the update: the
-	// install below writes and renames in this same directory and fails with
-	// its own cause if it cannot. It is reported rather than dropped, so an
-	// operator whose install directory is filling up with leftovers learns
-	// which one refused to go instead of finding them by listing it.
-	if serr := core.SweepStaleTemps(dir, updateTempPrefix, time.Now()); serr != nil {
-		logcfg.Logger().Warn("toktop: staging file beside the binary not removed",
-			"path", logcfg.Field(core.RedactHome(self), logcfg.FieldCap),
-			"error", logcfg.RedactedField(serr.Error(), logcfg.FieldCap))
-	}
+	// A staging file the sweep could not remove is folded onto the error this
+	// install returns, the way DiscardStaged folds its own unlink failure onto
+	// the failure that triggered it below. A leftover beside the binary is an
+	// unverified file in the directory the operator looks for the binary in,
+	// and the sweep is the only thing that ever removes it, so a refusal here
+	// is a leftover that no later run will clear. Failing the install over it
+	// would leave the operator with no update and no binary replaced, so it is
+	// reported alongside a successful install instead: the rename below still
+	// lands, and the returned error names what was left behind.
+	swept := core.SweepStaleTemps(dir, updateTempPrefix, time.Now())
 	tmp, err := os.CreateTemp(dir, updateTempPrefix+"*")
 	if err != nil {
 		return "", fmt.Errorf("cannot write next to %s: %w", self, err)
@@ -119,10 +118,12 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	// A failed update that leaves its partial download behind is reported
 	// with the failure, not swallowed: the operator otherwise sees the
 	// original error with no sign the install directory now holds an
-	// unverified file.
+	// unverified file. The sweep's own leftovers ride the same defer, so an
+	// install that replaced the binary and still could not clear the directory
+	// says so on the way out rather than reporting clean success.
 	defer func() {
 		tmp.Close()
-		err = core.DiscardStaged(tmpName, err)
+		err = core.DiscardStaged(tmpName, errors.Join(err, swept))
 	}()
 
 	sum, err := fetch(ctx, assetURL, tmp, maxAssetBytes)

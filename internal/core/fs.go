@@ -44,9 +44,10 @@ func ExpandHome(p string) string {
 const StaleTempAge = 24 * time.Hour
 
 // SweepStaleTemps removes staging files an earlier write did not get to rename
-// away, where prefix names the staging files of the caller. Callers serialize
-// their writers, so within one process only the crashed runs of earlier
-// sessions are ever this old.
+// away, where prefix names the staging files of the caller. Anything it cannot
+// remove is left alone, and named in the returned error. Callers serialize their
+// writers, so within one process only the crashed runs of earlier sessions are
+// ever this old.
 //
 // The ages are measured against now, so a driver decides which leftovers a
 // write sweeps instead of the sweep following the wall clock: which staging
@@ -59,9 +60,12 @@ const StaleTempAge = 24 * time.Hour
 // unlinked is a different condition, and is reported, for the reason
 // [DiscardStaged] gives: unverified content sits where the operator looks for
 // the real file, and a sweep that dropped the refusal on the floor left them
-// with a directory holding one and no line saying so. The failures of several
-// files are joined into the one error, so a caller names every leftover rather
-// than only the first.
+// with a directory holding one and no line saying so. The two places that
+// sweep are the two that also install, and the sweep is the only thing that
+// ever removes these files, so a leftover beside the binary or beside the
+// host-key store is one no later run identifies and clears. The failures of
+// several files are joined into the one error, so a caller names every
+// leftover rather than only the first.
 func SweepStaleTemps(dir, prefix string, now time.Time) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

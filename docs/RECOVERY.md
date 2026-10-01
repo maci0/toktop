@@ -23,7 +23,7 @@ somebody else's data.
 | the previous binary, during a Windows install | the installed binary plus `.old` (`internal/selfupdate/install.go`, `installDisplacing`) | `installDisplacing` |
 | the installed binary | the running executable's own path | `install` |
 | the store a killed write staged, and never renamed | a `.known_hosts-*` file beside the store (`internal/remote/knownhosts.go`, `knownHostsTempPrefix`), removed by the rename, by the failure that reports it, or by the restore that recovered the store it belonged to (`clearInterruptedWrite`) | `atomicWriteFile` |
-| a store staging file older than 24 hours | the same directory, removed by prefix and age on the next store write (`internal/core/fs.go`, `SweepStaleTemps`, `StaleTempAge`) | `writeKnownHosts` |
+| a store staging file older than 24 hours | the same directory, removed by prefix and age on the next store write (`internal/core/fs.go`, `SweepStaleTemps`, `StaleTempAge`); one the sweep cannot remove is warned about beside the store | `writeKnownHosts` |
 
 The files beside the binary hold no state worth recovering: each is
 rebuilt by running `toktop update` again. Everything else toktop touches is
@@ -81,7 +81,10 @@ installed binary with it:
   restore that recovered the store the staging file belonged to, and by
   `SweepStaleTemps` once they are older than `StaleTempAge` (24 hours). A
   staging file younger than that belongs to a write in progress, and the age
-  gate is what keeps the sweep from taking it.
+  gate is what keeps the sweep from taking it. A file the sweep cannot remove
+  is reported rather than left silently: the store write warns and carries on,
+  and an install says so alongside the binary it replaced, because the sweep
+  is the only thing that ever removes these and its refusal is what kept them.
 - `toktop.old` is removed by the next update, before the next one displaces
   the binary again (`applyTo`, `installDisplacing`). It is the previous
   binary, never the installed one.
