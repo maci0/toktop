@@ -13,6 +13,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- The agent feed's OpenAPI spec now declares the `Cache-Control: no-store`
+  answer header on every status either path lists. The ingest server has set
+  it ahead of routing since the start, so it rides every answer a handler
+  gives: an acknowledgement, a `503` naming a full decode table and a `404`
+  listing the endpoints. The spec did not name it, and a client generated
+  from the spec decides what to cache from what it can see, so a header the
+  file omitted was one it would cache and hand the next sender this run's
+  acknowledged counts, its saturation state and its endpoint list. The two
+  refusals the Go runtime makes before a handler runs are the documented
+  exception, since they never reach the chain that sets it.
+
 ### Changed
 
 - The `toktop: engine answering again` audit line reports the outage it ended

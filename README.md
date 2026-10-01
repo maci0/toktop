@@ -512,6 +512,16 @@ just that it was hit. Event
 bodies are not logged. A handler panic is one ERROR
 line with `req` and a single-line `stack`. An accept failure that ends the
 endpoint writes one ERROR line naming the bound address and the reason.
+Responses carry `Cache-Control: no-store`, set ahead of routing so it rides
+every answer a handler gives: an acknowledgement, a `503` naming a full decode
+table and a `404` listing the endpoints are all facts about one request, and a
+cache holding one of them answers the next sender with this run's state rather
+than with its own. The two refusals the Go runtime makes before a handler runs
+are the exception there too, since they never reach that chain.
+The same chain sets `X-Content-Type-Options: nosniff`, `X-Frame-Options:
+DENY`, `Content-Security-Policy: default-src 'none'; frame-ancestors 'none';
+base-uri 'none'; form-action 'none'`, `Cross-Origin-Resource-Policy:
+same-origin` and `Referrer-Policy: no-referrer` on the same answers.
 Responses carry `X-Request-Id`, echoed from the request when the sender set
 one and minted from a per-server counter when it did not, so every answer a
 handler gives is

@@ -48,6 +48,16 @@ info:
     An unknown path answers 404 naming every served endpoint and the methods
     each one takes; a wrong method on a served path answers 405 with an `Allow`
     header and a body naming the path and the methods it takes.
+
+    Every answer a handler gives carries the same set of security headers,
+    set ahead of routing so the answers a client handles least are covered
+    too: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`,
+    `Cross-Origin-Resource-Policy: same-origin`, `Referrer-Policy:
+    no-referrer`, `Content-Security-Policy: default-src 'none'; frame-ancestors
+    'none'; base-uri 'none'; form-action 'none'`. They are stated here rather
+    than on each status because they are one answer's worth of behaviour
+    rather than a per-operation contract, and a client reads the same set off
+    either operation.
 servers:
   - url: http://127.0.0.1:8420
     description: The default bind. --ingest ADDR moves it, --no-ingest turns it off.
@@ -107,6 +117,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             application/json:
               schema:
@@ -125,6 +137,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -137,6 +151,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -150,6 +166,8 @@ paths:
                 const: POST
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -161,6 +179,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -170,6 +190,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -184,6 +206,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -198,6 +222,8 @@ paths:
               $ref: "#/components/headers/RetryAfter"
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -227,6 +253,8 @@ paths:
                 type: integer
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -241,6 +269,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -254,6 +284,8 @@ paths:
                 const: GET, HEAD
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -266,6 +298,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -283,6 +317,8 @@ paths:
                 type: integer
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
           content:
             text/plain:
               schema:
@@ -307,6 +343,8 @@ paths:
                 type: integer
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
         "403":
           description: |
             The `Host` named another machine on a loopback-bound listener, the
@@ -314,6 +352,8 @@ paths:
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
         "405":
           description: The path takes GET and HEAD only.
           headers:
@@ -323,11 +363,15 @@ paths:
                 const: GET, HEAD
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
         "500":
           description: The handler panicked; the GET's answer without a body.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
         "431":
           $ref: "#/components/responses/RuntimeRefusal"
         "503":
@@ -341,6 +385,8 @@ paths:
                 type: integer
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
+            Cache-Control:
+              $ref: "#/components/headers/CacheControl"
 
 components:
   responses:
@@ -400,6 +446,19 @@ components:
         when the sender set none.
       schema:
         type: string
+    CacheControl:
+      description: |
+        Always `no-store`. The handler chain sets it before routing, so it
+        rides every answer this port gives, successes and refusals alike: an
+        acknowledgement, a `503` naming a full decode table and a `404`
+        listing the endpoints are all per-request facts, and a cache holding
+        any of them answers the next sender with a run's state rather than
+        with its own. The two refusals net/http makes before a handler runs
+        (see `RuntimeRefusal`) carry none, because they never reach the
+        chain that sets it.
+      schema:
+        type: string
+        const: no-store
     RetryAfter:
       description: Seconds to wait before resending, the same delay every refusal on this port names.
       schema:
