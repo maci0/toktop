@@ -210,7 +210,7 @@ func FuzzEventFromWire(f *testing.F) {
 		}
 		assertAgreesWithRat(t, "span_ms", span, ms, serr)
 		wantSpan := time.Duration(0)
-		if ms >= 0 && ms <= maxSpanMS {
+		if ms >= 0 && ms <= maxSpanMs {
 			wantSpan = time.Duration(ms) * time.Millisecond
 		}
 		if ev.Span != wantSpan {

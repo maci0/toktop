@@ -68,8 +68,8 @@ func TestParseMicroagentSpanIsOptionalAndBounded(t *testing.T) {
 	if !ok {
 		t.Fatal("a record with an absurd elapsed_ms still carries counters")
 	}
-	if v.span != time.Duration(maxTurnMS)*time.Millisecond {
-		t.Fatalf("span = %v, want the bound %v", v.span, time.Duration(maxTurnMS)*time.Millisecond)
+	if v.span != time.Duration(maxTurnMs)*time.Millisecond {
+		t.Fatalf("span = %v, want the bound %v", v.span, time.Duration(maxTurnMs)*time.Millisecond)
 	}
 }
 

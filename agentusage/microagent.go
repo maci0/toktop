@@ -28,25 +28,25 @@ func parseMicroagent(line []byte) (values, string, bool) {
 	if !ok {
 		return values{}, "", false
 	}
-	v.span = turnSpan(microagentElapsedMS(line))
+	v.span = turnSpan(microagentElapsedMs(line))
 	return v, cwd, true
 }
 
-// microagentElapsedMS reads elapsed_ms, the model time of one response. The
+// microagentElapsedMs reads elapsed_ms, the model time of one response. The
 // decode is behind the key so a record without one — an older build, a line
 // that merely mentions the word — pays a byte scan rather than a second JSON
 // decode. A count that does not fit an int, or a negative one, is no reading.
-func microagentElapsedMS(line []byte) int {
+func microagentElapsedMs(line []byte) int {
 	if !bytes.Contains(line, microagentElapsedKey) {
 		return 0
 	}
 	var rec struct {
-		ElapsedMS int `json:"elapsed_ms"`
+		ElapsedMs int `json:"elapsed_ms"`
 	}
 	if err := json.Unmarshal(bytes.TrimSpace(line), &rec); err != nil {
 		return 0
 	}
-	return rec.ElapsedMS
+	return rec.ElapsedMs
 }
 
 // microagentElapsedKey is the field name, as bytes, so the scan above does not

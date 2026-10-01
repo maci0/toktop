@@ -73,11 +73,11 @@ func grokSessionCwd(path string) (string, bool) {
 	return decoded, true
 }
 
-// maxTurnMS is the largest turn length that converts to a duration. The
+// maxTurnMs is the largest turn length that converts to a duration. The
 // counters arrive as milliseconds and the span is nanoseconds, so a value past
 // this wraps the product negative and a rate taken over it reports tokens per
 // second with the wrong sign.
-const maxTurnMS = math.MaxInt64 / int64(time.Millisecond)
+const maxTurnMs = math.MaxInt64 / int64(time.Millisecond)
 
 // turnSpan converts one record's millisecond turn length into the span a rate
 // is taken over. A count of zero or less is no reading at all: a zero span is
@@ -91,7 +91,7 @@ func turnSpan(ms int) time.Duration {
 	if ms <= 0 {
 		return 0
 	}
-	n := min(int64(ms), maxTurnMS)
+	n := min(int64(ms), maxTurnMs)
 	return time.Duration(n) * time.Millisecond
 }
 
@@ -105,7 +105,7 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 		Params struct {
 			Update struct {
 				SessionUpdate string `json:"sessionUpdate"`
-				ElapsedMS     int    `json:"elapsed_ms"`
+				ElapsedMs     int    `json:"elapsed_ms"`
 				Usage         struct {
 					InputTokens         int `json:"inputTokens"`
 					OutputTokens        int `json:"outputTokens"`
@@ -113,7 +113,7 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 					CacheCreationTokens int `json:"cacheCreationTokens"`
 					ReasoningTokens     int `json:"reasoningTokens"`
 					TotalTokens         int `json:"totalTokens"`
-					APIDurationMS       int `json:"apiDurationMs"`
+					APIDurationMs       int `json:"apiDurationMs"`
 				} `json:"usage"`
 			} `json:"update"`
 		} `json:"params"`
@@ -135,9 +135,9 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 	// apiDurationMs is time spent in the model. elapsed_ms is the whole
 	// turn, tools included, and a turn that mostly ran tools would otherwise
 	// report a few tokens per second for a model that was much faster.
-	ms := u.APIDurationMS
+	ms := u.APIDurationMs
 	if ms <= 0 {
-		ms = rec.Params.Update.ElapsedMS
+		ms = rec.Params.Update.ElapsedMs
 	}
 	v.span = turnSpan(ms)
 	return v, "", true

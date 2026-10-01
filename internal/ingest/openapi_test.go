@@ -288,8 +288,8 @@ func TestOpenAPIEventCapsMatchTheBounds(t *testing.T) {
 	if core.MaxEventTokens != 1<<40 || !strings.Contains(props, "2^40") {
 		t.Errorf("the Event schema does not name the token ceiling core.MaxEventTokens (%d) spells as 2^40", core.MaxEventTokens)
 	}
-	if !strings.Contains(propertySection(t, "Event", "span_ms"), strconv.FormatInt(maxSpanMS, 10)) {
-		t.Errorf("the Event schema does not name the span bound (%d ms) the handler clamps with", maxSpanMS)
+	if !strings.Contains(propertySection(t, "Event", "span_ms"), strconv.FormatInt(maxSpanMs, 10)) {
+		t.Errorf("the Event schema does not name the span bound (%d ms) the handler clamps with", maxSpanMs)
 	}
 	// The two bounds a sender sizes its request against, quoted as literals
 	// in the examples list rather than in a property: a generated client reads
@@ -338,7 +338,7 @@ func TestOpenAPIEventCapsMatchTheBounds(t *testing.T) {
 		"prompt_tokens":   core.MaxEventTokens,
 		"output_tokens":   core.MaxEventTokens,
 		"thinking_tokens": core.MaxEventTokens,
-		"span_ms":         maxSpanMS,
+		"span_ms":         maxSpanMs,
 	}
 	for field, want := range numericCaps {
 		section := propertySection(t, "Event", field)

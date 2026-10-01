@@ -307,15 +307,15 @@ func parseSpanFields(w agentEventWire) (time.Duration, error) {
 	if err != nil {
 		return 0, err
 	}
-	if ms < 0 || ms > maxSpanMS {
+	if ms < 0 || ms > maxSpanMs {
 		return 0, nil
 	}
 	return time.Duration(ms) * time.Millisecond, nil
 }
 
-// maxSpanMS is core.MaxEventSpan in the unit the wire carries, so the bound is
+// maxSpanMs is core.MaxEventSpan in the unit the wire carries, so the bound is
 // one definition read two ways.
-const maxSpanMS = int64(core.MaxEventSpan / time.Millisecond)
+const maxSpanMs = int64(core.MaxEventSpan / time.Millisecond)
 
 // parseTokenJSON reads one whole JSON number as an int64. A whole float
 // (100.0, 1e2) counts; a fractional remainder or a non-number is a 400. A
