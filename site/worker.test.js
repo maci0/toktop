@@ -33,6 +33,11 @@ const IMG_TAG_RE = /<img\b[^>]*>/g;
 const README_SIZES_RE = /([\d,]+) bytes identity \/ ([\d,]+) gzip \/\s*([\d,]+) brotli/;
 const README_VISIT_RE =
   /whole visit is those ([\d,]+) bytes[\s\S]*?([\d,]+) bytes in two requests/g;
+// The phone-visit total as CONTRIBUTING.md and the Makefile both quote it: the
+// bytes a phone's visit costs, right before "-byte visit". The Makefile wraps
+// the phrase over two comment lines and CONTRIBUTING.md over one, so the gap
+// between the words is free rather than a single space.
+const VISIT_TOTAL_RE = /([\d,]+)-byte visit/;
 const thousandsStripped = (value) => Number(value.replaceAll(",", ""));
 // The h1 cursor's animation rule, and the parts of it that say whether the
 // blink ever stops. Named apart from the tests that read them so a rule
@@ -1267,7 +1272,12 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
 // this repo no longer serves. The README is read here and its figures are
 // compared against the bodies just measured, so a re-record is a test failure
 // with the new numbers in it rather than a silent drift.
-test("the README records the transfer sizes the page actually ships", async () => {
+//
+// CONTRIBUTING.md (the `-q 32` rationale) and the Makefile recipe it explains
+// quote the same phone-visit total, and each had drifted to its own value
+// while the README stayed right, because only the README was read. They are
+// read here too, so one measurement has one restatement.
+test("the READMEs record the transfer sizes the page actually ships", async () => {
   const readme = readFileSync(join(import.meta.dir, "README.md"), "utf8");
   const recorded = readme.match(README_SIZES_RE);
   expect(recorded).not.toBeNull();
@@ -1284,6 +1294,12 @@ test("the README records the transfer sizes the page actually ships", async () =
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
   expect(visit[0][1]).toBe(14_403);
+  for (const name of ["CONTRIBUTING.md", "Makefile"]) {
+    const quoted = readFileSync(join(import.meta.dir, "..", name), "utf8").match(VISIT_TOTAL_RE);
+    expect(`${name} quotes ${quoted?.[1]}`).toBe(
+      `${name} quotes ${visit[0][1].toLocaleString("en-US")}`,
+    );
+  }
 });
 
 const PUBLIC = join(import.meta.dir, "public");

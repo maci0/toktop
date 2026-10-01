@@ -100,8 +100,9 @@ dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
 and answers every other path with the page (a one-page site should not 404
 on a typo). `/favicon.ico` is the one exception, and it has to be: a crawler, a
 bookmark or a client that ignored the `<link rel="icon">` data URI asks for
-that path blind, and the catch-all answered it with the whole page, 13,093 bytes
-of `text/html` for a request that wants an image. The Worker answers it with
+that path blind, and the catch-all used to answer it with the whole page,
+thirteen kilobytes of `text/html` for a request that wants an image (the
+sizes test below is what the page costs today). The Worker answers it with
 the icon the page already carries inline, from the same bytes, with no asset
 binding and no second request, and a browser that reads the `<link>` still
 fetches nothing at all. The answer carries a strong `ETag` derived from the

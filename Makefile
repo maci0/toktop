@@ -865,7 +865,7 @@ site-assets: require-encoders require-bun ## rebuild the site dashboard captures
 	magick docs/images/dashboard.png -strip -resize 1200x -colors 128 PNG8:$(SITE_PUBLIC)/dashboard-card.png
 	# avifenc -q 32 is the measured floor for this capture: 10,577 bytes at
 	# 768w against 13,563 at -q 40, a 22% cut of the image that is 73% of a
-	# phone's 14,391-byte visit, at 30.0 dB PSNR against the resized source.
+	# phone's 14,403-byte visit, at 30.0 dB PSNR against the resized source.
 	# The page draws that candidate into about 662 device pixels, so the
 	# browser downscales it, and a 2x crop of the 768w frame shows no artifact a
 	# reader would see. 4:2:0 was measured too and is not smaller here: the
