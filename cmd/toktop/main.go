@@ -214,7 +214,18 @@ func runMain() int {
 		// The live dashboard paints with alt-screen sequences; piped or
 		// redirected they are garbage bytes in the capture, and --once is
 		// the supported way to get output without a terminal.
-		fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live dashboard needs one (use --once for static output)")
+		//
+		// --plain is named as itself rather than as the dashboard: it renders
+		// no frame and opens no alt screen, so telling a reader who asked for
+		// the linear text report that "the live dashboard needs one" names a
+		// mode they did not ask for, and hides that --plain is the only flag
+		// they passed. The gate is unchanged; only the message follows the
+		// mode actually running.
+		if f.plain {
+			fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live text report needs one (use --once --plain for static output)")
+		} else {
+			fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live dashboard needs one (use --once for static output)")
+		}
 		return 2
 	}
 

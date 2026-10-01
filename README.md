@@ -895,9 +895,11 @@ to the directory that shell's completion setup reads.
 The script is generated from the flags this build actually defines, so a new
 flag is completed the day it lands and the completion never goes stale. It
 completes the subcommands and their own flags (`toktop update --<TAB>` offers
-that subcommand's own, `--check` and `--repo`, not the top-level flags), and
-offers a file list only
-where a flag takes a path (`--ssh-key`).
+that subcommand's own, `--check` and `--repo`, not the top-level flags),
+completes the shell names after `toktop completion`, offers a file list only
+where a flag takes a path (`--ssh-key`), and answers nothing at all in the
+position after a flag that takes a value, so a duration being typed is never
+completed into a subcommand name.
 
 ## Environment variables
 

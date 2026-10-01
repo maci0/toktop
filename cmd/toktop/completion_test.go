@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -133,6 +134,43 @@ func TestRunCompletion(t *testing.T) {
 		}
 		if !strings.Contains(out.String(), "${words[2]}") {
 			t.Fatalf("zsh script does not read the subcommand from words[2]:\n%s", out.String())
+		}
+	})
+
+	t.Run("both declarative shells name completion's shells", func(t *testing.T) {
+		// zsh and fish cannot infer the word list from the FlagSet the way
+		// they infer the flags; it has to be written into the script.
+		// Absent, `toktop completion <TAB>` offered nothing in either, which
+		// is the one command with a word list completing to nothing at all.
+		// Each shell spells the list its own way, so each is matched against
+		// the line that binds it, not against the whole script: the three
+		// names also appear in the comment header and in the help text.
+		want := "shells=(" + zshList(completionShells) + ")"
+		var zsh, fish bytes.Buffer
+		runCompletion(&zsh, []string{"zsh"})
+		runCompletion(&fish, []string{"fish"})
+		if !strings.Contains(zsh.String(), want) {
+			t.Errorf("zsh script has no %q line:\n%s", want, zsh.String())
+		}
+		wantFish := "-a " + strconv.Quote(strings.Join(completionShells, " "))
+		if !strings.Contains(fish.String(), wantFish) {
+			t.Errorf("fish script has no completion line carrying %s:\n%s", wantFish, fish.String())
+		}
+	})
+	t.Run("bash and zsh answer nothing after a value-taking flag", func(t *testing.T) {
+		// A word being typed as a duration is not a command. Both scripts
+		// fell through to the subcommand list here, so `toktop --interval
+		// <TAB>` answered with "completion help update version". The arm is
+		// built from takesValue, so it covers every value flag, not one.
+		for _, shell := range []string{"bash", "zsh"} {
+			var out bytes.Buffer
+			runCompletion(&out, []string{shell})
+			for _, name := range []string{"--interval", "--add", "--bearer", "--repo"} {
+				if !strings.Contains(out.String(), name+")") &&
+					!strings.Contains(out.String(), name+"|") {
+					t.Errorf("%s script has no case arm for %s:\n%s", shell, name, out.String())
+				}
+			}
 		}
 	})
 	t.Run("no shell is a usage error", func(t *testing.T) {
@@ -289,6 +327,11 @@ printf '%s\n' "top:$(try toktop "")"
 printf '%s\n' "dash:$(try toktop -)"
 printf '%s\n' "once:$(try toktop --on)"
 printf '%s\n' "update:$(try toktop update --)"
+printf '%s\n' "shells:$(try toktop completion \"\")"
+printf '%s\n' "shellprefix:$(try toktop completion \"z\")"
+printf '%s\n' "shellsagain:$(try toktop completion bash \"\")"
+printf '%s\n' "valueflag:$(try toktop --interval \"\")"
+printf '%s\n' "subvalue:$(try toktop update --repo \"\")"
 `
 	cmd := exec.Command(bash)
 	cmd.Stdin = strings.NewReader(probe)
@@ -331,6 +374,33 @@ printf '%s\n' "update:$(try toktop update --)"
 	}
 	if slices.Contains(got["dash"], "--check") {
 		t.Fatalf("bash completion of `toktop -<TAB>` offers update's --check: %v", got["dash"])
+	}
+	// completion takes a shell, so the shells are what its positional word
+	// completes to. The list was absent, which left the one command with a
+	// word list offering nothing at all.
+	for _, shell := range completionShells {
+		if !slices.Contains(got["shells"], shell) {
+			t.Errorf("bash completion of `toktop completion <TAB>` omits %s: %v", shell, got["shells"])
+		}
+	}
+	// By prefix, not only on an empty word: "completion z" narrows to zsh.
+	if !slices.Equal(got["shellprefix"], []string{"zsh"}) {
+		t.Errorf("bash completion of `toktop completion z<TAB>` = %v, want [zsh]", got["shellprefix"])
+	}
+	// The shells answer for the word after completion and for nothing past
+	// it, where the same list kept being offered.
+	if len(got["shellsagain"]) != 0 {
+		t.Errorf("bash completion of `toktop completion bash <TAB>` = %v, want nothing", got["shellsagain"])
+	}
+	// A word being typed as a value is not a command. Offering the subcommand
+	// names after a value-taking flag is how `--interval <TAB>` used to
+	// answer with "completion help update version".
+	for _, probe := range []string{"valueflag", "subvalue"} {
+		for _, sub := range completionSubs {
+			if slices.Contains(got[probe], sub) {
+				t.Errorf("bash completion of a value position offers the subcommand %s: %v", sub, got[probe])
+			}
+		}
 	}
 }
 

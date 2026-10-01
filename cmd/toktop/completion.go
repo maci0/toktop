@@ -189,35 +189,56 @@ func takesValue(fs *flag.FlagSet, name string) bool {
 }
 
 // bashCompletion completes flags by prefix and subcommands as bare words.
+//
+// Two branches earn their place here. A subcommand that takes a positional
+// gets its own word list, so `toktop completion <TAB>` offers the three
+// shells rather than nothing: without it the branch answered every bare word
+// with an empty COMPREPLY and the one place the shells are named offered
+// nothing. And the value of a value-taking flag is never completed from the
+// flag or subcommand lists, because `--interval 1<TAB>` answered with the
+// subcommand names: a word being typed as a duration is not a command.
 func bashCompletion(fs *flag.FlagSet, flags []string) string {
 	return fmt.Sprintf(`# bash completion for toktop
 # shellcheck disable=SC2207  # compgen output must word-split into COMPREPLY
 _toktop() {
-    local cur prev i subflags
+    local cur prev i subflags subargs
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
     local topflags="%s"
     local subs="%s"
     local plainflags="%s"
     local upflags="%s"
+    local shells="%s"
     subflags=""
-    for ((i = 1; i < COMP_CWORD; i++)); do
+    subargs=""
+    for ((i = 1; i <= COMP_CWORD; i++)); do
         if [ "$i" -eq 1 ]; then
             case "${COMP_WORDS[i]}" in
-                completion|help|version) subflags="$plainflags" ;;
+                completion) subflags="$plainflags"; subargs="$shells" ;;
+                help|version) subflags="$plainflags" ;;
                 update) subflags="$upflags" ;;
             esac
             if [ -n "$subflags" ]; then
-                case "$cur" in
-                    -*) COMPREPLY=($(compgen -W "$subflags" -- "$cur")) ;;
-                    *) COMPREPLY=() ;;
-                esac
+                # The word right after the subcommand is the positional, so
+                # it completes from subargs by prefix: "completion z" has to
+                # narrow to zsh. The subcommand sits at word 1, so its
+                # positional is only the word being completed while CWORD is
+                # 2; past that there is nothing left but the flags, which is
+                # what offered the shells a second time on "completion bash"
+                # followed by a tab.
+                if [ "$COMP_CWORD" -eq 2 ] && [ -n "$subargs" ]; then
+                    COMPREPLY=($(compgen -W "$subargs" -- "$cur"))
+                elif [[ "$cur" == -* ]]; then
+                    COMPREPLY=($(compgen -W "$subflags" -- "$cur"))
+                else
+                    COMPREPLY=()
+                fi
                 return 0
             fi
         fi
     done
     case "$prev" in
-%s    esac
+%s%s    esac
     if [[ "$cur" == -* ]]; then
         COMPREPLY=($(compgen -W "$topflags $subs" -- "$cur"))
     else
@@ -228,7 +249,27 @@ _toktop() {
 complete -F _toktop toktop
 `, strings.Join(flags, " "), strings.Join(completionSubs, " "),
 		strings.Join(plainSubFlags, " "), strings.Join(updateFlags, " "),
+		strings.Join(completionShells, " "),
+		valueCaseArm(fs, flags, updateFS, updateFlags,
+			"            COMPREPLY=()\n            return 0\n            ;;\n"),
 		fileCaseArm(fs, flags, "            COMPREPLY=($(compgen -f -- \"$cur\"))\n"))
+}
+
+// valueCaseArm is the `case "$prev"` arm that answers nothing after a flag
+// that takes a value. It is built from the same takesValue test the flag lists
+// use, so a flag that takes a value is never handed a completion in any
+// shell: a shell that offered the subcommand names there would complete a
+// duration being typed into "update".
+//
+// The path-flag arm comes first so --ssh-key still offers a file list; this
+// one catches every other value flag, at the top level and under update.
+func valueCaseArm(fs *flag.FlagSet, flags []string, subFS *flag.FlagSet, subFlags []string, body string) string {
+	names := append(valueFlagNames(fs, flags), valueFlagNames(subFS, subFlags)...)
+	slices.Sort(names)
+	if len(names) == 0 {
+		return ""
+	}
+	return "        " + strings.Join(names, "|") + ")\n" + body
 }
 
 // fileCaseArm is the `case "$prev"` arm that hands a value to the shell's file
@@ -240,6 +281,24 @@ func fileCaseArm(fs *flag.FlagSet, flags []string, body string) string {
 		return "        --)\n            ;;\n"
 	}
 	return "        " + strings.Join(names, "|") + ")\n" + body + "            return 0\n            ;;\n        *)\n            ;;\n"
+}
+
+// valueFlagNames is every value-taking flag across the commands, so the arm
+// that answers nothing after one covers the subcommands too. Deduplicated,
+// since --help and --version are declared on both sets. Path flags are left
+// out: they have their own arm, which is matched first and does offer a file
+// list rather than silence.
+func valueFlagNames(fs *flag.FlagSet, names []string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, name := range names {
+		if seen[name] || pathFlags[name] || !takesValue(fs, name) {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
 }
 
 // pathFlagNames is the subset of flags whose value is a filesystem path, so
@@ -255,33 +314,44 @@ func pathFlagNames(fs *flag.FlagSet, flags []string) []string {
 }
 
 // zshCompletion completes the same words, and asks zsh for a file list only
-// where a flag's value is a path.
+// where a flag's value is a path. It makes the two choices bash makes: the
+// shell a subcommand takes as its positional completes by prefix, and the
+// value of a value-taking flag completes to nothing at all rather than to the
+// subcommand names.
 func zshCompletion(fs *flag.FlagSet, flags []string) string {
 	return fmt.Sprintf(`#compdef toktop
 # zsh completion for toktop
 _toktop() {
-    local -a topflags subs plainflags upflags subflags
+    local -a topflags subs plainflags upflags subflags subargs
     topflags=(%s)
     subs=(%s)
     plainflags=(%s)
     upflags=(%s)
+    shells=(%s)
     subflags=()
+    subargs=()
     # words[2] rather than CURRENT: a subcommand is only ever the second word,
     # and the flags that follow it are that subcommand's, whatever is being
     # completed. Testing CURRENT instead answered with the top-level flags
     # for every word past the subcommand.
     case ${words[2]} in
-        completion|help|version) subflags=($plainflags) ;;
+        completion) subflags=($plainflags); subargs=($shells) ;;
+        help|version) subflags=($plainflags) ;;
         update) subflags=($upflags) ;;
     esac
     if (( ${#subflags} )); then
-        if [[ ${words[CURRENT]} == -* ]]; then
+        # The positional sits at word 3, so it is only the word being
+        # completed while CURRENT is 3; past that the flags are all that is
+        # left to offer.
+        if (( CURRENT == 3 )) && (( ${#subargs} )); then
+            _describe -t shells 'shell' subargs
+        elif [[ ${words[CURRENT]} == -* ]]; then
             _describe -t flags 'flag' subflags
         fi
         return
     fi
     case ${words[CURRENT-1]} in
-%s    esac
+%s%s    esac
     if [[ ${words[CURRENT]} == -* ]]; then
         _describe -t flags 'flag' topflags
     else
@@ -289,7 +359,23 @@ _toktop() {
     fi
 }
 compdef _toktop toktop
-`, zshList(flags), zshList(completionSubs), zshList(plainSubFlags), zshList(updateFlags), zshFileArm(fs, flags))
+`, zshList(flags), zshList(completionSubs), zshList(plainSubFlags), zshList(updateFlags),
+		zshList(completionShells),
+		zshValueArm(fs, flags, updateFS, updateFlags),
+		zshFileArm(fs, flags))
+}
+
+// zshValueArm is the `case ${words[CURRENT-1]}` arm that completes nothing
+// after a flag that takes a value. A duration being typed is not a command,
+// and offering the subcommand names there is how the branch below used to
+// read. The path arm follows this one, so --ssh-key still offers a file list.
+func zshValueArm(fs *flag.FlagSet, flags []string, subFS *flag.FlagSet, subFlags []string) string {
+	names := append(valueFlagNames(fs, flags), valueFlagNames(subFS, subFlags)...)
+	slices.Sort(names)
+	if len(names) == 0 {
+		return ""
+	}
+	return "        " + strings.Join(names, "|") + ")\n            return\n            ;;\n"
 }
 
 // zshFileArm is the `case ${words[CURRENT-1]}` arm for a flag whose value is a
@@ -298,7 +384,7 @@ compdef _toktop toktop
 func zshFileArm(fs *flag.FlagSet, flags []string) string {
 	names := pathFlagNames(fs, flags)
 	if len(names) == 0 {
-		return "        --)\n            ;;\n"
+		return ""
 	}
 	return "        " + strings.Join(names, "|") + ")\n            _files\n            return\n            ;;\n"
 }
@@ -332,6 +418,12 @@ func fishCompletion(fs *flag.FlagSet, flags []string) string {
 				sub, fishFlagSpec(subFlagSet(sub), name))
 		}
 	}
+	// The shells are completion's positional, so fish needs them named or
+	// `toktop completion <TAB>` offers nothing at all: the one word list the
+	// command has is the one fish cannot infer. -f because a shell name is
+	// not a path, which is what stops fish falling back to a file list.
+	fmt.Fprintf(&b, "complete -c toktop -f -n \"__fish_seen_subcommand_from completion\" -a %q\n",
+		strings.Join(completionShells, " "))
 	return b.String()
 }
 

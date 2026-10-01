@@ -925,6 +925,49 @@ func TestFlagDescriptionsIndentWithSpaces(t *testing.T) {
 	}
 }
 
+// Every wrapped line of the Environment block hangs under the start of the
+// description, at the column the two-space name field leaves it: "  " plus
+// the 24-wide field. frameEnvHelp built its continuation with a different
+// width, so the two rows it generates wrapped two columns further right than
+// every row spelled out beside them and read as a nested clause under the
+// line above rather than as the rest of the same sentence.
+func TestUsageEnvBlockWrapsAtTheDescriptionColumn(t *testing.T) {
+	var buf strings.Builder
+	usage(&buf)
+	_, rest, ok := strings.Cut(buf.String(), "\nEnvironment ")
+	if !ok {
+		t.Fatal("help has no Environment section")
+	}
+	// The block ends at the prose paragraph after the last row, which starts
+	// at column 0: from there on the screen is Exit codes, not the table.
+	section, _, _ := strings.Cut(rest, "\nAn unrecognized TOKTOP_*")
+	const want = 26
+	inRow := false
+	for _, line := range strings.Split(section, "\n") {
+		if strings.TrimSpace(line) == "" {
+			inRow = false
+			continue
+		}
+		// A row's first line starts with two spaces then the variable name;
+		// a wrapped one is indented past the name field. Prose paragraphs in
+		// the same block start at column 0 and are left alone.
+		if strings.HasPrefix(line, "  ") && !strings.HasPrefix(line, "   ") {
+			inRow = true
+			continue
+		}
+		if !strings.HasPrefix(line, " ") {
+			inRow = false
+			continue
+		}
+		if !inRow {
+			continue
+		}
+		if got := len(line) - len(strings.TrimLeft(line, " ")); got != want {
+			t.Errorf("usage() Environment row wraps to column %d, want %d: %q", got, want, line)
+		}
+	}
+}
+
 // A parse failure must name the flag the way the help screen and the README
 // spell it. The flag package reports its own single-dash form, which is not
 // the spelling shown anywhere else and reads as a different flag.
@@ -2703,6 +2746,44 @@ func TestWarnBlankGitHubToken(t *testing.T) {
 			}
 			if !strings.Contains(got, tt.want) {
 				t.Fatalf("printed %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// A run whose stdout is not a terminal is a usage error, and the message has
+// to name the mode actually running: --plain renders no frame and opens no
+// alt screen, so telling that reader "the live dashboard needs one" names a
+// mode they did not ask for and hides the flag they did pass. Drives the real
+// binary, since the gate reads os.Stdout's fd and no in-process writer can
+// make stdout a terminal or not one.
+func TestNonTTYMessageNamesTheRunningMode(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "toktop")
+	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
+		t.Fatalf("go build: %v\n%s", err, out)
+	}
+	for _, tt := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--plain"}, "the live text report needs one"},
+		{[]string{}, "the live dashboard needs one"},
+	} {
+		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
+			cmd := exec.Command(bin, tt.args...)
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout, cmd.Stderr = &stdout, &stderr
+			// The child inherits a pipe for stdout, so the gate fires;
+			// without that it is taken or skipped by whatever terminal the
+			// test run happens to have.
+			if err := cmd.Run(); err == nil {
+				t.Fatalf("%v exited 0 with stdout a pipe, want a usage error\nstderr: %s", tt.args, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.want) {
+				t.Errorf("%v stderr = %q, want it to name %q", tt.args, stderr.String(), tt.want)
+			}
+			if stdout.Len() != 0 {
+				t.Errorf("%v wrote %d bytes to stdout on a usage error", tt.args, stdout.Len())
 			}
 		})
 	}

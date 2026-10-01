@@ -237,7 +237,11 @@ func frameEnvHelp() string {
 			b.WriteString("\n")
 		}
 		fmt.Fprintf(&b, "  %-24s --once frame %s, %d-%d (default: the terminal,\n", e.name, what, e.least, e.most)
-		fmt.Fprintf(&b, "%28selse %d when stdout is not one)", "", def)
+		// 26, the column every other continuation line in the Environment
+		// block starts at: "  " + the 24-wide name field. These two rows
+		// hung two columns further right, which read as a nested clause under
+		// the line above rather than as the rest of the same sentence.
+		fmt.Fprintf(&b, "%26selse %d when stdout is not one)", "", def)
 	}
 	return b.String()
 }
