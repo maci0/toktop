@@ -104,6 +104,7 @@ func listLinux() ([]raw, error) {
 		args: make([]string, 0, CmdlinePrefix/2+1),
 	}
 	var out []raw
+	scratch := &foldScratch{}
 	for _, e := range entries {
 		pid, err := strconv.Atoi(e.Name())
 		if err != nil || pid <= 0 {
@@ -125,7 +126,7 @@ func listLinux() ([]raw, error) {
 		}
 
 		r := raw{pid: pid, name: baseName(args[0])}
-		annotateClipped(&r, args)
+		annotateClipped(&r, args, scratch)
 		if r.engine == "" && r.port == 0 {
 			// Not an engine, so nothing past this line is read and
 			// nothing above is retained: the next read overwrites the

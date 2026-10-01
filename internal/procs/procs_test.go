@@ -238,12 +238,55 @@ func TestAnyArgContainsSharesByteBudget(t *testing.T) {
 	// A match must never depend on anything past CmdlinePrefix bytes, so the
 	// budget is spent across arguments, not reset per argument.
 	beyond := cmdline{args: []string{strings.Repeat("x", matchJoinBytes), "vllm.entrypoints"}}
-	if beyond.anyArgContains("vllm.entrypoints") {
+	if beyond.anyArgContains([]byte("vllm.entrypoints")) {
 		t.Fatal("anyArgContains matched past the shared byte budget")
 	}
 	within := cmdline{args: []string{"python", "-m", "vllm.entrypoints"}}
-	if !within.anyArgContains("vllm.entrypoints") {
+	if !within.anyArgContains([]byte("vllm.entrypoints")) {
 		t.Fatal("anyArgContains missed a match inside the budget")
+	}
+}
+
+// One fold buffer serves every process a sweep matches, so a reused one must
+// never leave the previous command line readable in the next: the argv that
+// named an engine, then a short argv that must not match it, then the long
+// one again. A buffer that kept its contents, or a length carried over
+// instead of reset, would answer yes to the middle process.
+func TestFoldScratchDoesNotCarryOneProcessIntoTheNext(t *testing.T) {
+	scratch := &foldScratch{}
+	engine := Info{Name: "ollama", Args: []string{"ollama", "serve"}}
+	plain := Info{Name: "firefox", Args: []string{"/usr/lib/firefox/firefox"}}
+	if _, _, ok := matchEngine(scratch, engine); !ok {
+		t.Fatal("first process did not match ollama")
+	}
+	if eng, _, ok := matchEngine(scratch, plain); ok {
+		t.Fatalf("second process matched %q on the first process's bytes", eng)
+	}
+	if _, _, ok := matchEngine(scratch, engine); !ok {
+		t.Fatal("third process did not match ollama")
+	}
+	upper := Info{Name: "OLLAMA", Args: []string{"OLLAMA", "Serve"}}
+	if eng, _, ok := matchEngine(scratch, upper); !ok || eng != "ollama" {
+		t.Fatalf("uppercase argv matched %q (matched=%v), want ollama", eng, ok)
+	}
+}
+
+// A sweep matches every process on the host, so the folds it reuses must not
+// allocate per process once the buffers have grown to the widest command line
+// seen. The ratchet: the first match may grow the buffer, the rest must not.
+func TestFoldScratchReuseStopsAllocatingPerProcess(t *testing.T) {
+	scratch := &foldScratch{}
+	long := Info{Name: "firefox", Args: []string{"/usr/lib/firefox/firefox", strings.Repeat("x", 512), "-Profile", "/home/u/p"}}
+	matchEngine(scratch, long)
+	plain := Info{Name: "bash", Args: []string{"bash"}}
+	allocs := testing.AllocsPerRun(50, func() {
+		if _, _, ok := matchEngine(scratch, plain); ok {
+			t.Fatal("bash matched an engine")
+		}
+	})
+	if allocs > 2 {
+		t.Errorf("matching a second process allocates %.1f objects with a warm scratch, want ~0; "+
+			"the fold buffers are meant to be reused for the whole sweep", allocs)
 	}
 }
 

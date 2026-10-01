@@ -4,6 +4,7 @@
 package procs
 
 import (
+	"bytes"
 	"os"
 	"slices"
 	"strconv"
@@ -52,16 +53,18 @@ type raw struct {
 // can read. Both derivations run on the clipped command line, so what a
 // listing retains and what it reports are the same bytes.
 func annotate(r *raw) {
-	annotateClipped(r, ClipArgs(r.args))
+	annotateClipped(r, ClipArgs(r.args), nil)
 }
 
 // annotateClipped is annotate for a lister that has already clipped the
 // command line (see splitCmdline), so the line is not split and clipped
-// twice on its way to the same two derivations.
-func annotateClipped(r *raw, clipped []string) {
+// twice on its way to the same two derivations. scratch, when the lister has
+// one, carries the fold buffers across processes; a lister that has none
+// (one call, not a sweep) folds into fresh buffers.
+func annotateClipped(r *raw, clipped []string, scratch *foldScratch) {
 	r.args = clipped
 	r.port = ExtractPort(r.args)
-	if eng, defPort, ok := MatchEngine(Info{Name: r.name, Args: r.args}); ok {
+	if eng, defPort, ok := matchEngine(scratch, Info{Name: r.name, Args: r.args}); ok {
 		r.engine, r.defPort = eng, defPort
 	}
 }
@@ -380,8 +383,12 @@ func baseName(n string) string {
 	if i := strings.LastIndexByte(n, '\\'); i >= 0 {
 		n = n[i+1:]
 	}
-	return strings.TrimSuffix(core.FoldASCII(n), ".exe")
+	return strings.TrimSuffix(core.FoldASCII(n), exeSuffix)
 }
+
+// exeSuffix is what baseName strips from a Windows executable name, named so
+// baseNameEqual can recognise the same suffix without a folded copy to hold it.
+const exeSuffix = ".exe"
 
 // anyArgContains reports whether any argument holds one of subs. The
 // arguments are read through the cmdline's memoized fold, which draws on the
@@ -389,10 +396,10 @@ func baseName(n string) string {
 // than CmdlinePrefix allows. Clipping per argument matters on its own: a
 // Chrome --disable-features blob is tens of kilobytes and never an engine
 // module path.
-func (c *cmdline) anyArgContains(subs ...string) bool {
+func (c *cmdline) anyArgContains(subs ...[]byte) bool {
 	for _, la := range c.argsFolded() {
 		for _, sub := range subs {
-			if strings.Contains(la, sub) {
+			if bytes.Contains(la, sub) {
 				return true
 			}
 		}
@@ -537,23 +544,50 @@ func clipUTF8Prefix(s string, n int) string {
 // lowerJoinedArgs is the command line engine matchers search, lowercased,
 // capped so a process with a huge argv cannot force a huge allocation.
 func lowerJoinedArgs(args []string) string {
-	var b strings.Builder
+	return string(appendJoined(nil, args))
+}
+
+// appendJoined writes the lowercased, budget-capped join of args into dst and
+// returns the grown slice. Callers that fold one command line per process on a
+// /proc poll pass the previous result back in as dst, so the join reuses one
+// buffer for the whole sweep instead of allocating a fresh multi-kilobyte
+// string per process. The returned bytes are only valid until the next call
+// with the same dst, which is why nothing here retains them: the matchers read
+// them for a substring test and the engine name they return is a constant.
+func appendJoined(dst []byte, args []string) []byte {
+	b := dst[:0]
 	n := min(len(args), matchJoinArgs)
 	for i := 0; i < n; i++ {
-		if b.Len() >= matchJoinBytes {
+		if len(b) >= matchJoinBytes {
 			break
 		}
 		if i > 0 {
-			b.WriteByte(' ')
+			b = append(b, ' ')
 		}
 		a := args[i]
-		remain := matchJoinBytes - b.Len()
+		remain := matchJoinBytes - len(b)
 		if len(a) > remain {
 			a = clipUTF8Prefix(a, remain)
 		}
-		b.WriteString(core.FoldASCII(a))
+		b = appendFoldASCII(b, a)
 	}
-	return b.String()
+	return b
+}
+
+// appendFoldASCII appends s to dst with its ASCII A-Z folded to a-z, without
+// the intermediate []byte/string pair core.FoldASCII allocates for a string
+// that does have uppercase in it. The fold is byte-wise and never touches a
+// byte past an ASCII letter, so a multi-byte UTF-8 sequence is copied whole,
+// exactly as FoldASCII leaves it.
+func appendFoldASCII(dst []byte, s string) []byte {
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		dst = append(dst, c)
+	}
+	return dst
 }
 
 // cmdline is what an engine matcher reads: the process name, its argv, and
@@ -565,18 +599,37 @@ func lowerJoinedArgs(args []string) string {
 // separate from the joined one and memoized the same way: four matchers test
 // arguments by substring, and folding the same argv once per matcher was four
 // times the fold for one answer.
+//
+// buf is scratch the folds are built in, owned by the sweep rather than by the
+// cmdline: a listing folds one command line per process per poll, and a walk
+// that allocated its own buffer per process created (and collected) a
+// multi-kilobyte string for every process on the host, every interval, only to
+// answer a substring test and drop it. One buffer per sweep serves all of
+// them. Its contents are only valid until the next cmdline is folded, which
+// nothing retains: joined and argsFolded are read for a match, and the engine
+// a matcher returns is a constant.
 type cmdline struct {
 	name       string
 	args       []string
 	once       sync.Once
-	folded     string
+	folded     []byte
 	argsOnce   sync.Once
-	foldedArgs []string
+	foldedArgs [][]byte
+	heads      [][]byte
+	buf        []byte
+	argBuf     []byte
 }
 
-// joined is the lowercased command line, folded once per cmdline.
-func (c *cmdline) joined() string {
-	c.once.Do(func() { c.folded = lowerJoinedArgs(c.args) })
+// joined is the lowercased command line, folded once per cmdline. The grown
+// buffer is kept on the cmdline: the scratch hands the capacity back only
+// what this fold left on the line, and the line outlives it, so a fold that
+// grew the buffer (a long argv, the first process of a sweep) would otherwise
+// have to grow it again for the next one.
+func (c *cmdline) joined() []byte {
+	c.once.Do(func() {
+		c.folded = appendJoined(c.buf, c.args)
+		c.buf = c.folded
+	})
 	return c.folded
 }
 
@@ -587,10 +640,18 @@ func (c *cmdline) joined() string {
 // costs a byte of that budget here as it does in lowerJoinedArgs and in
 // ClipArgs: a budget one copy ignores is bytes a matcher reads past the
 // retained prefix the bound exists to keep.
-func (c *cmdline) argsFolded() []string {
+//
+// The arguments are windows onto one folded copy of the line in argBuf, which
+// the sweep reuses. Copying each fold out separately (what core.FoldASCII
+// returns) allocated a string per argument holding uppercase, once per process
+// per poll. argBuf and the joined line's buffer are kept apart because the two
+// reads may be taken in either order and a name matcher can read both, but each
+// is written once and reused for the whole sweep.
+func (c *cmdline) argsFolded() [][]byte {
 	c.argsOnce.Do(func() {
 		budget := matchJoinBytes
-		out := make([]string, 0, len(c.args))
+		b := c.argBuf[:0]
+		out := c.heads[:0]
 		for i, a := range c.args {
 			if i > 0 {
 				budget--
@@ -598,86 +659,210 @@ func (c *cmdline) argsFolded() []string {
 			if budget <= 0 {
 				break
 			}
-			la := core.FoldASCII(clipUTF8Prefix(a, budget))
-			budget -= len(la)
-			out = append(out, la)
+			a = clipUTF8Prefix(a, budget)
+			start := len(b)
+			b = appendFoldASCII(b, a)
+			budget -= len(b) - start
+			out = append(out, b[start:])
 		}
+		c.argBuf = b
+		c.heads = out
 		c.foldedArgs = out
 	})
 	return c.foldedArgs
 }
 
-// has reports whether the folded command line contains s.
-func (c *cmdline) has(s string) bool { return strings.Contains(c.joined(), s) }
+// has reports whether the folded command line contains s, which must already
+// be in the folded (lowercase) spelling the line is folded into. The needles
+// are package-level []byte rather than string literals so the search does not
+// convert one per matcher per process: this runs for every process on the host
+// on every /proc poll, and a []byte(s) conversion would allocate for the whole
+// sweep for a constant.
+func (c *cmdline) has(s []byte) bool { return bytes.Contains(c.joined(), s) }
 
 var engineMatchers = []engineMatcher{
 	{"ollama", 11434, func(c *cmdline) bool {
-		return c.name == "ollama" || c.has("ollama serve")
+		return c.name == "ollama" || c.has(needOllamaServe)
 	}},
 	{"llama.cpp", 8080, func(c *cmdline) bool {
-		return strings.Contains(c.name, "llama-server") || c.has("llama-server") ||
+		return strings.Contains(c.name, "llama-server") || c.has(needLlamaServer) ||
 			strings.Contains(c.name, "llamafile")
 	}},
 	{"koboldcpp", 5001, func(c *cmdline) bool {
-		return c.has("koboldcpp")
+		return c.has(needKoboldcpp)
 	}},
 	{"vllm", 8000, func(c *cmdline) bool {
-		return c.anyArgContains("vllm.entrypoints", "/vllm") ||
+		return c.anyArgContains(needVllmEntrypoints, needVllmSlash) ||
 			baseNameEq(c.args, "vllm")
 	}},
 	{"sglang", 30000, func(c *cmdline) bool {
 		// python -m sglang.launch_server / sglang.srt.*, and the
 		// `sglang serve` CLI (same shape as `vllm serve`).
-		return c.anyArgContains("sglang.launch_server", "sglang.srt") ||
+		return c.anyArgContains(needSglangLaunch, needSglangSrt) ||
 			baseNameEq(c.args, "sglang")
 	}},
 	{"triton", 8000, func(c *cmdline) bool { return c.name == "tritonserver" }},
 	{"tgi", 8080, func(c *cmdline) bool {
-		return c.has("text-generation-launcher")
+		return c.has(needTextGenLauncher)
 	}},
 	{"tabbyapi", 5000, func(c *cmdline) bool { return c.name == "tabbyapi" }},
 	{"oobabooga", 7860, func(c *cmdline) bool {
-		return c.has("text-generation-webui") || c.has("oobabooga")
+		return c.has(needTextGenWebui) || c.has(needOobabooga)
 	}},
 	{"localai", 8080, func(c *cmdline) bool {
 		return c.name == "localai" || c.name == "local-ai"
 	}},
 	{"litellm", 4000, func(c *cmdline) bool {
-		return baseNameEq(c.args, "litellm") || c.anyArgContains("litellm.proxy")
+		return baseNameEq(c.args, "litellm") || c.anyArgContains(needLiteLLMProxy)
 	}},
 	{"mlx", 8080, func(c *cmdline) bool {
-		return c.has("mlx_lm.server") || c.has("mlx-lm")
+		return c.has(needMlxServer) || c.has(needMlxDash)
 	}},
 	{"lmstudio", 1234, func(c *cmdline) bool {
 		return strings.Contains(c.name, "lm-studio") || strings.Contains(c.name, "lmstudio") ||
 			strings.Contains(c.name, "lm studio")
 	}},
 	{"gpustack", 80, func(c *cmdline) bool {
-		return c.anyArgContains("gpustack.start")
+		return c.anyArgContains(needGpustackStart)
 	}},
 	{"lemonade", 8000, func(c *cmdline) bool { return c.name == "lemonade-server" || c.name == "lemond" }},
 	{"gpt4all", 4891, func(c *cmdline) bool { return c.name == "gpt4all" }},
 	{"jan", 1337, func(c *cmdline) bool { return c.name == "jan" }},
 	{"ramalama", 8080, func(c *cmdline) bool {
-		return c.has("ramalama")
+		return c.has(needRamalama)
 	}},
 }
 
+// The substrings the name-line matchers search the folded command line for,
+// as bytes so the search needs no conversion. Each is written in the folded
+// spelling the line carries (lowercase), which is what has folds it into.
+var (
+	needOllamaServe     = []byte("ollama serve")
+	needLlamaServer     = []byte("llama-server")
+	needKoboldcpp       = []byte("koboldcpp")
+	needTextGenLauncher = []byte("text-generation-launcher")
+	needTextGenWebui    = []byte("text-generation-webui")
+	needOobabooga       = []byte("oobabooga")
+	needMlxServer       = []byte("mlx_lm.server")
+	needMlxDash         = []byte("mlx-lm")
+	needRamalama        = []byte("ramalama")
+	needVllmEntrypoints = []byte("vllm.entrypoints")
+	needVllmSlash       = []byte("/vllm")
+	needSglangLaunch    = []byte("sglang.launch_server")
+	needSglangSrt       = []byte("sglang.srt")
+	needLiteLLMProxy    = []byte("litellm.proxy")
+	needGpustackStart   = []byte("gpustack.start")
+)
+
+// baseNameEq reports whether any argument is, by base name, want (which every
+// caller passes already folded). It compares without building the folded name.
+//
+// Three name-only matchers call this, and each folded the base name of every
+// argument on the host to do it: a name containing uppercase costs a copy of
+// it, so an argv like "-m vllm.entrypoints.openai.api_server" was copied once
+// per matcher per process on every /proc poll, for a comparison that folding
+// does not change. baseNameEqual folds a byte at a time against want instead,
+// so no name is copied at all.
 func baseNameEq(args []string, want string) bool {
-	return slices.ContainsFunc(args, func(a string) bool { return baseName(a) == want })
+	return slices.ContainsFunc(args, func(a string) bool { return baseNameEqual(a, want) })
+}
+
+// baseNameEqual is baseName(a) == want for a want already folded, without the
+// allocation. The name is reduced to its base first, and the ".exe" suffix
+// TrimSuffix would drop is recognised in either case, because baseName folds
+// the name before it strips the suffix and so drops it off "LITELLM.EXE" as
+// readily as off "litellm.exe". What is compared is therefore precisely what
+// baseName produces, and not what strings.ToLower would have over-folded (see
+// baseName).
+func baseNameEqual(a, want string) bool {
+	if i := strings.LastIndexByte(a, '/'); i >= 0 {
+		a = a[i+1:]
+	}
+	if i := strings.LastIndexByte(a, '\\'); i >= 0 {
+		a = a[i+1:]
+	}
+	if n := len(a) - len(exeSuffix); n >= 0 && equalFoldedASCII(a[n:], exeSuffix) {
+		a = a[:n]
+	}
+	if len(a) != len(want) {
+		return false
+	}
+	return equalFoldedASCII(a, want)
+}
+
+// equalFoldedASCII reports whether a folded to b's spelling, which must be
+// the name baseName folds to. It is FoldASCII's fold (ASCII A-Z only, and not
+// ToLower's, so it never rewrites a multi-byte rune) without the copy that
+// makes one. b carries no uppercase of its own, so a is the only side that
+// ever needs folding.
+func equalFoldedASCII(a, b string) bool {
+	for i := 0; i < len(a); i++ {
+		c := a[i]
+		if c >= 'A' && c <= 'Z' {
+			c += 'a' - 'A'
+		}
+		if c != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // MatchEngine finds the well-known engine behind a process, if any. The
 // name is basename'd internally, so raw argv[0] works. Exported for the
 // remote ssh path, which matches command lines gathered from another host.
 func MatchEngine(i Info) (engine string, defPort int, ok bool) {
-	c := cmdline{name: baseName(i.Name), args: i.Args}
+	return matchEngine(nil, i)
+}
+
+// matchEngine is MatchEngine over a reusable fold buffer, which a lister that
+// folds one command line per process per poll passes so the folds reuse its
+// capacity instead of allocating per process. The engine name and port it
+// returns are constants from engineMatchers, so nothing about the match
+// depends on the buffer outliving the call.
+func matchEngine(scratch *foldScratch, i Info) (engine string, defPort int, ok bool) {
+	if scratch == nil {
+		c := cmdline{name: baseName(i.Name), args: i.Args}
+		return runMatchers(&c)
+	}
+	// The cmdline itself is part of the scratch. Its address reaches the
+	// matcher closures, which is enough for the compiler to give it the heap,
+	// so a sweep that allocated one per process paid that once per process on
+	// the host on every poll for a struct it overwrites immediately.
+	c := &scratch.cmd
+	c.name, c.args = baseName(i.Name), i.Args
+	c.buf, c.argBuf, c.heads = scratch.buf, scratch.argBuf, scratch.heads
+	// A new process is a new command line, so the previous process's folds
+	// must not answer for it: reset the memos rather than let a warm cmdline
+	// report the last one.
+	c.once, c.argsOnce, c.folded, c.foldedArgs = sync.Once{}, sync.Once{}, nil, nil
+	engine, defPort, ok = runMatchers(c)
+	// Keep whatever capacity the folds grew to for the next process, and drop
+	// their contents: the bytes the matchers read are windows onto them and
+	// are not read again.
+	scratch.buf, scratch.argBuf, scratch.heads = c.buf[:0], c.argBuf[:0], c.heads[:0]
+	return engine, defPort, ok
+}
+
+// runMatchers walks the matchers against one command line. The first that
+// claims it names the engine.
+func runMatchers(c *cmdline) (engine string, defPort int, ok bool) {
 	for _, m := range engineMatchers {
-		if m.match(&c) {
+		if m.match(c) {
 			return m.engine, m.defPort, true
 		}
 	}
 	return "", 0, false
+}
+
+// foldScratch holds everything one lister reuses across the processes it
+// matches: the fold buffers, the slice of argument windows onto them, and the
+// cmdline itself. It is emptied at the end of every match: the buffers keep
+// their capacity and nothing outside a match reads their contents.
+type foldScratch struct {
+	cmd         cmdline
+	buf, argBuf []byte
+	heads       [][]byte
 }
 
 // defaultSamplerRefresh is set by platform files when OS tooling needs
