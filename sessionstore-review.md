@@ -20,7 +20,7 @@ Review the following:
 3. Attribution
 - A usage record with no working directory that is dropped from every watcher, or credited to every watcher, with no test pinning which
 - A header or sidecar read on the assumption the vendor always writes it, where a missing header silently empties the count
-- Directory identity (case folding, normalization form, escaped separators) handled by a per-OS file whose Windows or non-Linux variant is a stub, leaving those platforms reading zero
+- Directory identity (case folding, normalization form, escaped separators) decided per-OS by files that answer differently on purpose (`agentusage/pathnorm_darwin.go` normalizes, `pathnorm_windows.go` folds case and separators, `pathnorm_other.go` returns the recorded spelling alone), so a session recorded under one spelling is credited to a different watcher, or to none, with no test pinning which watcher owns it
 4. Partial coverage
 - A fallback matcher loose enough to claim another tool's store and credit its usage to the wrong agent
 - A SQLite-backed source where the untagged build already refuses loudly (`builtinSource` and `setOpenCodeDB` return false in `agentusage/source_off.go`, the `!sqlite` stub): the defect is a caller that renders that refusal as zero usage, or a listing the user reads (README, CLI help) that omits the `sqlite`-tag caveat. The stub is correct as written; do not edit it
