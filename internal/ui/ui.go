@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"math"
 	"strings"
 	"time"
 
@@ -653,8 +654,8 @@ func (m Model) agentRates() []core.AgentRate { return m.agentSum().Rates }
 // sumOwn adds up the unattributed agent rates a frame already accounted.
 func sumOwn(own []core.AgentRate) (out, in float64) {
 	for _, r := range own {
-		out += r.TokPS
-		in += r.PromptPS
+		out = addRate(out, r.TokPS)
+		in = addRate(in, r.PromptPS)
 	}
 	return out, in
 }
@@ -662,11 +663,44 @@ func sumOwn(own []core.AgentRate) (out, in float64) {
 // aggBoth adds a feed summary's unattributed rates to the provider totals.
 func aggBoth(s core.Snapshot, sum core.AgentSummary) (out, in float64) {
 	for _, p := range s.Providers {
-		out += p.OutTokPS
-		in += p.InTokPS
+		out = addRate(out, p.OutTokPS)
+		in = addRate(in, p.InTokPS)
 	}
 	aOut, aIn := sumOwn(sum.Own)
-	return out + aOut, in + aIn
+	return addRate(out, aOut), addRate(in, aIn)
+}
+
+// addRate adds one throughput reading to a running total without leaving the
+// range a float64 can carry.
+//
+// Each reading is finite on its own: the parsers that produce them filter NaN
+// and the infinities, and collector.rateOrZero drops the rest. Summing them is
+// where the range is lost, though. A rate is a counter delta over an interval,
+// and an interval can be short enough (a coalesced tick, a clock that stepped,
+// a backend answering between two scrapes) that the quotient reaches the top
+// of the float64 range; two such engines on one frame overflow the sum to
+// +Inf. Nothing downstream can use that: encoding/json refuses to encode it,
+// so JSONFrame returned an error and a --once --json run printed no report at
+// all rather than the numbers it was asked for, and the drawn header and the
+// plain report printed "+Inf tok/s" beside the engines that were measured fine.
+//
+// The two failures are answered differently. A sum that left the range
+// saturates, sign and all: the total is past the point where any consumer of a
+// tok/s figure would have told the two apart, and a finite total still renders
+// and still serializes. A NaN sum is a corrupt reading rather than a large one
+// and reads as no throughput, which is the same answer rateOrZero gives one
+// interval's corrupt reading.
+func addRate(sum, v float64) float64 {
+	n := sum + v
+	switch {
+	case math.IsNaN(n):
+		return 0
+	case math.IsInf(n, 1):
+		return math.MaxFloat64
+	case math.IsInf(n, -1):
+		return -math.MaxFloat64
+	}
+	return n
 }
 
 // aggIn is the header's input total: provider rates plus the feed's

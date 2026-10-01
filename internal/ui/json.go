@@ -2,6 +2,7 @@ package ui
 
 import (
 	"encoding/json"
+	"math"
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
@@ -242,9 +243,9 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 		DemoSeed:   demoSeed(cfg),
 		DemoOrigin: originStamp(cfg.DemoOrigin),
 		At:         stamp(now),
-		UptimeSecs: s.Uptime.Seconds(),
-		OutTokPS:   outAgg,
-		InTokPS:    inAgg,
+		UptimeSecs: reportFloat(s.Uptime.Seconds()),
+		OutTokPS:   reportFloat(outAgg),
+		InTokPS:    reportFloat(inAgg),
 		Engines:    make([]jsonEngine, 0, len(s.Providers)),
 		Agents:     make([]jsonAgent, 0, len(s.Agents)),
 		Probes:     make([]jsonProbe, 0, len(s.Probes)),
@@ -266,8 +267,8 @@ func jsonReportOf(cfg Config, s core.Snapshot) jsonReport {
 	for _, r := range sum.Rates {
 		rep.AgentRates = append(rep.AgentRates, jsonRate{
 			Agent:     core.SanitizeText(r.Agent),
-			TokPS:     r.TokPS,
-			PromptPS:  r.PromptPS,
+			TokPS:     reportFloat(r.TokPS),
+			PromptPS:  reportFloat(r.PromptPS),
 			Tokens:    r.Tokens,
 			Prompt:    r.Prompt,
 			Thinking:  r.Thinking,
@@ -287,14 +288,14 @@ func jsonEngineOf(p core.ProviderSnapshot) jsonEngine {
 		Error:      core.SanitizeText(p.Err),
 		Version:    core.SanitizeText(p.Version),
 		PID:        p.PID,
-		ProcRSSMiB: float64(p.ProcRSS) / bytesPerMiB,
-		ProcCPU:    p.ProcCPU,
-		OutTokPS:   p.OutTokPS,
-		InTokPS:    p.InTokPS,
+		ProcRSSMiB: reportFloat(float64(p.ProcRSS) / bytesPerMiB),
+		ProcCPU:    reportFloat(p.ProcCPU),
+		OutTokPS:   reportFloat(p.OutTokPS),
+		InTokPS:    reportFloat(p.InTokPS),
 		Running:    p.Running,
 		Waiting:    p.Waiting,
-		KvPct:      p.KVPct,
-		TTFTms:     p.TTFTms,
+		KvPct:      reportFloat(p.KVPct),
+		TTFTms:     reportFloat(p.TTFTms),
 	}
 	for _, m := range p.Models {
 		e.Models = append(e.Models, jsonModel{
@@ -345,8 +346,8 @@ func jsonProbeOf(p core.ProbeSample) jsonProbe {
 		Model:  core.SanitizeText(p.Model),
 		OK:     p.OK,
 		Error:  core.SanitizeText(p.Err),
-		TTFTms: p.TTFTms,
-		TokPS:  p.TokPS,
+		TTFTms: reportFloat(p.TTFTms),
+		TokPS:  reportFloat(p.TokPS),
 		Tokens: p.Tokens,
 	}
 }
@@ -387,10 +388,10 @@ func jsonSystemOf(s *core.SysSample) *jsonSystem {
 		MemUsedMiB:   s.MemUsed / bytesPerMiB,
 		SwapTotalMiB: s.SwapTotal / bytesPerMiB,
 		SwapUsedMiB:  s.SwapUsed / bytesPerMiB,
-		Load1:        s.Load1,
-		Load5:        s.Load5,
-		Load15:       s.Load15,
-		HostUptimeS:  s.HostUptime.Seconds(),
+		Load1:        reportFloat(s.Load1),
+		Load5:        reportFloat(s.Load5),
+		Load15:       reportFloat(s.Load15),
+		HostUptimeS:  reportFloat(s.HostUptime.Seconds()),
 		Drivers:      jsonDrivers(s.Drivers),
 		RemoteHost:   core.SanitizeText(s.RemoteHost),
 		RemoteErr:    core.SanitizeText(s.RemoteErr),
@@ -415,10 +416,39 @@ func jsonSystemOf(s *core.SysSample) *jsonSystem {
 			MilliC:      g.MilliC,
 			MemUsedMiB:  g.MemUsed / bytesPerMiB,
 			MemTotalMiB: g.MemTotal / bytesPerMiB,
-			UtilPct:     g.UtilPct,
-			PowerW:      g.PowerW,
+			UtilPct:     reportFloat(g.UtilPct),
+			PowerW:      reportFloat(g.PowerW),
 			Driver:      core.SanitizeText(g.Driver),
 		})
 	}
 	return out
+}
+
+// reportFloat makes one measurement safe to serialize, which every float in
+// the report has to be before encoding/json is asked for the document.
+//
+// JSON has no spelling for a NaN or an infinity: encoding/json writes neither
+// and returns an error instead, so a single unusable value costs the whole
+// report. A --once --json run is that run's only output, and a caller reading
+// it gets an empty string and an error rather than the numbers. The arithmetic
+// that produces an infinity is ordinary here: a rate is a counter delta over an
+// interval, so a short interval on a large delta overflows, and the per-engine
+// readings reach the report unsummed even where the totals now saturate.
+//
+// The substituted value is the finite one the field's own meaning puts at the
+// end of its range: an unbounded positive reading becomes the largest double
+// there is, a negative one the smallest, and a NaN becomes no reading at all,
+// which is the answer the parsers give a corrupt cell rather than a merely
+// enormous one. A finite value is untouched, so an ordinary report is
+// byte-identical to one written before this existed.
+func reportFloat(v float64) float64 {
+	switch {
+	case math.IsNaN(v):
+		return 0
+	case math.IsInf(v, 1):
+		return math.MaxFloat64
+	case math.IsInf(v, -1):
+		return -math.MaxFloat64
+	}
+	return v
 }
