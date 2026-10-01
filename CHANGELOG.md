@@ -204,6 +204,62 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   refused it: `make check` and `make lint` failed on every run, in CI and on a
   contributor's machine alike. The character is now the `\u202e` escape the rule
   asks for, which is the same seed string the fuzz corpus gets.
+- `toktop completion <TAB>` now lists the shell names in zsh and fish, and
+  bash and zsh answer nothing in the position after a flag that takes a value.
+  `completion` is the one subcommand whose argument is a word the same
+  completion has to finish, and neither declarative script could infer the
+  word list the way it infers the flags, so it had to be written into the
+  script and was: `toktop completion <TAB>` offered nothing in either. Bash and
+  zsh separately fell through to the subcommand list in a value position, so a
+  duration being typed was completed into a subcommand name. A script sourcing
+  either one picks the change up with no change to the setup it already has.
+  The subtests "both declarative shells name completion's shells" and "bash
+  and zsh answer nothing after a value-taking flag" in `TestRunCompletion` in
+  cmd/toktop pin both.
+
+- The refusal `toktop` prints when stdout is not a terminal now names the mode
+  actually running. `--plain` renders no frame and opens no alt screen, so it
+  is the one live mode that does not need a terminal, and a reader who asked
+  for the linear text report was told "the live dashboard needs one": a mode
+  they did not ask for, and the fact that the flag they did pass was `--plain`
+  not named. Under `--plain` the line says the live text report and points at
+  `--once --plain`. The gate is unchanged, and every other mode's message is
+  unchanged. `TestNonTTYMessageNamesTheRunningMode` in cmd/toktop pins it.
+
+- The `SYS` strip now renders a host that answers a kernel and nothing else.
+  The identity row was guarded on the CPU model, the OS name, a driver or an
+  NPU, and a sample carrying only a kernel missed it: a hardened container, or
+  a remote whose `/etc/os-release` is unreadable, dropped a reading it had and
+  reported `no sensors found`. The kernel joins that guard, and the `os ·
+  kernel` segment is built from the halves that are present, so the same
+  sample renders the kernel rather than a segment opening on a separator that
+  joins nothing (` · 6.11.0`). A host carrying both prints the same pair as
+  before. `TestSystemStripShowsKernelOnlyHost` in internal/ui pins it.
+
+- The compact strip's empty hint now names the ingest endpoint. Below the
+  full-layout minimum the setup card is not drawn, and the strip's one line of
+  advice was the flag fallback alone, so a `toktop --ingest` run whose pane was
+  too small to hold the card showed nothing that said it was an ingest run:
+  the endpoint is the only state on that frame distinguishing it from a bare
+  `toktop`. The hint is graded longest-first, as the feed panel's own empty
+  hint is, so a narrow strip still ends on a whole instruction rather than on
+  half an address. A run with no endpoint keeps the flag advice it always had
+  and invents nothing. `TestMinimalViewGuidesRecovery` in internal/ui walks
+  61x30 down to 20x8 and fails on a width that lost the endpoint or ended on
+  half a hint.
+
+- The site's skip link and focus ring now follow the system palette under
+  Windows High Contrast and any other `forced-colors` mode. Both are drawn
+  from author colors (`--panel` over `--bg`, `--accent` for the ring), and a
+  single-color system theme collapses the pair, so the one control that takes a
+  keyboard reader's first Tab stop went invisible on the display they had
+  turned high contrast on. A `@media (forced-colors: active)` block gives the
+  skip link `Highlight`/`HighlightText` and points the ring at `Highlight` too,
+  since `--accent` cannot be relied on once the browser is choosing the
+  colors. The base rules are unchanged, and no rule opts out of forced colors.
+  "the skip link and the focus ring follow the system palette in forced
+  colors" in site/worker.test.js pins the block, both declarations inside it
+  and the absence of the opt-out.
 
 ### Added
 
