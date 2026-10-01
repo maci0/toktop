@@ -141,6 +141,17 @@ accept a host's new key would read as another interrupted write and hand the
 rejected key back. A new killed write leaves new marks, so a later loss is
 still recovered, on its own evidence.
 
+The `cp` above is an operator's restore, and it lands the file without
+touching anything beside it, so the next connect finishes the job:
+`settleOperatorRestore` (`internal/remote/knownhosts.go`) spends the marks the
+same way toktop's own restore does, refreshes `known_hosts.bak` from the store
+that was just put back so the copy is not left a write behind, and says both on
+the audit log. A host where nothing is left to settle pays no write and says
+nothing: the step runs only where a mark is beside the store or the copy has
+fallen behind it. Either step can only copy the store into the copy, so a
+restore cannot roll a pin back to what the copy held; a step that fails is
+reported rather than taken as a restore that did not happen.
+
 One `cp`, because the store is a text file, one record per line, in the
 `host key-type base64` form OpenSSH uses. `ssh-keygen -l -f` reads it, and
 so does toktop. Concatenating a shared `~/.ssh/known_hosts` is not the way

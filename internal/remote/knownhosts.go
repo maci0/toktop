@@ -152,8 +152,14 @@ func tofu() (ssh.HostKeyCallback, error) {
 	// reads them on every run either way, so a restore that cannot land costs
 	// nothing but the tidiness, and a store that cannot be parsed at all is
 	// the probe's error to report, not this one's to swallow.
+	//
+	// settleOperatorRestore is the other half of that sentence, for the loss
+	// the operator repairs by hand: a store that is present because they put
+	// it back is finished, and the marks and the behind-copy that repair
+	// leaves are spent here rather than standing beside a store nobody lost.
 	restoreStore(path)
 	checkStoreCopy(path)
+	settleOperatorRestore(path)
 	clearSupersededCopy(path)
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		if strings.ContainsAny(hostname, " \t\r\n\x00") {
@@ -636,6 +642,74 @@ func warnDeletedStore(path string) {
 		"restore", logcfg.RedactedField(core.RedactHome(restoreCommand(copy, path)), logcfg.FieldCap))
 }
 
+// settleOperatorRestore finishes the recovery an operator's own copy performed.
+//
+// The command printed above restores the store, and the store coming back is
+// only the first half of the state that loss leaves. Two things beside it are
+// then wrong, and neither is fixed by the copy itself:
+//
+//   - A staging file or a displaced copy the killed write left is still there,
+//     so interruptedWrite reads a store that is present as one a write did not
+//     finish. That outlasts the repair: the next rm, the re-pin gesture, is
+//     answered from the copy and hands back the key the operator deleted the
+//     store to reject. clearInterruptedWrite spends the marks, and it is safe
+//     on a store that is present, so the operator does not have to know which
+//     of the two kinds of loss they had.
+//   - The copy the store was copied from is now older than the store it was
+//     copied into, which staleStoreCopy reports on every connect from then on.
+//     The report is true and the gap closes the moment one write lands, but
+//     the operator who was told to copy a file back has no write coming.
+//     Refreshing it here closes the gap now, from the store that was just put
+//     back rather than from the copy, so the copy ends up either the store's
+//     twin or the one a later write makes.
+//
+// Neither step can lose a pin: both read the store that was restored, and the
+// copy is rewritten from those bytes. A step that fails is reported rather than
+// taken as a restore that did not happen, and the restore itself is already
+// done before any of it runs, which is why the failures are warnings.
+func settleOperatorRestore(path string) {
+	if !interruptedWrite(path) && staleStoreCopy(path) == "" {
+		return // healthy: nothing a restore left behind to spend or refresh
+	}
+	if why := staleStoreCopy(path); why != "" {
+		audit().Warn("toktop: host key store copy is not current after a restore",
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"reason", why)
+	}
+	// The lock every writer of the store takes, so a connect pinning a host
+	// at this moment is waited for rather than having the copy rewritten
+	// underneath it.
+	err := lockStore(path, func() error {
+		mu := storeMutex(path)
+		mu.Lock()
+		defer mu.Unlock()
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if _, err := parseKnownHosts(path, b); err != nil {
+			// A store that does not parse is not one an operator put back,
+			// and readKnownHosts has already refused it. There is nothing to
+			// copy, and the marks are not spent on a store that is still the
+			// loss it was.
+			return err
+		}
+		if err := writeBackup(path, string(b)); err != nil {
+			return err
+		}
+		clearInterruptedWrite(path)
+		return core.SyncDir(filepath.Dir(path))
+	})
+	if err != nil {
+		audit().Warn("toktop: host key store restore not settled",
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
+		return
+	}
+	audit().Warn("toktop: host key store restored from a copy beside it, its marks cleared and its copy brought current",
+		"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap))
+}
+
 // checkStoreCopy re-creates the copy the store is recovered from when that
 // copy is missing, damaged, or older than the store, and reports it.
 //
@@ -701,6 +775,13 @@ func checkStoreCopy(path string) {
 // copy back and hands over the key the deletion was meant to reject, and it
 // does so for as long as the leftover survives: nothing else removes it, since
 // the write that could not already happened.
+//
+// A copy beside a store that parses is superseded whatever it holds, so the
+// check is the store parsing and not the copy being a leftover of a
+// particular write. A displaced copy the store has caught up with is the same
+// file with the same consequence; waiting for the store to be rewritten again
+// to notice it leaves the re-pin gesture reading as a loss for as long as the
+// copy sits there.
 //
 // So every connect tries again, once the store is known to parse. A store that
 // is missing, or one that does not parse, keeps the copy: there it is the
