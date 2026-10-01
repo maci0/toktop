@@ -1952,6 +1952,37 @@ func TestMinimalViewRecoveryAreAlternatives(t *testing.T) {
 	}
 }
 
+// The empty card's two lines are the only thing that says what state the run
+// is in and what to do about it. Both were hard-clipped to the pane, so a
+// 20-column strip read "no inference engine…" beside "try --demo, --add U…":
+// no state named, and a flag cut in half. minimalHint and compactEmptyHint on
+// the same strip are already graded for exactly this; these are now too.
+func TestCompactEmptyStateLinesAreNeverCutMidWord(t *testing.T) {
+	for _, w := range []int{16, 18, 20, 24, 28, 32, 40, 50} {
+		for _, addr := range []string{"", "127.0.0.1:8420"} {
+			m := New(Config{Version: "t", IngestAddr: addr}, nil)
+			m.w, m.h, m.ready = w, 14, true
+			out := strip(m.renderMinimal())
+			// Below the shortest whole form ("POST to /v1/events", 19 cells),
+			// a clipped row is the documented last resort every strip line
+			// takes; the defect these lines had is clipping *above* it.
+			floor := 19
+			for _, ln := range strings.Split(out, "\n") {
+				if !strings.Contains(ln, "engine") && !strings.Contains(ln, "POST") && !strings.Contains(ln, "try ") {
+					continue
+				}
+				if w >= floor && strings.HasSuffix(strings.TrimSpace(ln), "…") {
+					t.Errorf("w=%d ingest=%q: compact empty state cut mid-word: %q", w, addr, ln)
+				}
+			}
+			// Whatever the headline settles on, it has to name the condition.
+			if !strings.Contains(out, "engine") {
+				t.Errorf("w=%d ingest=%q: compact empty state names no condition:\n%s", w, addr, out)
+			}
+		}
+	}
+}
+
 // A dead ingest endpoint must be visible in-band: stderr is hidden under the
 // alternate screen, so without this the UI advertises a dead endpoint (and a
 // POST target that swallows events) forever.
@@ -3066,6 +3097,51 @@ func TestInertKeyNoticeInCompactStrip(t *testing.T) {
 	out := strip(m.renderMinimal())
 	if !strings.Contains(out, "no engines to probe") {
 		t.Errorf("compact strip does not explain an inert p:\n%s", out)
+	}
+}
+
+// The compact strip clips its notice to one line, and a notice cut
+// mid-sentence stops answering the press it exists to answer: t on a strip
+// with no chart printed "t: enlarge window, the timescale has no…" beside a
+// "min 62×30" line already naming the size. The strip grades the notice the
+// way minimalHint and compactEmptyHint already grade their own lines.
+func TestCompactStripNoticeIsNotCutMidSentence(t *testing.T) {
+	for _, key := range []string{"t", "a"} {
+		// The shortest whole spelling is "<key>: enlarge window"; below that
+		// the pane cannot carry the action itself and a clipped row is the
+		// only thing left, which is what every other strip line does too.
+		for w := minDashW - 1; w >= widthOf(key+": enlarge window"); w-- {
+			m := New(Config{Version: "t", Prober: func() {}}, nil)
+			m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "x", OK: true, OutTokPS: 12}}}
+			m.w, m.h, m.ready = w, 24, true
+			next, _ := m.Update(keyMsg(key))
+			m = next.(Model)
+			if m.notice == "" {
+				t.Fatalf("w=%d: %s on the compact strip raised no notice", w, key)
+			}
+			out := strip(m.renderMinimal())
+			var line string
+			for _, ln := range strings.Split(out, "\n") {
+				if strings.HasPrefix(ln, key+": ") {
+					line = strings.TrimSpace(ln)
+				}
+			}
+			if line == "" {
+				t.Fatalf("w=%d %s: compact strip dropped the notice:\n%s", w, key, out)
+			}
+			// Either the notice whole, or a prefix of it ending on the
+			// action. What it must never be is a prefix that stops in the
+			// middle of a clause.
+			if !strings.HasPrefix(m.notice, line) {
+				t.Errorf("w=%d %s: compact notice = %q, want a whole prefix of %q", w, key, line, m.notice)
+			}
+			if strings.HasSuffix(line, "…") {
+				t.Errorf("w=%d %s: compact notice ends mid-sentence: %q", w, key, line)
+			}
+			if !strings.HasPrefix(line, key+": enlarge window") && line != m.notice {
+				t.Errorf("w=%d %s: shortened notice dropped the action: %q", w, key, line)
+			}
+		}
 	}
 }
 

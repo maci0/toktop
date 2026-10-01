@@ -413,7 +413,15 @@ func (m Model) minimalHint() string {
 //
 // "or" keeps the flags from reading as one command carrying all of them.
 func (m Model) compactEmptyHint() string {
-	forms := []string{"try --demo, --add URL, or --agents"}
+	// Graded in both branches: with no ingest endpoint this list used to hold
+	// one form, so a pane narrower than it fell straight through to shorten and
+	// printed "try --demo, --add U…" — a half flag, which is the one thing a
+	// reader cannot act on. Same longest-first rule the ingest branch follows.
+	forms := []string{
+		"try --demo, --add URL, or --agents",
+		"try --demo or --add URL",
+		"try --demo",
+	}
 	if m.cfg.IngestAddr != "" {
 		forms = []string{
 			"POST events to http://" + core.SanitizeText(m.cfg.IngestAddr) +
@@ -431,6 +439,59 @@ func (m Model) compactEmptyHint() string {
 	// The last form is a prefix of every one above it, so on a pane narrower
 	// than it the strip still ends on the action rather than on half a URL.
 	return shorten(forms[len(forms)-1], m.w)
+}
+
+// compactEmptyHeadline is the compact strip's empty-state headline. It is the
+// one line that says what state the run is in, and the strip clipped it whole
+// on any pane under 28 cells: "no inference engine…" states no state at all.
+//
+// Graded the way minimalHint on this same strip is, for the same reason: a
+// short pane has to end on the reading, not on half of it. The last form is
+// the shortest whole statement of the condition.
+func (m Model) compactEmptyHeadline(w int) string {
+	forms := []string{
+		"no inference engines detected",
+		"no engines found",
+		"no engines",
+	}
+	for _, f := range forms {
+		if widthOf(f) <= w {
+			return f
+		}
+	}
+	return shorten(forms[len(forms)-1], w)
+}
+
+// compactNotice is the compact strip's spelling of a notice. renderFooter
+// grades the notice instead of clipping it, because a notice cut mid-sentence
+// stops answering the press it exists to answer; this strip is one clipped
+// line wide too and had the same fate.
+//
+// The forms are longest first and the first that fits wins, the rule
+// minimalHint and compactEmptyHint already follow on this same strip. A
+// notice here is nearly always about the pane being too small (t and a have
+// no chart and no panels here), so the short forms drop the reason and keep
+// the action the reader can take; the strip's own "min 62×30" line above names
+// the size, so a shortened notice repeats none of it. The last form is a
+// prefix of the ones above it, so a pane narrower than even that still ends
+// on the action rather than on half a word.
+func (m Model) compactNotice(w int) string {
+	forms := []string{m.notice}
+	// "t: enlarge window, the timescale has no chart here" and "a: enlarge
+	// window, there are no panels to swap here" are the two a small pane
+	// raises; both shorten to the same action.
+	if _, ok := strings.CutPrefix(m.notice, "t: enlarge window, the"); ok {
+		forms = append(forms, "t: enlarge window")
+	}
+	if _, ok := strings.CutPrefix(m.notice, "a: enlarge window, there"); ok {
+		forms = append(forms, "a: enlarge window")
+	}
+	for _, f := range forms {
+		if widthOf(f) <= w {
+			return f
+		}
+	}
+	return shorten(forms[len(forms)-1], w)
 }
 
 // renderMinimal is the degraded view for panes too small for the dashboard:
@@ -456,7 +517,7 @@ func (m Model) renderMinimal() string {
 	// The compact foot is one clipped line wide, too narrow to carry a notice
 	// beside the keys; the body is the only place it fits.
 	if m.notice != "" {
-		lines = append(lines, clip(styleWarn.Render(m.notice), m.w))
+		lines = append(lines, clip(styleWarn.Render(m.compactNotice(m.w)), m.w))
 	}
 	// The agent feed degrades under this layout too, and there is no AGENT
 	// FEED panel here to carry the reason: the strip is the only place it can
@@ -477,7 +538,7 @@ func (m Model) renderMinimal() string {
 				// told not to need reads as a failure instead of a wait.
 				lines = append(lines, dim(clip("watching local agents…", m.w)))
 			} else {
-				lines = append(lines, clip(styleWarn.Render("no inference engines detected"), m.w))
+				lines = append(lines, clip(styleWarn.Render(m.compactEmptyHeadline(m.w)), m.w))
 				lines = append(lines, dim(clip(m.compactEmptyHint(), m.w)))
 			}
 		}
