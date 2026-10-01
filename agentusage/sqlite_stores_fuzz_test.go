@@ -262,6 +262,19 @@ func FuzzOpenCodeDBUsage(f *testing.F) {
 		{"/work", `{"role":"assistant","tokens":{"output":"7"}}`},
 		{"/work", `{"role":"assistant","tokens":{"output":null}}`},
 		{"/work", `{"role":["assistant"],"tokens":{"output":9}}`},
+		// A total below the output beside it, and a negative one: the
+		// context cannot be smaller than the turn that produced it, and
+		// it cannot be negative. Both are reachable from a single row,
+		// and the assertion below only checks a store the corpus
+		// actually builds, so the corpus has to name these shapes or
+		// the invariant is never exercised.
+		{"/work", `{"role":"assistant","tokens":{"output":100,"total":5}}`},
+		{"/work", `{"role":"assistant","tokens":{"output":100,"total":-5}}`},
+		{"/work", `{"role":"assistant","tokens":{"output":100,"total":0}}`},
+		{"/work", `{"role":"assistant","tokens":{"output":100,"total":null}}`},
+		{"/work", `{"role":"assistant","tokens":{"reasoning":50,"total":1}}`},
+		{"/work", `{"role":"assistant","tokens":{"output":1e30,"total":-1e30}}`},
+		{"/work", `{"role":"assistant","tokens":{"output":"100","total":"5"}}`},
 		{"", `{"role":"assistant","tokens":{"output":5}}`},
 		{"/work\x00\xff", `{"role":"assistant","tokens":{"output":5}}`},
 		{"/work' OR 1=1 --", `{"role":"assistant","tokens":{"output":5}}`},

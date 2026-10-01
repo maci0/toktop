@@ -31,7 +31,11 @@ func opencodeDB(t *testing.T) string {
 }
 
 // createOpenCodeSchema matches opencode's session/message tables and the
-// session_id index the usage query is written against.
+// message index the usage query is written against. The index is the one
+// opencode declares, message_session_time_created_id_idx: session_id leading,
+// then time_created, then id. A fixture narrowed to session_id alone made the
+// query look like it scanned messages it does not, and the plan assertions
+// below were checking a shape no real store has.
 func createOpenCodeSchema(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, stmt := range []string{
@@ -39,7 +43,7 @@ func createOpenCodeSchema(t *testing.T, db *sql.DB) {
 		`CREATE TABLE message (id text PRIMARY KEY, session_id text NOT NULL,
 			time_created integer NOT NULL, data text NOT NULL,
 			FOREIGN KEY (session_id) REFERENCES session(id))`,
-		`CREATE INDEX message_session_idx ON message (session_id)`,
+		`CREATE INDEX message_session_time_created_id_idx ON message (session_id, time_created, id)`,
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatal(err)
@@ -542,6 +546,73 @@ func TestOpenCodeDBNegativeCounters(t *testing.T) {
 	}
 }
 
+// tokens.total is the context the model read, so it cannot be smaller than
+// the output the same reading reports. counter already refuses a negative
+// one; the floor against the output is what the JSONL adapters get from
+// foldCounters and this reader, whose total is a MAX in SQL, did not have.
+// Without it a store holding `{"output":100,"total":5}` publishes a context
+// window of 5 beside an output of 100, and every consumer of the sample
+// reads the pair as a measurement.
+func TestOpenCodeDBTotalIsFlooredAtOutput(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		payload string
+		want    int
+	}{
+		{"negative", `{"role":"assistant","tokens":{"output":100,"total":-5}}`, 100},
+		{"below output", `{"role":"assistant","tokens":{"output":100,"total":5}}`, 100},
+		{"zero beside output", `{"role":"assistant","tokens":{"output":100,"total":0}}`, 100},
+		{"absent beside output", `{"role":"assistant","tokens":{"output":100}}`, 100},
+		{"real context", `{"role":"assistant","tokens":{"output":100,"total":900}}`, 900},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			path := opencodeDB(t)
+			dir := t.TempDir()
+			start := time.Now()
+			addSession(t, path, "s", dir)
+			addMessage(t, path, "m", "s", start.Add(time.Second), c.payload)
+			withOpenCodeDB(t, path)
+
+			w := Watch("opencode", dir, start)
+			got := w.Poll()
+			if got.Total != c.want {
+				t.Fatalf("total %d, want %d from %s", got.Total, c.want, c.payload)
+			}
+			if got.Total < 0 {
+				t.Fatalf("total %d is negative", got.Total)
+			}
+			if got.Output > 0 && got.Total < got.Output {
+				t.Fatalf("total %d below output %d: %+v", got.Total, got.Output, got)
+			}
+		})
+	}
+}
+
+// The floor is on the reading, not on any row: a message carrying no total
+// at all does not zero a context another message reported, and a message
+// carrying a small one does not lower it. The statement picks the largest
+// total before the floor runs, so this is the whole guarantee.
+func TestOpenCodeDBTotalFloorDoesNotOverrideTheLargestTotal(t *testing.T) {
+	path := opencodeDB(t)
+	dir := t.TempDir()
+	start := time.Now()
+	addSession(t, path, "s", dir)
+	addMessage(t, path, "m-big-out", "s", start.Add(time.Second),
+		`{"role":"assistant","tokens":{"output":9000}}`)
+	addMessage(t, path, "m-real-ctx", "s", start.Add(2*time.Second),
+		`{"role":"assistant","tokens":{"output":1,"total":50000}}`)
+	withOpenCodeDB(t, path)
+
+	w := Watch("opencode", dir, start)
+	got := w.Poll()
+	if got.Total != 50000 {
+		t.Fatalf("total %d, want the 50000 the store reported", got.Total)
+	}
+	if got.Output != 9001 {
+		t.Fatalf("output %d, want 9001", got.Output)
+	}
+}
+
 func TestEnableOpenCodeDBReportsAvailability(t *testing.T) {
 	if !EnableOpenCodeDB(false) {
 		t.Fatal("a build with -tags sqlite can read the database")
@@ -605,28 +676,70 @@ func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) strin
 	return b.String()
 }
 
-// The usage query must walk session first. Starting at message would scan
-// the whole table; opencode indexes session_id, not time_created.
+// The usage query must walk session first, and must not scan message. The
+// store is filled out because a plan is a cost estimate: on a handful of rows
+// SQLite indexes a scan away, so a shape that only becomes expensive at scale
+// reads as fine until the table is big enough to care. opencode's own message
+// index leads with session_id, so a session-outer plan is the one that stays
+// inside it; a message-outer plan reads every message on the box on a poll
+// that runs four times a second.
 func TestUsageQueryStartsAtSession(t *testing.T) {
 	path := opencodeDB(t)
-	addSession(t, path, "s-mine", "/work")
 	start := time.Unix(1_700_000_000, 0)
-	addMessage(t, path, "m-mine", "s-mine", start.Add(time.Second),
-		`{"role":"assistant","tokens":{"output":1}}`)
-
-	orig := foldSessionDirectory.Load()
-	foldSessionDirectory.Store(false)
-	t.Cleanup(func() { foldSessionDirectory.Store(orig) })
-
+	// One watched session among many, so a plan that reaches for the whole
+	// message table has rows it could visibly have avoided.
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer db.Close()
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	for i := range 500 {
+		dir := "/other"
+		if i == 250 {
+			dir = "/work"
+		}
+		if _, err := tx.Exec(`INSERT INTO session (id, directory) VALUES (?, ?)`, fmt.Sprintf("s-%d", i), dir); err != nil {
+			t.Fatal(err)
+		}
+		for j := range 20 {
+			if _, err := tx.Exec(
+				`INSERT INTO message (id, session_id, time_created, data) VALUES (?, ?, ?, ?)`,
+				fmt.Sprintf("m-%d-%d", i, j), fmt.Sprintf("s-%d", i), start.Add(time.Duration(j)*time.Second).UnixMilli(),
+				`{"role":"assistant","tokens":{"output":1}}`); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("ANALYZE"); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := foldSessionDirectory.Load()
+	foldSessionDirectory.Store(false)
+	t.Cleanup(func() { foldSessionDirectory.Store(orig) })
+
 	plan := explainQueryPlan(t, db, usageQueryFor(1), "/work", start.UnixMilli())
 	first, _, _ := strings.Cut(plan, "\n")
 	if !strings.Contains(strings.ToLower(first), "session") {
 		t.Fatalf("outer loop is not session:\n%s", plan)
+	}
+	// A plan can name the index and still scan, and a scan there reads every
+	// message in the store on every poll. Nothing in the query as written
+	// produces that: SQLite reorders even a plain INNER JOIN into this shape,
+	// so the check is a guard on the statement rather than a reproducer, and
+	// it fires if a future edit drops the join term the index is chosen on.
+	for _, step := range strings.Split(plan, "\n") {
+		if strings.HasPrefix(step, "SCAN m") {
+			t.Fatalf("message table is scanned, so the whole store is read per poll:\n%s", plan)
+		}
 	}
 }
 

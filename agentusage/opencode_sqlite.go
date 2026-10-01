@@ -54,9 +54,13 @@ func init() {
 //
 // The database is opened read-only and the handle is kept across polls (see
 // sqlite.go), dropped when a read fails or the file is replaced, so the
-// dashboard re-establishes it once rather than per reading. Sessions for this
-// directory are few; their messages are found through the session_id index
-// rather than a scan of the message table.
+// dashboard re-establishes it once rather than per reading. It is
+// machine-wide, so the sessions matching one directory are the few rows; the
+// session table itself is not, and it is scanned on every poll because
+// opencode indexes project_id, workspace_id and parent_id but not directory,
+// and this reader cannot add an index to a store it opens mode=ro. The scan
+// is linear in the sessions on the box: 50k sessions measured 8ms a read
+// against 88µs with a directory index, at a poll that runs every 250ms.
 type openCodeDBSource struct{ path string }
 
 func setOpenCodeDB(on bool) bool {
@@ -92,11 +96,27 @@ func openCodeDBPath() string {
 // no placeholder for either. MAX(CAST(…), 0) floors a negative stored counter
 // at zero so one malformed row cannot subtract from sessions that read fine.
 //
-// Sessions are the outer loop, then messages via message_session_idx
-// (session_id). CROSS JOIN stops SQLite from reversing that into a scan of
-// message: opencode indexes session_id, not (session_id, time_created) and
-// not directory. CAST keeps MAX numeric: json_extract of a JSON string is
-// TEXT, and SQLite ranks TEXT above INTEGER, so MAX('9', 100) would be '9'.
+// The context total is floored after the read, in floorTotal, not in the
+// statement. It has to be the largest of two numbers — the stored maximum and
+// the output this same reading summed — and the first is an aggregate over
+// rows while the second is another aggregate over the same rows, which SQL
+// will not nest: a scalar MAX of the two is a per-row fold that silently
+// reports whichever row it saw last. counter already refuses a negative total,
+// so that half of the rule was never missing here; the half that was is the
+// floor against the output. Every JSONL adapter gets it from foldCounters,
+// which rebuilds a total from the parts, and this reader's total is a MAX in
+// SQL, so a store holding a total below the output beside it published a
+// context smaller than the turn that produced it: a reading no row supports.
+//
+// Sessions are the outer loop, then messages through the message index on
+// session_id. CROSS JOIN stops SQLite from reversing that into a scan of
+// message: opencode's own index leads with session_id and carries
+// time_created beside it, so the join and the since bound are both served by
+// it, and the message table is kept out of the read entirely. It indexes
+// session_id but not directory, which leaves the session table itself scanned
+// (see the type's comment for what that costs). CAST keeps MAX numeric:
+// json_extract of a JSON string is TEXT, and SQLite ranks TEXT above INTEGER,
+// so MAX('9', 100) would be '9'.
 //
 // The since bound is a spliced predicate, not a placeholder, because a
 // zero since means no lower bound at all and a bound still needs a value to
@@ -313,14 +333,31 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok boo
 		}
 		return values{}, false
 	}
+	outCount := counter64(out.Int64)
 	v = values{
-		output:   counter64(out.Int64),
+		output:   outCount,
 		thinking: counter64(thinking.Int64),
-		total:    counter64(total.Int64),
+		total:    floorTotal(counter64(total.Int64), outCount),
 		input:    counter64(input.Int64),
 	}
 	noteStoreReadOK("opencode", o.path)
 	// The read itself succeeded whatever the totals came to, so the handle
 	// stays open even when the store holds nothing for this window.
 	return v, true
+}
+
+// floorTotal is the context a reading reports: the stored total, and never
+// below the output beside it. A turn read at least what it wrote, so a total
+// under the output is a reading the rows do not support. counter has already
+// refused a negative total before this sees one, so the zero floor every
+// JSONL adapter also applies is spent here.
+//
+// The floor is on the reading, not on any row: one message carrying a total
+// of 5 does not lower a context another message reported as 50000, because
+// the statement has already picked the largest total before this runs.
+func floorTotal(total, output int) int {
+	if total < output {
+		return output
+	}
+	return total
 }
