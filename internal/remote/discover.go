@@ -38,11 +38,22 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 	// The script ends in `true` so a host with no /proc/net/tcp6 still exits
 	// 0, which means its exit status cannot report the failure this line
 	// exists to name. The script marks the unreadable case on stdout instead.
+	//
+	// The target rides every line here, the way it rides the connect, tunnel
+	// and vitals lines in this package. Discovery runs per ssh:// target and
+	// the sweep below is optional on both counts, so an operator watching
+	// several boxes sees the same "remote engine scan failed" on whichever of
+	// them hid its /proc/net/tcp, with nothing on the line saying which. That
+	// is the whole diagnosis: the port to go and look at.
 	if out, err := c.Run(ctx, netTCPScript); err != nil {
 		audit().Warn("toktop: remote listening-port sweep failed, falling back to an active probe",
+			"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
+			"port", c.Target.Port,
 			"error", logcfg.RedactedField(c.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), logcfg.FieldCap))
 	} else if strings.Contains(out, noProcNetTCPMarker) {
-		audit().Warn("toktop: remote listening-port sweep could not read /proc/net/tcp, falling back to an active probe")
+		audit().Warn("toktop: remote listening-port sweep could not read /proc/net/tcp, falling back to an active probe",
+			"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
+			"port", c.Target.Port)
 	} else {
 		d.Listening = parseNetTCP(out)
 	}
@@ -65,6 +76,8 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 	// absence from the dashboard.
 	if out, err := c.Run(ctx, procScanScript()); err != nil {
 		audit().Warn("toktop: remote engine scan failed; engines on custom ports will not be discovered",
+			"target", logcfg.RedactedField(c.Target.LogHost(), logcfg.FieldCap),
+			"port", c.Target.Port,
 			"error", logcfg.RedactedField(c.Target.RedactUser(core.RedactHome(core.Snippet([]byte(err.Error())))), logcfg.FieldCap))
 	} else {
 		d.EnginePorts = enginePorts(parseProcScan(out))

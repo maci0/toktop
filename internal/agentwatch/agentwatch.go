@@ -25,6 +25,7 @@ import (
 	"cmp"
 	"context"
 	"errors"
+	"log/slog"
 	"maps"
 	"slices"
 	"sync"
@@ -33,7 +34,18 @@ import (
 	"github.com/maci0/toktop/agentusage"
 
 	"github.com/maci0/toktop/internal/core"
+	"github.com/maci0/toktop/internal/logcfg"
 )
+
+// auditLog is the logger this package's own lines go to; a test swaps it for
+// a handler it can read, the way collector and selfreload do. The package
+// carries no logger before this one: every condition it used to surface went
+// to onError, which main routes to a single "agent watch failed" line naming
+// no agent. A fault attributable to one followed process was therefore
+// indistinguishable from one attributable to any other.
+var auditLog = logcfg.NewSwapLogger(logcfg.Logger)
+
+func audit() *slog.Logger { return auditLog.Logger() }
 
 // Engines reports the endpoints toktop is already measuring, as the URLs the
 // providers advertise. An agent generating through one of those engines has
@@ -322,6 +334,15 @@ func (w *Watcher) stopAll() {
 // with it process exit, for as long as the read blocks. Past the bound the
 // tail read is dropped: the transcripts of an exited agent are one more poll
 // from the dashboard anyway.
+//
+// The drop is reported rather than made silently. The final Poll below is what
+// carries the tail of the agent's usage into the feed, so a tracker that timed
+// out contributes no tail, and the events it did not get to are gone with the
+// run rather than one poll later as the comment above claims: nothing reads
+// them again once the tracker is gone. What the operator is left with is an
+// agent whose total quietly stops short of what its transcripts hold, with a
+// dashboard that is entirely healthy and no line anywhere naming the stall. The
+// wait is bounded either way; only the record of it is new.
 const stopWait = 3 * time.Second
 
 func (w *Watcher) stopOne(t *tracked) {
@@ -333,11 +354,29 @@ func (w *Watcher) stopOne(t *tracked) {
 	select {
 	case <-t.done:
 	case <-timer.C:
+		w.auditStopTimedOut(t)
 		return
 	}
 	if t.watch != nil {
 		w.report(t, t.watch.Poll())
 	}
+}
+
+// auditStopTimedOut records a tracker whose read loop did not unwind inside
+// stopWait, so its final poll was dropped and the agent's tail is missing.
+//
+// The line names the agent by tool and pid, the way every other line about a
+// followed agent does, and the store it was tailing: a stall is almost always
+// the filesystem underneath one transcript store, so the store is what an
+// operator checks first and the pid alone does not lead there. The wait rides
+// along so a log read knows this is the stop path's ceiling rather than an
+// open-ended hang.
+func (w *Watcher) auditStopTimedOut(t *tracked) {
+	audit().Warn("toktop: agent tracker did not stop in time; its last usage reading is dropped",
+		"agent", logcfg.Field(t.proc.Tool, core.AgentNameMax),
+		"pid", t.proc.PID,
+		"store", logcfg.Field(core.RedactHome(t.proc.Dir), logcfg.FieldCap),
+		"wait", stopWait.Round(time.Millisecond))
 }
 
 // trackedList is the followed agents in PID order. Report and shutdown

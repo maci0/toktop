@@ -284,8 +284,15 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 				// The reason is folded to "~" before it is written, like every
 				// other audit line here: a read failure carries the path it failed
 				// on in full, and a path under $HOME names the account the line
-				// is otherwise careful not to.
+				// is otherwise careful not to. The target rides along because
+				// this is a per-connect condition, not a per-run one: the chain
+				// is assembled for one ssh:// target at a time, and an operator
+				// attaching three of them otherwise reads the same "default ssh
+				// key unusable" line and cannot tell which connection is about
+				// to fall back to a password prompt.
 				audit().Warn("toktop: default ssh key unusable, continuing without it",
+					"target", logcfg.RedactedField(t.LogHost(), logcfg.FieldCap),
+					"port", t.Port,
 					"key", core.RedactHome(p),
 					"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 				continue
@@ -301,7 +308,13 @@ func (t Target) authMethods() ([]ssh.AuthMethod, func(), error) {
 			// The socket is $SSH_AUTH_SOCK, environment input rather than a
 			// constant, so it is capped and folded like the rest of the line's
 			// text; the dial error names the same socket and is folded with it.
+			// The target rides along for the reason the key line above gives:
+			// the chain is built per connection, and without it an operator
+			// cannot tell which target lost the agent and is about to be
+			// authenticated with the rest of the chain alone.
 			audit().Warn("toktop: ssh agent unreachable, continuing without it",
+				"target", logcfg.RedactedField(t.LogHost(), logcfg.FieldCap),
+				"port", t.Port,
 				"socket", logcfg.Field(core.RedactHome(sock), logcfg.FieldCap),
 				"error", core.RedactHome(core.Snippet([]byte(err.Error()))))
 		} else {
