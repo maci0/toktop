@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 )
@@ -46,9 +47,11 @@ func Discover() []Process {
 		}
 		r.pid = pid
 
+		// Both files are raw kernel bytes, decoded by procText at this
+		// boundary rather than at each use.
 		var comm string
 		if name, err := r.read(procCommFile); err == nil {
-			comm = strings.TrimSpace(string(name))
+			comm = strings.TrimSpace(procText(name))
 		}
 
 		raw, err := r.read(procCmdlineFile)
@@ -61,7 +64,7 @@ func Discover() []Process {
 		// a browser or an Electron app carries thousands of arguments, and
 		// the two readers below look at the first two words of the line and
 		// at whether any word of it is "web".
-		line := strings.TrimRight(string(raw), "\x00")
+		line := strings.TrimRight(procText(raw), "\x00")
 		tool := agentName(comm, leadingWords(line, r.nameBuf[:0], agentNameWords), known)
 		if tool == "" {
 			continue
@@ -85,6 +88,29 @@ const (
 	procCmdlineFile = "cmdline"
 	procCwdFile     = "cwd"
 )
+
+// procText decodes one /proc file into text. Neither comm nor cmdline is
+// required to hold valid UTF-8: comm is fixed at TASK_COMM_LEN-1 (15) bytes,
+// so a binary named in a non-ASCII script is cut mid-rune by the kernel (an
+// agent tool named "エージェント" is 21 bytes and lands on half a character),
+// and cmdline holds whatever bytes the process's argv did.
+//
+// An ill-formed byte cannot be left in place. canonicalTool composes to NFC
+// and x/text leaves a lone 0xc3 there rather than dropping it, so the half a
+// rune would enter the agent identity as a key no other reader of the same
+// process can produce, and whether a built-in name still matched would depend
+// on which side of the cut the walk landed. Dropping the byte is the safe
+// direction: a name that lost a byte matches no agent, which is the right
+// answer for a process this walk cannot name.
+//
+// Valid input takes the plain conversion, so a walk over every process on the
+// host pays only for the strings it was already turning into text.
+func procText(b []byte) string {
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	return strings.ToValidUTF8(string(b), "")
+}
 
 // procReader carries the scratch one /proc walk needs: the path it is opening
 // and the buffer that file is read into. One of each per walk, and neither

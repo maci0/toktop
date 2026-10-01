@@ -19,8 +19,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
-	"unicode/utf8"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/maci0/toktop/agentusage"
 	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
@@ -174,7 +174,12 @@ func TestRunOnceOutput(t *testing.T) {
 						t.Fatalf("stdout = %q, want a rendered frame", got)
 					}
 					for i, line := range strings.Split(frame, "\n") {
-						if n := utf8.RuneCountInString(line); n > 120 {
+						// Cells, not runes: every cap in the plain report is
+						// stated in cells (ui.shorten counts visible cells and
+						// gives CJK and emoji their real width), so a rune
+						// count both waved a wide line past this assertion and
+						// disagreed with the frame about the contract itself.
+						if n := lipgloss.Width(line); n > 120 {
 							t.Errorf("stdout line %d is %d columns, want at most 120", i+1, n)
 						}
 					}
