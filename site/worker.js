@@ -1065,17 +1065,19 @@ export default {
 
 async function handle(request, env, started) {
   const url = new URL(request.url);
+  // ALLOWED_METHODS holds for the image paths and the page alike, so one
+  // check answers for every route below.
+  if (request.method !== "GET" && request.method !== "HEAD") {
+    return failRequest(
+      request,
+      started,
+      405,
+      "method-not-allowed",
+      notAllowedMessage(url.pathname, request.method),
+      { allow: ALLOWED_METHODS },
+    );
+  }
   if (IMAGE_PATHS.has(url.pathname)) {
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      return failRequest(
-        request,
-        started,
-        405,
-        "method-not-allowed",
-        notAllowedMessage(url.pathname, request.method),
-        { allow: ALLOWED_METHODS },
-      );
-    }
     if (!env?.ASSETS) {
       // Every image on the page is now a 404 and /health reports the missing
       // binding, so this is the line that names the request behind it.
@@ -1128,16 +1130,6 @@ async function handle(request, env, started) {
       return new Response(null, { status: asset.status, headers });
     }
     return new Response(asset.body, { status: asset.status, headers });
-  }
-  if (request.method !== "GET" && request.method !== "HEAD") {
-    return failRequest(
-      request,
-      started,
-      405,
-      "method-not-allowed",
-      notAllowedMessage(url.pathname, request.method),
-      { allow: ALLOWED_METHODS },
-    );
   }
   if (url.pathname === "/health") {
     // Uptime probes hit this continuously; caching it would only blur
