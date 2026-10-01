@@ -14,6 +14,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 ## [Unreleased]
 
 ### Fixed
+- The Windows process lister left a process behind on every poll. PowerShell
+  CIM is polled on the dashboard timer to read `Win32_Process`, and the command
+  it builds was the only `exec.CommandContext` caller in the tree without the
+  group kill and the deferred group cleanup their siblings carry: a helper
+  PowerShell spawned that outlived it was reparented and kept running, one per
+  sweep, for the life of the dashboard. `os/exec` closes the output pipes at
+  the `WaitDelay` expiry without signalling anything, so the deadline kill and
+  the deferred cleanup are the only two moments either could have been sent at.
+  Both are now armed beside `WaitDelay`, as on the darwin lister, the GPU
+  sampler and the agent store discovery already were.
+  `TestEveryProcessListerArmsTheGroupKill` and
+  `TestEveryProcessListerArmsThePipeGrace` in internal/procs pin that neither
+  platform's lister drops either half.
 - A staging file the stale-temp sweep could not remove was dropped silently,
   so `toktop update` reported a clean install and a host-key pin reported a
   clean write over a directory that still held an unverified download or a

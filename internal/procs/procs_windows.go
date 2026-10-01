@@ -64,6 +64,15 @@ func listWindows() ([]raw, error) {
 	cmd := exec.CommandContext(ctx, shell, "-NoProfile", "-Command",
 		`$OutputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId,Name,CommandLine,WorkingSetSize,KernelModeTime,UserModeTime | ConvertTo-Json -Compress`)
 	cmd.WaitDelay = listPipeGrace
+	core.GroupKill(cmd)
+	// Deferred beside the group, and for the reason listDarwin gives: CIM is
+	// polled on a dashboard timer (defaultSamplerRefresh), and a helper
+	// PowerShell spawned that outlives it is one more process per sweep for the
+	// life of the process. Both are no-ops on windows today, because core has
+	// no Job Object to address there (see procattr_other.go); they are here so
+	// the two listers cannot drift apart the way this one had, and so adding
+	// the Job Object is one edit in core rather than one per caller.
+	defer core.KillGroup(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s -NoProfile -Command Get-CimInstance Win32_Process: %w", shell, err)
