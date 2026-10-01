@@ -16,7 +16,11 @@ this file imports directly.
 The capture must come from `tmux capture-pane -e -p` (one line per row,
 escape sequences preserved). Rendering uses Meslo (LG Nerd Font where it is
 installed), the family the shipped capture was made with, on the toktop.ai
-dark base the TUI paints. Set TOKTOP_SCREENSHOT_FONT to a regular-weight
+dark base the TUI paints, and falls back per character to any installed
+Noto Sans Mono face, so a model id or agent name written in CJK, Cyrillic,
+Greek, Arabic, Hebrew, Devanagari or Thai is drawn as itself rather than as
+the .notdef box a Latin-only face draws for every character outside it. Set
+TOKTOP_SCREENSHOT_FONT to a regular-weight
 .ttf when no Meslo build
 is installed where the script looks.
 
@@ -38,6 +42,7 @@ from typing import TYPE_CHECKING, TextIO
 
 if TYPE_CHECKING:
     from PIL.ImageFont import FreeTypeFont
+    from pyte import Screen
 
 RGB = tuple[int, int, int]
 
@@ -89,12 +94,103 @@ HELP_FLAGS: frozenset[str] = frozenset({"-h", "--help"})
 # A truecolor SGR payload is #rrggbb.
 HEX_DIGITS = 6
 
+# A Unicode noncharacter no font holds a glyph for, so drawing it yields the
+# face's .notdef box. _covers compares a character's mask against this one to
+# tell a glyph the face has from the box it draws in its place.
+UNMAPPED = "\U0010fffe"
+
 
 def _search(pattern: str) -> list[str]:
     hits: list[str] = []
     for root in FONT_ROOTS:
         hits.extend(str(p) for p in sorted(Path(root).glob(f"**/{pattern}")))
     return hits
+
+
+def display_width(text: str) -> int:
+    """Return the terminal columns text occupies.
+
+    Characters a terminal gives two cells to -- the East Asian Wide and
+    Fullwidth classes, which is where every CJK ideograph, kana, Hangul
+    syllable and fullwidth form sits -- count two, and the combining marks
+    and zero-width joiners inside one grapheme cluster count zero. len()
+    counts all three as one character, so it under-measures a row of Japanese
+    model names by a third and over-measures a row of emoji by however many
+    joiners the sequences carry.
+
+    wcwidth is the same table pyte lays the screen out with, so measuring
+    here and laying out there cannot disagree; both read the same Unicode
+    data from the same installed pin.
+    """
+    from wcwidth import wcswidth  # noqa: PLC0415
+
+    # wcswidth returns -1 for a control character, which a sanitized capture
+    # cannot hold but a hand-written one can. A row of them measures as one
+    # column each, which is the widest a control ever draws.
+    return max(int(wcswidth(text)), 0)
+
+
+# Nerd Font build of Meslo carries Latin, box drawing and the Powerline
+# glyphs and nothing else, so every CJK, Cyrillic, Greek, Arabic, Hebrew,
+# Devanagari or Thai character the TUI renders -- a model id, an agent name,
+# an engine's own error string -- came out of one Latin face as .notdef.
+#
+# The list is the site's --mono stack (site/worker.js) translated to faces
+# rather than family names: whatever the reader's terminal falls back to, the
+# renderer picks up from the same list. A name the reader's platform does not
+# install is skipped, and the last entry is whatever monospace the platform
+# resolves, so a machine with none of the named faces still renders through
+# its own default rather than through nothing.
+#
+# Order is by how much of the dashboard a script covers, not alphabetically:
+# a CJK face also carries the Han kana and Hangul, so it goes first and
+# covers three of the entries below it.
+FALLBACK_PATTERNS: tuple[str, ...] = (
+    "NotoSansMonoCJK*.ttc",
+    "NotoSansMonoCJK*.otf",
+    "NotoSansCJK*.ttc",
+    "NotoSansMonoDevanagari*.ttf",
+    "NotoSansMonoArabic*.ttf",
+    "NotoSansMonoHebrew*.ttf",
+    "NotoSansMonoThai*.ttf",
+    "NotoSansMono*.ttf",
+    "*Mono*.ttf",
+    "*Mono*.otf",
+    "*Mono*.ttc",
+)
+
+
+def resolve_fallback_fonts() -> tuple[str, ...]:
+    """Return the fallback face paths, in the order a glyph is tried.
+
+    Empty when no installed face is a candidate, which is not a failure: the
+    primary face still draws Latin and box drawing, and the renderer falls
+    back to it for everything it cannot find elsewhere rather than skipping
+    the glyph.
+    """
+    found: list[str] = []
+    for pattern in FALLBACK_PATTERNS:
+        for path in _search(pattern):
+            if path not in found:
+                found.append(path)
+    return tuple(found)
+
+
+def _covers(font: FreeTypeFont, ch: str) -> bool:
+    """Whether font draws ch, rather than its .notdef box.
+
+    pillow's getmask on a face with no glyph for ch returns the face's
+    .notdef rectangle, which is a real bitmap and so cannot be told from a
+    drawn character by size alone. U+10FFFE is a noncharacter: no font holds a
+    glyph for one, so its mask is always .notdef, and a character whose mask
+    differs from that one is a character the face draws. Reading the cmap
+    would be exact, and pillow exposes no reader for one.
+    """
+    try:
+        drawn = font.getmask(ch).getbbox() != font.getmask(UNMAPPED).getbbox()
+    except (OSError, ValueError):
+        return False
+    return bool(drawn)
 
 
 def resolve_fonts() -> tuple[str, str]:
@@ -162,6 +258,62 @@ def load_fonts(regular: str, bold: str, size: int) -> tuple[FreeTypeFont, FreeTy
             print(f"screenshot.py: {role} font {path}: {e}", file=sys.stderr)
             raise SystemExit(1) from e
     return loaded[0], loaded[1]
+
+
+def load_fallback_fonts(paths: tuple[str, ...], size: int) -> tuple[FreeTypeFont, ...]:
+    """Open every usable fallback face at size, skipping the rest.
+
+    Unlike the primary pair, a fallback that cannot be opened is dropped
+    rather than fatal: the list is one entry per script the reader's platform
+    may or may not have installed, and the renderer draws through the primary
+    face whatever this returns empty. A path here that names a directory or a
+    truncated download would otherwise cost the whole screenshot.
+    """
+    from PIL import ImageFont  # noqa: PLC0415
+
+    faces: list[FreeTypeFont] = []
+    for path in paths:
+        try:
+            faces.append(ImageFont.truetype(path, size))
+        except OSError as e:
+            print(f"screenshot.py: fallback font {path}: {e}", file=sys.stderr)
+    return tuple(faces)
+
+
+def select_faces(
+    screen: Screen,
+    rows: int,
+    cols: int,
+    primary: tuple[FreeTypeFont, ...],
+    fallbacks: tuple[FreeTypeFont, ...],
+) -> dict[str, FreeTypeFont]:
+    """Map each character on screen to a face that has a glyph for it.
+
+    A Nerd Font build of Meslo carries Latin, box drawing and the Powerline
+    glyphs and nothing else, so drawing every cell through it puts the face's
+    .notdef box wherever the dashboard holds anything outside Latin -- and the
+    dashboard holds a model id, an agent name and an engine's own error string
+    in whatever script the engine and the user wrote them in.
+
+    The table is built from the characters actually on screen, not from the
+    whole Unicode range, and built once for the frame rather than per cell: a
+    coverage probe rasterizes a face twice, and doing it inside the draw loop
+    would rasterize every cell of the dashboard twice over.
+
+    A character no installed face covers is absent from the table and is drawn
+    from the primary face, which is the .notdef box. That is what a machine
+    with no font for the script in its capture can show.
+    """
+    faces: dict[str, FreeTypeFont] = {}
+    onscreen = {screen.buffer[y][x].data for y in range(rows) for x in range(cols)}
+    for ch in onscreen:
+        if ch in (" ", ""):
+            continue
+        for face in (*primary, *fallbacks):
+            if _covers(face, ch):
+                faces[ch] = face
+                break
+    return faces
 
 
 def usage(out: TextIO) -> None:
@@ -268,8 +420,17 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
 
     lines = [ln.rstrip(b"\r") for ln in data.split(b"\n")]
     if cols <= 0:
-        # count runes after stripping escapes: braille dots are 3 UTF-8 bytes
-        cols = max(len(ANSI_RE.sub(b"", ln).decode("utf-8", "replace")) for ln in lines)
+        # Count display columns after stripping escapes: braille dots are 3
+        # UTF-8 bytes, and a CJK, Hangul or fullwidth glyph is one character
+        # occupying two terminal cells. len() of the decoded line counted
+        # both as one, so a row of Japanese model names measured a third
+        # short, pyte truncated it at that width, and every cell past the
+        # cut was dropped from the image -- a screenshot that silently lost
+        # the right-hand part of the dashboard it was made to show.
+        cols = max(
+            display_width(ANSI_RE.sub(b"", ln).decode("utf-8", "replace"))
+            for ln in lines
+        )
     if rows <= 0:
         rows = len(lines)
     # Rejoin with CRLF: capture-pane trims trailing spaces, so bare \n would
@@ -288,6 +449,8 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
     font_size = 16 * scale
     font_path, font_bold_path = resolve_fonts()
     font, font_bold = load_fonts(font_path, font_bold_path, font_size)
+    fallbacks = load_fallback_fonts(resolve_fallback_fonts(), font_size)
+    faces = select_faces(screen, rows, cols, (font, font_bold), fallbacks)
 
     img = Image.new("RGB", (cols * cell_w, rows * cell_h), BG)
     draw = ImageDraw.Draw(img)
@@ -313,7 +476,7 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
                     ],
                     fill=bg,
                 )
-            face = font_bold if bold else font
+            face = faces.get(ch) or (font_bold if bold else font)
             draw.text(
                 (x * cell_w + cell_w // 2, y * cell_h + cell_h // 2),
                 ch,

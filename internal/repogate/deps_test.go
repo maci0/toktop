@@ -616,10 +616,11 @@ func pythonImportName(distribution string) string {
 // pythonClosure is the runtime pin a distribution in scripts/requirements.txt
 // is required by, for the pins no file in scripts/ imports itself. The install
 // runs --no-deps, so a pin nothing imports has to be spelled out here or it is
-// a package the tree fetches from PyPI and never runs.
-var pythonClosure = map[string]string{
-	"wcwidth": "pyte",
-}
+// a package the tree fetches from PyPI and never runs. Empty while every pin
+// is imported by a file under scripts/ itself: wcwidth sat here until the
+// screenshot renderer measured a capture row in display columns, and pyte,
+// whose pin it was, has always been imported directly.
+var pythonClosure = map[string]string{}
 
 // TestPythonRuntimePinsAreUsed fails when scripts/requirements.txt pins a
 // distribution nothing under scripts/ imports and nothing in pythonClosure

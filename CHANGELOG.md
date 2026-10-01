@@ -15,6 +15,24 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `scripts/screenshot.py` measures a capture row in terminal cells rather than
+  in characters, and draws each character from a face that has a glyph for it.
+  Both were Latin assumptions in the one tool that produces the dashboard
+  image. The column count came from `len()` of the decoded line, so a model id,
+  an agent name or an engine's own error string written in CJK, Hangul or a
+  fullwidth form measured one cell per character where the terminal gives two:
+  `pyte` laid the row out at that width and every cell past the cut was missing
+  from the written image, a third of a Japanese-named dashboard gone. Every cell
+  was then drawn through the one Meslo Nerd Font, whose `.notdef` box came out
+  for every character outside Latin, so the characters that survived rendered
+  as the same hollow rectangle each. The list of fallback faces is the site's
+  `--mono` stack (`site/worker.js`) turned into files: the site names CJK,
+  Arabic and Devanagari faces for exactly this, and the renderer now picks up
+  from the same list. A machine with none of them installed renders through
+  its own default, which is what it could show anyway.
+  `TestScreenshotMeasuresRowsInDisplayColumns`,
+  `TestScreenshotHonorsAnExplicitColumnCount` and
+  `TestScreenshotFallsBackPerCharacter` in internal/repogate pin all three.
 - A process whose name or command line is not valid UTF-8 no longer reaches an
   engine matcher, a panel label or the JSON report holding half a character.
   `/proc` does not require a name to be UTF-8: `comm` is fixed at
