@@ -14,6 +14,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 ## [Unreleased]
 
 ### Fixed
+- The audit log no longer loses a line in silence when stderr refuses one. The
+  `log/slog` API discards whatever a handler returns, so a stderr that is full,
+  redirected to a full disk, or a pipe whose reader had gone dropped every line
+  with nothing anywhere saying so: the log read as a run where nothing was
+  reported, on exactly the lines that exist to say a store backup could not be
+  written, a store was read back from its copy, or a rename could not be made
+  durable. Those refusals are now counted, and the count is written as one line
+  of its own on the next line stderr accepts, naming the reason it refused. A
+  run whose stderr never accepts another line still reports nothing, which is
+  the ceiling of a log whose only sink is the channel that failed.
+  `TestALostAuditLineIsReportedOnTheNextOneThatLands` and its neighbours in
+  internal/logcfg pin the count, the once-only report and the short write.
 - The Windows process lister left a process behind on every poll. PowerShell
   CIM is polled on the dashboard timer to read `Win32_Process`, and the command
   it builds was the only `exec.CommandContext` caller in the tree without the

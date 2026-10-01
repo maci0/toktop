@@ -13,7 +13,9 @@ package logcfg
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -75,15 +77,164 @@ const utcStamp = "2006-01-02T15:04:05.000000000Z07:00"
 // TOKTOP_LOG_LEVEL names, stamping every record in UTC so lines from several
 // machines sort against each other, and folding the home directory out of
 // every line through [HomeHandler].
+//
+// The handler writes through a [LossHandler], so a line that stderr refused is
+// counted rather than dropped in silence: slog's own API discards whatever
+// Handle returns, and an audit line is the only record that a store backup
+// failed, a store was read back from its copy, or a rename could not be made
+// durable, so a stderr that is full, redirected to a full disk, or closed
+// loses the operator exactly the line they would have read. See the handler
+// for what is reported and when.
 func Logger() *slog.Logger {
 	lvl, err := ParseLogLevel(os.Getenv(LevelEnv))
 	if err != nil {
 		lvl = slog.LevelInfo // main already rejected this; stay quiet if constructed in tests
 	}
-	return slog.New(HomeHandler{Handler: slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+	// One counter for the stderr this logger writes to, and the same stderr
+	// for every record: the packages that audit all reach it through one
+	// SwapLogger holding the logger this returns, so a process counts its lost
+	// lines once against the one channel they went missing from.
+	lw := &lossWriter{w: os.Stderr}
+	return slog.New(HomeHandler{Handler: LossHandler{w: lw, inner: slog.NewTextHandler(lw, &slog.HandlerOptions{
 		Level:       lvl,
 		ReplaceAttr: utcTime,
-	})})
+	})}})
+}
+
+// lossWriter is the stderr the audit log is written to, counting the lines it
+// refused. One write is one audit line, which is what makes the count a line
+// count: the handler below writes each record in a single call, and a partial
+// write reports a non-nil error, so one refusal never stands for a fraction of
+// a line.
+//
+// A refused line is counted and nothing more. Repeating the warning on every
+// refused line turns one full disk into a flood on a stderr that is itself the
+// thing failing, and a warning nobody can read is not a signal either; the
+// count is reported once, by the next write stderr accepts, which is also the
+// first moment there is a channel to say it on.
+type lossWriter struct {
+	w io.Writer
+
+	mu      sync.Mutex
+	lost    uint64
+	opened  bool  // a line was lost and the loss has not been reported yet
+	lastErr error // why, from the first refusal since the last report
+}
+
+// Write forwards to stderr, and remembers a refusal. A short write is a loss
+// as surely as a failed one, and io.Writer's contract makes both a non-nil
+// error, so the two are one branch here.
+func (l *lossWriter) Write(p []byte) (int, error) {
+	n, err := l.w.Write(p)
+	if err != nil || n < len(p) {
+		if err == nil {
+			err = errWriteRefused
+		}
+		l.mu.Lock()
+		l.lost++
+		l.opened = true
+		// The first reason is the one kept: a stderr that refused once
+		// because a disk filled and then again because a pipe closed is the
+		// same channel failing two ways, and the first is the one that
+		// explains the rest.
+		if l.lastErr == nil {
+			l.lastErr = err
+		}
+		l.mu.Unlock()
+		if n == 0 {
+			return n, err
+		}
+		// A writer that reported progress and then an error still failed to
+		// write the line; reporting only the error would let a caller read a
+		// short write as a whole one.
+		return n, errWriteRefused
+	}
+	return n, nil
+}
+
+// errWriteRefused is what a short write reports. The wrapped error is the
+// one stderr gave, so the reason a full disk, a closed pipe or a broken
+// redirect refused reaches the operator with the count naming it.
+var errWriteRefused = errors.New("the audit line was only partly written")
+
+// takeLoss reports the lines lost since the last call and clears the record,
+// so the same loss is never reported twice and a loss that nothing follows is
+// still pending rather than forgotten.
+//
+// It answers false when nothing was lost, which is the case every healthy run
+// takes and the only one that costs no more than a counter read.
+func (l *lossWriter) takeLoss() (uint64, error, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.opened {
+		return 0, nil, false
+	}
+	// Captured before the reset: the reason is read here, and an assignment
+	// that cleared it first would return the nil it just wrote.
+	lost, why := l.lost, l.lastErr
+	l.opened, l.lastErr, l.lost = false, nil, 0
+	return lost, why, true
+}
+
+// LossHandler reports the audit lines stderr refused, on the next line stderr
+// accepts. It wraps the text handler rather than replacing it, so the level
+// floor, the UTC stamp and the folding are the inner handler's and unchanged.
+//
+// The count waits for a line that lands, because stderr is the only sink this
+// logger has: a line lost to a full disk is a line lost to a channel that is
+// out of room, so saying so into the same channel is how it is lost twice. The
+// pending loss is carried until stderr takes a line again, which is the first
+// moment there is somewhere to say it, and it is said once rather than once
+// per refusal, because a flood on a channel that is already failing is not a
+// signal. Writing the notice through the inner handler rather than to stderr
+// directly is what keeps the home-directory fold applied to it, and a count
+// that carried a home directory would be the one line of the log that leaked
+// it.
+type LossHandler struct {
+	inner slog.Handler
+	w     *lossWriter
+}
+
+// Handle implements slog.Handler.
+func (h LossHandler) Handle(ctx context.Context, r slog.Record) error {
+	err := h.inner.Handle(ctx, r)
+	if err == nil {
+		if lost, lerr, ok := h.w.takeLoss(); ok {
+			// The notice is its own record, so the loss reads on a line of
+			// its own rather than being a prefix an operator's log parser
+			// attributes to the audit line that happened to follow it.
+			_ = h.inner.Handle(ctx, slog.NewRecord(r.Time, slog.LevelError, lostNotice(lost, lerr), 0))
+		}
+		return nil
+	}
+	return err
+}
+
+// WithAttrs implements slog.Handler. The loss is reported through h.inner, so
+// the attributes bound here are the ones a later notice carries rather than
+// none, and WithGroup is passed through for the same reason.
+func (h LossHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return LossHandler{inner: h.inner.WithAttrs(attrs), w: h.w}
+}
+
+// WithGroup implements slog.Handler.
+func (h LossHandler) WithGroup(name string) slog.Handler {
+	return LossHandler{inner: h.inner.WithGroup(name), w: h.w}
+}
+
+// Enabled implements slog.Handler.
+func (h LossHandler) Enabled(ctx context.Context, l slog.Level) bool { return h.inner.Enabled(ctx, l) }
+
+// lostNotice is the one line that says audit lines were lost. It names the
+// count and the reason, and nothing about the lines themselves: they are
+// already gone, and a handler that printed them would be trying to write them
+// to the channel that refused them.
+func lostNotice(lost uint64, err error) string {
+	if err == nil {
+		return fmt.Sprintf("toktop: %d audit line(s) could not be written to stderr and are lost; "+
+			"the record of them does not exist anywhere else", lost)
+	}
+	return fmt.Sprintf("toktop: %d audit line(s) could not be written to stderr and are lost: %v", lost, err)
 }
 
 // A SwapLogger is the logger a package's audit lines go to, with the
