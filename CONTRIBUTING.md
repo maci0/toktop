@@ -30,9 +30,11 @@
   too-old uv rather than failing on an unknown flag.
 - `shellcheck` at or above the `SHELLCHECK_MIN` in the Makefile for
   `make check-shell`, which analyzes the bash completion script
-  `toktop completion bash` prints. The bash ubuntu runner already carries a
-  newer one; the target refuses an older version rather than reporting a pass
-  from a rule set that predates the script's own `# shellcheck disable`.
+  `toktop completion bash` prints, and for `make check-workflow-shell`, which
+  analyzes the bash in every workflow `run:` block. The bash ubuntu runner
+  already carries a newer one; both targets refuse an older version rather than
+  reporting a pass from a rule set that predates a script's own
+  `# shellcheck disable`.
 - `zsh` and `fish` at or above `ZSH_MIN` and `FISH_MIN` in the Makefile, for
   the same target and the other two completion scripts. shellcheck has no zsh
   or fish mode, so each script is parsed by the shell that will source it; a
@@ -236,7 +238,7 @@ in day-to-day work:
 | `make test-asan` | all tests again under `-asan` (both sqlite tag halves); the go command refuses `-race -asan` together, so this is a second run and not a flag on `make test`. It skips `TestStaticFrameAllocBudget` by name, because an instrumented allocator makes an exact allocation count meaningless; `make test` still asserts that budget. Linux CI and `make ci` run it; it needs a C compiler and does not enter the edit-test loop |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + shellcheck plus zsh/fish parse over the completion scripts + yamllint over `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-shell`, `check-yaml`, `check-help-docs`, `check-changelog-structure`, `check-changelog-covers`) |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + shellcheck plus zsh/fish parse over the completion scripts + shellcheck over the workflows' `run:` blocks + yamllint over `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-shell`, `check-workflow-shell`, `check-yaml`, `check-help-docs`, `check-changelog-structure`, `check-changelog-covers`) |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
@@ -261,6 +263,7 @@ in day-to-day work:
 | `make check-yaml` | fail unless every workflow in `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` are valid YAML and pass the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
 | `make check-site-tools` | fail unless the site deploy path checks for `curl` before it takes the lock, since the `/health` poll both recipes end in is a curl the Makefile would otherwise take from the machine unnamed (`make check` runs it) |
 | `make check-shell` | fail unless `shellcheck` (at or above the Makefile's `SHELLCHECK_MIN`) clears the bash completion script and `zsh -n` / `fish --no-execute` parse the zsh and fish ones; all three are generated, so a copy kept beside the Go source cannot go stale (`make check` runs it, on the Linux CI leg) |
+| `make check-workflow-shell` | fail unless `shellcheck` clears the bash in every workflow `run:` block: the code every merge gate is reached through, which yamllint parses the document around without ever reading. `scripts/workflow-run-blocks.awk` extracts one file per block under `dist/`, named for the workflow and the line the `run:` block starts on, so a finding names the step and a `# shellcheck disable` scopes to that step alone. SC2154 is excluded for these files because the names they use come from the job's `env:` block, not from the step that reads them. Runs from `make check` on the Linux CI leg |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make check-changelog-structure` | fail unless no `CHANGELOG.md` section repeats an impact heading, so the entries a second `### Added` collected do not ship unlabelled (`make check` runs it) |
 | `make check-changelog-covers` | fail unless `CHANGELOG.md` moved since the last release tag whenever `README.md`, `cmd/toktop/help.go`, `docs/openapi.yaml`, `agentusage/`, `internal/ui/json.go`, `site/worker.js` or `site/README.md` did. Every other changelog gate reads the file's shape, not the diff it describes, so this is the one that notices a change shipping under notes written for other commits (`make check` and `make release` run it) |

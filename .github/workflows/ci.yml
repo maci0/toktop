@@ -212,6 +212,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes zsh fish
           make check-shell
+      # The other shell in the tree: the bash this file's own run: blocks are
+      # written in. yamllint parses the document and no other analyzer reads
+      # the scripts inside it, so an unquoted variable in a step here used to
+      # merge unnoticed, including in the step above that installs zsh and
+      # fish. Same tool, same floor and the same Linux-only reason: the blocks
+      # are the same bytes from the same source on every runner.
+      - name: analyze this workflow's own run blocks (linux only)
+        if: runner.os == 'Linux'
+        run: make check-workflow-shell
       - name: govulncheck (linux only; both sqlite tag halves)
         if: runner.os == 'Linux'
         # Makefile GOVULNCHECK is the only version string; `go run @version`

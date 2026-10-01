@@ -555,12 +555,12 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	if command -v $(SHELLCHECK) >/dev/null 2>&1; then \
 		have=$$($(SHELLCHECK) --version | awk '/^version:/ { sub(/^version: */, ""); print; exit }'); \
 		if version_too_old "$(SHELLCHECK_MIN)" "$$have"; then \
-			gap "shellcheck $$have on PATH, make check-shell needs >= $(SHELLCHECK_MIN)"; \
+			gap "shellcheck $$have on PATH, make check-shell and check-workflow-shell need >= $(SHELLCHECK_MIN)"; \
 		else \
 			ok "shellcheck $$have (>= $(SHELLCHECK_MIN))"; \
 		fi; \
 	else \
-		gap "shellcheck is not on PATH (make check-shell analyzes the bash completion script)"; \
+		gap "shellcheck is not on PATH (make check-shell analyzes the bash completion script, check-workflow-shell the workflows' run: blocks)"; \
 	fi; \
 	if command -v $(ZSH) >/dev/null 2>&1; then \
 		have=$$($(ZSH) --version | awk '{ print $$2; exit }'); \
@@ -1085,6 +1085,12 @@ endef
 # network exactly like a .yml, and a glob naming one extension leaves every
 # gate below answering about a file that no longer carries the workflow.
 WORKFLOWS := $(wildcard .github/workflows/*.yml .github/workflows/*.yaml)
+# check-workflow-shell's extractor, and where it writes. dist/ is where the
+# completion scripts are generated to as well and .gitignore covers it, so an
+# extracted block is a build output rather than a second copy of a workflow
+# that nothing keeps in step with the first.
+WF_SHELL_AWK  := $(CURDIR)/scripts/workflow-run-blocks.awk
+WF_SHELL_DIR := $(DIST)/workflow-shell
 
 # The same drift, inside this file. `test-pkg` builds its own `-tags` value
 # rather than reusing GOTAGS, so a line here can lose the tag or the shuffle
@@ -1320,6 +1326,50 @@ check-shell: ## analyze the bash, zsh and fish completion scripts 'toktop comple
 	@$(SHELLCHECK) $(DIST)/completion.bash
 	@$(ZSH) -n $(DIST)/completion.zsh
 	@$(FISH) --no-execute $(DIST)/completion.fish
+
+# The workflows are shell code too, and they are the shell code every gate in
+# this repo is reached through: a `run:` block installs the toolchain, names
+# the tags, and calls the make target that does the analyzing. yamllint parses
+# the document and biome does not read it, so before this target a workflow
+# block was shell nothing read. The ci.yml step that installs zsh and fish and
+# then calls check-shell is the sharpest case: an unquoted variable in that
+# block is a gate that installs less than it says and reports a pass anyway.
+#
+# The blocks are extracted rather than linted where they lie, for the reason
+# api-surface.awk is generated too: there is no file to hand a linter, and a
+# copy kept beside the workflow goes stale the day a step moves. One file per
+# block, named for the workflow and the line its `run:` key is on, so a finding
+# points at the step and a `# shellcheck disable` scopes to one step rather than
+# to every step in the same file. The generated files live under dist/.
+#
+# SC2154 is excluded, and only here: GITHUB_OUTPUT, RELEASE_REPO and the rest
+# are set by the job's env block, not by the step that reads them, so a block
+# that never assigns one is correct. Every other default check applies, and
+# `make check` and CI run this the same way they run check-shell.
+.PHONY: check-workflow-shell
+check-workflow-shell: ## run shellcheck over the bash in every workflow 'run:' block
+	@command -v $(SHELLCHECK) >/dev/null 2>&1 || { \
+		echo "make check-workflow-shell: $(SHELLCHECK) is not on PATH; the bash in .github/workflows/ is the code every gate runs through and no other analyzer reads it" >&2; \
+		exit 1; \
+	}
+	@$(VERSION_OLD); \
+	have=$$($(SHELLCHECK) --version | awk '/^version:/ { sub(/^version: */, ""); print; exit }'); \
+	if version_too_old "$(SHELLCHECK_MIN)" "$$have"; then \
+		echo "make check-workflow-shell: $(SHELLCHECK) $$have is older than $(SHELLCHECK_MIN), so the run below would clear a workflow against a rule set that predates its own '# shellcheck disable' comment" >&2; \
+		exit 1; \
+	fi
+	@rm -rf $(WF_SHELL_DIR)
+	@mkdir -p $(WF_SHELL_DIR)
+	@for wf in $(WORKFLOWS); do \
+		awk -v outdir=$(WF_SHELL_DIR) -f $(WF_SHELL_AWK) "$$wf" || exit 1; \
+	done
+	@set -- $(WF_SHELL_DIR)/*.bash; \
+	if [ ! -e "$$1" ]; then \
+		echo "make check-workflow-shell: no 'run:' block extracted from $(WORKFLOWS); the extractor is not reading what CI runs" >&2; \
+		exit 1; \
+	fi; \
+	$(SHELLCHECK) -e SC2154 "$$@"
+	@rm -rf $(WF_SHELL_DIR)
 
 .PHONY: check-yaml
 check-yaml: ## fail if a workflow, .github/dependabot.yml or docs/openapi.yaml is invalid YAML or breaks the .yamllint rule set
@@ -1636,7 +1686,7 @@ screenshot: ## render a tmux capture: make screenshot CAPTURE=.scratch/capture.t
 	$(SCRIPTS_BIN)/python scripts/screenshot.py $(CAPTURE) $(OUT) $(SCALE) $(COLS) $(ROWS)
 
 .PHONY: check
-check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion scripts, the workflow YAML and the doc guards (CI parity)
+check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion and workflow shell, the workflow YAML and the doc guards (CI parity)
 	@$(MAKE) --no-print-directory check-test-flags
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-env
@@ -1656,6 +1706,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion s
 	@$(MAKE) lint
 	@$(MAKE) vet
 	@$(MAKE) check-shell
+	@$(MAKE) check-workflow-shell
 
 .PHONY: ci
 ci: ## Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests
