@@ -26,7 +26,7 @@ func TestProcTextDropsIllFormedBytes(t *testing.T) {
 	// drop the property under test rather than a side effect of it.
 	for _, tc := range []struct{ in, want string }{
 		{string(cut), "caf"},
-		{"\xffclaude\x00", "claude\x00"},                        // argv[0] in an invalid locale
+		{"\xffclaude\x00", "claude\x00"}, // argv[0] in an invalid locale
 		{string(append(cut, 0, 'c', 'l', 'a', 'u', 'd', 'e', 0)), "caf\x00claude\x00"}, // cut comm, whole argv
 		// A valid two-byte rune is not a half one and must survive whole.
 		{"café", "café"},

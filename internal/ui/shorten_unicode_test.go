@@ -33,7 +33,7 @@ func TestShortenCellBudgetAcrossGraphemes(t *testing.T) {
 		{"ascii", "abcdefghij"},
 		{"accented nfc", "école école"},
 		{"accented nfd", "école école"},
-		{"zwj family", "\U0001f468‍\U0001f469‍\U0001f467‍\U0001f466family"},
+		{"zwj family", "\U0001f468\u200d\U0001f469\u200d\U0001f467\u200d\U0001f466family"},
 		{"flags", "\U0001f1fa\U0001f1f8\U0001f1eb\U0001f1f7flags"},
 		{"stacked combining", "á̂̃"},
 		{"cjk", "日本語テキスト"},
