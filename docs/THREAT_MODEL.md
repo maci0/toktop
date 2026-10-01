@@ -16,7 +16,14 @@ they live and what already stands in their way.
   `zstdMaxFrameBytes` 8 MiB, `forwardAcceptRetryMax` 5 s), the self-update
   gate (`ValidateRepo`, `githubRedirect`, `TrustedReleaseURL`), the host
   guard (`loopbackHostGuard`), the HSTS header the site sets on every response,
-  and the risk table below each hold as written. No risk changed rank.
+  and the risk table below each hold as written. No risk changed rank. This
+  pass added the boundary the two cross-process locks were missing from: B8
+  (local processes -> toktop's own on-disk state), summary risk 6, M52, and
+  gap 13, and qualified M12's cross-process serialization as conditional on the
+  lock being creatable, which it had claimed unconditionally. The
+  previously highest-ranked risks were re-read against
+  `internal/ingest/middleware.go`, `internal/selfupdate/`, and
+  `.github/workflows/release.yml` rather than carried from the last pass.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -37,7 +44,8 @@ targets, the static site worker at site/worker.js). Out of scope: the
 | 3 | Self-update installs whatever binary the named GitHub repo published: integrity rests on the release's own checksums.txt over TLS, and nothing in the updater reads the provenance attestation | runtime -> update channel | internal/selfupdate/release.go, internal/selfupdate/checksum.go, internal/selfupdate/install.go, .github/workflows/release.yml | Checksum + size + GitHub-host URL verification present; owner/name validated (M18); a SLSA provenance entry per published file exists in the transparency log (release.yml, `attest` job) but the updater does not read it |
 | 4 | SSH engine relays bind loopback listeners (`127.0.0.1:0`); any local process can reach the remote engines those listeners front | local processes -> remote engines | internal/remote/client.go | Bound loopback-only; no listener auth |
 | 5 | Hot-reload re-execs whatever binary occupies the exe path when its identity changes (Unix); PATH-based vendor CLI lookup executes tools from `$PATH` | build -> runtime, host -> process | internal/selfreload/exec_unix.go; internal/gpu/run.go | Windows Restart does not exec (exec_windows.go); `--no-hot-reload` exists |
-| 6 | Low: ingest poisoning cannot be reconstructed from retained payloads; raising the log floor also hides successful submissions | B1, response readiness | internal/ingest/middleware.go; internal/collector/collector.go | Request metadata logs at info by default; warn/error suppress successes. No authenticated sender identity or durable event store |
+| 6 | The cross-process lock guarding the two files another process may read is created with `O_EXCL`, and a lock that cannot be created makes the read-modify-write run with **no lock at all**; the store and the installed binary both silently lose their serialization under that condition | host filesystem -> toktop, toktop -> toktop (other process) | internal/lockfile/lockfile.go, `With`; internal/remote/knownhosts.go, `lockStore`; internal/selfupdate/install.go, `lockInstall` | Lock is 0600 and exclusive-create, so it is atomic on every filesystem toktop supports; stale locks are broken on an age read through `core.Age`, so a backward clock step cannot wedge a store forever. The no-lock fallback is deliberate (gap 13) and the only way to reach it is a directory toktop cannot create a file in, which the work inside then reports on its own |
+| 7 | Low: ingest poisoning cannot be reconstructed from retained payloads; raising the log floor also hides successful submissions | B1, response readiness | internal/ingest/middleware.go; internal/collector/collector.go | Request metadata logs at info by default; warn/error suppress successes. No authenticated sender identity or durable event store |
 
 Resolved since 2026-08-25: the previous ranking's "bearer token sent to every
 probed endpoint" is closed by origin-scoped token application
@@ -127,6 +135,24 @@ What is worth stealing, corrupting, or denying:
   [RECOVERY.md](RECOVERY.md) is the
   operational half: the state inventory, the RPO and RTO, and the restore
   and its verification.
+- **The two cross-process locks**, each a 0600 file created exclusively beside
+  the file it protects: `known_hosts.lock` in the store's directory
+  (`storeLockSuffix`, internal/remote/knownhosts.go, taken by `lockStore`) and
+  `<binary>.lock` beside the installed executable (`installLockSuffix`,
+  internal/selfupdate/install.go, taken by `lockInstall`). Neither carries
+  anything a reader wants, but each is a gate over a read-modify-write, so a
+  same-user process that can hold or pre-create one changes what the gate
+  protects: holding it past `storeLockWait` 5s or `installLockWait` 5s makes
+  every other toktop give up, and leaving a file there is indistinguishable to
+  a waiter from a lock a live process holds. The lock is not a claim about the
+  holder, which is why a release removes it only while the file still carries
+  that acquisition's own token (`lockIs`, internal/lockfile/lockfile.go), and
+  why a lock that cannot be read is treated as held rather than as free. The
+  install lock sits in the binary's own directory, so it inherits that
+  directory's permissions rather than the 0700 the store's directory is given
+  (`os.MkdirAll(filepath.Dir(lock), 0o700)` in `lockStore`); a
+  group- or world-writable install directory is a directory whose lock any
+  local process can hold (gap 13).
 - **Binary integrity**: the running executable is replaceable by design twice
   over: hot-reload on Unix (internal/selfreload/exec_unix.go) and
   `toktop update` (cmd/toktop/update.go). Whoever controls either channel
@@ -787,6 +813,38 @@ Deployment surface:
   field `parseClaude` takes and `codexSessionCwd` in agentusage/codex.go). A writer of a watched store therefore
   chooses which project's tokens are attributed to which directory, in
   addition to choosing the store's contents.
+- **B8: local processes -> toktop's own on-disk state.** The host-key store
+  and the installed binary are read-modify-written by every toktop on the
+  machine, and both writes are serialized by one shared cross-process lock
+  (`internal/lockfile`, `With`), taken as `known_hosts.lock` by `lockStore`
+  (internal/remote/knownhosts.go) and as `<binary>.lock` by `lockInstall`
+  (internal/selfupdate/install.go). The serialization is one wide
+  read-modify-write held for a checksum and a rename, so a local process that
+  creates, holds, or plants one of those files sits exactly on the boundary.
+  Three properties are the whole control, and each is checkable in that one
+  function: the lock is taken with `O_CREATE|O_EXCL` at 0600, so acquisition
+  is atomic on every filesystem toktop runs on (`With`); a release removes the
+  file only while it still carries that acquisition's own token
+  (`newToken`, `lockIs`), so the process that broke a stale lock cannot delete
+  the peer's lock it just handed over, which is the race the lock exists to
+  close; and a lock that cannot be *created* at all does not fail the work, it
+  runs it (`With`, the `!os.IsExist(cerr)` branch, which calls `fn()`
+  unlocked so the operation reports its own clearer error) — the one path where
+  the read-modify-write proceeds with no serialization, and gap 13. Age is read
+  through `core.Age`, which floors a negative age at zero
+  (internal/core/elapsed.go), so an NTP step backwards cannot make a live lock
+  look stale or a dead one look fresh. `lockStore` creates the store's
+  directory with `os.MkdirAll(..., 0o700)` before taking the lock, because on a
+  first connect the directory does not exist and `O_EXCL` would fail `ENOENT`
+  rather than `EEXIST` and take the unlocked branch with the race that is
+  exactly the one the lock closes (the comment on that call names it). The
+  install lock has no equivalent: it is created in the binary's own directory,
+  which exists by construction and whose mode is whatever installed the binary
+  left it. Neither caller audits the locks: a lock failure surfaces as the
+  connect's or the install's own error, and `lockStore` passes `lockfile.Raw`
+  where `lockInstall` passes `core.RedactHome`, so a lock error naming the
+  store prints that path in full while a lock error naming the binary folds
+  `$HOME` out of it (response readiness).
 
 Privilege transitions: toktop gains no privileges at runtime (no setuid,
 no sudo). The ssh connection is the one place code acts with authority beyond
@@ -1011,6 +1069,44 @@ comparison in install.go against the listing read by checksum.go), so a
   re-read every poll. dsh zstd frames are size-capped
   (`zstdMaxFrameBytes`, `WithDecoderMaxMemory` in agentusage/dsh.go).
 
+**B8 (on-disk state, lock-guarded):**
+- *Denial of service*: a same-user process that creates `known_hosts.lock` and
+  never removes it makes every later toktop wait `storeLockWait` 5s and then
+  give up on the *first* connect to any host (`lockStore`, internal/remote/knownhosts.go),
+  and the same for `toktop update` against `<binary>.lock`
+  (`installLockWait` 5s, `lockInstall`). The stale break is 1 minute
+  (`storeLockStale`, `installLockStale`), so a planted lock is a five-second
+  stall per attempt and a one-minute-minimum denial, not permanent: the break
+  unlinks the file and the next caller proceeds. The file is not a
+  capability — nothing parses its contents to decide who holds it
+  (`newToken`: the value is diagnostic), so planting one buys time rather
+  than authority.
+- *Tampering*: the read-modify-write is unsynchronized in exactly one
+  reachable case, and it is the case M12's "serialized within and across
+  processes" is conditional on. `lockfile.With` treats a lock it cannot create
+  for any reason other than "already exists" as a condition to *work around*,
+  calling `fn()` with no lock held (the `!os.IsExist(cerr)` branch), so an
+  unwritable store directory or a filesystem without an exclusive create
+  silently returns the store to last-write-wins: two toktop processes racing a
+  first contact lose a pin, and the next connect re-trusts that host without
+  the operator ever seeing a refusal. `lockStore` closes the one instance
+  that was reachable by accident, by creating the store's directory at 0700
+  before taking the lock (so a first connect cannot miss the directory and take
+  the unlocked branch), but the fallback remains for an unwritable directory,
+  where the write inside `fn` then fails on its own and the pin is not lost —
+  so the residual is the filesystem-without-`O_EXCL` case rather than the
+  common one (gap 13).
+- *Repudiation*: neither lock writes an audit line. A give-up is the connect's
+  or the install's own error text and nothing more, so "a peer held the
+  install lock for five seconds" is an error the operator reads once and has no
+  record of afterwards; the same line, from `lockStore`, names the store path
+  unredacted because that caller passes `lockfile.Raw` where `lockInstall`
+  passes `core.RedactHome` (response readiness, asset: diagnostic log lines).
+- *Elevation of privilege*: none. The lock is held by the same user that
+  already writes the file it guards, and a lock held past the stale age is
+  broken rather than honored, so the worst a local process gets from planting
+  one is the denial above, not the write.
+
 ## Existing mitigations map
 
 Controls verified in code, with the threats they cover:
@@ -1028,7 +1124,7 @@ Controls verified in code, with the threats they cover:
 | M9: Non-finite rejection in metrics (per-value and a family-sum overflow guard) and numeric-text coercion of the vendor's Prometheus text exposition (`parseProm`, `strconv.ParseFloat` behind `finite()`) and its JSON replies, both bounded by the body caps of M8; a counter that goes backwards yields a rate clamped to zero rather than a negative one | poisoned counters/rates propagating through history (B2 tampering) | provider/provider.go, `parseProm` 376 and the family-sum guard; internal/gpu/parse.go, the finite check; internal/collector/rates.go, the counter-reset clamp |
 | M10: Probes request 32 tokens, Ollama `think=false`, OpenAI `n=1`; streaming readers stop after 32 observed content/reasoning units or 1 KiB decoded content/reasoning, with 16 KiB scanner and 128 KiB stream limits. Non-stream OpenAI JSON over 16 KiB is rejected. Reported token counts trusted only up to 128; fixed prompt, model-id cap `core.ModelNameMax` 256 (M34, the same constant the provider layer stores ids under), embed/rerank filtering, 429/503 backoff 15s–5m, and a wave cap of 4 backends per wave with a rotating cursor, so one `--probe` tick on a wide fleet cannot fan out one billed generation per backend at once. The OpenAI request-shape walk (`postOpenAI`) records the shape that answered per engine base URL (`shapeMemo`) and starts the next walk there, so an engine that rejects a cap field is not made to reject it again on every wave for the life of the run; a refusal at or before the recorded shape drops the entry, so an engine that changes what it accepts is walked again from the top rather than pinned to a stale spelling. Without the memo, `--probe` against a strict engine costs up to four requests per wave, three of them refusals that generate nothing but a gateway in front of the engine still counts every request it forwards. The wave's cadence floor (`ProbeBackendGap` 10s) and the 429/503 backoff deadline are dated on the collector's own clock (`c.instant()` in `probeWave`, internal/collector/probe.go), not on a second wall-clock read: the gates have to be measured against the same timeline every other gate in the wave reads, or a run that steps its own clock (demo mode, `SetNow`) measures a ten-second floor in microseconds of simulated time and holds nothing. In a run that does not step the clock the value is `time.Now()`, which carries a monotonic reading, so an NTP step of either sign still leaves the wait the length the engine asked for. The generation itself stays on wall time, because that part is real I/O and its elapsed time is not a position on the run's timeline. A wire-reported `eval_duration` is passed through `nanoseconds`, which returns zero for a negative value, one outside the int64 nanosecond range, or one beyond `maxEvalDuration` 24h, so a count that would wrap into a plausible duration cannot reach `fitEvalDuration`'s band rescale and report a throughput the engine never claimed | Limits client work and reduces B2 compute/spend amplification; request parameters and closing a response do not guarantee that a backend stops generation or billing; a hostile engine's reported durations cannot wrap into a plausible rate (B2 tampering) | internal/probe/probe.go; internal/probe/openai.go, `postOpenAI` and `shapeMemo`; internal/collector/probe.go, `probeWave` |
 | M11: Poll/scan/probe timeouts (700ms/1.5s/30s) + context-bounded requests | hung-engine DoS (B2/B3) | discover.go; provider.go; probe.go |
-| M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, writes serialized within and across processes (mutex plus `known_hosts.lock` over the whole read-modify-write, stale locks broken), temp-file plus rename whose directory flush is checked, not assumed: `core.SyncDir` returns the reason it could not flush, and `syncStoreDir` (knownhosts.go) turns it into the write's own error, so a first-contact pin that is in place but not durable fails the connect rather than printing the `first use ... pinned to` line it cannot stand behind; the write is not undone, and a copy that could not be refreshed stays the warning it was (`writeBackup`). The same rule serves the self-update install, where the `core.SyncDir` calls inside `install` (the Unix path) and `installDisplacing` (the Windows path, where the running image is moved aside first) report a rename that could not be made durable as an install failure with the new binary already in place, and the restore in `restoreDisplaced` reports the same for the rename that puts a displaced binary back, on both platforms; there is no named helper for it in this package, and the flush is not skipped on Windows (install.go calls it on both paths), so a rename the platform does not journal is flushed as well. Unparsable, conflicting-duplicate or record-free stores fail the read. The repair copies beside the store (`known_hosts.bak`, the displaced copy) are consulted and restored only where `interruptedWrite` finds the marks of a write that did not finish, so a store an operator deleted on purpose re-pins on the next connect instead of having the key they just rejected silently pinned back | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect, in one process or two; corruption or an appended line read as a shorter store, forcing a re-TOFU; a deliberate re-pin undone into the rejected key; a pin or an install announced as durable that a crash can take back | knownhosts.go, `readKnownHosts`, `interruptedWrite`, `clearInterruptedWrite`, `restoreStore`, `settleOperatorRestore`, `replaceFile`, `syncStoreDir`, `writeBackup`; internal/selfupdate/install.go, `install`, `installDisplacing` and `restoreDisplaced`; core/fs.go, `SyncDir` |
+| M12: TOFU host-key store with loud change refusal, 0600 file in 0700 dir, writes serialized within and across processes (mutex plus `known_hosts.lock` over the whole read-modify-write, stale locks broken; the cross-process half is conditional on that lock being creatable, M51 and gap 13), temp-file plus rename whose directory flush is checked, not assumed: `core.SyncDir` returns the reason it could not flush, and `syncStoreDir` (knownhosts.go) turns it into the write's own error, so a first-contact pin that is in place but not durable fails the connect rather than printing the `first use ... pinned to` line it cannot stand behind; the write is not undone, and a copy that could not be refreshed stays the warning it was (`writeBackup`). The same rule serves the self-update install, where the `core.SyncDir` calls inside `install` (the Unix path) and `installDisplacing` (the Windows path, where the running image is moved aside first) report a rename that could not be made durable as an install failure with the new binary already in place, and the restore in `restoreDisplaced` reports the same for the rename that puts a displaced binary back, on both platforms; there is no named helper for it in this package, and the flush is not skipped on Windows (install.go calls it on both paths), so a rename the platform does not journal is flushed as well. Unparsable, conflicting-duplicate or record-free stores fail the read. The repair copies beside the store (`known_hosts.bak`, the displaced copy) are consulted and restored only where `interruptedWrite` finds the marks of a write that did not finish, so a store an operator deleted on purpose re-pins on the next connect instead of having the key they just rejected silently pinned back | silent MITM after first contact (B3 spoofing); lost pins under concurrent Connect, in one process or two; corruption or an appended line read as a shorter store, forcing a re-TOFU; a deliberate re-pin undone into the rejected key; a pin or an install announced as durable that a crash can take back | knownhosts.go, `readKnownHosts`, `interruptedWrite`, `clearInterruptedWrite`, `restoreStore`, `settleOperatorRestore`, `replaceFile`, `syncStoreDir`, `writeBackup`; internal/selfupdate/install.go, `install`, `installDisplacing` and `restoreDisplaced`; core/fs.go, `SyncDir` |
 | M13: Banner deadline lifted only on complete version line; 15s command timeout; keepalive with bounded probe waits; SupportedAlgorithms (no ssh-rsa SHA-1 / DSA); `agentDialTimeout` 2s bounds the wait for a wedged ssh-agent to answer a dial, so a machine with an agent configured and none running still reaches the password prompt; forwardDialTimeout 8s. A forwarded port whose `Accept` keeps failing is paced instead of hammered: the gap starts at `forwardAcceptRetry` 100 ms, doubles per consecutive failure, is capped at `forwardAcceptRetryMax` 5 s, is spread over a tenth-to-full jitter range by `acceptBackoff` so several forwarded ports failing on one system condition do not retry in lockstep, and resets to the base gap the moment one accept succeeds | trickle/silent-peer hangs (B3 DoS); weak host-key algorithms; hung tunnel dial (B3b); a wedged agent pinning the connect past the prompt (B4 DoS); a forwarded port stuck refusing to accept spinning at ten wakeups a second for the life of the client, burning a core while every dashboard poll against it times out (B3b DoS) | internal/remote/client.go, the `handshakeConn` type and its `Read`, `bannerTimeout`, and the `SupportedAlgorithms` filter; internal/remote/auth.go, `agentDialTimeout` and the platform dial in auth_unix.go / auth_windows.go; internal/remote/forward.go, `forwardDialTimeout`, `forwardAcceptRetry`, `forwardAcceptRetryMax`, `acceptBackoff` and the `relay` loop |
 | M14: Local-only defaults: forward listeners on 127.0.0.1, ingest on 127.0.0.1:8420 | accidental network exposure (B1 widening; B3b stays local) | client.go; main.go |
 | M15: Routable-bind warning at ingest startup | silent widening of B1 to the network (visibility control; the widening itself remains possible) | cmd/toktop/endpoints.go, `routableBind` |
@@ -1068,7 +1164,9 @@ Controls verified in code, with the threats they cover:
 | M49: Every sender-shaped string reaching retained or reported state is folded for the sender's home as well as the local one. `foldSenderHome` (internal/ingest/event.go) is `core.RedactAnyUserHome` over `core.RedactHome`, and `RedactAnyUserHome` reads the account off the path rather than being told it, trying each of `userHomePrefixes` (`internal/core/redact.go`): `/home/`, `/Users/`, `\Users\`, `/var/home/`, `/export/home/`, `/nfs/home/`, `/srv/homes/`. The local fold alone reaches only the account this process runs as, and the normal case for this endpoint is a client posting from another host or another account, so the account in a client-shaped field is the one the sender chose. It is applied at the points that outlive the request and the run: the event fields (`Agent`, `Model`, `ViaEngine`, `Note`, `Kind`, and the raw line at event.go, 179), the echoed and logged `X-Request-Id` and the request path (middleware.go), and the recovered panic value and stack (M46). The prefix list overlaps, `/home/` being the tail of `/export/home/` and `/nfs/home/`, and one pass can leave a `~` with the rest of the path behind it for the next prefix, so the list is walked until a pass folds nothing: `/export/home/a/home/b` reads `~~` rather than `~/home/b`. Documented limits: a run of more than `maxAccountNameLen` 100 characters after a home prefix is read as a file name rather than an account, so a longer one survives; and the fold reaches only the seven prefixes named, so a sender whose home is spelled outside them is left as it arrived | an account name from a posting peer reaching the retained feed, the live dashboard, the `--once --json` report or a diagnostic line the operator pastes into a public issue (B1 disclosure, response readiness); a field rendered and then stored showing a redacted-once path | internal/core/redact.go, `RedactAnyUserHome`, `userHomePrefixes` and `maxAccountNameLen`; internal/ingest/event.go, `foldSenderHome`; tests internal/core/redact_test.go and `internal/core/redactany_fuzz_test.go`, which pin determinism, idempotence, no-growth and the no-spurious-tilde properties |
 | M50: The `/proc` walk decodes the two kernel files it reads through one boundary, and drops what is not text. `procText` (agentusage/discover_linux.go) converts `comm` and `cmdline` to strings with an `utf8.Valid` fast path and a `strings.ToValidUTF8(..., "")` fallback, and both call sites in `Discover` read through it rather than converting at each use. Neither file is required to hold valid UTF-8: the kernel fixes `comm` at `TASK_COMM_LEN-1` (15) bytes, so a binary named in a non-ASCII script is cut mid-rune, and `cmdline` holds whatever bytes the process's argv did. An ill-formed byte cannot be left in place because `canonicalTool` (agentusage/definitions.go, `norm.NFC.String`) composes to NFC and x/text leaves a lone 0xc3 in rather than dropping it, so half a rune would enter the agent identity as a key no other reader of the same process can produce, and whether a built-in name still matched would depend on which side of the cut the walk landed. Dropping the byte is the safe direction: a name that lost a byte matches no agent, which is the right answer for a process this walk cannot name, and `resolveAgent` returning "" drops the process from discovery rather than attributing its tokens to an agent the operator never ran (B7 tampering; terminal-integrity and dashboard-integrity assets). Pinned by `TestProcTextDropsIllFormedBytes` and `TestCanonicalToolOverCutNameIsValid` (agentusage/discover_linux_proc_text_test.go) | an agent identity keyed on an ill-formed string, or a process whose tokens are credited to whichever built-in name the cut happened to leave matchable (B7 spoofing/tampering) | agentusage/discover_linux.go, `procText` and the two reads in `Discover`; agentusage/definitions.go, `canonicalTool`; agentusage/discover.go, `agentName` and `resolveAgent` |
 | M51: A retained-append answer stays true of a feed holding more than its window. `AppendRetained` (internal/core/core.go) tests `len(s) >= max` rather than `len(s) == max`, so a feed restored from anywhere else is read as the full case it is. An exactly-max test read a feed over the cap as not-yet-full, inserted an arrival that `AppendSorted` trimmed away on the same call, and answered `true` for an event nothing holds, which is the one answer this function exists to keep out of a caller's id ledger and out of the `stored` count it reports back to a sender (B1/B7 tampering, response readiness). Every caller today builds its feed through this function or `AppendSorted` at the same max, so the two lengths always agree and the distinction is invisible; the at-least form is what keeps the answer true if one does not. The refusal path is already latched and audited: `refuseForWindow` (internal/collector/agents.go) records the run of events the window turned away and `storedForWindow` closes it, so a sender whose clock lags reads "kept nothing" with a reason rather than a replay-shaped gap. Pinned by `TestAppendRetainedRefusesOnAFeedOverTheCap` (internal/core/core_test.go) | a `stored` count reporting an event as retained when the feed holds nothing, so the ingest answer and the collector's id ledger both record an event no dashboard row ever showed (B1 tampering) | internal/core/core.go, `AppendRetained`; internal/collector/agents.go, the `AppendRetained` call in `RecordAgent` and the `refuseForWindow` branch beside it |
-| M52: An audit line stderr refused is reported rather than lost in silence. The slog API discards whatever a handler's `Handle` returns, so every line written through `logcfg.Logger()` was dropped with nothing anywhere saying so: a full disk, a closed redirect, or a pipe whose reader had gone left the operator with a log that reads as a run where nothing happened, on the exact lines that exist to say a store backup failed, a store was read back from its copy, or a rename could not be made durable. The logger now writes through a `lossWriter` that counts a refused or short write and `LossHandler` reports the pending count as one line of its own on the next line the channel accepts, naming the first reason. The count is said once rather than per refusal, because a sink that is already failing is the channel the warning would have to travel on, and it is written through the inner handler so M35's home fold still applies to it. The count is reset when reported, so a run that recovers reports the next loss rather than re-reporting an old one. Documented limits: a run whose channel never takes another line reports nothing, since stderr is the only sink this logger has and reporting into a channel that refuses is how the first line was lost; and a partial write is reported as a loss rather than replayed, since a half-written record is a line no parser can read | an operator reading a log with a hole in it as a run where nothing was reported, and the hole landing exactly on the recovery lines that are the only record a loss happened (B5 repudiation, response readiness) | internal/logcfg/logcfg.go, `Logger`, `lossWriter`, `LossHandler` and `lostNotice`; tests internal/logcfg/loss_test.go |
+| M52: One cross-process lock implementation for both read-modify-writes toktop owns, with the three properties that make it a gate rather than a file. `lockfile.With` (internal/lockfile/lockfile.go) creates with `O_CREATE\|O_EXCL` at 0600, so acquisition is atomic on every filesystem toktop runs on, which a flock over the target file is not on Windows; it stamps a per-acquisition token (pid plus a process-local counter, `newToken`) and releases only while the file still carries that token (`lockIs`), so the process that broke a stale lock and handed the section to a peer cannot delete the peer's lock on its way out — the same read-modify-write race the lock exists to close, which an unconditional remove would have reopened for every holder; and it ages a lock with `core.Age` (internal/core/elapsed.go), which floors a negative age at zero, so an NTP step backwards leaves a lock from a dead process looking fresh rather than making a live one look breakable. `lockStore` creates the store's directory at 0700 before taking `known_hosts.lock`, so a first connect on a fresh install cannot miss the directory, take the `ENOENT` path, and run the write unlocked. The one property it does not have is that a lock it cannot create fails the work: it runs the work instead, and that is gap 13 rather than a control | two toktop processes last-writing the host-key store away and forcing a silent re-TOFU, or a stale-break handing two holders the install section at once (B8 tampering, B3 spoofing, B5 repudiation) | internal/lockfile/lockfile.go, `With`, `newToken`, `lockIs`, `Policy`; internal/core/elapsed.go, `Age`; internal/remote/knownhosts.go, `lockStore` and the `storeMu`/`storeMutex` pair; internal/selfupdate/install.go, `lockInstall`; tests internal/lockfile/lockfile_test.go, internal/remote/knownhosts_superseded_test.go |
+| M53: An audit line stderr refused is reported rather than lost in silence. The slog API discards whatever a handler's `Handle` returns, so every line written through `logcfg.Logger()` was dropped with nothing anywhere saying so: a full disk, a closed redirect, or a pipe whose reader had gone left the operator with a log that reads as a run where nothing happened, on the exact lines that exist to say a store backup failed, a store was read back from its copy, or a rename could not be made durable. The logger now writes through a `lossWriter` that counts a refused or short write and `LossHandler` reports the pending count as one line of its own on the next line the channel accepts, naming the first reason. The count is said once rather than per refusal, because a sink that is already failing is the channel the warning would have to travel on, and it is written through the inner handler so M35's home fold still applies to it. The count is reset when reported, so a run that recovers reports the next loss rather than re-reporting an old one. Documented limits: a run whose channel never takes another line reports nothing, since stderr is the only sink this logger has and reporting into a channel that refuses is how the first line was lost; and a partial write is reported as a loss rather than replayed, since a half-written record is a line no parser can read | an operator reading a log with a hole in it as a run where nothing was reported, and the hole landing exactly on the recovery lines that are the only record a loss happened (B5 repudiation, response readiness) | internal/logcfg/logcfg.go, `Logger`, `lossWriter`, `LossHandler` and `lostNotice`; tests internal/logcfg/loss_test.go |
+
 Documentation claims checked against code on 2026-09-30. What this pass
 found is in the header; the list below is what holds as written, so the next
 pass has something to re-check rather than a record of what used to be wrong.
@@ -1129,6 +1227,22 @@ reads as a claim about the code when it is not one.
   rule, the lock on the injected clock and error sink, the account-name drop
   at every ssh audit site, the capped and folded definitions read, and the
   serialized release prerequisites. None changes the ranking in the summary.
+- The cross-process lock holds as written (M52, B8, gap 13). `With` creates
+  with `O_CREATE|O_EXCL` at 0600 and holds the section around the whole
+  read-modify-write; `newToken`/`lockIs` make the release conditional on the
+  file still carrying that acquisition's token, so a stale-break cannot
+  unlink the peer's lock; `core.Age` floors a negative age at zero, so a
+  backward clock step neither breaks a live lock nor preserves a dead one
+  forever; `lockStore` pre-creates the store's directory at 0700 so a first
+  connect cannot reach the `ENOENT` case; and the `!os.IsExist(cerr)` branch
+  is the unlocked fallback this pass recorded rather than a claim the code
+  contradicts. Both call sites verified: `lockStore` passes `lockfile.Raw`
+  and `lockInstall` passes `core.RedactHome`, which is the redaction
+  asymmetry the response-readiness note names. The waits and stale ages are
+  `storeLockWait`/`installLockWait` 5s and `storeLockStale`/
+  `installLockStale` 1 minute at this commit. This boundary was absent from
+  the model entirely before this pass, and it gates the two files
+  everything else in B8 protects.
 - The shell-probe fallback still checks only `p > 0` on the port it parses
   from a remote's stdout (the `strconv.Atoi` in `Discover`'s fallback,
   internal/remote/discover.go), and `FuzzParseDiscoveryOutput` still covers
@@ -1333,6 +1447,19 @@ high-impact threats alone.
 7. **Client-side-trust inversion (noted for completeness):** the ingest feed
    trusts the sender entirely; there is no server-side notion of an authorized
    harness. Anything claiming to be an agent is rendered as one.
+8. **Lock-file squatting on the host-key store.** A process running as the
+   same user creates `known_hosts.lock` beside the store and holds it. Every
+   toktop on the machine then waits `storeLockWait` 5s and gives up on its
+   first connect to any host, so the operator's dashboard shows a connect that
+   fails with no reason to attribute it, for as long as the file is younger
+   than `storeLockStale` 1 minute. Enabling path: `lockStore` (internal/remote/knownhosts.go)
+   -> `lockfile.With` (internal/lockfile/lockfile.go), the `os.IsExist` wait
+   and the `storeLockWait` give-up; the planted file's contents are never
+   parsed, so the squatter needs no token. The same file beside the binary
+   stalls a concurrent `toktop update` through `lockInstall`. The break is
+   what bounds it, and the break is the whole reason the squat is a delay
+   rather than a permanent lockout; nothing is audited, so a repeat is
+   indistinguishable from a flaky filesystem after the fact (B8, gap 13).
 
 ## Gaps needing sec-review attention (ranked)
 
@@ -1452,6 +1579,27 @@ Recorded as threats with locations; fixes do not happen in this document:
     documented contract rather than a defect in it, and the sender is already
     untrusted (gap 1); a per-request or per-sender replay bound belongs to
     sec-review if the feed's accuracy matters to a consumer.
+13. **A lock that cannot be created is a lock that is not taken**
+    (Low): `lockfile.With` (internal/lockfile/lockfile.go) distinguishes only
+    two outcomes of its `O_CREATE|O_EXCL` open: "already held", which waits,
+    and *everything else*, which runs the work unlocked on the reasoning that
+    the operation will report its own clearer error. An unwritable store
+    directory or a filesystem without an exclusive create therefore puts the
+    host-key store and the installed binary back to last-write-wins between
+    two toktop processes, silently, and M12's cross-process serialization is
+    conditional on a condition nothing checks. The reachable consequence
+    differs by caller and is the reason this is Low rather than higher: for
+    `lockStore` the write inside `fn` then fails on the same directory, so a
+    pin is not lost — and `lockStore` already pre-creates the directory at
+    0700 to keep the common first-connect case off this path — while for
+    `lockInstall` the section is a checksum and a rename that a second process
+    can interleave, so two concurrent `toktop update` runs on a filesystem
+    without `O_EXCL` can leave the installed binary as one or the other's
+    bytes. Making the fallback an error, or at least an audited one, belongs
+    to sec-review. The other half of this boundary has no gap: a planted or
+    stale lock is bounded by `storeLockWait` 5s and broken at 1 minute, and
+    the token check keeps a stale-break from deleting the peer's lock, both
+    verified in M52.
 
 ## Response readiness (notes only)
 
@@ -1468,6 +1616,15 @@ Recorded as threats with locations; fixes do not happen in this document:
   internal/sysmon/sysmon.go), the process listing (`var audit`,
   internal/procs/procs.go), and the hot-reload watcher (`auditLog`,
   internal/selfreload/selfreload.go). Each is named below with its lines.
+  The two cross-process locks are the exception and record nothing at all: a
+  wait, a stale break, and a give-up are each only the connect's or the
+  install's own error text (`lockfile.With`, internal/lockfile/lockfile.go),
+  and neither caller audits them. So a planted `known_hosts.lock` that made
+  every connect for a minute give up leaves one error the operator may have
+  seen and no record that the lock was ever there (B8, gap 13). Of the two,
+  the store's names its path in full: `lockStore` passes `lockfile.Raw` while
+  `lockInstall` passes `core.RedactHome`, so the same class of message folds
+  `$HOME` out beside the binary and not beside the store.
   - the ingest server (`logcfg.Logger()` in `newServer`,
     internal/ingest/server.go): POST /v1/events, 404/405, and recovered
     handler panics, all through
@@ -1655,7 +1812,8 @@ Recorded as threats with locations; fixes do not happen in this document:
   the make target, not a line. That rule covers `Makefile`, `site/worker.js`,
   `internal/ingest/`, `internal/provider/`, `internal/probe/`,
   `internal/remote/`, `internal/selfupdate/`, `internal/ui/`,
-  `internal/collector/`, `cmd/toktop/validate.go`,
+  `internal/collector/`, `internal/lockfile/`, `internal/core/elapsed.go`,
+  `cmd/toktop/validate.go`,
   `cmd/toktop/config.go`, `cmd/toktop/main.go`, `internal/agentwatch/` and the
   `agentusage/` package (`definitions.go`, `transcript.go`, `candidates.go`,
   `registry.go`, `kimi.go`) as well as the Go files it was written for: each
