@@ -3,6 +3,11 @@
 # sha256 is on the py3-none-any wheels only. Binary wheels stay version
 # pins so other OS/arch/CPython combinations still install.
 #
+# Licenses are recorded in docs/DEPENDENCIES.md, read off the installed
+# metadata. yamllint is GPL-3.0-or-later and pyte is LGPL-3.0; both reach the
+# tree only through a developer running a linter, and neither lands in a
+# released file.
+#
 # This file is the whole closure, not the top of one: the Makefile installs it
 # with --no-deps, so nothing below is resolved out of the index at install
 # time. black's five requirements and ruff's none are all listed here, and a

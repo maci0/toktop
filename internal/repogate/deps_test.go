@@ -559,6 +559,80 @@ func TestPythonPinsAreDocumented(t *testing.T) {
 	}
 }
 
+// pythonLicenseRow returns the line of the Python table in the dependency
+// table that names this pin, or "" when none does. The row is what a reader
+// checks a supply chain against, and a pin named only in prose carries no
+// license at all.
+func pythonLicenseRow(t *testing.T, pin string) string {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, dependencyTable))
+	if err != nil {
+		t.Fatalf("read %s: %v", dependencyTable, err)
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "|") {
+			continue
+		}
+		// The pin names the row. A trailing " (...)" is tolerated so a row can
+		// carry the version or a note beside the name without the lookup
+		// below having to know how it was spelled.
+		first := strings.Trim(strings.TrimSpace(strings.Split(line, "|")[1]), "`")
+		if first == pin || strings.HasPrefix(first, pin+" (") {
+			return line
+		}
+	}
+	return ""
+}
+
+// licenseIdentifiers matches an SPDX identifier in a cell of the table:
+// MIT, BSD-3-Clause, Apache-2.0, GPL-3.0-or-later, LGPL-3.0, MPL-2.0, PSF-2.0
+// and the "A OR B" form. It is deliberately loose about the version suffix --
+// the point is that a license is named at all, not that the number matches.
+var licenseIdentifiers = regexp.MustCompile(`\b(?:A?GPL|LGPL|MPL|MIT|BSD|Apache|PSF|ISC)[-\w.]*`)
+
+// TestPythonPinsRecordALicense fails when a pin in scripts/ has a row in the
+// dependency table naming it with no license beside it.
+//
+// The gap it closes is one this tree already fell into: yamllint was recorded
+// as LGPL-2.1 while its installed metadata says GPL-3.0-or-later, and no gate
+// read that column. TestPythonPinsAreDocumented only asks whether the name
+// appears anywhere in the file, so a weaker copyleft identifier sat there
+// indefinitely -- and a weaker identifier is the one kind of license error a
+// reader cannot catch by reading the file, because the file is what they read.
+//
+// The table is the source of truth rather than the installed metadata: the
+// env under dist/ is not built for a bare `go test`, and a gate that needed it
+// would stop being a gate.
+//
+// Ceiling: this checks that a license is NAMED, not that it is the right one,
+// so downgrading an identifier to a weaker one (yamllint to LGPL-2.1) passes
+// here. Comparing against the installed metadata would catch that, but it
+// needs the dist/ env, which a bare `go test` does not have. The upgrade path
+// is a `make scripts-check` step that diffs the table's license column against
+// each pin's .dist-info, which is where the env is guaranteed to exist.
+func TestPythonPinsRecordALicense(t *testing.T) {
+	records := pythonPinRecords(t)
+	if len(records) == 0 {
+		t.Fatal("the requirements files parsed to no pins; the parser no longer understands them")
+	}
+	for _, pin := range records {
+		row := pythonLicenseRow(t, pin.name)
+		if row == "" {
+			t.Errorf("scripts/%s: %s==%s has no row in %s; the pin needs a license beside it", pin.file, pin.name, pin.version, dependencyTable)
+			continue
+		}
+		cells := strings.Split(row, "|")
+		// A table row splits with an empty cell on either side of the
+		// delimiters, so the license is the third cell, not the second. Only
+		// it is read: the fourth is prose, and a reason that happens to
+		// contain a word like "Apache" would otherwise pass a row that names
+		// no license.
+		if len(cells) < 3 || !licenseIdentifiers.MatchString(cells[2]) {
+			t.Errorf("scripts/%s: %s==%s has a row in %s naming no license: %s", pin.file, pin.name, pin.version, dependencyTable, strings.TrimSpace(row))
+		}
+	}
+}
+
 // pythonImport matches a top-level import in a file under scripts/, at any
 // indentation so the deferred imports inside a function count, and
 // captures the module both `import x` and `from x import y` name.

@@ -118,10 +118,41 @@ which pinned the linter and left pyyaml and pathspec to be resolved out of the
 index on every run, so a linter's behavior could change under a gate that
 nothing in the tree could reproduce.
 
-- runtime: pyte (LGPL-3.0), wcwidth (MIT), pillow (MIT)
-- tools: black, ruff, mypy, yamllint (LGPL-2.1), and their transitive closure
-  (click, packaging, pathspec, platformdirs, mypy-extensions, pytokens, librt,
-  ast-serialize, typing-extensions, pyyaml)
+Every pin, with the license its installed `.dist-info/METADATA` records, read
+off the env `make scripts-env` builds rather than off the index:
+
+| Pin | License | Why it is here |
+| --- | --- | --- |
+| pyte | LGPL-3.0 | Lays the captured ANSI out into a screen the renderer draws. |
+| wcwidth | MIT | Display-column measurement, from the same table pyte lays out with. |
+| pillow | MIT-CMU | Rasterizes the laid-out screen to a PNG. |
+| black | MIT | Formats scripts/. |
+| ruff | MIT | Lints scripts/. |
+| mypy | MIT | Type-checks scripts/. |
+| yamllint | GPL-3.0-or-later | The one linter reading the workflow YAML. |
+| click | BSD-3-Clause | black's argument parser. |
+| packaging | Apache-2.0 OR BSD-2-Clause | black's version parsing. |
+| pathspec | MPL-2.0 | The gitignore matcher black applies, and yamllint's. |
+| platformdirs | MIT | Where black looks for a project config. |
+| mypy-extensions | MIT | mypy's marker and typed-dict helpers. |
+| pytokens | MIT | The token set mypy and black share. |
+| librt | MIT | mypy's runtime, compiled. |
+| ast-serialize | MIT | mypy's AST serialization, compiled. |
+| typing-extensions | PSF-2.0 | The typing constructs newer than the pinned interpreter. |
+| pyyaml | MIT | yamllint's parser. |
+
+Three of those are copyleft: pyte (LGPL-3.0), yamllint (GPL-3.0-or-later) and
+pathspec (MPL-2.0). All three reach the tree only through a developer running
+a linter or rendering a capture, never through a released artifact:
+`scripts/screenshot.py` is not linked into any binary or published file, and
+neither is the linter. The licenses are recorded because the grant travels
+with the code and a reader checking a supply chain asks before the install,
+not after.
+
+`yamllint` is GPL-3.0-or-later, not the LGPL-2.1 this table used to claim. The
+installed metadata says so (`License-Expression: GPL-3.0-or-later`), and a
+weaker identifier recorded against a copyleft dependency is the one kind of
+error here a reader cannot catch by reading the file.
 
 ## JavaScript, site/ only
 
