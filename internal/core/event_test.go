@@ -167,3 +167,34 @@ func TestAppendRetainedReportsWhatTheFeedHolds(t *testing.T) {
 		t.Fatalf("AppendRetained(3) = %v, %v; want [3 3 4], true", s, kept)
 	}
 }
+
+// A feed holding more than the window it is trimmed to has no spare room, so
+// it is refused on the same rule a full one is. Reading it as not-yet-full
+// inserted an arrival the trim dropped on the same call and answered true for
+// an event nothing holds, which is the one answer this function exists to keep
+// out of a caller's ledger and its reply to a sender.
+func TestAppendRetainedRefusesOnAFeedOverTheCap(t *testing.T) {
+	intCmp := cmp.Compare[int]
+	s := []int{1, 2, 3, 4, 5}
+	for _, v := range []int{0, 1} {
+		got, kept := AppendRetained(s, v, 3, intCmp)
+		if kept {
+			t.Errorf("AppendRetained(%d) on a %d-entry feed trimmed to 3 = true, want false", v, len(s))
+		}
+		if !slices.Equal(got, []int{1, 2, 3, 4, 5}) {
+			t.Fatalf("a refused arrival changed the feed: %v", got)
+		}
+	}
+	// A feed over the cap still admits an arrival that sorts after the oldest
+	// entry: the trim drops the two entries before it, and the arrival is in
+	// the result. This is the case an exactly-max test got right by accident.
+	got, kept := AppendRetained(s, 3, 3, intCmp)
+	if !kept || !slices.Equal(got, []int{3, 4, 5}) {
+		t.Fatalf("AppendRetained(3) on a %d-entry feed = %v, %v; want [3 4 5], true", len(s), got, kept)
+	}
+	// The newest arrival is retained too, for the same reason.
+	got, kept = AppendRetained(s, 6, 3, intCmp)
+	if !kept || !slices.Equal(got, []int{4, 5, 6}) {
+		t.Fatalf("AppendRetained(6) on a %d-entry feed = %v, %v; want [4 5 6], true", len(s), got, kept)
+	}
+}

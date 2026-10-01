@@ -267,11 +267,20 @@ func AppendSorted[T any](s []T, item T, max int, cmp func(a, b T) int) []T {
 // instead keeps "did the feed take it" a truthful answer for a caller that
 // reports the count back to a sender, and keeps the id a caller ledgers for
 // suppressed replays off entries nothing holds.
+//
+// The length test is at-least rather than exactly max, so the answer stays
+// true of a feed holding more than the window it is trimmed to. Every caller
+// today builds its feed through this function or [AppendSorted] at the same
+// max, so the two lengths always agree and the distinction is invisible; an
+// exactly-max test would read a feed restored from anywhere else as
+// not-yet-full, insert an arrival that [AppendSorted] drops on the same call,
+// and report it retained while nothing holds it. A feed over the cap has no
+// spare room, so it is treated as the full case it is.
 func AppendRetained[T any](s []T, item T, max int, cmp func(a, b T) int) ([]T, bool) {
 	if max <= 0 {
 		return s, false
 	}
-	if len(s) == max && cmp(item, s[0]) <= 0 {
+	if len(s) >= max && cmp(item, s[0]) <= 0 {
 		return s, false
 	}
 	return AppendSorted(s, item, max, cmp), true
