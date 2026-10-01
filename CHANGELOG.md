@@ -13,6 +13,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- A `--probe` run against an OpenAI-compatible engine that rejects one of the
+  request shapes no longer pays for that rejection on every wave. The probe
+  walks `max_tokens`, `max_completion_tokens` and `stream_options` in turn to
+  find the spelling an engine accepts, and it started the walk from the top
+  every time: an engine that answers only the third shape cost three refused
+  POSTs before each measurement, once per wave, for as long as the run lasted.
+  A refused request generates nothing, so the cost was never generation, but a
+  gateway in front of the engine counts every request it forwards and this run
+  was multiplying them. The shape that answered is now remembered per engine
+  address and the next walk starts there, so the steady state is one POST per
+  wave. The entry is dropped when the engine refuses the shape it was
+  remembered for, so an engine that changes what it accepts is walked again
+  from the top instead of being pinned to a spelling it no longer serves, and a
+  429 or a transport failure writes nothing. `TestRunOpenAIShapeWalkIsRememberedPerEngine`,
+  `TestRunOpenAIMemoForgetsOnRefusal` and `TestRunOpenAIMemoIsPerEngine` in
+  internal/probe pin all three.
+
 ### Added
 
 - The agent feed's OpenAPI spec now declares the `Cache-Control: no-store`

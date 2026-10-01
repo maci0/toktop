@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/maci0/toktop/internal/core"
@@ -19,7 +20,7 @@ import (
 // server sends one at all, counts completion tokens rather than decode time.
 func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens int, ttft time.Duration, err error) {
 	url := r.Base + "/v1/chat/completions"
-	resp, err := postOpenAI(ctx, url, r.Model)
+	resp, err := postOpenAI(ctx, url, r.Model, r.Base)
 	if err != nil {
 		return 0, 0, err
 	}
@@ -170,21 +171,77 @@ const (
 // answering every other request.
 var openaiShapes = []openaiShape{shapeBoth, shapeCompletion, shapeLegacy, shapeReasoning}
 
+// shapeMemo remembers, per engine base URL, the last shape that answered.
+// The walk is free per shape -- a 400/422 is refused before any generation
+// runs -- but it is not free per wave: an engine that needs shapeLegacy costs
+// three refused POSTs before every measurement, once per wave, for as long as
+// the run lasts. On a billed gateway that is a request multiplier on a probe
+// whose whole point is to be small. Recording the shape that answered turns
+// every later probe of that engine into a single POST.
+//
+// The entry is the full base URL, not the model: the refusal is about the
+// server's request shape, which does not vary with the model. An engine that
+// serves two models only one of which refuses a shape still has to walk to
+// find out, and the memo is rewritten from the answer either way.
+var shapeMemo sync.Map // base URL -> openaiShape
+
+// memoShape returns the shape that last answered for base, if any.
+func memoShape(base string) (openaiShape, bool) {
+	v, ok := shapeMemo.Load(base)
+	if !ok {
+		return shapeBoth, false
+	}
+	shape, ok := v.(openaiShape)
+	return shape, ok
+}
+
+// rememberShape records the shape that answered for base. A shape later in the
+// walk than the one already recorded is kept: the walk only ever widens its
+// concessions, so a later shape is strictly the more compatible one.
+func rememberShape(base string, shape openaiShape) {
+	if prev, ok := memoShape(base); !ok || shape > prev {
+		shapeMemo.Store(base, shape)
+	}
+}
+
+// forgetShape drops base's memo. A collector run can change the address it
+// probes an engine under (one that stops resolving and answers again on a new
+// port), and a memo left over from the old endpoint would send the first
+// probe of the new one straight into a refusal the walk would have recovered
+// from.
+func forgetShape(base string) { shapeMemo.Delete(base) }
+
 // postOpenAI POSTs the probe, walking the request shapes on a rejection. Only
 // 400 and 422 continue the walk: they are refused before any generation runs,
 // so the whole walk is free, and walking it is the only way a probe can reach
 // an engine whose cap field is named the other way. 429, 503 and transport
 // failures end it, since a retry there multiplies billed generations.
-func postOpenAI(ctx context.Context, url, model string) (*http.Response, error) {
+//
+// The walk starts from the shape that last answered for this base rather than
+// at shapeBoth, so an engine that rejects a field is not made to reject it
+// again on every wave for the rest of the run. A refusal at the remembered
+// shape does not end the probe: the memo can be stale against an engine that
+// changed what it accepts, so the walk resumes where the memo left off, a
+// shape that answers rewrites it, and a refusal at or before the memo drops it
+// so the next wave starts over rather than paying that refusal every wave.
+func postOpenAI(ctx context.Context, url, model, base string) (*http.Response, error) {
+	from, memoized := memoShape(base)
+	if !memoized {
+		from = 0 // an engine with no memo is always walked from the top
+	}
 	var err error
-	for _, shape := range openaiShapes {
+	for _, shape := range openaiShapes[from:] {
 		var resp *http.Response
 		if resp, err = postJSON(ctx, url, openaiBody(model, shape)); err == nil {
+			rememberShape(base, shape)
 			return resp, nil
 		}
 		var se *httpStatusError
 		if !errors.As(err, &se) || (se.status != http.StatusBadRequest && se.status != http.StatusUnprocessableEntity) {
 			return nil, err
+		}
+		if memoized && shape <= from {
+			forgetShape(base)
 		}
 	}
 	return nil, err
