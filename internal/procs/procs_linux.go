@@ -118,7 +118,7 @@ func listLinux() ([]raw, error) {
 		// process on the host paid a string header per argument, twice
 		// (the split and the clip), for a listing that keeps a handful of
 		// processes and none of their tails.
-		line := strings.TrimRight(string(cmdlineB), "\x00")
+		line := strings.TrimRight(procText(cmdlineB), "\x00")
 		args := splitCmdline(line, w.args)
 		if len(args) == 0 || args[0] == "" {
 			continue

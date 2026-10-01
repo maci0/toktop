@@ -15,6 +15,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A process whose name or command line is not valid UTF-8 no longer reaches an
+  engine matcher, a panel label or the JSON report holding half a character.
+  `/proc` does not require a name to be UTF-8: `comm` is fixed at
+  `TASK_COMM_LEN-1` bytes, so the kernel cuts a name written in a non-ASCII
+  script mid-rune, and the command-line file holds whatever bytes the process's
+  argv did. The local sweep turned those bytes straight into a string, and
+  `core.FoldASCII` only touches ASCII, so a lone `0xC3` stayed in the name as a
+  character no other reader of the same process can produce. The ssh-remote
+  sweep and the agent walker already dropped those bytes at the same boundary;
+  the local one now does too, through the same `procText` treatment, on Linux
+  and on macOS, where `ps` carries the same bytes. A name that lost a byte
+  matches no engine, which is the right answer for a process the sweep cannot
+  name. `TestProcsProcTextDropsIllFormedBytes` and
+  `TestProcsLinuxCmdlineNameIsValidUTF8` in internal/procs pin both halves.
 - A `--probe` run against an OpenAI-compatible engine that rejects one of the
   request shapes no longer pays for that rejection on every wave. The probe
   walks `max_tokens`, `max_completion_tokens` and `stream_options` in turn to

@@ -690,3 +690,27 @@ var defaultSamplerRefresh time.Duration
 // slow rather than duplicating its work; a lister wedged in the kernel is
 // released rather than left pinning the panel.
 const sweepWait = 2 * time.Second
+
+// procText decodes one process-listing file into text at the boundary that
+// reads it. None of those files is required to hold valid UTF-8: the comm file
+// is fixed at TASK_COMM_LEN-1 (15) bytes, so the kernel cuts a name written in
+// a non-ASCII script mid-rune (an executable whose name is 21 bytes lands on
+// half a character), the command-line file holds whatever bytes the process's
+// argv did, and a ps(1) command column carries whatever the process wrote as
+// its first argument.
+//
+// An ill-formed byte cannot be left in place. core.FoldASCII only touches
+// ASCII, and a matcher or a label renders the name as it stands, so the half a
+// rune reaches the engine label, the JSON report and the matcher key as a
+// character no other reader of the same process can produce. Dropping the byte
+// is the safe direction: a name that lost a byte matches no engine, which is
+// the right answer for a process this sweep cannot name.
+//
+// Valid input takes the plain conversion, so a sweep over every process on the
+// host pays only for the strings it was already turning into text.
+func procText(b []byte) string {
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	return strings.ToValidUTF8(string(b), "")
+}

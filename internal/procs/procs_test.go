@@ -727,3 +727,46 @@ func TestBaseNameKeepsInvalidBytes(t *testing.T) {
 		t.Errorf("baseName(%q) = %q, want the invalid byte preserved", "vllm\xff", got)
 	}
 }
+
+// A process-listing file is not required to hold valid UTF-8. The kernel cuts
+// comm at TASK_COMM_LEN-1 bytes, so a name written in a non-ASCII script lands
+// the sweep on half a character, and the command-line file holds whatever bytes
+// the process's argv did. The half a rune must not reach the name, the
+// arguments or the matcher key.
+func TestProcsProcTextDropsIllFormedBytes(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []byte
+		want string
+	}{
+		{"valid multibyte is untouched", []byte("llama-server\xE3\x82\xA8"), "llama-server\xE3\x82\xA8"},
+		{"lone lead byte is dropped", []byte("llama\xC3"), "llama"},
+		{"lone continuation byte is dropped", []byte("llama\xA9"), "llama"},
+		{"truncated three-byte sequence is dropped", []byte("llama\xE3\x82"), "llama"},
+		{"truncated four-byte sequence is dropped", []byte("agent\xF0\x9F\x98"), "agent"},
+		{"ascii is untouched", []byte("llama-server"), "llama-server"},
+		{"empty is empty", []byte{}, ""},
+	}
+	for _, c := range cases {
+		got := procText(c.in)
+		if got != c.want {
+			t.Errorf("%s: procText(%q) = %q, want %q", c.name, c.in, got, c.want)
+		}
+		if !utf8.ValidString(got) {
+			t.Errorf("%s: procText(%q) = %q, which is not valid UTF-8", c.name, c.in, got)
+		}
+	}
+}
+
+// The name a sweep keeps must never carry a half a rune into a matcher key or
+// a rendered label, whatever the listing held.
+func TestProcsLinuxCmdlineNameIsValidUTF8(t *testing.T) {
+	line := "llama-server\xC3\x00--port\x0080800\x00"
+	trimmed := strings.TrimRight(procText([]byte(line)), "\x00")
+	if !utf8.ValidString(trimmed) {
+		t.Fatalf("command line kept ill-formed bytes: %q", trimmed)
+	}
+	if got := baseName(strings.SplitN(trimmed, "\x00", 2)[0]); !utf8.ValidString(got) {
+		t.Fatalf("baseName kept ill-formed bytes: %q", got)
+	}
+}
