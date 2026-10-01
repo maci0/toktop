@@ -607,11 +607,16 @@ func (w *Watcher) Run(ctx context.Context, every time.Duration, onChange func(Sa
 	if every <= 0 {
 		every = DefaultPollInterval
 	}
+	// The ticker is registered before the first read, not after it. A driver
+	// firing a virtual pacer that fires between the two would otherwise drop
+	// the step, and a read loop whose first tick is lost is a step sequence
+	// that replays differently from the one the driver recorded. The read
+	// below is not that tick: it is the warm pass, which happens either way.
+	t := w.pacer().New(every)
+	defer t.Stop()
 	// A first read straight away: an agent that reports early should show a
 	// rate early, rather than waiting out a tick.
 	w.poll(onChange)
-	t := w.pacer().New(every)
-	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():

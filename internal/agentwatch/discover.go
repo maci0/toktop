@@ -179,9 +179,19 @@ func (w *Watcher) discover(ctx context.Context) {
 		promoteWatch(pm.proc, pm.tr)
 	}
 
+	// The read loops are paced by the watcher's pacer, the same one the
+	// discovery loop above runs on. A driver firing that pacer decides which
+	// pass reads the transcripts: with the reads on the wall clock the number
+	// of passes, and so the ledger a replay reports, is a function of how long
+	// the run happened to take, and the same seed reads a different number of
+	// records on every run. The pacer is read once here rather than inside the
+	// goroutine, so a swap during a pass takes effect on the next tracker
+	// instead of half the pass.
+	pace := w.pacer()
 	for i, t := range started {
 		go func(t *tracked, tctx context.Context) {
 			defer close(t.done)
+			t.watch.SetPacer(pace)
 			t.watch.Run(tctx, w.readEvery, func(s agentusage.Sample) {
 				w.report(t, s)
 			})

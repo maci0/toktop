@@ -78,6 +78,16 @@ func (p *VirtualPacer) Fire(at time.Time) {
 	}
 }
 
+// Live reports how many tickers are registered right now. A loop that
+// registers its ticker on the goroutine it starts registers late, so a tick
+// fired before that is gone the way a wall-clock tick before time.NewTicker
+// was. A driver waits for the count rather than sleeping past the race.
+func (p *VirtualPacer) Live() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.tickers)
+}
+
 type virtualTicker struct {
 	c       chan time.Time
 	mu      sync.Mutex

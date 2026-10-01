@@ -1182,6 +1182,116 @@ func TestDiscoveryIsSteppableByADriver(t *testing.T) {
 	}
 }
 
+// The read loop is paced by the watcher's pacer too, not only the discovery
+// loop: a pass that reads the transcripts is a step, so the number of passes
+// and the ledger they report are a function of the driver's step sequence.
+// Left on the wall clock, the reads that landed inside readEvery varied with
+// how long the run took, so one step sequence reported a different split of
+// the same spend on every run and two replays could not be diffed. The spend
+// below is written between driven passes, and both runs of the same steps
+// must report it identically, ids and stamps alike.
+func TestReadLoopReplaysFromOneStepSequence(t *testing.T) {
+	run := func() string {
+		work, transcript := claudeHome(t)
+		rec := &recorder{}
+		w := New(rec, nil)
+		// Long enough that a wall-clock loop reads nothing at all inside the
+		// test: every pass this run gets is one the driver fired.
+		w.readEvery = time.Hour
+		pid := 6100
+		w.listAgents = func() []agentusage.Process {
+			return []agentusage.Process{{PID: pid, Tool: "claude", Dir: work, Started: time.Unix(1, 0)}}
+		}
+		// A pacer per run. A shared one would still hold the previous run's
+		// tickers while they unwind, and the registration count below would
+		// then be satisfied by loops that no longer fire.
+		pace := core.NewVirtualPacer()
+		w.SetPacer(pace)
+		origin := time.Unix(1_700_000_000, 0).UTC()
+		now := &atomic.Pointer[time.Time]{}
+		now.Store(&origin)
+		w.SetNow(func() time.Time { return *now.Load() })
+
+		ctx, cancel := context.WithCancel(t.Context())
+		stopped := make(chan struct{})
+		go func() {
+			defer close(stopped)
+			_ = w.Run(ctx)
+		}()
+		defer func() {
+			cancel()
+			<-stopped
+		}()
+		// The warm pass discovers the process before the driver fires
+		// anything, so the tracker whose reads the steps drive exists first.
+		// The tracker registers its ticker on the goroutine the pass started,
+		// so the driver waits for the registration rather than firing into a
+		// loop that is not listening yet: a tick lost that way is a step the
+		// replay does not reproduce. Two registrations, one for the discovery
+		// loop and one for the tracker's read loop.
+		waitFor(t, waitCeiling, func() bool { return w.watching(pid) && pace.Live() == 2 })
+
+		path := filepath.Join(transcript, "s.jsonl")
+		reported := func(want int64) bool {
+			var n int64
+			for _, ev := range rec.forPID(pid) {
+				n += ev.OutputTokens
+			}
+			return n == want
+		}
+		// Each step writes a distinct spend and waits for exactly the running
+		// total, so the pass that reported it happened after that append and
+		// before the next: a loop waiting out readEvery on the wall clock
+		// never reports the first total, and one reading several appends at
+		// once cannot hit the running total on every step.
+		total := 0
+		step := func(spend int) {
+			total += spend
+			appendLine(t, path, usageLine(work, spend))
+			at := origin.Add(time.Duration(total) * time.Second)
+			now.Store(&at)
+			pace.Fire(at)
+			want := int64(total)
+			waitFor(t, waitCeiling, func() bool { return reported(want) })
+		}
+		step(100)
+		step(240)
+		step(120)
+
+		var b strings.Builder
+		for _, ev := range rec.forPID(pid) {
+			b.WriteString(ev.ID)
+			b.WriteString(" ")
+			b.WriteString(strconv.FormatInt(ev.At.UnixNano(), 10))
+			b.WriteString(" ")
+			b.WriteString(strconv.FormatInt(ev.OutputTokens, 10))
+			b.WriteString("\n")
+		}
+		return b.String()
+	}
+	first, second := run(), run()
+	if first != second {
+		t.Fatalf("two runs of one step sequence reported different ledgers:\n--- first\n%s--- second\n%s", first, second)
+	}
+	// A run that reported nothing would pass the same diff, so the ledger must
+	// carry the spend the three steps wrote.
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(first), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 3 {
+			t.Fatalf("malformed ledger line %q", line)
+		}
+		out, err := strconv.Atoi(fields[2])
+		if err != nil {
+			t.Fatalf("malformed ledger line %q: %v", line, err)
+		}
+		n += out
+	}
+	if n != 460 {
+		t.Fatalf("ledger carries %d output tokens, want 460:\n%s", n, first)
+	}
+}
+
 // A nil pacer restores the wall clock rather than leaving the loop silent,
 // which is the state a caller that forgot to pass one would read as a
 // watcher that stopped finding anything.

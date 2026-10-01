@@ -50,7 +50,10 @@ alongside them would be a layer importing sideways into itself.
   tracker, `discover.go` the pass that classifies this pass's processes
   against the trackers and attaches, follows and hands over stores,
   `engines.go` the monitored engines a tracker is matched against, and
-  `report.go` the events read off a tracker.
+  `report.go` the events read off a tracker. One pacer paces both loops:
+  the discovery pass and the per-tracker transcript reads, so a driver
+  stepping it decides when each pass runs and a seeded run replays from
+  its steps rather than from how long the process happened to take.
 - `internal/bearer`: one process-wide optional `Bearer` token for gateways
   that require an API key.
 - `internal/collector`: polls providers on an interval, derives rates, and is

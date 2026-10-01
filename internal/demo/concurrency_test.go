@@ -17,6 +17,14 @@ import (
 // them does.
 func TestConcurrentFramesProbesAndEvents(t *testing.T) {
 	s := NewSource(time.Millisecond, 7)
+	// The run's cadence is driven, not the wall clock's. The writers below
+	// have to overlap a frame publication to race the state Run reads, and
+	// how many frames land in that window was a function of how loaded the
+	// machine was: a wall-clock millisecond let the writers finish first on
+	// a busy box, and the run published nothing while they ran. A driver
+	// firing the pacer puts a step on the timeline whatever the load.
+	pace := core.NewVirtualPacer()
+	s.SetPacer(pace)
 	ctx, cancel := context.WithCancel(context.Background())
 	ch := make(chan core.Snapshot, 4)
 	done := make(chan struct{})
@@ -47,6 +55,22 @@ func TestConcurrentFramesProbesAndEvents(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
+	// Steps keep landing until every writer is home, so the loop reads the
+	// state they are mutating rather than idling behind a tick that never
+	// came. The first frame above needed no tick; every one after it does.
+	writing := make(chan struct{})
+	stepping := make(chan struct{})
+	go func() {
+		defer close(stepping)
+		for {
+			select {
+			case <-writing:
+				return
+			case <-time.After(time.Millisecond):
+				pace.Fire(s.Now())
+			}
+		}
+	}()
 	for w := range 8 {
 		wg.Go(func() {
 			for i := range 500 {
@@ -62,6 +86,8 @@ func TestConcurrentFramesProbesAndEvents(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	close(writing)
+	<-stepping
 	cancel()
 	go func() {
 		for range ch {

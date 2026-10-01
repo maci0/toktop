@@ -196,6 +196,13 @@ func (s *Source) pacer() core.Pacer {
 	return p
 }
 
+// Pacer is SetPacer read back, for the loops this source's clock also
+// stamps: a run that stamps an agent watcher's events from Now has to pace
+// its passes from the same source, or the seed decides the events and the
+// wall clock decides how many passes produced them. It reports what is in
+// force, which is core.WallPacer unless a driver replaced it.
+func (s *Source) Pacer() core.Pacer { return s.pacer() }
+
 // stepAt applies one simulated frame at now and returns the snapshot. Tests
 // drive this directly so two sources with the same seed can be compared
 // without a wall-clock ticker.

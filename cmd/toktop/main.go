@@ -352,6 +352,15 @@ func runMain() int {
 		aw := agentwatch.New(recorder, engineAddrs)
 		if demoSrc != nil {
 			aw.SetNow(demoSrc.Now)
+			// The passes are paced by the source's own pacer, as the stamps
+			// come from its clock. Left on the wall clock, discovery and the
+			// transcript reads would run on real time while every event they
+			// produced is stamped on the simulated one, and the same --seed
+			// would report a different number of agents, a different number
+			// of reads, and a different split of the same spend on every
+			// launch. Two runs of one seed could not be compared, which is
+			// what the seed is for.
+			aw.SetPacer(demoSrc.Pacer())
 		}
 		// Run's only error is a second concurrent Run, which this one call
 		// site cannot make, so every condition an operator has to see comes
