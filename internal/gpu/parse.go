@@ -117,7 +117,7 @@ func ParseRocmSMI(b []byte) []core.GPUDevice {
 				}
 			}
 		}
-		d := core.GPUDevice{Vendor: "amd", Index: index}
+		d := core.GPUDevice{Vendor: core.VendorAMD, Index: index}
 		fields := raw[card]
 		for _, k := range slices.Sorted(maps.Keys(fields)) {
 			lk, val := core.FoldASCII(k), flatten(fields[k])
@@ -208,7 +208,7 @@ func parseXpuMetrics(b []byte, index int) (core.GPUDevice, bool) {
 	if json.Unmarshal(b, &raw) != nil || raw.Metrics == nil {
 		return core.GPUDevice{}, false
 	}
-	d := core.GPUDevice{Vendor: "intel", Index: index}
+	d := core.GPUDevice{Vendor: core.VendorIntel, Index: index}
 	// Sorted keys, same as ParseRocmSMI: map ranges are randomized, and
 	// which of two overlapping sensors (two temperature keys, memory_size
 	// vs memory_total) wins would otherwise flip between polls.

@@ -6,7 +6,6 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
-	"time"
 )
 
 // microagent writes one session log per run under
@@ -29,13 +28,7 @@ func parseMicroagent(line []byte) (values, string, bool) {
 	if !ok {
 		return values{}, "", false
 	}
-	if ms := microagentElapsedMS(line); ms > 0 {
-		n := int64(ms)
-		if n > maxTurnMS {
-			n = maxTurnMS
-		}
-		v.span = time.Duration(n) * time.Millisecond
-	}
+	v.span = turnSpan(microagentElapsedMS(line))
 	return v, cwd, true
 }
 

@@ -79,6 +79,22 @@ func grokSessionCwd(path string) (string, bool) {
 // second with the wrong sign.
 const maxTurnMS = math.MaxInt64 / int64(time.Millisecond)
 
+// turnSpan converts one record's millisecond turn length into the span a rate
+// is taken over. A count of zero or less is no reading at all: a zero span is
+// what the caller falls back to the gap between records on.
+//
+// The clamp is the same rule for every adapter publishing a turn length (grok's
+// apiDurationMs and elapsed_ms, microagent's elapsed_ms), so it lives here
+// rather than once per parser: an adapter spelling the conversion its own way
+// is a wrapped span and a rate with the wrong sign.
+func turnSpan(ms int) time.Duration {
+	if ms <= 0 {
+		return 0
+	}
+	n := min(int64(ms), maxTurnMS)
+	return time.Duration(n) * time.Millisecond
+}
+
 // parseGrokUpdate reads one updates.jsonl line. Only a completed turn
 // carries counts. Anything else in the log, including the same word inside
 // a tool result, contributes nothing.
@@ -123,12 +139,6 @@ func parseGrokUpdate(line []byte) (values, string, bool) {
 	if ms <= 0 {
 		ms = rec.Params.Update.ElapsedMS
 	}
-	if ms > 0 {
-		n := int64(ms)
-		if n > maxTurnMS {
-			n = maxTurnMS
-		}
-		v.span = time.Duration(n) * time.Millisecond
-	}
+	v.span = turnSpan(ms)
 	return v, "", true
 }

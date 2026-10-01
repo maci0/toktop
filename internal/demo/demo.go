@@ -332,7 +332,7 @@ func (s *Source) sysSample() core.SysSample {
 	h200.Index, h200.Name, h200.MemTotal = 1, "H200-SXM-141GB", 141*GiB
 	h200.MemUsed = uint64(float64(h200.MemTotal) * clamp(50+28*math.Sin(s.t/10+2), 5, 99) / 100)
 	mi210 := core.GPUDevice{
-		Vendor: "amd", Index: 0, Name: "MI210",
+		Vendor: core.VendorAMD, Index: 0, Name: "MI210",
 		MilliC: int((gpuBase + 6) * 1000), MemTotal: 64 * GiB,
 		MemUsed: uint64(float64(64*GiB) * clamp(35+25*math.Sin(s.t/15+1), 5, 99) / 100),
 		UtilPct: clamp(40+45*math.Sin(s.t/11+3), 0, 100),
