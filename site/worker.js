@@ -41,7 +41,7 @@ const SHARE_CARD_PATH = "/dashboard-card.png";
 // renderer's (scripts/screenshot.py). Spelling a hex a second time here is a
 // hex that can drift from the product it depicts, so the CSS, the light scheme
 // and the favicon all read these names. site/worker.test.js pins the agreement
-// across the three files.
+// across the three files, and the two schemes apart.
 const DARK = {
   bg: "#0d1117",
   panel: "#11161d",
@@ -51,6 +51,21 @@ const DARK = {
   accent: "#4cc38a",
   warm: "#e3b341",
 };
+// LIGHT is a designed scheme, not DARK inverted. The identity holds across
+// both: the green accent and the amber keep the hues the terminal draws,
+// dropped to a lightness that reads as ink on paper. The neutrals move the
+// other way, on purpose. The dark scheme is a cool near-black, because
+// phosphor sits on cold glass, and a light scheme reusing that coolness would
+// be the same terminal seen through a projector. This is paper instead: red
+// and green sit two channels above blue, the way a terminal emulator's own
+// light theme is warm rather than the dark colors run backwards. The ink
+// stays cool in both, so a reader who switches is still reading inside one
+// world, on cold glass or on warm paper.
+//
+// Neither decision moves a contrast number, so both are invisible in a diff
+// and to every measurement the suite already makes. site/worker.test.js reads
+// the temperature of each scheme and holds the two apart: #ffffff passes
+// every ratio on the page and erases all of this.
 const LIGHT = {
   bg: "#fbfbf9",
   panel: "#f3f3ee",
@@ -161,6 +176,15 @@ const HTML = htmlForWire(`<!doctype html>
        under-reads the bar is the bar covering the thing it was meant to
        clear. The phone breakpoint raises it, the bar wrapping to two rows. */
     --bar-h: 4rem;
+    /* The one radius on the page, on the one control that is a physical key.
+       Every other box here is a rule and a background, because that is what a
+       terminal draws: a rounded corner on a code block would be the page
+       borrowing a web app's soft-edged cards to describe a frame that has no
+       corner radius at all. The keycap earns its one, because a key is the
+       one object a reader already holds a shape for. Named rather than
+       written into the rule, so a second rounded box has to be argued for
+       here instead of typed in beside whatever rule wanted it. */
+    --radius-key: 4px;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -312,7 +336,7 @@ const HTML = htmlForWire(`<!doctype html>
      the key reads as a key; the box-drawing --line stays on the rules that
      divide the page rather than name a control. The sticky bar and the code
      blocks take --fg for that same reason, each at the point that needs it. */
-  kbd { border: 1px solid var(--fg); border-radius: 4px;
+  kbd { border: 1px solid var(--fg); border-radius: var(--radius-key);
     padding: 0 .4rem; font-family: inherit; font-size: var(--fs-micro); background: var(--bg); }
   /* Links must not be identified by color alone (WCAG 1.4.1): underline at
      rest, not just on hover. One device carries it. A transparent border that

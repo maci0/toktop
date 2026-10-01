@@ -13,6 +13,29 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- The light scheme on toktop.ai is no longer one edit away from being a
+  mechanical inversion of the dark one. The two schemes were already decided
+  apart — the dark page is a cool near-black, the light page warm paper, and
+  the ink is cool in both — but nothing measured the temperature, because a
+  palette's temperature is invisible to every contrast ratio on the page:
+  `#fbfbf9` and `#ffffff` are both pure enough to clear every floor the suite
+  checks, so a `#fbfbf9` to `#ffffff` "cleanup" passed all of them and turned
+  the light scheme into the dark one run backwards. Two tests read the
+  temperature of each scheme now and hold them apart, the near-neutral
+  comparison made on which channel leads rather than on a hue, because a
+  near-neutral's hue swings under a single digit of change. The identity hues
+  are held across both schemes in the same test, so a light scheme that picked
+  a second green is caught too. No hex changed and no contrast ratio moved.
+
+- The one rounded box on toktop.ai is a token rather than a literal in the
+  `kbd` rule, and a test holds the page to exactly one radius. The keycap is
+  the one control a reader already holds a shape for; every other box is a
+  rule and a background, because that is what a terminal draws. The value is
+  the same `4px` and nothing is drawn differently. The byte figures in
+  `site/README.md` move with it.
+
 ## [0.23.0] - 2026-09-30
 
 Binaries, checksums, and a CycloneDX SBOM are on
