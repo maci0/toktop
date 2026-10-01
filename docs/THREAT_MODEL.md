@@ -5,7 +5,12 @@ with file references so each claim can be re-verified against code. Individual
 vulnerabilities and their fixes belong to sec-review; this file records where
 they live and what already stands in their way.
 
-- **Last reviewed:** 2026-09-30, against this commit. Every mitigation row,
+- **Last reviewed:** 2026-10-02, against this commit. The prior pass ran on
+  2026-09-30 and its findings are kept below in the order it made them; this
+  pass re-read every constant, cap, route, flag and environment variable this
+  file names and found them all holding as written, so no risk changed rank,
+  and took up the two controls that landed after it (M50, M51, described at
+  the end of this header). Every mitigation row,
   entry point, and constant this file names was re-read in the code: the
   defaults and caps (`maxInFlightEvents` 64, `maxHeaderBytes` 16 KiB,
   `maxReportedName` 64, `ModelNameMax` 256, `maxLineBytes` 8 MiB,
@@ -83,7 +88,21 @@ they live and what already stands in their way.
   not twelve (internal/remote/forward.go is one of them). No risk changed rank:
   the sender fold removes an account name M35 could not reach, the replay shape
   sits under the absent sender identity gap 1 already records, and `--origin`
-  configures a demo replay.
+  configures a demo replay. This pass took up the two controls that landed
+  after it and that no row above named, both at boundaries this file already
+  carries. `procText` (agentusage/discover_linux.go) drops ill-formed bytes
+  where the `/proc` walk decodes `comm` and `cmdline`, because the kernel cuts
+  `comm` at 15 bytes and `canonicalTool` composes to NFC over a string that
+  x/text leaves a lone 0xc3 in, so a half rune would key the agent identity on
+  bytes no other reader of the same process can produce; M50 records it, and
+  the B7 entry point now says the decode happens at that boundary rather than
+  at each use. `AppendRetained` (internal/core/core.go) refuses on a feed
+  holding *at least* the cap rather than exactly it, so a feed restored from
+  anywhere else is read as full rather than as having room for one more entry
+  the trim would drop on the same call; M51 records it. Neither changes a
+  rank: a process the walk cannot name was already reported as no agent, and a
+  feed holding more than its window has no spare room to fill, so each sits
+  inside a bound M5's retention cap and M7's clamps already carry.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -516,7 +535,13 @@ Every externally reachable input, with its code location:
     system_profiler and ioreg (internal/gpu/gpu_darwin.go), ps
     (internal/procs/procs_darwin.go; agentusage/discover_darwin.go),
     lsof (agentusage/discover_darwin.go; peers_darwin.go), a PowerShell
-    CIM query (internal/procs/procs_windows.go).
+    CIM query (internal/procs/procs_windows.go). The `agentusage` `/proc`
+    walk reads `comm` and `cmdline` as raw kernel bytes and decodes both
+    through `procText` at that boundary rather than at each use, because
+    neither file is required to hold valid UTF-8 (`comm` is cut at 15
+    bytes); ill-formed bytes are dropped rather than carried into the agent
+    identity (M50, `procText`, agentusage/discover_linux.go). The same walk
+    reads `cwd` and, for same-engine attribution, `/proc/<pid>/fd`.
 12. **Site deployment** (operator-run, not CI): `make site-deploy` and
     `make site-rollback` take `dist/site.lock` and shell to
     `bunx wrangler@4.126.0 deploy` / `rollback` inside `site/`, then poll
@@ -790,7 +815,12 @@ Deployment surface:
   discovery plus transcript/SQLite reads cross from other processes' files
   into the dashboard. The operator never names those files; `agents.json`
   roots, crush's walk to `.crush/crush.db` (crush_sqlite.go, capped at
-  16 parents), and opencode's well-known path do. SQLite opens are
+  16 parents), and opencode's well-known path do. The bytes themselves are
+  untrusted on the way in, not only the paths: `/proc` hands out `comm` cut
+  at `TASK_COMM_LEN-1` and `cmdline` verbatim, so the Linux discovery walk
+  decodes both through `procText` and drops what is not text before either
+  reaches `canonicalTool` and the agent-name lookup (M50,
+  agentusage/discover_linux.go). SQLite opens are
   read-only (sqlite.go, `_query_only=1`, `_defensive=1`, `_dqs=0`,
   and `trusted_schema=OFF` in the DSN).
   Transcript and crush paths that leave their root via a planted symlink are
@@ -1080,6 +1110,8 @@ Controls verified in code, with the threats they cover:
 | M48: The release's exported-surface gate cannot pass by comparing nothing. `check-api` reads the declarations `agentusage` exports now and the ones it exported at the last tag, and refuses a `VERSION` that drops one. It resolved that tag from `HEAD^`, and on the release runner `actions/checkout` checked the tree out at the default `fetch-depth: 1`, which carries neither the parent commit nor the tags, so `git describe` failed and the recipe's `|| exit 0` turned the failure into a pass: a tag push could remove an exported symbol, publish it, and report every gate green. The gate now asks whether the clone is shallow and refuses one with a message naming `fetch-depth: 0`, because a shallow clone and a repository's first commit both lack `HEAD^` and only the first of the two has anything to hide; `ALLOW_SHALLOW=1` overrides, and the release workflow checks the tag push out at full depth so the gate has the history it reads | a published release that removes an exported symbol, where a Go caller meets it as a compile error while this repository's own build and tests stay clean, against the same trust anchor as summary risk 3 (B5 tampering/repudiation) | Makefile, `CHECK_API`, a prerequisite of `release`; .github/workflows/release.yml, the `fetch-depth: 0` checkout |
 | M47: The two name sets a startup warning prints are folded and capped. `reportedField` runs `core.SingleLine` and then `core.TruncateClusters` at `maxReportedName` 64 on every externally supplied name before it is written: the key out of `~/.gauntlet/agents.json` named by M44's unknown-key warning (`warnUnknownUsageKeys`), and the name out of the environment named by the unknown-environment warning (`warnUnknownEnv`). Both print through `reportedNames`, which is `reportedField` over the list, so `reportedField` is reached from that helper alone. Both are text this program did not write, and both land on the first lines a run prints, so a wrapper script or a supervisor that puts one escape sequence in a variable name would otherwise reach the operator's terminal as a clipboard write or a title change before any other text (B6 spoofing, terminal-integrity asset). The cap cuts between grapheme clusters, so a name ending in an emoji or a decomposed accent is never sliced mid-character, and those two warnings are the only paths that print an untrusted name: every other startup line names a flag, a file, or a value this process parsed | an escape sequence or an oversized key in a name reaching the operator's terminal, and a startup warning spending unbounded bytes on one name (B6, response-readiness disclosure) | cmd/toktop/validate.go, `maxReportedName`, `reportedField`, and the `warnUnknownEnv` call site; tests cmd/toktop/reported_field_test.go |
 | M49: Every sender-shaped string reaching retained or reported state is folded for the sender's home as well as the local one. `foldSenderHome` (internal/ingest/event.go) is `core.RedactAnyUserHome` over `core.RedactHome`, and `RedactAnyUserHome` reads the account off the path rather than being told it, trying each of `userHomePrefixes` (`internal/core/redact.go`): `/home/`, `/Users/`, `\Users\`, `/var/home/`, `/export/home/`, `/nfs/home/`, `/srv/homes/`. The local fold alone reaches only the account this process runs as, and the normal case for this endpoint is a client posting from another host or another account, so the account in a client-shaped field is the one the sender chose. It is applied at the points that outlive the request and the run: the event fields (`Agent`, `Model`, `ViaEngine`, `Note`, `Kind`, and the raw line at event.go, 179), the echoed and logged `X-Request-Id` and the request path (middleware.go), and the recovered panic value and stack (M46). The prefix list overlaps, `/home/` being the tail of `/export/home/` and `/nfs/home/`, and one pass can leave a `~` with the rest of the path behind it for the next prefix, so the list is walked until a pass folds nothing: `/export/home/a/home/b` reads `~~` rather than `~/home/b`. Documented limits: a run of more than `maxAccountNameLen` 100 characters after a home prefix is read as a file name rather than an account, so a longer one survives; and the fold reaches only the seven prefixes named, so a sender whose home is spelled outside them is left as it arrived | an account name from a posting peer reaching the retained feed, the live dashboard, the `--once --json` report or a diagnostic line the operator pastes into a public issue (B1 disclosure, response readiness); a field rendered and then stored showing a redacted-once path | internal/core/redact.go, `RedactAnyUserHome`, `userHomePrefixes` and `maxAccountNameLen`; internal/ingest/event.go, `foldSenderHome`; tests internal/core/redact_test.go and `internal/core/redactany_fuzz_test.go`, which pin determinism, idempotence, no-growth and the no-spurious-tilde properties |
+| M50: The `/proc` walk decodes the two kernel files it reads through one boundary, and drops what is not text. `procText` (agentusage/discover_linux.go) converts `comm` and `cmdline` to strings with an `utf8.Valid` fast path and a `strings.ToValidUTF8(..., "")` fallback, and both call sites in `Discover` read through it rather than converting at each use. Neither file is required to hold valid UTF-8: the kernel fixes `comm` at `TASK_COMM_LEN-1` (15) bytes, so a binary named in a non-ASCII script is cut mid-rune, and `cmdline` holds whatever bytes the process's argv did. An ill-formed byte cannot be left in place because `canonicalTool` (agentusage/definitions.go, `norm.NFC.String`) composes to NFC and x/text leaves a lone 0xc3 in rather than dropping it, so half a rune would enter the agent identity as a key no other reader of the same process can produce, and whether a built-in name still matched would depend on which side of the cut the walk landed. Dropping the byte is the safe direction: a name that lost a byte matches no agent, which is the right answer for a process this walk cannot name, and `resolveAgent` returning "" drops the process from discovery rather than attributing its tokens to an agent the operator never ran (B7 tampering; terminal-integrity and dashboard-integrity assets). Pinned by `TestProcTextDropsIllFormedBytes` and `TestCanonicalToolOverCutNameIsValid` (agentusage/discover_linux_proc_text_test.go) | an agent identity keyed on an ill-formed string, or a process whose tokens are credited to whichever built-in name the cut happened to leave matchable (B7 spoofing/tampering) | agentusage/discover_linux.go, `procText` and the two reads in `Discover`; agentusage/definitions.go, `canonicalTool`; agentusage/discover.go, `agentName` and `resolveAgent` |
+| M51: A retained-append answer stays true of a feed holding more than its window. `AppendRetained` (internal/core/core.go) tests `len(s) >= max` rather than `len(s) == max`, so a feed restored from anywhere else is read as the full case it is. An exactly-max test read a feed over the cap as not-yet-full, inserted an arrival that `AppendSorted` trimmed away on the same call, and answered `true` for an event nothing holds, which is the one answer this function exists to keep out of a caller's id ledger and out of the `stored` count it reports back to a sender (B1/B7 tampering, response readiness). Every caller today builds its feed through this function or `AppendSorted` at the same max, so the two lengths always agree and the distinction is invisible; the at-least form is what keeps the answer true if one does not. The refusal path is already latched and audited: `refuseForWindow` (internal/collector/agents.go) records the run of events the window turned away and `storedForWindow` closes it, so a sender whose clock lags reads "kept nothing" with a reason rather than a replay-shaped gap. Pinned by `TestAppendRetainedRefusesOnAFeedOverTheCap` (internal/core/event_test.go) | a `stored` count reporting an event as retained when the feed holds nothing, so the ingest answer and the collector's id ledger both record an event no dashboard row ever showed (B1 tampering) | internal/core/core.go, `AppendRetained`; internal/collector/agents.go, the `AppendRetained` call in `RecordAgent` and the `refuseForWindow` branch beside it |
 
 Documentation claims checked against code on 2026-09-30. What this pass
 found is in the header; the list below is what holds as written, so the next
