@@ -26,15 +26,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   refusals the Go runtime makes before a handler runs are the documented
   exception, since they never reach the chain that sets it.
 
-### Changed
+### Breaking
 
-- The `toktop: engine answering again` audit line reports the outage it ended
-  under `down_reason` instead of `reason`. `reason` is the field every failure
-  line carries, so it was the field to filter on for "what is broken right
-  now", and the recovery line was answering that filter with a failure that
-  had already cleared. The failure text is still on the line, under a name
-  that says it ended. The `toktop: engine not answering` line is unchanged,
-  and probes already used this split.
+- The `toktop: engine answering again` audit line reports the failure it ended
+  under a new `down_reason` key instead of the `reason` every failure line
+  shares. Before this release a log filter on `reason` -- the field to watch
+  for "what is broken right now" -- returned the recovery line too, so it read
+  an outage that had already cleared as a live one. After this release `reason`
+  is carried only by the `toktop: engine not answering` line, so that filter
+  is right, and the failure text on the recovery line has to be read from
+  `down_reason`. A filter or parser keyed on `reason` for the recovery line
+  stops matching it; `toktop: engine not answering` is unchanged, and probes
+  (`probe failed`, `probe answering again`) already used this split.
 
 ### Fixed
 
