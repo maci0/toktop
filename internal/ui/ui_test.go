@@ -1009,6 +1009,57 @@ func TestStaticFrameNoSensors(t *testing.T) {
 	}
 }
 
+// A sample carrying only a kernel still has a reading to show, so it gets an
+// identity segment and not the "no sensors found" line. The guard that
+// decides whether hostSegments runs has to name every field it can render on
+// its own; a kernel-only host (a hardened container, a remote whose
+// /etc/os-release and /proc/cpuinfo are both unreadable) is what pins Kernel
+// to it.
+func TestSystemStripShowsKernelOnlyHost(t *testing.T) {
+	snap := core.Snapshot{
+		At:        time.Now(),
+		Providers: []core.ProviderSnapshot{{Label: "x", Kind: core.KindOllama, OK: true}},
+		Sys:       &core.SysSample{Kernel: "6.11.0-generic"},
+	}
+	out := strip(StaticFrame(Config{Version: "t"}, snap, 110, 34))
+	if !strings.Contains(out, "6.11.0-generic") {
+		t.Errorf("kernel-only host lost its identity row:\n%s", out)
+	}
+	if strings.Contains(out, "no sensors found") {
+		t.Errorf("kernel-only host reported no sensors:\n%s", out)
+	}
+}
+
+// The OS/kernel segment joins the two halves that are present, so a sample
+// with a kernel and no OS name prints the kernel alone rather than opening on
+// a separator that joins nothing. A sample carrying both prints the pair both
+// reports have always printed.
+func TestHostSegmentsJoinsOnlyPresentHalves(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		sy    core.SysSample
+		want  string
+		avoid string
+	}{
+		{"kernel only", core.SysSample{Kernel: "6.11.0"}, "6.11.0", "·"},
+		{"os only", core.SysSample{OsName: "Debian"}, "Debian", "·"},
+		{"both", core.SysSample{OsName: "Debian", Kernel: "6.11.0"}, "Debian · 6.11.0", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			segs := hostSegments(&tc.sy, stripHostLimits, true)
+			if len(segs) != 1 {
+				t.Fatalf("got %d segments, want 1: %q", len(segs), segs)
+			}
+			if segs[0] != tc.want {
+				t.Errorf("segment = %q, want %q", segs[0], tc.want)
+			}
+			if tc.avoid != "" && strings.Contains(segs[0], tc.avoid) {
+				t.Errorf("segment = %q, want no bare %q", segs[0], tc.avoid)
+			}
+		})
+	}
+}
+
 // With GPU devices present, hwmon GPU readings are filtered out of the CPU
 // temp list (they already render as GPU segments). The "+N more" overflow
 // marker must then still appear when the remaining CPU temps alone exceed

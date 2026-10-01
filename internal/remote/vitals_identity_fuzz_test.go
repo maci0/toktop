@@ -62,7 +62,7 @@ func FuzzVitalsIdentityFields(f *testing.F) {
 		vitalsDumpFrom("", "", "", "", "\"unterminated", "", ""),
 		vitalsDumpFrom("", "", "", "", "\"\xff\xfe\"", "", ""),
 		// The kernel string with a line break and a bidi override in it.
-		vitalsIdentitySeed("kernel", "6.1.0‮gnp.exe\r\nsecond"),
+		vitalsIdentitySeed("kernel", "6.1.0\u202egnp.exe\r\nsecond"),
 		vitalsIdentitySeed("kernel", "6.1.0\ttab"),
 		vitalsIdentitySeed("os", `"\ud800"`),
 		vitalsIdentitySeed("os", `"\ud800\ud800"`),

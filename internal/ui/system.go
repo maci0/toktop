@@ -56,8 +56,14 @@ func (m Model) renderSystem() string {
 	}
 	vitals = append(vitals, gpuSegments(sy)...)
 
+	// Every field hostSegments can render on its own belongs in this guard:
+	// a sample carrying only that field would otherwise lose the whole
+	// identity row. Kernel is one — a host answering a uname and nothing else
+	// (a hardened container, a remote whose /etc/os-release is unreadable)
+	// missed it, and got "no sensors found" about a reading it had.
 	var ident []string
-	if sy != nil && (sy.CPUModel != "" || sy.OsName != "" || len(sy.Drivers) > 0 || len(sy.NPUs) > 0) {
+	if sy != nil && (sy.CPUModel != "" || sy.OsName != "" || sy.Kernel != "" ||
+		len(sy.Drivers) > 0 || len(sy.NPUs) > 0) {
 		ident = hostSegments(sy, stripHostLimits, false)
 	}
 
@@ -177,6 +183,19 @@ func fitSeg(s string, n int) string {
 	return shorten(s, n)
 }
 
+// nonEmpty returns the parts that carry a reading, so a segment composed of
+// two optional halves joins only the ones present instead of padding an
+// absent one in with a separator.
+func nonEmpty(parts ...string) []string {
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
 // hostSegments adds CPU model, OS·kernel and driver versions to the strip.
 // All values can originate from another host (ssh vitals) or vendor tooling,
 // so they pass the terminal sanitizer.
@@ -205,10 +224,13 @@ func hostSegments(sy *core.SysSample, lim hostSegmentLimits, plain bool) []strin
 		segs = append(segs, muted(fitSeg(core.SanitizeText(sy.CPUModel), lim.cpu)))
 	}
 	if sy.OsName != "" || sy.Kernel != "" {
-		osPart := core.SanitizeText(sy.OsName)
-		if sy.Kernel != "" {
-			osPart = strings.TrimSpace(osPart + " · " + core.SanitizeText(sy.Kernel))
-		}
+		// Joined from the halves that are present: a kernel-only sample came
+		// out as " · 6.11.0", a segment opening on a separator that joins
+		// nothing. A host carrying both prints the same "os · kernel".
+		osPart := strings.Join(nonEmpty(
+			core.SanitizeText(sy.OsName),
+			core.SanitizeText(sy.Kernel),
+		), " · ")
 		segs = append(segs, muted(fitSeg(osPart, lim.os)))
 	}
 	if len(sy.Drivers) > 0 {
