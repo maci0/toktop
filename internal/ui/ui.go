@@ -249,13 +249,24 @@ func tickClock() tea.Cmd {
 // pointed at it.
 //
 // The segments are the states a reader who arrives at the window cannot see:
-// a demo frame's numbers are simulated, a paused frame is not moving, and the
-// agents view is not the engines view. They are appended in that order and
-// cost nothing at rest.
+// a demo frame's numbers are simulated, a paused frame is not moving, the
+// agents view is not the engines view, and the key reference is not the
+// dashboard at all. They are appended in that order and cost nothing at rest.
+//
+// The keys segment is the one that names a full-screen replacement. The help
+// box covers the entire frame, and on the alternate screen covering it looks
+// exactly like the dashboard repainting, so a screen reader was told nothing
+// when the reference opened and nothing when it closed. Its own title line
+// reads "KEYS", a bare fragment that does not say which program a reader
+// arrived in, so the segment is what both names the overlay and marks the
+// transition back.
 func (m Model) windowTitle() string {
 	title := "toktop"
 	if m.cfg.Demo {
 		title += " (demo)"
+	}
+	if m.help {
+		title += " (keys)"
 	}
 	if m.focusAgents {
 		title += " (agents)"
@@ -357,7 +368,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// explanation would outlive its own screen and reappear on the
 			// dashboard when the box closes.
 			m.notice, m.noticeAt = "", time.Time{}
-			return m.updateHelpKey(key), nil
+			return m.updateHelpKey(key)
 		}
 		// A notice describes the state the previous press found. The next
 		// press changes that state, and a notice left standing says the
@@ -456,7 +467,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Reopening starts at the top: a reader who scrolled to the flags
 			// and came back wants the list from its first row.
 			m.helpScroll = 0
-			return m, nil
+			// Opening is the other half of the same transition the dismissal
+			// publishes: the reference covers the whole frame, so the title
+			// says so rather than letting the repaint stand in for it.
+			return m, m.titleCmd()
 		}
 	}
 	return m, nil
@@ -467,11 +481,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // dashboard it covers (space silently paused mid-read, p fired real probe
 // generations), so every key ends here, and only the dismiss, toggle and
 // scroll keys are live.
-func (m Model) updateHelpKey(key string) Model {
+func (m Model) updateHelpKey(key string) (Model, tea.Cmd) {
 	switch key {
 	case "q", "Q", "ctrl+c", "esc", "?", "h", "H", "enter":
 		m.help = false
 		m.helpScroll = 0
+		// The box is a full-screen replacement, so leaving it is a state
+		// change the title's own segments track: a screen reader that was
+		// pointed at the reference has to be told the dashboard is back.
+		return m, m.titleCmd()
 	case "up", "ctrl+p":
 		m.helpScroll = max(m.helpScroll-1, 0)
 	case "down", "ctrl+n":
@@ -490,7 +508,9 @@ func (m Model) updateHelpKey(key string) Model {
 	case "end":
 		m.helpScroll = m.helpScrollMax()
 	}
-	return m
+	// A scroll changes no title segment, so it publishes none: the title goes
+	// out on the transitions that alter it, and on nothing else.
+	return m, nil
 }
 
 // --- view ------------------------------------------------------------------

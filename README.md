@@ -686,11 +686,17 @@ technology:
 - **Keyboard only** - every action has a key (table above); nothing requires
   pointing or clicking, and `?` always shows the full key map.
 - **The window names itself** - the terminal title reads `toktop`, and takes a
-  `(demo)`, `(agents)` or `(paused)` segment when the frame is one of those. A
+  `(demo)`, `(keys)`, `(agents)` or `(paused)` segment when the frame is one of
+  those. A
   screen reader announces that title when focus moves onto the window, and it
   is the only part of the frame read without being pointed at: the alternate
   screen repaints in place, so a reader arriving at the window otherwise lands
-  on a wall of braille under whatever the shell last named the terminal.
+  on a wall of braille under whatever the shell last named the terminal. The
+  `(keys)` segment is the one that names a full-screen replacement: the `?`
+  reference covers the whole frame, so on the alternate screen opening it looks
+  exactly like the dashboard repainting. Without that segment a reader met
+  nothing but the bare heading `KEYS`, with no indication of which program they
+  had arrived in or of when the dashboard came back.
 - **Pause holds the frame** - `space` stops the streaming data and the
   header clock, so a still frame can be read at leisure with a screen reader
   or magnifier. A probe that lands while paused still updates the probe

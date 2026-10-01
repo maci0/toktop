@@ -29,6 +29,24 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   matches no engine, which is the right answer for a process the sweep cannot
   name. `TestProcsProcTextDropsIllFormedBytes` and
   `TestProcsLinuxCmdlineNameIsValidUTF8` in internal/procs pin both halves.
+- The `?` key reference is now named in the terminal window title, which takes a
+  `(keys)` segment for as long as the box is open. The reference covers the
+  whole frame, so on the alternate screen opening it looked exactly like the
+  dashboard repainting and closing it looked the same way again: a screen
+  reader was told nothing on either transition, and one arriving mid-box heard
+  the bare heading `KEYS` with nothing saying which program it was in. The
+  title is the one line of the frame a reader meets without being pointed at,
+  and it already carried `(demo)`, `(agents)` and `(paused)`; opening and
+  dismissing the box now publish through the same path, while scrolling the
+  list still publishes nothing because it changes no segment.
+  `TestWindowTitleNamesTheKeyReference` in internal/ui pins all three.
+- The compact key reference now says what `esc` does from the dashboard as well
+  as inside the box, in a spelling that fits the same narrow pane. The compact
+  list is the one a reader reaches by necessity, since a pane below the
+  full-layout minimum is what a small window or a large reader font produces,
+  and there it was the only place inside the product still leaving the quit
+  undocumented: the full-size list names both jobs and the compact one did not.
+  `TestCompactHelpNamesEscapeFromDashboard` pins the wording and the fit.
 - A `--probe` run against an OpenAI-compatible engine that rejects one of the
   request shapes no longer pays for that rejection on every wave. The probe
   walks `max_tokens`, `max_completion_tokens` and `stream_options` in turn to

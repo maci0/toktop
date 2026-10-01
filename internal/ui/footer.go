@@ -291,7 +291,14 @@ func (m Model) helpRows() [][2]string {
 		// row at the bottom rather than the way out of it.
 		rows := [][2]string{
 			{"q / ctrl+c", "close help, then quit"},
-			{"esc", "close help"},
+			// esc is the one key whose job differs between this screen and the
+			// dashboard behind it, and the compact pane is where naming both
+			// matters most: a reader who shrank the pane or raised the font
+			// past the full layout is here by necessity, and this row is the
+			// only place inside the product that still tells them what esc
+			// does once the box is closed. The spelling is the short one, at
+			// the width the rows above already hold.
+			{"esc", "close, or quit here"},
 			{"? / h", "close help"},
 			{"space", "pause / resume"},
 		}

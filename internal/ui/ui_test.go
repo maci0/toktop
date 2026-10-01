@@ -79,6 +79,22 @@ func assertQuits(t *testing.T, label string, cmd tea.Cmd) {
 	}
 }
 
+// assertDoesNotQuit is the counterpart to assertQuits, for a key whose
+// contract is that it changes the frame and leaves the program running. A
+// dismissal publishes the window title, because the key reference is a
+// full-screen replacement and the screen reader has to be told the dashboard
+// is back, so the command it returns is not nil. The check is therefore what
+// the key is forbidden from doing, not that it publishes nothing at all.
+func assertDoesNotQuit(t *testing.T, label string, cmd tea.Cmd) {
+	t.Helper()
+	if cmd == nil {
+		return
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); isQuit {
+		t.Errorf("%s quit, want it to change the frame and keep running", label)
+	}
+}
+
 func keyMsg(s string) tea.KeyMsg {
 	switch s {
 	case " ":
@@ -112,9 +128,7 @@ func TestUpdateKeyMap(t *testing.T) {
 	if !m.help {
 		t.Fatal("? did not open help")
 	}
-	if key("q") != nil {
-		t.Error("q with help open must close help, not quit")
-	}
+	assertDoesNotQuit(t, "q with help open", key("q"))
 	if m.help {
 		t.Error("q with help open did not close help")
 	}
@@ -144,9 +158,7 @@ func TestUpdateKeyMap(t *testing.T) {
 			t.Errorf("help view missing %q:\n%s", want, out)
 		}
 	}
-	if key("esc") != nil {
-		t.Error("esc with help open must close help, not quit")
-	}
+	assertDoesNotQuit(t, "esc with help open", key("esc"))
 	if m.help {
 		t.Error("esc with help open did not close help")
 	}
@@ -239,9 +251,7 @@ func testHelpOverlayMutesActionKeys(t *testing.T) {
 			t.Errorf("%s set the probing marker while help was open", k)
 		}
 	}
-	if key("esc") != nil {
-		t.Error("esc with help open must close help, not quit")
-	}
+	assertDoesNotQuit(t, "esc with help open", key("esc"))
 	if m.help {
 		t.Fatal("esc did not close help")
 	}
@@ -2808,6 +2818,30 @@ func TestHelpDocumentsEscapeFromDashboard(t *testing.T) {
 	}
 }
 
+// The compact reference is the one a reader is guaranteed to reach: a pane
+// below the full-layout minimum is exactly what a small window or a large
+// reader font produces, and on that pane this row is the only place inside the
+// product that still names what esc does once the box has closed. A wording
+// that said only "close help" left them learning the quit by pressing it.
+func TestCompactHelpNamesEscapeFromDashboard(t *testing.T) {
+	m := New(Config{Version: "t", Prober: func() {}}, nil)
+	m.help, m.w, m.h, m.ready = true, 40, 8, true
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{{Label: "ollama", OK: true}}}
+	var desc string
+	for _, r := range m.helpRows() {
+		if r[0] == "esc" {
+			desc = r[1]
+		}
+	}
+	if !strings.Contains(desc, "close") || !strings.Contains(desc, "quit") {
+		t.Errorf("compact esc row = %q, want both what it closes and what it quits", desc)
+	}
+	// The row has to fit the same narrow box every other compact row does: a
+	// phrasing that overflows is clipped mid-word back to "close help",
+	// which is the failure the longer spelling was meant to fix.
+	assertFitsPane(t, "compact help", m.View(), 40, 8)
+}
+
 func TestPanelTitlesShowHiddenCount(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	ps := make([]core.ProviderSnapshot, 6)
@@ -3673,14 +3707,63 @@ func TestWindowTitleFollowsPauseAndFocus(t *testing.T) {
 	}
 }
 
+// The key reference covers the whole frame, so on the alternate screen opening
+// it looks exactly like the dashboard repainting and closing it looks the same
+// way again. The title is the one line a screen reader reads without being
+// pointed at, so it has to carry the overlay: a reader who arrives mid-box
+// hears "KEYS" on its own otherwise, with nothing saying which program they
+// are in or that the dashboard has come back.
+func TestWindowTitleNamesTheKeyReference(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.w, m.h, m.ready, m.clock = 110, 36, true, time.Now()
+
+	nm, cmd := m.Update(keyMsg("?"))
+	m = nm.(Model)
+	if !m.help {
+		t.Fatal("? did not open the reference")
+	}
+	if msg := fmt.Sprintf("%v", cmd()); msg != "toktop (keys)" {
+		t.Errorf("opening the reference published title %q, want it to name the overlay", msg)
+	}
+	// A state the title already carries survives the overlay: opening the
+	// reference does not drop the segments that still describe the frame
+	// behind it.
+	m.paused = true
+	if got := m.windowTitle(); got != "toktop (keys) (paused)" {
+		t.Errorf("title with the reference open = %q, want the paused segment kept", got)
+	}
+	m.paused = false
+
+	nm, cmd = m.Update(keyMsg("esc"))
+	m = nm.(Model)
+	if m.help {
+		t.Fatal("esc did not close the reference")
+	}
+	if msg := fmt.Sprintf("%v", cmd()); msg != "toktop" {
+		t.Errorf("closing the reference published title %q, want the dashboard back", msg)
+	}
+
+	// Scrolling moves the list without changing which view is on screen, so
+	// it must not republish: the title goes out on the transitions that alter
+	// it and on nothing else.
+	m.Update(keyMsg("?"))
+	nm, cmd = m.Update(keyMsg("down"))
+	m = nm.(Model)
+	if cmd != nil {
+		t.Errorf("scrolling the reference published %v with the view unchanged", cmd())
+	}
+}
+
 // A key that leaves the model alone leaves the terminal alone: a title
 // republished on every keystroke is an escape sequence written per press for a
-// string that did not change.
+// string that did not change. ? is not in this list because the key reference
+// is a full-screen replacement the title now names, so opening it is a state
+// change; TestWindowTitleFollowsPauseAndFocus covers the keys that change it.
 func TestUntouchedKeysPublishNoTitle(t *testing.T) {
 	m := New(Config{Version: "t"}, nil)
 	m.w, m.h, m.ready, m.clock = 110, 36, true, time.Now()
 	// No engines, so p has nothing to fire and t has nothing to plot.
-	for _, k := range []string{"p", "t", "?"} {
+	for _, k := range []string{"p", "t"} {
 		nm, cmd := m.Update(keyMsg(k))
 		m = nm.(Model)
 		if cmd != nil {
