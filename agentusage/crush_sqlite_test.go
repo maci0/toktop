@@ -433,6 +433,28 @@ func TestCrushDBSymlinkOutsideProjectIsIgnored(t *testing.T) {
 	}
 }
 
+// A .crush that is a plain file, not a directory, holds no store: the walk
+// looks for .crush/crush.db under it and must find nothing rather than
+// treating the file as the project. The Lstat prefilter that answers this
+// cheaply on the poll path has to agree with what the full check would have
+// concluded, and it is this tree's regular file (not a symlink) that pins
+// the Lstat arm; the symlink arm is TestCrushDBSymlinkOutsideProjectIsIgnored.
+func TestCrushDBInPlainFileIsNotAStore(t *testing.T) {
+	dir := t.TempDir()
+	skipIfCrushAbove(t, dir)
+	if err := os.WriteFile(filepath.Join(dir, ".crush"), []byte("not a directory"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if path := crushDBIn(dir); path != "" {
+		t.Fatalf("a plain .crush file was taken for a store: %s", path)
+	}
+	// And the read over it still succeeds, contributing nothing: the answer
+	// is "no crush here", not "this project cannot be read".
+	if out, in, ok := crushSessionSum([]string{dir}, time.Time{}); !ok || out != 0 || in != 0 {
+		t.Fatalf("read over a plain .crush file: out=%d in=%d ok=%v", out, in, ok)
+	}
+}
+
 // crushSessionSum is the sessions snapshot flattened to totals, for tests
 // that care about what was recorded rather than per-session identity. ok is
 // the source's own: a tree with no crush database is read successfully and

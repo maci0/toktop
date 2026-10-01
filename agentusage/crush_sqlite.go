@@ -126,8 +126,23 @@ const crushDBRel = ".crush/crush.db"
 // descriptor the kernel would not hand back is one per project per poll for
 // the life of the dashboard, which shows up as an EMFILE refusal on every other
 // store long before anything names this one.
+//
+// The Lstat prefilter is what makes the common answer cheap. crushDBPath walks
+// up to crushMaxWalkUp levels per directory per poll, and on a machine that
+// never ran crush every one of those levels used to open a root descriptor,
+// open the store, stat it and close both before reporting that there is
+// nothing there: two descriptors and four syscalls per level, on the poll path,
+// for a store that is not there. One Lstat settles it instead, and it is not a
+// weaker test of what the walk below accepts: a missing .crush, and a
+// .crush/crush.db that is a directory, both leave nothing to open, while a
+// .crush that is itself a symlink falls through to the OpenRoot check, which
+// is what refuses a link whose target leaves the project.
 func crushDBIn(root string) string {
 	store := filepath.Join(root, filepath.FromSlash(crushDBRel))
+	crushDir := filepath.Join(root, ".crush")
+	if di, err := os.Lstat(crushDir); err != nil || !di.IsDir() {
+		return ""
+	}
 	r, err := os.OpenRoot(root)
 	if err != nil {
 		return ""
