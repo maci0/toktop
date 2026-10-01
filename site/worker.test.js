@@ -92,6 +92,19 @@ const FOOTER_MAXWIDTH_RE = /footer \{[^}]*max-width: 76rem/;
 // The role is the documented remedy for a list whose markers are removed.
 const GRID_LIST_RE = /<ul class="grid" role="list">/;
 const GRID_LIST_STYLE_RE = /\.grid \{[^}]*list-style: none/;
+// The forced-colors block, and the two declarations that have to sit inside
+// it. A skip link drawn on --panel over a --bg page is the one control a
+// single-color system theme can erase, and the focus ring cannot keep the
+// accent token once the browser is choosing the palette.
+const FORCED_COLORS_BLOCK_RE = /@media \(forced-colors: active\) \{[\s\S]*?\n {2}\}/;
+const FORCED_SKIP_LINK_RE = /\.skip-link \{[^}]*background: Highlight;[^}]*color: HighlightText;/;
+const FORCED_OUTLINE_RE = /:focus-visible \{ outline-color: Highlight; \}/;
+// The base rule the override sits beside: the skip link is only drawn once
+// focused, so the override has to reach the same state.
+const BASE_OUTLINE_RE = /:focus-visible \{ outline: 2px solid var\(--accent\);/;
+// The one property that puts a panel back under author control while its text
+// is still forced, which is the failure the block above exists to prevent.
+const OPTED_OUT_RE = /forced-color-adjust:\s*none/;
 // The terminal frame re-points the scheme it paints in; every scheme token its
 // text can name has to be in that list.
 const SHOT_FRAME_RE = /\.shot \{[^}]*\}/;
@@ -338,7 +351,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4518);
+    expect(bytes.byteLength).toBe(4564);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1190,6 +1203,26 @@ test("the shell prompt in the capture caption is hidden from assistive technolog
   expect(identityBody).toMatch(SHELL_PROMPT_RE);
 });
 
+// Windows High Contrast (and every other forced-colors mode) hands the
+// palette to the reader: the browser overrides author colors on text,
+// surfaces and borders, so a system theme that paints surfaces one color
+// collapses --bg and --panel to the same Canvas. Nothing on the page opts out
+// of that, which is what is wanted, but the skip link is the one control it
+// erases: drawn on --panel over a --bg page, it went invisible on exactly the
+// display a reader had turned high contrast on, taking the first Tab stop
+// with it. It takes the system highlight pair here, and the focus ring
+// follows it there, since the accent token is no longer the browser's to
+// honor. Both declarations are read out of the block so an edit that drops
+// either fails here rather than in the field.
+test("the skip link and the focus ring follow the system palette in forced colors", () => {
+  const block = identityBody.match(FORCED_COLORS_BLOCK_RE)?.[0] ?? "";
+  expect(block, "the page declares no forced-colors block").not.toBe("");
+  expect(block).toMatch(FORCED_SKIP_LINK_RE);
+  expect(block).toMatch(FORCED_OUTLINE_RE);
+  expect(identityBody).not.toMatch(OPTED_OUT_RE);
+  expect(identityBody).toMatch(BASE_OUTLINE_RE);
+});
+
 // The capture is the product, drawn as a terminal on the light paper too. The
 // frame re-points the scheme tokens so nothing inside it can be recolored by
 // the page it sits on, and the list is complete rather than the four tokens
@@ -1266,9 +1299,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13114);
-  expect(gzipped).toBe(4518);
-  expect(brotli).toBe(3826);
+  expect(identity).toBe(13294);
+  expect(gzipped).toBe(4564);
+  expect(brotli).toBe(3865);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1304,7 +1337,7 @@ test("the READMEs record the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_403);
+  expect(visit[0][1]).toBe(14_442);
   for (const name of ["CONTRIBUTING.md", "Makefile"]) {
     const quoted = readFileSync(join(import.meta.dir, "..", name), "utf8").match(VISIT_TOTAL_RE);
     expect(`${name} quotes ${quoted?.[1]}`).toBe(
@@ -1363,7 +1396,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_403);
+  expect(visit).toBe(14_442);
   expect(visit).toBeLessThan(25_000);
 });
 

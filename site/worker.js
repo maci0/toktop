@@ -269,6 +269,18 @@ const HTML = htmlForWire(`<!doctype html>
      holds focus right after that one key press, so the ring marks where
      focus landed rather than framing the page. */
   :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Windows High Contrast (and any forced-colors mode) overrides author
+     colors with the reader's own. The skip link is the one control that can
+     vanish under it: it sits on --panel over a --bg page, two tokens a
+     single-color system theme collapses to one, so a keyboard reader's first
+     Tab stop went invisible on the display they had turned high-contrast on.
+     It takes the system highlight pair instead, and the focus ring follows
+     it there, since the accent token can no longer be relied on once the
+     browser is choosing the colors. */
+  @media (forced-colors: active) {
+    .skip-link { background: Highlight; color: HighlightText; border-color: Highlight; }
+    :focus-visible { outline-color: Highlight; }
+  }
   code { color: inherit; }
   .dim { color: var(--dim); }
   /* The capture needs the 76rem column; copy does not. */
