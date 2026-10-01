@@ -224,7 +224,16 @@ func (m Model) gaugesBody(w, rows int) (string, int) {
 		if len(m.snap.Providers) == 0 {
 			return dim("waiting for telemetry…"), 0
 		}
-		return dim("no healthy engines (see ENGINES)"), 0
+		// The pointer to the panel holding the reason is the part a narrow
+		// column loses, and losing it leaves "see EN…", which names nothing a
+		// reader can act on. The reason is the first clause and it survives
+		// the clip; the pointer joins only while the column is wide enough to
+		// spell it, the way the titles on the same row build themselves.
+		line := "no healthy engines"
+		if tail := " (see ENGINES)"; lipgloss.Width(line)+lipgloss.Width(tail) <= w {
+			line += tail
+		}
+		return dim(line), 0
 	}
 	return b.String(), shown
 }

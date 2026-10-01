@@ -1247,7 +1247,7 @@ func TestEveryOverflowCountNamesTheWayOut(t *testing.T) {
 		t.Errorf("AGENT FEED title = %q, want the count and the way out", feed)
 	}
 	_, midIn, _ := m.sectionHeights()
-	agents := strip(moreTitle("AGENTS", m.w-4, len(rates)-midIn))
+	agents := strip(moreTitle("AGENTS", "", m.w-4, len(rates)-midIn))
 	if !strings.Contains(agents, "more (enlarge window)") {
 		t.Errorf("AGENTS title = %q, want the count and the way out", agents)
 	}
@@ -2184,6 +2184,61 @@ func TestMidRowPanelsCountOnlyWholeEngines(t *testing.T) {
 	}
 }
 
+// A panel that is all down says so, and points at the panel holding the
+// reason. On a column too narrow to spell the pointer the clip cut it to
+// "see EN…", which names nothing a reader can act on, so the pointer joins
+// only while it fits and the reason is what always survives.
+func TestAllDownPanelKeepsTheReasonWhenThePointerCannotFit(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{
+		{Label: "a", OK: false, Err: "connect refused"},
+	}}
+	for _, tc := range []struct {
+		w           int
+		wantPointer bool
+	}{
+		{w: 32, wantPointer: true},
+		{w: 20, wantPointer: false},
+	} {
+		body, shown := m.gaugesBody(tc.w, 4)
+		if shown != 0 {
+			t.Fatalf("all-down panel drew %d engines, want 0", shown)
+		}
+		got := strip(body)
+		if !strings.Contains(got, "no healthy engines") {
+			t.Errorf("gaugesBody(%d) = %q, want the reason the panel is empty", tc.w, got)
+		}
+		if strings.Contains(got, "…") {
+			t.Errorf("gaugesBody(%d) = %q, want no clipped cross-reference", tc.w, got)
+		}
+		if has := strings.Contains(got, "see ENGINES"); has != tc.wantPointer {
+			t.Errorf("gaugesBody(%d) = %q, pointer present = %v, want %v", tc.w, got, has, tc.wantPointer)
+		}
+	}
+}
+
+// Every legal pane has to name what an overflow count counts. The ENGINE STATE
+// column takes 31% of the frame, which on the 62-cell minimum dashboard leaves
+// fifteen cells, and there the long heading could only keep a bare "+N" beside
+// it: a number with no word to tell a hidden reading from a rating, and no way
+// out. The heading takes its short spelling instead, and no legal width is left
+// showing a count with nothing naming it.
+func TestEngineStateTitleNeverShowsAnUnnamedCount(t *testing.T) {
+	m := New(Config{Version: "t"}, nil)
+	m.snap = core.Snapshot{Providers: []core.ProviderSnapshot{
+		{Label: "a", OK: true}, {Label: "b", OK: true}, {Label: "c", OK: true},
+	}}
+	for w := minDashW; w <= 240; w++ {
+		title := strip(m.engineStateTitle(w*31/100-4, 1))
+		if !strings.Contains(title, "+2") {
+			t.Errorf("engineStateTitle at pane %d = %q, want the hidden count", w, title)
+		}
+		if !strings.Contains(title, "more") {
+			t.Errorf("engineStateTitle at pane %d = %q, want the count to say what it counts", w, title)
+		}
+	}
+}
+
 // An engine with no memory, cpu or ttft reading has a two-row state block
 // where a measured one has three, so a count derived from the row budget alone
 // miscounts the panel. The title follows the body either way.
@@ -2213,15 +2268,20 @@ func TestEngineStateCountsShortBlocksByRow(t *testing.T) {
 	if got := strip(m.engineStateTitle(22, shown)); got != "ENGINE STATE  +1 more" {
 		t.Errorf("narrow ENGINE STATE title = %q, want the bare count", got)
 	}
-	// Narrower still: the 31% ENGINE STATE takes on the 62-cell minimum
-	// dashboard is 15 cells, and the count was dropped whole there, leaving a
-	// panel that silently drew fewer engines than the fleet has. The gap
-	// closes before the wording does, and the bare number is the last form.
+	// Narrower still: the 31% ENGINE STATE column takes on the 62-cell minimum
+	// dashboard is 15 cells. The heading gives up its cells instead of the
+	// count: at fifteen, the long heading could only keep "+1", a number with
+	// no word to say what it counts, while KV/TTFT fits the full marker. The
+	// gap closes before the wording does, and the bare number is still the
+	// last form when even the short heading cannot carry a sentence.
 	if got := strip(m.engineStateTitle(20, shown)); got != "ENGINE STATE +1 more" {
-		t.Errorf("15-cell ENGINE STATE title = %q, want the count on a one-cell gap", got)
+		t.Errorf("20-cell ENGINE STATE title = %q, want the long heading and the count", got)
 	}
-	if got := strip(m.engineStateTitle(15, shown)); got != "ENGINE STATE +1" {
-		t.Errorf("narrowest ENGINE STATE title = %q, want the bare number", got)
+	if got := strip(m.engineStateTitle(15, shown)); got != "KV/TTFT +1 more" {
+		t.Errorf("15-cell ENGINE STATE title = %q, want the short heading and the count", got)
+	}
+	if got := strip(m.engineStateTitle(10, shown)); got != "KV/TTFT +1" {
+		t.Errorf("10-cell ENGINE STATE title = %q, want the bare number", got)
 	}
 }
 

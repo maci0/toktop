@@ -26,12 +26,20 @@ func (m Model) renderMidRow() string {
 // enginesTitle names what the ENGINES body could not fit. shown is the count
 // the body reports, not a guess from the row budget: the two must agree or the
 // badge reads as a sixth engine on a fleet of five.
+//
+// ENGINES is short enough to carry its count on every legal pane, so it has no
+// narrower spelling to fall back on.
 func (m Model) enginesTitle(w, shown int) string {
-	return moreTitle("ENGINES", w, len(m.snap.Providers)-shown)
+	return moreTitle("ENGINES", "", w, len(m.snap.Providers)-shown)
 }
 
 // engineStateTitle is enginesTitle's counterpart over the healthy engines
 // only, matching the body that skips the down ones.
+//
+// KV/TTFT is the short spelling. It says what the gauges measure, which the
+// long heading does not, and at seven cells it fits beside "+N more" on the
+// narrowest legal pane, where ENGINE STATE could only keep the bare number and
+// a reader had no word to tell a hidden reading from a rating.
 func (m Model) engineStateTitle(w, shown int) string {
 	healthy := 0
 	for _, p := range m.snap.Providers {
@@ -39,12 +47,49 @@ func (m Model) engineStateTitle(w, shown int) string {
 			healthy++
 		}
 	}
-	return moreTitle("ENGINE STATE", w, healthy-shown)
+	return moreTitle("ENGINE STATE", "KV/TTFT", w, healthy-shown)
 }
 
 // moreTitle counts what the body dropped: the title and the marker beside it.
-func moreTitle(title string, w, hidden int) string {
+//
+// short is the same heading in fewer cells, for a column the long one cannot
+// carry the marker beside. It stands in for the long title, never sits beside
+// it: the marker names the way out, and a heading that has given up its cells
+// to say nothing drops rows again the moment the marker grows a form. probesTitle
+// sheds its measurement the same way.
+//
+// Only a marker that still says what the count is buys the shorter heading. A
+// bare "+3" beside the long heading is the dead end moreMarker exists to avoid,
+// so it is not a reason to keep the cells the heading spent.
+func moreTitle(title, short string, w, hidden int) string {
+	if hidden > 0 && lipgloss.Width(short) < lipgloss.Width(title) {
+		// Prefer the long heading, but only while it can carry a marker that
+		// names what the count is; then the short one, which takes the widest
+		// marker it can hold at all before it falls back to the bare number.
+		for _, t := range []string{title, short} {
+			if fitsNamedMore(hidden, lipgloss.Width(t), w) {
+				return t + moreMarker(t, w, hidden)
+			}
+		}
+		if marker := moreMarker(short, w, hidden); marker != "" {
+			return short + marker
+		}
+	}
 	return title + moreMarker(title, w, hidden)
+}
+
+// fitsNamedMore reports whether a title of titleWidth cells has room for a
+// moreForms spelling on some gap, the wording that names the way out rather
+// than the bare number moreMarker falls back to.
+func fitsNamedMore(hidden, titleWidth, w int) bool {
+	for _, form := range moreForms(hidden) {
+		for gap := 2; gap >= 1; gap-- {
+			if titleWidth+lipgloss.Width(form)+gap <= w {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // moreMarker is the overflow marker's spacing and spelling for a title: the

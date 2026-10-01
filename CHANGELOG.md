@@ -41,6 +41,28 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The `ENGINE STATE` panel no longer drops to a bare `+N` count on a pane
+  between 62 and 77 cells, which is most of an 80-column terminal. The column
+  takes 31% of the frame, so at the 62-cell minimum dashboard it has fifteen
+  cells and the long heading could keep the count only in the form that names
+  nothing: `ENGINE STATE +2` beside a sibling panel that spelled its own
+  overflow `ENGINES +2 more`. A reader could not tell a hidden reading from a
+  rating, and neither form said how to reach the two engines that were not
+  drawn. The heading now takes a short spelling, `KV/TTFT`, at widths too
+  narrow for it to carry the full marker. That names what the gauges measure,
+  which `ENGINE STATE` did not, and it fits `+2 more` at the minimum pane, so
+  every legal width now says what the count counts and how to reach it.
+  TestEngineStateTitleNeverShowsAnUnnamedCount walks every width from the
+  minimum dashboard up and fails on one that shows a count with nothing
+  naming it.
+
+- The all-engines-down `ENGINE STATE` panel no longer clips its cross-reference
+  to `see EN…` on a narrow column. The pointer to the panel holding the reason
+  was the part the clip cut, and what survived named nothing a reader could
+  act on. The reason is now the clause that survives every width and the
+  pointer joins only while the column can spell it, the way the titles on the
+  same row build themselves.
+
 - The agent feed's OpenAPI spec no longer claims a replay of an unkeyed body
   answers `{"accepted":2,"stored":4}`. The handler decodes every line and can
   only store a subset of them, so `stored` is never above `accepted`; the
