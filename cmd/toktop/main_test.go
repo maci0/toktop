@@ -2551,6 +2551,60 @@ func TestFrameEnvVarsSizeTheOnceFrame(t *testing.T) {
 	}
 }
 
+// foreignEnvVars is what warnMisspelledEnv resolves a variable against, and
+// it has no prefix rule behind it: a reader this build consults that the list
+// omits is a misspelling nothing can name, which is the same silent fallback
+// every entry there exists to close. toktopEnvVars has the test above; this
+// is the other half.
+func TestKnownForeignEnvCoversEveryReader(t *testing.T) {
+	known := nearMissNames()
+	for _, want := range []string{
+		agentusage.GauntletHomeEnv,
+		agentusage.KimiHomeEnv,
+		agentusage.XDGDataHomeEnv,
+		remote.XDGConfigHomeEnv,
+		remote.AgentSockEnv,
+		selfupdate.TokenEnv,
+	} {
+		if !slices.Contains(known, want) {
+			t.Errorf("nearMissNames() does not list $%s, which a reader uses", want)
+		}
+	}
+	// The non-TOKTOP_ bearer source is the first one a token is resolved
+	// from, so a misspelling of it falls through to the next with nothing
+	// naming the cause.
+	for _, name := range bearerEnvVars {
+		if !strings.HasPrefix(name, "TOKTOP_") && !slices.Contains(known, name) {
+			t.Errorf("nearMissNames() does not list $%s, the bearer fallback a reader uses", name)
+		}
+	}
+	// HOME, USER and USERNAME are read but deliberately absent: they are
+	// named by the platform, and a near-miss rule over names this short
+	// fires on Path, TERM and ProgramFiles rather than on a misspelling. The
+	// exclusion is asserted so the list cannot quietly grow to cover them and
+	// turn every ordinary variable into a warning.
+	for _, name := range []string{"HOME", "USER", "USERNAME", "PROCESSOR_IDENTIFIER", "WINDIR"} {
+		if slices.Contains(known, name) {
+			t.Errorf("nearMissNames() lists $%s, which is too short or platform-named to check", name)
+		}
+	}
+	// Every name the list carries is one it can actually compare against: a
+	// name at or below nearMissMinLen never reaches the edit-distance pass,
+	// so listing it claims a misspelling check that cannot fire.
+	for _, name := range known {
+		if len(name) < nearMissMinLen {
+			t.Errorf("nearMissNames() lists $%s, shorter than nearMissMinLen (%d), so it is never compared",
+				name, nearMissMinLen)
+		}
+		if strings.HasPrefix(name, "TOKTOP_") {
+			continue // the prefix pass in warnUnknownEnv owns those
+		}
+		if !slices.Contains(foreignEnvVars, name) {
+			t.Errorf("nearMissNames() lists $%s with no TOKTOP_ prefix, but foreignEnvVars does not", name)
+		}
+	}
+}
+
 func TestRoutableBind(t *testing.T) {
 	tests := []struct {
 		addr string

@@ -412,6 +412,24 @@ func parseOrigin(s string) (time.Time, error) {
 	return at, nil
 }
 
+// resolveOrigin parses --origin for the mode that reads it. A demo run
+// replays a captured frame from a pinned instant, so a bad value aborts it
+// rather than silently leaving the timeline on the wall clock, which is the
+// one difference the operator pinned the origin to remove.
+//
+// A non-demo run reports no error for any value: --origin configures the demo
+// timeline and nothing else, which warnIgnoredFlags says on stderr and the
+// startup config line omits, so the flag is not in force and there is nothing
+// for a malformed value to break. Parsing it unconditionally put a stale
+// --origin in a shell alias or a wrapper in front of every real run, which
+// aborted with a message about an input that run had no use for.
+func resolveOrigin(demo bool, val string) (time.Time, error) {
+	if !demo {
+		return time.Time{}, nil
+	}
+	return parseOrigin(val)
+}
+
 // bareUnixSeconds reads s as a Unix second, or reports that it is not one. A
 // leading minus is a pre-epoch second and has no date spelling to be confused
 // with, so the width bound is on the unsigned form only.

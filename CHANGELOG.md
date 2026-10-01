@@ -23,6 +23,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   that says it ended. The `toktop: engine not answering` line is unchanged,
   and probes already used this split.
 
+### Fixed
+
+- `--origin` is no longer parsed outside `--demo`. It configures the demo
+  timeline and nothing else, so a non-demo run had no use for it, but a
+  malformed value still aborted the run with exit code 2 before the startup
+  checks that say the flag has no effect without `--demo`. A stale
+  `--origin` in a shell alias or a wrapper therefore failed every real run
+  over an input that run never read. A demo run is unchanged: a bad pinned
+  instant still aborts it, because the replay is pinned to that instant and
+  a value it could not read would silently leave the timeline on the wall
+  clock.
+
 ## [0.23.0] - 2026-09-30
 
 Binaries, checksums, and a CycloneDX SBOM are on

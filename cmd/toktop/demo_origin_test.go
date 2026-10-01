@@ -15,6 +15,63 @@ import (
 	"github.com/maci0/toktop/internal/ui"
 )
 
+// --origin configures the demo timeline and nothing else, so only a demo run
+// reads it. A malformed value must abort a demo run (the replay is pinned to
+// it) and leave a non-demo run alone: a stale --origin in a shell alias or a
+// wrapper otherwise failed every real run over an input that run had no use
+// for, and the run then went on to say the flag had no effect anyway.
+func TestResolveOriginGatesOnDemo(t *testing.T) {
+	const bad = "not-an-instant"
+	for _, tt := range []struct {
+		name  string
+		demo  bool
+		val   string
+		isErr bool
+		want  time.Time
+	}{
+		{name: "demo accepts a valid instant", demo: true, val: "2026-01-02T03:04:05Z",
+			want: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)},
+		{name: "demo rejects a malformed instant", demo: true, val: bad, isErr: true},
+		{name: "demo accepts an empty value", demo: true, val: "", want: time.Time{}},
+		{name: "non-demo ignores a malformed value", demo: false, val: bad, want: time.Time{}},
+		{name: "non-demo ignores a valid value", demo: false, val: "2026-01-02T03:04:05Z", want: time.Time{}},
+		{name: "non-demo ignores a date-shaped value", demo: false, val: "20260102", want: time.Time{}},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveOrigin(tt.demo, tt.val)
+			if tt.isErr {
+				if err == nil {
+					t.Fatalf("resolveOrigin(%v, %q) = %v, want an error", tt.demo, tt.val, got)
+				}
+				if !strings.Contains(err.Error(), "--origin") {
+					t.Errorf("error does not name the flag: %v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveOrigin(%v, %q): %v", tt.demo, tt.val, err)
+			}
+			if !got.Equal(tt.want) {
+				t.Fatalf("resolveOrigin(%v, %q) = %v, want %v", tt.demo, tt.val, got, tt.want)
+			}
+		})
+	}
+}
+
+// The gate and warnIgnoredFlags have to agree on when --origin is in force: a
+// run the warnings call one mode and the parser another either rejects an
+// unused value or accepts one it never reads.
+func TestResolveOriginAgreesWithWarnIgnoredFlags(t *testing.T) {
+	f := &cliFlags{origin: "not-an-instant"}
+	if _, err := resolveOrigin(f.demo, f.origin); err != nil {
+		t.Fatalf("a run warnIgnoredFlags would call non-demo rejects --origin: %v", err)
+	}
+	f.demo = true
+	if _, err := resolveOrigin(f.demo, f.origin); err == nil {
+		t.Fatal("a demo run accepts a malformed --origin")
+	}
+}
+
 func TestParseOrigin(t *testing.T) {
 	for _, tt := range []struct {
 		name  string

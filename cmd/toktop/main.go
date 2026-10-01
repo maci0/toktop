@@ -101,10 +101,10 @@ func runMain() int {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		return 2
 	}
-	// Parsed before anything reads it: a bad --origin aborts the run rather
-	// than leaving the demo on the wall clock, which is the one input the
-	// operator pinned the origin to remove.
-	origin, err := parseOrigin(f.origin)
+	// Parsed before anything reads it, and only where it is read: --origin
+	// configures the demo timeline, so a non-demo run has no use for it
+	// (cfg.DemoOrigin below is set only from the demo branch).
+	origin, err := resolveOrigin(f.demo, f.origin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		return 2
