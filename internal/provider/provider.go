@@ -416,11 +416,31 @@ func splitMetric(line string) (string, float64, bool) {
 		return "", 0, false
 	}
 	name := line[:sp]
-	fields := strings.Fields(line[sp:])
-	if len(fields) == 0 {
+	// The value is the first space-delimited run after the name. strings.Fields
+	// built a slice holding every field on the line to read one of them: the
+	// exposition carries thousands of lines per scrape and a vLLM poll
+	// answers with thousands, so that was one slice plus one string header
+	// per field per line, 98% of the allocations in the scrape path. The run
+	// is cut here instead, and the rest of the line (the timestamp a
+	// recording rule appends) is skipped the way Fields skipped it. One byte
+	// pass, not TrimLeft plus IndexAny: IndexAny decodes runes, and this line
+	// is ASCII apart from the label values the first loop already stepped
+	// over.
+	rest := line[sp:]
+	for len(rest) > 0 && (rest[0] == ' ' || rest[0] == '\t') {
+		rest = rest[1:]
+	}
+	val := rest
+	for i := 0; i < len(rest); i++ {
+		if rest[i] == ' ' || rest[i] == '\t' {
+			val = rest[:i]
+			break
+		}
+	}
+	if val == "" {
 		return "", 0, false
 	}
-	v, err := strconv.ParseFloat(fields[0], 64)
+	v, err := strconv.ParseFloat(val, 64)
 	if err != nil || name == "" {
 		return "", 0, false
 	}

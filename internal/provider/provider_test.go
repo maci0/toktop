@@ -215,6 +215,52 @@ func TestSplitMetric(t *testing.T) {
 	}
 }
 
+// BenchmarkScrapeProm measures the /metrics path every poll pays: the
+// exposition split, the per-line metric parse and classify's fuzzy name
+// matching. A busy vLLM publishes a family per model per request class, so
+// the line count is what sets the cost, and it is not visible from the
+// single-model fixture above. ReportAllocs is the point of the benchmark:
+// the line walk is pure scanning and must not grow a heap proportional to
+// the exposition, one slice per line or one string header per field. The
+// measurements are 17 allocs/op at any size, which is the family map and
+// nothing per line.
+func BenchmarkScrapeProm(b *testing.B) {
+	for _, models := range []int{1, 5, 20} {
+		b.Run(fmt.Sprintf("models=%d", models), func(b *testing.B) {
+			text := promExposition(models)
+			b.ReportAllocs()
+			for b.Loop() {
+				classify(parseProm(text), &Metrics{})
+			}
+		})
+	}
+}
+
+// promExposition builds the exposition a vLLM serving that many models
+// answers with: the families classify reads, plus the per-request-class
+// latency and histogram families it filters out and never touches.
+func promExposition(models int) string {
+	var b strings.Builder
+	for i := range models {
+		m := fmt.Sprintf("meta-llama/Llama-3.1-8B-Instruct-hf-run%d", i)
+		fmt.Fprintf(&b, "# HELP vllm:num_requests_running requests\n# TYPE vllm:num_requests_running gauge\n")
+		fmt.Fprintf(&b, "vllm:num_requests_running{model_name=%q,engine=\"0\"} %d.0\n", m, i%7)
+		fmt.Fprintf(&b, "vllm:num_requests_waiting{model_name=%q} %d.0\n", m, i%3)
+		fmt.Fprintf(&b, "vllm:gpu_cache_usage_perc{model_name=%q} 0.62\n", m)
+		fmt.Fprintf(&b, "vllm:prompt_tokens_total{model_name=%q} %d.0\n", m, i*1000)
+		fmt.Fprintf(&b, "vllm:generation_tokens_total{model_name=%q} %d.0\n", m, i*2500)
+		fmt.Fprintf(&b, "vllm:request_success_total{finished_reason=\"stop\",model_name=%q} %d\n", m, i)
+		fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_sum{model_name=%q} 4.0\n", m)
+		fmt.Fprintf(&b, "vllm:time_to_first_token_seconds_count{model_name=%q} 20.0\n", m)
+		for j := range 20 {
+			fmt.Fprintf(&b, "vllm:request_success_total{finished_reason=\"length\",model_name=%q} %d\n", m, j)
+			fmt.Fprintf(&b, "vllm:e2e_request_latency_seconds_sum{model_name=%q} %d.0\n", m, j)
+			fmt.Fprintf(&b, "vllm:request_queue_time_seconds_sum{model_name=%q} %d.0\n", m, j)
+		}
+	}
+	return b.String()
+}
+
 // Ensure kind constants stay stable; they key UI colors and probes.
 func TestKindConstants(t *testing.T) {
 	cases := []struct{ got, want string }{

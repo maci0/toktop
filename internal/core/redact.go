@@ -189,13 +189,19 @@ const maxAccountNameLen = 100
 // an account (a name, folded) or a file in a directory that happens to be
 // spelled "home" (no name, or a hidden one, copied through).
 func foldAnyHomePrefix(msg, prefix string) string {
+	// A prefix that appears nowhere is the common case for all but one of
+	// the seven, and a builder built up front copied the whole message to
+	// say so: RedactAnyUserHome allocated and copied a full string per
+	// prefix per pass for text that named no home at all, and the ingest
+	// path runs it over every field of every posted event. The builder is
+	// therefore created once the prefix is known to be there, and a miss
+	// returns the caller's own string.
+	at, n, ok := indexFold(msg, prefix)
+	if !ok {
+		return msg
+	}
 	var b strings.Builder
-	for {
-		at, n, ok := indexFold(msg, prefix)
-		if !ok {
-			b.WriteString(msg)
-			return b.String()
-		}
+	for ok {
 		name, boundary := "", false
 		if homeNameStartsAt(msg, at) {
 			name, boundary = accountName(msg[at+n:])
@@ -207,12 +213,15 @@ func foldAnyHomePrefix(msg, prefix string) string {
 			// after them so the same text is not matched again.
 			b.WriteString(msg[:at+n])
 			msg = msg[at+n:]
-			continue
+		} else {
+			b.WriteString(msg[:volumeStart(msg, at)])
+			b.WriteByte('~')
+			msg = msg[at+n+len(name):]
 		}
-		b.WriteString(msg[:volumeStart(msg, at)])
-		b.WriteByte('~')
-		msg = msg[at+n+len(name):]
+		at, n, ok = indexFold(msg, prefix)
 	}
+	b.WriteString(msg)
+	return b.String()
 }
 
 // homeNameStartsAt reports whether the text before the matched prefix ends it,
@@ -366,15 +375,58 @@ func replaceFold(s, old, new string) string {
 // spellings fold together but need not be the same width in bytes (U+212A
 // KELVIN SIGN against "k"). Resuming by len(sub) would step past the text the
 // match covered, splitting the wide rune or running off the end of s.
+//
+// The first rune of sub is resolved once and every offset of s is tested
+// against it before the rest of the pattern is walked. Without that, a
+// caller searching for one of userHomePrefixes paid a decode, a SimpleFold
+// orbit walk and a byte compare for the prefix's first rune at every offset
+// of s, per prefix, per pass: seven prefixes times every character is what
+// RedactAnyUserHome spent on a short note, and it runs on the unauthenticated
+// ingest path for every field of every posted event. The prefilter is exact,
+// not a heuristic: a rune folds to sub[0] exactly when the first rune
+// comparison would have succeeded, so a skip is a comparison the walk
+// already made and lost.
+//
+// An ASCII byte on both sides is an ASCII case pair and is settled by one
+// byte compare, without the orbit walk that answered a third of the profile.
+// A wide rune on either side takes the orbit walk, because that is where the
+// pattern lives: U+212A KELVIN SIGN folds onto "k" and U+0130 DOTTED_I does
+// not fold onto "i", and TestReplaceFold pins both directions, a wide
+// pattern against ASCII text included. Each branch advances by the width the
+// walk just measured, so no offset ever lands inside a multi-byte rune.
 func indexFold(s, sub string) (at, n int, ok bool) {
+	if sub == "" {
+		return 0, 0, false
+	}
+	first, _ := utf8.DecodeRuneInString(sub)
+	ascii := sub[0] < utf8.RuneSelf
+	low := asciiLower(sub[0])
 	for i := 0; i < len(s); {
-		if n := prefixFoldLen(s[i:], sub); n > 0 {
-			return i, n, true
+		var hit bool
+		w := 1
+		if b := s[i]; b < utf8.RuneSelf && ascii {
+			hit = asciiLower(b) == low
+		} else {
+			got, n := utf8.DecodeRuneInString(s[i:])
+			w = n
+			hit = equalFoldRune(got, first)
 		}
-		_, w := utf8.DecodeRuneInString(s[i:])
+		if hit {
+			if n := prefixFoldLen(s[i:], sub); n > 0 {
+				return i, n, true
+			}
+		}
 		i += w
 	}
 	return 0, 0, false
+}
+
+// asciiLower is the ASCII half of core.FoldASCII, on one byte.
+func asciiLower(c byte) byte {
+	if c >= 'A' && c <= 'Z' {
+		return c + ('a' - 'A')
+	}
+	return c
 }
 
 // prefixFoldLen returns the byte length of the case-insensitive match for

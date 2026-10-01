@@ -281,6 +281,53 @@ func TestRedactAnyUserHomeFoldsEveryOccurrence(t *testing.T) {
 	}
 }
 
+// Most fields name no home at all, and the redactor tries seven prefixes to
+// learn that. Each prefix that does not appear has to cost a scan and
+// nothing else: the ingest path folds every field of every posted event
+// through here, and a builder per prefix copied the whole message to report
+// the miss, so text naming no home allocated seven full copies per pass.
+// The budget is zero, not a small number, because there is no copy left to
+// make on a miss.
+func TestRedactAnyUserHomeNoCopyWithoutAHome(t *testing.T) {
+	const budget = 0
+	// A note at the cap, so the length is the one the ingest path folds.
+	msg := strings.Repeat("editing internal/ui/ui.go; running the test suite. ", 9)
+	if got := testing.AllocsPerRun(50, func() { _ = RedactAnyUserHome(msg) }); got > budget {
+		t.Errorf("RedactAnyUserHome allocates %.0f objects on a %d-byte note that names "+
+			"no home, budget %d; a prefix that does not appear must not copy the text",
+			got, len(msg), budget)
+	}
+}
+
+// A message that does name a home still has to fold it, without regressing to
+// a copy per prefix. The small budget is the point: the match path allocates
+// the builder and the string it returns, and the prefixes that did not match
+// allocate nothing.
+func TestRedactAnyUserHomeCopiesOnceForAMatch(t *testing.T) {
+	const budget = 4
+	msg := "/home/asmith/proj and /Users/asmith/other"
+	if got := testing.AllocsPerRun(50, func() { _ = RedactAnyUserHome(msg) }); got > budget {
+		t.Errorf("RedactAnyUserHome allocates %.0f objects folding %q, budget %d",
+			got, msg, budget)
+	}
+}
+
+func BenchmarkRedactAnyUserHome(b *testing.B) {
+	for name, msg := range map[string]string{
+		"name":     "claude",
+		"prose":    "edit internal/ui/ui.go and run the test suite",
+		"maxnote":  strings.Repeat("some note text here ", 20),
+		"withhome": "/home/asmith/projects/toktop",
+	} {
+		b.Run(name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = RedactAnyUserHome(msg)
+			}
+		})
+	}
+}
+
 // absPath builds an absolute path under a fake root, spelled the way this
 // platform spells one. Windows paths need a volume, so "\home\private-user" is
 // drive-relative there and RedactHome rightly leaves it alone; a test that
