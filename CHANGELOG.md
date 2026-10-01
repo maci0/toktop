@@ -180,6 +180,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   tag-pinned action or an unpinned `go run` in it passed a run that no longer
   read it. The wildcard and the Go gate's glob cover both extensions now, so
   a workflow cannot move to the one name the gates do not read.
+- The vitals identity fuzz seed no longer fails `make lint`. The seed carries a
+  right-to-left override (U+202E) in a kernel string, written as a literal
+  character, and `staticcheck.conf` asks for the whole check set, so ST1018
+  refused it: `make check` and `make lint` failed on every run, in CI and on a
+  contributor's machine alike. The character is now the `\u202e` escape the rule
+  asks for, which is the same seed string the fuzz corpus gets.
 
 ### Added
 

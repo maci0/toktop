@@ -1972,6 +1972,13 @@ buildinfo: test-dist ## record the toolchain, commit, and flags behind dist/ int
 # release.yml's guard does, and `--jq` keeps a JSON parser off PATH: gh carries
 # one. Both calls refuse to read an empty answer as success, because a list
 # that failed to parse is the same shape as a release with nothing on it.
+#
+# The digest tool is chosen once, from the OS the recipe runs on, rather than
+# probed at the end: `command -v sha256sum` answers for the shell's PATH, and
+# PATH is ambient state, so the same recipe could reach two different tools on
+# two machines while reading as the same command. An image whose uname is
+# neither Linux nor Darwin is named and refused here rather than falling
+# through to a tool nobody checked is there.
 .PHONY: release-verify
 release-verify: ## fetch every published asset for VERSION and re-verify its checksum (needs gh)
 	@$(CHECK_VERSION)
@@ -1981,6 +1988,14 @@ release-verify: ## fetch every published asset for VERSION and re-verify its che
 	}
 	@tag=v$(VERSION); \
 	dir=$(CURDIR)/$(DIST)/release-verify/$(VERSION); \
+	os=$$(uname -s 2>/dev/null || echo unknown); \
+	case "$$os" in \
+		Linux*) sha256() { sha256sum "$$@"; } ;; \
+		Darwin*) sha256() { shasum -a 256 "$$@"; } ;; \
+		*) echo "make release-verify: '$$os' is not a runner image this recipe has a digest tool for" >&2; \
+		   echo "  it needs sha256sum (Linux) or shasum (macOS), named like the checksums target names them" >&2; \
+		   exit 1 ;; \
+	esac; \
 	rm -rf "$$dir" && mkdir -p "$$dir/sums"; \
 	if ! assets=$$(gh release view "$$tag" --repo $(RELEASE_REPO) --json assets --jq '.assets[] | "\(.size) \(.name)"' 2>&1); then \
 		echo "make release-verify: cannot read release $$tag on $(RELEASE_REPO):" >&2; printf '%s\n' "$$assets" >&2; \
@@ -2011,7 +2026,7 @@ release-verify: ## fetch every published asset for VERSION and re-verify its che
 	fi; \
 	awk '{ if ($$1 <= 0) { printf "  EMPTY      %s\n", $$2; exit 1 } }' "$$dir/published.txt" >&2 || exit 1; \
 	gh release download "$$tag" --repo $(RELEASE_REPO) --dir "$$dir" --pattern '$(BINARY)*$(VERSION)*' || exit 1; \
-	tar -xzf "$$dir/$(CHECKSUMS_ASSET)" -C "$$dir/sums" || exit 1; \
+	$(TAR) -xzf "$$dir/$(CHECKSUMS_ASSET)" -C "$$dir/sums" || exit 1; \
 	listed=$$(cut -c67- "$$dir/sums/checksums.txt" 2>/dev/null | tr -d '*' | sort || true); \
 	unlisted=$$(grep -vxF -e "$$listed" -e "$(CHECKSUMS_ASSET)" "$$dir/expected.txt" || true); \
 	if [ -z "$$listed" ] || [ -n "$$unlisted" ]; then \
@@ -2019,9 +2034,7 @@ release-verify: ## fetch every published asset for VERSION and re-verify its che
 		if [ -n "$$unlisted" ]; then sed 's/^/  UNLISTED   /' <<< "$$unlisted" >&2; fi; \
 		echo "  an artifact missing from checksums.txt is one a client cannot verify, so it is not installed." >&2; exit 1; \
 	fi; \
-	cd "$$dir" && \
-		if command -v sha256sum >/dev/null 2>&1; then sha256sum -c "$$dir/sums/checksums.txt"; \
-		else shasum -a 256 -c "$$dir/sums/checksums.txt"; fi
+	cd "$$dir" && sha256 -c "$$dir/sums/checksums.txt"
 
 # The flags above promise byte-identical output; nothing tested that promise.
 # Build each platform twice and diff. The one input still free to leak is the
