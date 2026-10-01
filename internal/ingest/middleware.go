@@ -148,8 +148,9 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 		}
 		e, known := lookupEndpoint(r.URL.Path)
 		if !known {
-			http.Error(w, notFoundMessage(), http.StatusNotFound)
-			s.logRequest(r, id, http.StatusNotFound, 0, 0, time.Since(start), "not found")
+			msg := notFoundMessage()
+			http.Error(w, msg, http.StatusNotFound)
+			s.logRequest(r, id, http.StatusNotFound, 0, 0, time.Since(start), msg)
 			return
 		}
 		// The mux would answer a wrong method with the same status and Allow
@@ -160,7 +161,13 @@ func (s *Server) wrap(next http.Handler) http.Handler {
 			w.Header().Set("Allow", e.allow())
 			msg := methodNotAllowedMessage(e, r.Method)
 			http.Error(w, msg, http.StatusMethodNotAllowed)
-			s.logRequest(r, id, http.StatusMethodNotAllowed, 0, 0, time.Since(start), "method not allowed")
+			// The reason the caller was given, not a label naming the class of
+			// it. handlePost logs its rejections the same way, so a harness
+			// whose POST was refused could quote a line that named neither
+			// which path was misspelled nor which methods it takes: the 404
+			// body lists both endpoints, and the operator read a line that
+			// said neither.
+			s.logRequest(r, id, http.StatusMethodNotAllowed, 0, 0, time.Since(start), msg)
 			return
 		}
 		next.ServeHTTP(w, r)

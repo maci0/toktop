@@ -221,8 +221,9 @@ paths:
         "503":
           description: |
             64 bodies were already decoding. This is a pile-up, not a fault:
-            wait the second `Retry-After` names and resend the same request,
-            under the same `Idempotency-Key` if it had one.
+            wait the second `Retry-After` names, which the reason line names
+            too, and resend the same request, under the same `Idempotency-Key`
+            if it had one.
           headers:
             Retry-After:
               $ref: "#/components/headers/RetryAfter"
@@ -488,7 +489,12 @@ components:
         type: string
         const: no-store
     RetryAfter:
-      description: Seconds to wait before resending, the same delay every refusal on this port names.
+      description: |
+        Seconds to wait before resending, the same delay every refusal on this
+        port names. It is written in the delta-seconds form only, and the
+        refused POST's reason line spells the same number out
+        (`retry in 1s`), so a sender reading the body rather than the headers
+        waits what the header carries.
       schema:
         type: string
         const: "1"
@@ -533,7 +539,7 @@ components:
         - "host is not this machine; refusing a request addressed to another name"
         - "event stream exceeds 1048576 byte cap"
         - "request stalled: no body bytes for 1m0s"
-        - "at most 64 event streams are decoded at once; retry"
+        - "at most 64 event streams are decoded at once; retry in 1s"
 
     Event:
       type: object

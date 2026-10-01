@@ -27,6 +27,22 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `TestEveryProcessListerArmsTheGroupKill` and
   `TestEveryProcessListerArmsThePipeGrace` in internal/procs pin that neither
   platform's lister drops either half.
+- The audit line for a request refused by the router now carries the reason
+  the caller was answered with instead of a label for the class of it. A `404`
+  and a `405` logged `error="not found"` and `error="method not allowed"`,
+  while the bodies named every endpoint the server serves and the methods each
+  takes, so a harness that quoted its 404 to an operator got a line naming
+  neither the misspelled path nor the path it meant; every POST refusal
+  already logged its own reason, and the two now match. A log filter keyed on
+  the literal `not found` or `method not allowed` no longer matches; filter on
+  `status=404` or `status=405`.
+- The refused POST's `503` reason line names the second its `Retry-After`
+  carries (`at most 64 event streams are decoded at once; retry in 1s`) instead
+  of a bare `retry`. The header and the body carried the same delay, but a
+  sender that reads the reason line alone had no wait to read, and the probe's
+  `503` names the delay only in its header.
+  `TestEveryRefusalCarriesTheSameRetryAfter` in internal/ingest pins both
+  refusals against one constant.
 - A staging file the stale-temp sweep could not remove was dropped silently,
   so `toktop update` reported a clean install and a host-key pin reported a
   clean write over a directory that still held an unverified download or a

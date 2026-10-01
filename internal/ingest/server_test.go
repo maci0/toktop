@@ -2759,7 +2759,11 @@ func TestIngestLogsUnknownPath(t *testing.T) {
 		"path=/events",
 		"status=404",
 		"accepted=0",
-		`error="not found"`,
+		// The reason the caller was answered with, not a label naming the
+		// class of it: the 404 body lists every served endpoint and the
+		// methods each one takes, and a harness quoting the operator's log
+		// got a line that named neither.
+		`error="` + notFoundMessage() + `"`,
 		"req=" + reqID,
 	} {
 		if !strings.Contains(got, want) {
@@ -2794,7 +2798,10 @@ func TestIngestLogsWrongMethod(t *testing.T) {
 		"method=PUT",
 		"path=/v1/events",
 		"status=405",
-		`error="method not allowed"`,
+		// The caller's own line, naming the path and the methods it takes,
+		// which is what tells a sender that /v1/events takes POST and nothing
+		// else. handlePost logs its refusals the same way.
+		`error="` + methodNotAllowedMessage(ingestEndpoints[0], http.MethodPut) + `"`,
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("405 log missing %q: %s", want, got)
@@ -3259,7 +3266,9 @@ func TestPostBeyondInFlightCapIsRefusedNotHeld(t *testing.T) {
 }
 
 // A sender that waits what the health probe says must not retry faster than
-// the refused POSTs make it, so the two 503s advertise one delay.
+// the refused POSTs make it, so the two 503s advertise one delay. The refused
+// POST also spells that second out in its reason line, so a sender reading the
+// body rather than the headers waits the same number the header carries.
 func TestEveryRefusalCarriesTheSameRetryAfter(t *testing.T) {
 	s := startIngest(t, &memRecorder{})
 	defer swapVar(t, &eventSlots, make(chan struct{}, 1))()
@@ -3281,13 +3290,21 @@ func TestEveryRefusalCarriesTheSameRetryAfter(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		io.Copy(io.Discard, resp.Body)
+		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("%s %s = %d, want 503", target.method, target.path, resp.StatusCode)
 		}
 		if got := resp.Header.Get("Retry-After"); got != want {
 			t.Errorf("%s %s Retry-After = %q, want %q", target.method, target.path, got, want)
+		}
+		if target.method == http.MethodPost &&
+			!strings.Contains(string(body), "retry in "+want+"s") {
+			t.Errorf("%s %s reason does not name the %s second its header carries: %q",
+				target.method, target.path, want, body)
 		}
 	}
 }

@@ -30,10 +30,10 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	body, status := healthOK, http.StatusOK
 	slots := eventSlots
 	if in := len(slots); in >= cap(slots) {
-		// The same Retry-After the refused POSTs carry: a 503 that names no
-		// delay leaves a client to invent one, and the slot frees as soon as a
-		// stalled body gives up.
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+		// The same Retry-After the refused POSTs carry, written by the one
+		// helper both use: a 503 that names no delay leaves a client to invent
+		// one, and the slot frees as soon as a stalled body gives up.
+		setRetryAfter(w)
 		status = http.StatusServiceUnavailable
 		body = fmt.Sprintf("degraded: %d/%d event streams in flight; events are being refused\n", in, cap(slots))
 	}

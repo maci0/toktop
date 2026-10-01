@@ -767,6 +767,43 @@ func TestOpenAPIAckExampleIsAPairTheHandlerCanWrite(t *testing.T) {
 // against a second send, so a prose example that stopped describing the
 // handler fails here rather than reaching a sender as a promise about its own
 // counts.
+// The Reason schema's examples are the one-line answers a sender reads instead
+// of a status line, so they are the strings a client parses. Nothing held them
+// to the server: the file carries them by hand next to code that builds each
+// one, and a bound that moved under a fixed spelling leaves a generated client
+// matching on a line the server no longer writes. Each example that names a
+// constant is therefore pinned against that constant, and the two that come
+// from the route table are pinned against what the router writes.
+func TestReasonExamplesAreAnswersTheServerWrites(t *testing.T) {
+	want := []string{
+		notFoundMessage(),
+		methodNotAllowedMessage(ingestEndpoints[0], http.MethodPut),
+		"event stream exceeds " + strconv.Itoa(maxEventBody) + " byte cap",
+		fmt.Sprintf("at most %d event streams are decoded at once; retry in %ds",
+			maxInFlightEvents, retryAfterSeconds),
+	}
+	listed := make([]string, 0, 8)
+	for _, line := range exampleList(t, "Reason", "examples:") {
+		reason, ok := strings.CutPrefix(strings.TrimSpace(line), "- ")
+		if !ok {
+			t.Errorf("the Reason examples list holds a line that is not an example: %s", line)
+			continue
+		}
+		listed = append(listed, strings.Trim(strings.TrimSpace(reason), `"`))
+	}
+	for _, w := range want {
+		if !slices.Contains(listed, w) {
+			t.Errorf("the Reason schema does not list %q, which the handlers write", w)
+		}
+	}
+}
+
+// The operation's prose spells out what a replay reads on its answer, since
+// the Ack schema cannot: the pair is two integers whose relation depends on
+// what the request carried. Both claims are read off the spec and checked
+// against a second send, so a prose example that stopped describing the
+// handler fails here rather than reaching a sender as a promise about its own
+// counts.
 func TestOpenAPIReplayProseNamesTheAckAReplayReads(t *testing.T) {
 	desc := openapiOperationDescription(t, eventsPath, "recordEvents")
 	body := ndjsonEvent("a") + "\n" + ndjsonEvent("b")
@@ -981,4 +1018,31 @@ func exampleBlock(t *testing.T, anchor string) []string {
 		out = append(out, l)
 	}
 	return out
+}
+
+// exampleList returns the entries of one named list key inside one schema's
+// block, verbatim: the Reason schema's reasons are the lines a client reads off
+// a failure, so each is held against the handler that writes it.
+func exampleList(t *testing.T, schema, key string) []string {
+	t.Helper()
+	lines := strings.Split(schemaSection(t, schema), "\n")
+	for i, l := range lines {
+		if strings.TrimSpace(l) != key {
+			continue
+		}
+		indent := len(l) - len(strings.TrimLeft(l, " "))
+		var out []string
+		for _, entry := range lines[i+1:] {
+			if strings.TrimSpace(entry) == "" {
+				continue
+			}
+			if len(entry)-len(strings.TrimLeft(entry, " ")) <= indent {
+				break
+			}
+			out = append(out, entry)
+		}
+		return out
+	}
+	t.Fatalf("docs/openapi.yaml schema %s declares no %s list", schema, key)
+	return nil
 }

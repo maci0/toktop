@@ -467,7 +467,10 @@ singular.
 
 `503` with `Retry-After: 1` means 64 bodies were already decoding, which is a pile-up
 and not a fault: wait the named second and resend the same request, under the
-same `Idempotency-Key` if it had one. A POST carrying an
+same `Idempotency-Key` if it had one. The reason line names the same second the
+header carries (`at most 64 event streams are decoded at once; retry in 1s`), so
+a sender reading the body rather than the headers waits what it was told rather
+than inventing a delay. A POST carrying an
 `Origin` header (browser-driven; scripts and agents never send one) is
 refused with `403`, so a web page cannot forge rows into a running
 dashboard. When the endpoint is bound to loopback (the default), a request
@@ -497,7 +500,11 @@ Every POST is logged to stderr as one structured line (`req`, `method`,
 prefix its derived event ids start with, so a request can be matched against
 the rows it minted.
 Wrong-method and unknown-path requests log the same way, so a harness
-posting to `/events` is not silent. A healthy `GET /healthz` is not logged. It
+posting to `/events` is not silent, and their `error` field carries the reason
+the caller was answered with rather than a label for the class of it: the line
+names the endpoints the server does serve and the methods each takes, so an
+operator reading it can tell a misspelled path from a wrong method without
+asking the sender. A healthy `GET /healthz` is not logged. It
 answers `503` with `Retry-After: 1` and a one-line reason while all 64 event
 slots are held, because the endpoint is refusing every POST then and `ok` would
 describe a service that accepts nothing. Crossing into that state logs one

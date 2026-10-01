@@ -59,6 +59,18 @@ const maxEventSkew = 2 * time.Minute
 // says and ignores the other retries faster than the slots free.
 const retryAfterSeconds = 1
 
+// setRetryAfter writes the delay header in the one form this port advertises
+// it (RFC 9110 delta-seconds), and hands the seconds back, so a caller names
+// the same value in its body as the header carried rather than writing the
+// number a second time. The refused POST and the health probe both go through
+// it, which is what keeps the delay a client is told to wait equal to the one
+// the header carries.
+func setRetryAfter(w http.ResponseWriter) int {
+	secs := retryAfterSeconds
+	w.Header().Set("Retry-After", strconv.Itoa(secs))
+	return secs
+}
+
 // progressBody arms the read deadline before every read: no progress within
 // idle, or past the absolute end, surfaces as an i/o timeout from Decode.
 // The bounds travel with the body, read from the server that is handling the
@@ -232,13 +244,17 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	case slots <- struct{}{}:
 		defer func() { <-slots }()
 	default:
-		w.Header().Set("Retry-After", strconv.Itoa(retryAfterSeconds))
+		secs := setRetryAfter(w)
 		armWrite()
 		// in_flight beside the cap, so a run of these says how close the
 		// endpoint is to refusing everything rather than only that it did:
-		// the same number /healthz reports, on the same refusals.
+		// the same number /healthz reports, on the same refusals. The delay
+		// rides in the body as well as the header: a sender reading the
+		// reason line alone waits the second it names rather than looking for
+		// the header, and the two say the same number because both are
+		// written from one constant.
 		reject(http.StatusServiceUnavailable,
-			fmt.Sprintf("at most %d event streams are decoded at once; retry", cap(slots)),
+			fmt.Sprintf("at most %d event streams are decoded at once; retry in %ds", cap(slots), secs),
 			append([]any{"in_flight", len(slots), "slot_cap", cap(slots)}, writeArm...)...)
 		return
 	}
