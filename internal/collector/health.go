@@ -25,6 +25,16 @@ type downState struct {
 	reason string
 }
 
+// scrapeState is one engine's current measurement run: when its last answering
+// poll stopped being measurable and the reason the failed sub-request gave.
+// It mirrors downState because it latches and reports the same two things, and
+// is a separate type on purpose: the engine is answering, so folding this into
+// down would report an outage the operator cannot reproduce.
+type scrapeState struct {
+	since  time.Time
+	reason string
+}
+
 // foldedErr is one poll error's text after the home fold and the length
 // bound, kept alongside a digest of the exact error and the home it was folded
 // against so a repeat of that error can be answered from memory.
@@ -118,6 +128,22 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		ps.Err = "empty poll result"
 	default:
 		ps.OK = true
+		// The measurement boundary is read before the answering one so a
+		// poll that recovered both ways reports the counters coming back and
+		// not only the engine answering again. Both lines are wanted: an
+		// operator watching a healthy engine with no throughput needs the
+		// instant its data returned, whatever its reachability did in between.
+		if r.m.ScrapeErr != "" {
+			if _, ok := c.scrape[key]; !ok {
+				c.scrape[key] = scrapeState{since: now, reason: r.m.ScrapeErr}
+				changes = append(changes, healthChange{p: p, kind: changeScrape, reason: r.m.ScrapeErr, since: now})
+			}
+		} else if was, ok := c.scrape[key]; ok {
+			delete(c.scrape, key)
+			changes = append(changes, healthChange{
+				p: p, kind: changeScrapeOK, reason: was.reason, since: was.since, heldFor: core.Age(now, was.since),
+			})
+		}
 		if was, ok := c.down[key]; ok {
 			delete(c.down, key)
 			changes = append(changes, healthChange{
@@ -180,6 +206,12 @@ func (c *Collector) providerSnapshot(p provider.Provider, r result, now time.Tim
 		// answering, and its next answer is measured fresh, so a stale latch
 		// cannot report a slowdown that ended before the outage began.
 		delete(c.slow, key)
+		// And it supersedes a measurement run for the same reason. The
+		// engine's counters were already not arriving when it stopped
+		// answering altogether, so leaving the latch set would have the
+		// first answering poll report a measurement recovery alongside the
+		// outage recovery, naming a run the operator never saw start.
+		delete(c.scrape, key)
 	}
 	return ps, changes, homeUnknown
 }
@@ -208,11 +240,18 @@ const (
 	// answered but took too long, and one that answered in time again.
 	changeSlow
 	changeFast
+	// changeScrape and changeScrapeOK are the measurement boundary: an
+	// answering poll whose /metrics sub-request failed, and one whose every
+	// sub-request answered again. Neither crosses the answering boundary nor
+	// the latency one, so down and slow cannot report it, and the frame is
+	// drawn as healthy either way.
+	changeScrape
+	changeScrapeOK
 )
 
-// healthChange is one engine crossing the answering or the latency boundary.
-// reason is the failure text that started an answering run, so the recovery
-// line names the outage it ends. took is the duration that tripped the latency
+// healthChange is one engine crossing the answering, latency or measurement
+// boundary. reason is the failure text that started a run, so the recovery line
+// names the outage it ends. took is the duration that tripped the latency
 // boundary, and is zero on the change that ends the run. heldFor is how long
 // the run lasted when the change was reported.
 type healthChange struct {

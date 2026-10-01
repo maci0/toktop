@@ -471,3 +471,102 @@ func TestWindowRefusalCountResetsAfterRecovery(t *testing.T) {
 	}
 	t.Errorf("the closed run's count carried into the next run:\n%s", lines)
 }
+
+// An engine can answer its model listing while failing the Prometheus /metrics
+// scrape. The poll succeeds, so the dashboard draws the engine healthy with
+// every throughput number zero and nothing on that frame says the counters
+// never arrived: an operator reads an unmeasurable engine as an idle one. The
+// audit log gets the reason once, not once per poll, and one line when the
+// counters come back.
+func TestScrapeFailureOnAnAnsweringEngineIsAuditedOnce(t *testing.T) {
+	fp := &fakeProvider{label: "engine", m: &provider.Metrics{OutTotal: 10}}
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
+	base := time.Unix(1_700_000_000, 0).UTC()
+	now := base
+	c.SetNow(func() time.Time { return now })
+	t.Cleanup(func() { c.SetNow(nil) })
+	c.procFn = nil
+	logs := captureAudit(t)
+	ch := make(chan core.Snapshot, 1)
+
+	c.emit(context.Background(), ch)
+	<-ch
+	if got := countLines(logs, "engine metrics scrape failing"); got != 0 {
+		t.Fatalf("healthy engine produced %d scrape failure lines:\n%s", got, logs.String())
+	}
+
+	// The poll still succeeds: the models call answered, so this is an engine
+	// the dashboard draws as healthy on every one of these frames.
+	fp.m = &provider.Metrics{OutTotal: 20, ScrapeErr: "500 Internal Server Error"}
+	for range 3 {
+		c.emit(context.Background(), ch)
+		<-ch
+	}
+	lines := logs.String()
+	if got := countLines(logs, "engine metrics scrape failing"); got != 1 {
+		t.Fatalf("scrape failure lines = %d, want 1 for three failed scrapes:\n%s", got, lines)
+	}
+	if !strings.Contains(lines, "level=WARN") {
+		t.Errorf("a failing scrape is not logged at warn:\n%s", lines)
+	}
+	// The reason is what turns "zero throughput" into something the operator
+	// can act on, and a line naming none is the blind spot this closes.
+	if !strings.Contains(lines, "reason=") || !strings.Contains(lines, "500 Internal Server Error") {
+		t.Errorf("scrape failure line does not carry the reason:\n%s", lines)
+	}
+	// The recovery names the run it ends and how long it lasted.
+	now = base.Add(90 * time.Second)
+	fp.m = &provider.Metrics{OutTotal: 30}
+	for range 2 {
+		c.emit(context.Background(), ch)
+		<-ch
+	}
+	lines = logs.String()
+	if got := countLines(logs, "engine metrics scrape recovered"); got != 1 {
+		t.Fatalf("scrape recovery lines = %d, want 1:\n%s", got, lines)
+	}
+	if !strings.Contains(lines, "level=INFO") {
+		t.Errorf("a recovered scrape is not logged at info:\n%s", lines)
+	}
+	if !strings.Contains(lines, "scrape_failed_for=1m30s") {
+		t.Errorf("scrape recovery line does not carry the run length:\n%s", lines)
+	}
+	// The resolved run is named under the field a resolved outage uses, so an
+	// operator's "what is broken right now" filter does not page on an engine
+	// that has been measurable for an hour.
+	if !strings.Contains(lines, "down_reason=") {
+		t.Errorf("scrape recovery line does not mark the run as resolved:\n%s", lines)
+	}
+}
+
+// An engine that stops answering altogether already has an outage line, which
+// carries every reason the poll gave. A measurement run left latched across the
+// outage would have the first answering poll report a measurement recovery
+// beside the outage recovery, naming a run that the outage line superseded and
+// the operator never saw the start of.
+func TestScrapeRunIsSupersededByAnOutage(t *testing.T) {
+	fp := &fakeProvider{label: "engine", m: &provider.Metrics{OutTotal: 10, ScrapeErr: "connection reset"}}
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
+	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	t.Cleanup(func() { c.SetNow(nil) })
+	c.procFn = nil
+	logs := captureAudit(t)
+	ch := make(chan core.Snapshot, 1)
+
+	c.emit(context.Background(), ch)
+	<-ch
+	fp.m, fp.err = nil, errors.New("connection refused")
+	c.emit(context.Background(), ch)
+	<-ch
+	fp.m, fp.err = &provider.Metrics{OutTotal: 30}, nil
+	c.emit(context.Background(), ch)
+	<-ch
+
+	lines := logs.String()
+	if got := countLines(logs, "engine metrics scrape recovered"); got != 0 {
+		t.Fatalf("an outage reported a measurement recovery (%d lines):\n%s", got, lines)
+	}
+	if got := countLines(logs, "engine answering again"); got != 1 {
+		t.Fatalf("recovery lines = %d, want 1 for the outage alone:\n%s", got, lines)
+	}
+}

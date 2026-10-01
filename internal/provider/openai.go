@@ -81,6 +81,17 @@ func (o *OpenAICompat) poll(ctx context.Context) (*Metrics, error) {
 	case core.KindLemonade:
 		enriched = enrichLemonade(ctx, o.base, m)
 	}
+	// A /metrics scrape that failed while the poll still answered leaves an
+	// engine the dashboard draws as healthy with every throughput number zero:
+	// the counters that produce them never arrived, and nothing on the frame
+	// says so. Carrying the reason on the result lets the collector audit it
+	// on its own boundary, instead of an operator reading an engine that
+	// cannot be measured as one that is merely idle. Folded and bounded here,
+	// where the engine's own text is first met, for the reason ScrapeErr
+	// documents: an engine error embeds whatever literal tripped its decoder.
+	if merr != nil {
+		m.ScrapeErr = core.Snippet([]byte(core.RedactHome(merr.Error())))
+	}
 	// One of /metrics, /v1/models, or a native enrich endpoint is
 	// enough; none of them answering is a down engine, not an idle one.
 	// Both failures are reported: the one that reaches the operator is

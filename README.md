@@ -576,7 +576,7 @@ cannot tell a retry from a second sender that picked the same one.
 ### Engine health lines
 
 An engine is only shown on the dashboard for the frame it fails on, so the
-audit log is the record that outlives the frame. Each engine crosses two
+audit log is the record that outlives the frame. Each engine crosses three
 boundaries and each crossing writes one line, however many polls passed in
 between: a run of failing polls is a line when the engine goes down and a line
 when it returns, not one per second.
@@ -587,6 +587,8 @@ when it returns, not one per second.
 | `toktop: engine answering again` | INFO | `engine`, `addr`, `down_reason`, `down_for` |
 | `toktop: engine poll slow` | WARN | `engine`, `addr`, `duration`, `slow_for` |
 | `toktop: engine poll back to normal` | INFO | `engine`, `addr`, `slow_for` |
+| `toktop: engine metrics scrape failing` | WARN | `engine`, `addr`, `reason` |
+| `toktop: engine metrics scrape recovered` | INFO | `engine`, `addr`, `down_reason`, `scrape_failed_for` |
 
 The failure is `reason` on the line that reports it and `down_reason` on the
 line that reports the outage ending, so filtering on `reason` returns what is
@@ -594,6 +596,16 @@ failing now and not the engines that already came back. `duration` on the slow
 line is the poll that tripped the threshold, which no frame carries. A poll
 that stops answering clears the slow latch, since the outage is the louder
 signal and the next answer is measured fresh.
+
+The scrape pair is a third boundary, and it catches the failure the dashboard
+cannot show: an engine that answers its model listing while refusing or timing
+out on the Prometheus `/metrics` scrape still polls successfully, so the frame
+draws it healthy with every throughput number zero and nothing on it says the
+counters never arrived. The reason rides on the poll result rather than as a
+poll error, because the engine is answering and reporting it as down would be
+an outage the operator cannot reproduce. A poll that stops answering clears
+both the slow and the scrape latch, since the outage is the louder signal and
+the next answer is measured fresh.
 
 Probes (`--probe`, or `p`) latch the same way and keep the same split:
 `probe failed` is WARN and carries `reason`, and `probe answering again` is

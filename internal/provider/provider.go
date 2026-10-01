@@ -53,6 +53,18 @@ type Metrics struct {
 	DirectOutPS    float64 // engine-reported instantaneous tok/s, if it publishes one
 	HasDirectOutPS bool
 	Version        string // engine software version, best effort
+
+	// ScrapeErr is why one sub-request of an otherwise-answering poll failed,
+	// folded and bounded like any other engine-supplied text before it leaves
+	// this package. An engine can serve its model listing and still refuse or
+	// time out on the Prometheus /metrics scrape: the poll succeeds, the
+	// dashboard shows the engine healthy, and every throughput number is zero
+	// because the counters that produce them never arrived. That is a
+	// degraded engine, not a down one, so the poll cannot report it as an
+	// error the collector turns into an outage; it carries the reason here and
+	// the collector audits it on its own boundary. Empty when every
+	// sub-request answered, which is the only case that costs a nil check.
+	ScrapeErr string
 }
 
 // Provider is one inference backend the collector can poll.

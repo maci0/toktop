@@ -1148,3 +1148,93 @@ func TestProbeContainsWordTreatsForeignLettersAsWord(t *testing.T) {
 		}
 	}
 }
+
+// An engine whose /metrics scrape fails while its model listing answers is an
+// engine toktop can serve but not measure: the poll succeeds, so every
+// throughput number derived from the counters is zero, and nothing on the
+// snapshot says why. The scrape failure travels on the result so the collector
+// can audit it, and the reason is folded and bounded here, where the engine's
+// own text is first met.
+func TestPollCarriesTheScrapeFailureOfAnEngineThatStillAnswers(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Write([]byte(`{"data":[{"id":"qwen"}]}`))
+		case "/metrics":
+			http.Error(w, "scrape endpoint is disabled", http.StatusInternalServerError)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	p := NewOpenAICompat(srv.URL, "engine", core.KindOpenAI)
+	m, err := p.Poll(context.Background())
+	if err != nil {
+		t.Fatalf("an engine that answers its model listing failed the poll outright: %v", err)
+	}
+	if len(m.Models) != 1 || m.Models[0].Name != "qwen" {
+		t.Fatalf("models = %+v, want the listing that answered", m.Models)
+	}
+	if m.ScrapeErr == "" {
+		t.Fatal("a failed /metrics scrape was discarded: the poll reports the engine healthy with no throughput and no reason")
+	}
+	if !strings.Contains(m.ScrapeErr, "500") {
+		t.Errorf("ScrapeErr = %q, want the status that refused the scrape", m.ScrapeErr)
+	}
+	if strings.Contains(m.ScrapeErr, "\n") {
+		t.Errorf("ScrapeErr spans lines: %q", m.ScrapeErr)
+	}
+}
+
+// The scrape failure is an engine-supplied string, so it is folded on the way
+// out: a body under the operator's home must not reach the audit log or the
+// dashboard through the new field.
+func TestScrapeErrFoldsTheHomeAndTheAddress(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/metrics" {
+			http.Error(w, "cannot read "+home+"/engine.yaml", http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(`{"data":[{"id":"qwen"}]}`))
+	}))
+	defer srv.Close()
+
+	m, err := NewOpenAICompat(srv.URL, "engine", core.KindOpenAI).Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ScrapeErr == "" {
+		t.Fatal("ScrapeErr empty")
+	}
+	if strings.Contains(m.ScrapeErr, home) {
+		t.Errorf("ScrapeErr carries the home directory: %q", m.ScrapeErr)
+	}
+}
+
+// An engine whose every sub-request answers reports no scrape failure: the
+// field is the exception's carrier, and a healthy engine must not pay for it.
+func TestPollCarriesNoScrapeFailureWhenMetricsAnswer(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			w.Write([]byte(`{"data":[{"id":"qwen"}]}`))
+		case "/metrics":
+			w.Write([]byte("vllm:generation_tokens_total 9\n"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	m, err := NewOpenAICompat(srv.URL, "engine", core.KindOpenAI).Poll(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.ScrapeErr != "" {
+		t.Errorf("ScrapeErr = %q on an engine whose /metrics answered", m.ScrapeErr)
+	}
+}

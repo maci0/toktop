@@ -95,6 +95,15 @@ type Collector struct {
 	// down exists: a poll interval of a second would otherwise write a line
 	// per engine per second while an engine is merely struggling.
 	slow map[string]time.Time
+	// scrape latches the endpoints whose last answering poll came back with a
+	// failed sub-request: an engine that serves its model listing while
+	// refusing or timing out on the /metrics scrape. The poll succeeds, so
+	// the dashboard draws the engine healthy with every throughput number
+	// zero and nothing on that frame says the counters never arrived. It is
+	// neither down nor slow, so it needs its own latch, for the same reason
+	// down and slow have one: a poll interval of a second would otherwise
+	// write a line per engine per second.
+	scrape map[string]scrapeState
 	// errFold memoizes the folded text of a poll error per key. A downed
 	// engine answers the same failed poll every interval, and folding is a
 	// pure function of that error string, so the fold is done once per
@@ -172,6 +181,7 @@ func New(providers []provider.Provider, interval time.Duration) *Collector {
 		agentSkewLive: map[string]agentSkewEntry{},
 		down:          map[string]downState{},
 		slow:          map[string]time.Time{},
+		scrape:        map[string]scrapeState{},
 		probeInflight: map[string]bool{},
 		probeBackoff:  map[string]time.Time{},
 		probeLast:     map[string]time.Time{},
@@ -405,7 +415,7 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// One bucket per changeKind, indexed by it, so a new boundary picks its
 	// log level at the call below rather than falling through a switch that
 	// quietly reports it at the wrong one.
-	var buckets [changeFast + 1][]healthChange
+	var buckets [changeScrapeOK + 1][]healthChange
 	homeUnknown := false
 	snap.Agents = slices.Clone(c.agents)
 	snap.Probes = slices.Clone(c.probes)
@@ -430,6 +440,13 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	logChanges(buckets[changeUp], slog.LevelInfo, "toktop: engine answering again", "down_for", "down_reason")
 	logChanges(buckets[changeSlow], slog.LevelWarn, "toktop: engine poll slow", "slow_for", "")
 	logChanges(buckets[changeFast], slog.LevelInfo, "toktop: engine poll back to normal", "slow_for", "")
+	// The measurement pair, on the same lines as the answering ones: an
+	// engine answering with no throughput is the gap the dashboard cannot
+	// show, so the reason it is unmeasurable is a warn and its return an
+	// info, each named under the field its own failure is written to, so a
+	// filter for what is failing now does not pick up runs that closed.
+	logChanges(buckets[changeScrape], slog.LevelWarn, "toktop: engine metrics scrape failing", "scrape_failed_for", "reason")
+	logChanges(buckets[changeScrapeOK], slog.LevelInfo, "toktop: engine metrics scrape recovered", "scrape_failed_for", "down_reason")
 	logWindowRefusals(refused)
 	// One line per sweep, not one per engine: the condition is the process's,
 	// not a given engine's, and the engines that saw it said the same thing.
