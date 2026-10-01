@@ -406,6 +406,15 @@ func TestWindowRefusalsAreAuditedOnce(t *testing.T) {
 	if got := countLines(logs, "agent events stored again"); got != 1 {
 		t.Fatalf("recovery lines = %d, want 1:\n%s", got, logs.String())
 	}
+	// How long the sender was dropped is what makes the recovery line
+	// actionable, so it rides the collector clock rather than the wall time
+	// the test spent getting here: the run opened on the first refusal at
+	// base+511s and drained on the frame after the fresh event, one clock
+	// step past storing it.
+	if !strings.Contains(logs.String(), "down_for=3s") {
+		t.Errorf("recovery line does not carry how long the sender was dropped, "+
+			"off the collector clock:\n%s", logs.String())
+	}
 	emit()
 	if got := countLines(logs, "agent events stored again"); got != 1 {
 		t.Fatalf("recovery logged again with no new refusals: %d lines\n%s", got, logs.String())

@@ -153,13 +153,20 @@ func logWindowRefusals(run windowRun) {
 			"refused", run.refused,
 			"reason", "older than the retained agent window",
 		}
-		if run.lostFor > 0 {
-			attrs = append(attrs, "down_for", run.lostFor)
-		}
 		lg.Warn("toktop: agent events refused", attrs...)
 	}
 	if run.recovered {
-		lg.Info("toktop: agent events stored again", "agent", logcfg.Field(run.back, core.AgentNameMax))
+		attrs := []any{"agent", logcfg.Field(run.back, core.AgentNameMax)}
+		// The span rides the recovery line, not the opening one: the run has
+		// only just started when the opening line is written, so the duration
+		// is computed (drainWindowRefusals) and known only on the branch that
+		// closes the run. Reading it here instead left down_for off both lines,
+		// so an operator reading that the sender came back had no way to tell
+		// how long it had been dropped.
+		if run.lostFor > 0 {
+			attrs = append(attrs, "down_for", run.lostFor)
+		}
+		lg.Info("toktop: agent events stored again", attrs...)
 	}
 }
 
