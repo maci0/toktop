@@ -875,12 +875,22 @@ func toolCoordinate(coord string) (name, version string, pinned bool) {
 // set the Makefile's WORKFLOWS wildcard names. A job runs with the
 // permissions, the environment and the network a workflow gives it, so a
 // package a step fetches is as much a dependency as one a recipe fetches.
+//
+// GitHub Actions reads both extensions, so both are globbed: a workflow
+// renamed to .yaml still runs on the job's token, and a gate that read only
+// .yml would stop holding the one file that now says what CI executes. A
+// `uses:` on a tag would pass a run that no longer reads it.
 func workflowFiles(t *testing.T) []string {
 	t.Helper()
-	paths, err := filepath.Glob(filepath.Join(moduleRoot, ".github", "workflows", "*.yml"))
-	if err != nil {
-		t.Fatalf("glob workflows: %v", err)
+	var paths []string
+	for _, pattern := range []string{"*.yml", "*.yaml"} {
+		found, err := filepath.Glob(filepath.Join(moduleRoot, ".github", "workflows", pattern))
+		if err != nil {
+			t.Fatalf("glob workflows: %v", err)
+		}
+		paths = append(paths, found...)
 	}
+	slices.Sort(paths)
 	if len(paths) == 0 {
 		t.Fatal("no workflow files under .github/workflows; the gate below would pass on an empty set")
 	}

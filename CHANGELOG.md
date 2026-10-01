@@ -64,66 +64,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `TestRunOpenAIMemoForgetsOnRefusal` and `TestRunOpenAIMemoIsPerEngine` in
   internal/probe pin all three.
 
-### Added
-
-- A wrong method on the site Worker now answers with a body naming the path
-  and the methods it takes (`method not allowed; /health accepts GET, HEAD,
-  not POST`), the envelope the ingest port's `404` and `405` already use. The
-  reason was the bare string `method not allowed`, which named neither the
-  path nor the accepted methods: a client that logs a body without its
-  headers, or that reads the line the way it reads `/health`, was left with a
-  failure that did not say which request it belonged to or what the request
-  should have been. Both refusal sites, the page and the image paths, now
-  answer from one `notAllowedMessage`, and the `Allow` header still carries
-  the list for a client that reads headers.
-
-- The agent feed's OpenAPI spec now declares a `maximum` on the four numeric
-  event fields, `prompt_tokens`, `output_tokens`, `thinking_tokens` and
-  `span_ms`. The ceilings were already in the descriptions and were the ones
-  the handler clamps with, but a client generator reads the schema and not the
-  prose, and `minimum: 0` with no `maximum` reads as "any count up to
-  int64": the generated sender writes values the server silently clamps to
-  zero, and the totals it expected never arrive. Each `maximum` is
-  `core.MaxEventTokens` or the span bound, and
-  `TestOpenAPIEventCapsMatchTheBounds` pins both, so a bound that drifts in
-  either file fails there rather than in a sender's token count.
-
-- The agent feed's OpenAPI spec and the README now say that an `id` sent as
-  `null` or as an empty string reads as one left out, the rule every other
-  field on the schema follows. The handler has always done this: an empty id
-  is keyed from the request `Idempotency-Key` like any other id-less line,
-  rather than refused (which would break every sender that builds the key
-  from an identifier it could not fill in) or stored (which would fold every
-  such event onto one id and drop all but the first as a duplicate). The
-  schema declared `minLength: 1` without saying what a sender sending `""`
-  actually gets.
-  `TestIngestTreatsAnEmptyIDAsOmitted` pins the behavior.
-
-- The agent feed's OpenAPI spec now declares the `Cache-Control: no-store`
-  answer header on every status either path lists. The ingest server has set
-  it ahead of routing since the start, so it rides every answer a handler
-  gives: an acknowledgement, a `503` naming a full decode table and a `404`
-  listing the endpoints. The spec did not name it, and a client generated
-  from the spec decides what to cache from what it can see, so a header the
-  file omitted was one it would cache and hand the next sender this run's
-  acknowledged counts, its saturation state and its endpoint list. The two
-  refusals the Go runtime makes before a handler runs are the documented
-  exception, since they never reach the chain that sets it.
-
-### Breaking
-
-- The `toktop: engine answering again` audit line reports the failure it ended
-  under a new `down_reason` key instead of the `reason` every failure line
-  shares. Before this release a log filter on `reason` -- the field to watch
-  for "what is broken right now" -- returned the recovery line too, so it read
-  an outage that had already cleared as a live one. After this release `reason`
-  is carried only by the `toktop: engine not answering` line, so that filter
-  is right, and the failure text on the recovery line has to be read from
-  `down_reason`. A filter or parser keyed on `reason` for the recovery line
-  stops matching it; `toktop: engine not answering` is unchanged, and probes
-  (`probe failed`, `probe answering again`) already used this split.
-
-### Fixed
 
 - A context total below the output beside it no longer reaches the dashboard or
   any `agentusage` embedder. The rule is that the window a model read cannot be
@@ -205,6 +145,75 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   a `TiB` tier for the same reason. A `1<<63` model context reads `9223372.0T`
   now instead of `9223372036.9G`. The JSON and text reports carry raw numbers
   and are unchanged.
+
+- The dependency gates now read a workflow written as `.yaml` as well as one
+  written as `.yml`. GitHub Actions runs both, but the `WORKFLOWS` wildcard in
+  the Makefile and the glob behind the action, tool-pin and workflow checks
+  named only `*.yml`, so a workflow renamed to `.yaml` kept running in CI with
+  the job's token while every gate holding its `uses:` refs and its fetched
+  tools answered about a file that no longer carried the workflow: a
+  tag-pinned action or an unpinned `go run` in it passed a run that no longer
+  read it. The wildcard and the Go gate's glob cover both extensions now, so
+  a workflow cannot move to the one name the gates do not read.
+
+### Added
+
+- A wrong method on the site Worker now answers with a body naming the path
+  and the methods it takes (`method not allowed; /health accepts GET, HEAD,
+  not POST`), the envelope the ingest port's `404` and `405` already use. The
+  reason was the bare string `method not allowed`, which named neither the
+  path nor the accepted methods: a client that logs a body without its
+  headers, or that reads the line the way it reads `/health`, was left with a
+  failure that did not say which request it belonged to or what the request
+  should have been. Both refusal sites, the page and the image paths, now
+  answer from one `notAllowedMessage`, and the `Allow` header still carries
+  the list for a client that reads headers.
+
+- The agent feed's OpenAPI spec now declares a `maximum` on the four numeric
+  event fields, `prompt_tokens`, `output_tokens`, `thinking_tokens` and
+  `span_ms`. The ceilings were already in the descriptions and were the ones
+  the handler clamps with, but a client generator reads the schema and not the
+  prose, and `minimum: 0` with no `maximum` reads as "any count up to
+  int64": the generated sender writes values the server silently clamps to
+  zero, and the totals it expected never arrive. Each `maximum` is
+  `core.MaxEventTokens` or the span bound, and
+  `TestOpenAPIEventCapsMatchTheBounds` pins both, so a bound that drifts in
+  either file fails there rather than in a sender's token count.
+
+- The agent feed's OpenAPI spec and the README now say that an `id` sent as
+  `null` or as an empty string reads as one left out, the rule every other
+  field on the schema follows. The handler has always done this: an empty id
+  is keyed from the request `Idempotency-Key` like any other id-less line,
+  rather than refused (which would break every sender that builds the key
+  from an identifier it could not fill in) or stored (which would fold every
+  such event onto one id and drop all but the first as a duplicate). The
+  schema declared `minLength: 1` without saying what a sender sending `""`
+  actually gets.
+  `TestIngestTreatsAnEmptyIDAsOmitted` pins the behavior.
+
+- The agent feed's OpenAPI spec now declares the `Cache-Control: no-store`
+  answer header on every status either path lists. The ingest server has set
+  it ahead of routing since the start, so it rides every answer a handler
+  gives: an acknowledgement, a `503` naming a full decode table and a `404`
+  listing the endpoints. The spec did not name it, and a client generated
+  from the spec decides what to cache from what it can see, so a header the
+  file omitted was one it would cache and hand the next sender this run's
+  acknowledged counts, its saturation state and its endpoint list. The two
+  refusals the Go runtime makes before a handler runs are the documented
+  exception, since they never reach the chain that sets it.
+
+### Breaking
+
+- The `toktop: engine answering again` audit line reports the failure it ended
+  under a new `down_reason` key instead of the `reason` every failure line
+  shares. Before this release a log filter on `reason` -- the field to watch
+  for "what is broken right now" -- returned the recovery line too, so it read
+  an outage that had already cleared as a live one. After this release `reason`
+  is carried only by the `toktop: engine not answering` line, so that filter
+  is right, and the failure text on the recovery line has to be read from
+  `down_reason`. A filter or parser keyed on `reason` for the recovery line
+  stops matching it; `toktop: engine not answering` is unchanged, and probes
+  (`probe failed`, `probe answering again`) already used this split.
 
 ## [0.23.0] - 2026-09-30
 

@@ -1050,7 +1050,11 @@ endef
 # mention a command it is not running. Every other line naming a go
 # toolchain command must carry the tag, and every go vet line must carry
 # VET_TESTS as well, for the reason given at the `vet` target.
-WORKFLOWS := $(wildcard .github/workflows/*.yml)
+# Both extensions GitHub Actions reads, not just the one this tree happens to
+# use: a workflow written as .yaml runs in CI with the job's token and its
+# network exactly like a .yml, and a glob naming one extension leaves every
+# gate below answering about a file that no longer carries the workflow.
+WORKFLOWS := $(wildcard .github/workflows/*.yml .github/workflows/*.yaml)
 
 # The same drift, inside this file. `test-pkg` builds its own `-tags` value
 # rather than reusing GOTAGS, so a line here can lose the tag or the shuffle
