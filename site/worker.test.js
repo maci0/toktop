@@ -348,14 +348,23 @@ test("implicit identity does not outweigh an accepted compressed representation"
 });
 
 test("unacceptable encodings return an uncacheable 406, including conditional requests", async () => {
+  // A fresh isolate so the per-isolate cap starts at zero. The not-acceptable
+  // lines are counted in module state, and this file's own refusals plus every
+  // one the fuzz file drives against the shared module spend the budget: the
+  // fuzz seeds alone emit more than REFUSAL_LOG_CAP, so on the shared isolate
+  // the 12 lines asserted below are past the cap and silently dropped, and the
+  // assertion reads the empty list as a pass with a failure shape.
+  const { default: freshWorker } = await import("./worker.js?not-acceptable");
   const logs = captureLogs();
   try {
-    const etag = (await call()).headers.get("etag");
+    const etag = (await freshWorker.fetch(new Request(ORIGIN))).headers.get("etag");
     let refused = 0;
     for (const ae of ["identity;q=0", "*;q=0", "deflate, identity;q=0"]) {
       for (const method of ["GET", "HEAD"]) {
         for (const conditional of [{}, { "if-none-match": etag }]) {
-          const res = await call({ "accept-encoding": ae, ...conditional }, { method });
+          const res = await freshWorker.fetch(
+            new Request(ORIGIN, { method, headers: { "accept-encoding": ae, ...conditional } }),
+          );
           expect(res.status).toBe(406);
           expect(res.headers.get("cache-control")).toBe("no-store");
           expect(res.headers.get("vary")).toBe("Accept-Encoding");
@@ -381,7 +390,9 @@ test("unacceptable encodings return an uncacheable 406, including conditional re
         duration_ms: expect.any(Number),
       })),
     );
-    const accepted = await call({ "accept-encoding": "*;q=0, gzip;q=0.5" });
+    const accepted = await freshWorker.fetch(
+      new Request(ORIGIN, { headers: { "accept-encoding": "*;q=0, gzip;q=0.5" } }),
+    );
     expect(accepted.status).toBe(200);
     expect(accepted.headers.get("content-encoding")).toBe("gzip");
   } finally {
