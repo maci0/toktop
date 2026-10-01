@@ -14,34 +14,6 @@ import (
 
 var openAPIVersionRe = regexp.MustCompile(`(?m)^\s{2}version:\s*"?([^"\s]+)"?\s*$`)
 
-// changelogReleases returns the release sections of CHANGELOG.md newest first,
-// each with the date its heading carries.
-func changelogReleases(t *testing.T) []changelogRelease {
-	t.Helper()
-	raw, err := os.ReadFile(filepath.Join(moduleRoot, "CHANGELOG.md"))
-	if err != nil {
-		t.Fatalf("read CHANGELOG.md: %v", err)
-	}
-	var out []changelogRelease
-	for _, line := range strings.Split(string(raw), "\n") {
-		m := headerRe.FindStringSubmatch(line)
-		if m == nil || m[1] == "Unreleased" {
-			continue
-		}
-		v, ok := parseSemver(m[1])
-		if !ok {
-			t.Fatalf("CHANGELOG.md section [%s] is not a version this gate can compare", m[1])
-		}
-		out = append(out, changelogRelease{version: v, date: m[2]})
-	}
-	return out
-}
-
-type changelogRelease struct {
-	version semver
-	date    string
-}
-
 // TestOpenAPIVersionNamesTheReleaseItDescribes holds the OpenAPI document's
 // `info.version` to the release its content shipped in.
 //

@@ -19,6 +19,39 @@ var (
 	linkRe   = regexp.MustCompile(`^\[([^\]]+)\]:\s*(\S+)`)
 )
 
+// changelogRelease is one dated release section of CHANGELOG.md.
+type changelogRelease struct {
+	version semver
+	date    string
+}
+
+// changelogReleases returns the release sections of CHANGELOG.md newest first,
+// each with the date its heading carries. It lives beside the changelog
+// regexes it reads with rather than in whichever test called it first: the
+// section list is the changelog's own shape, and openapi_test.go only consumes
+// it to date a document against the releases.
+func changelogReleases(t *testing.T) []changelogRelease {
+	t.Helper()
+	raw, err := os.ReadFile(filepath.Join(moduleRoot, "CHANGELOG.md"))
+	if err != nil {
+		t.Fatalf("read CHANGELOG.md: %v", err)
+	}
+	var out []changelogRelease
+	for _, line := range strings.Split(string(raw), "\n") {
+		m := headerRe.FindStringSubmatch(line)
+		if m == nil || m[1] == "Unreleased" {
+			continue
+		}
+		v, ok := parseSemver(m[1])
+		if !ok {
+			t.Fatalf("CHANGELOG.md section [%s] is not a version this gate can compare", m[1])
+		}
+		out = append(out, changelogRelease{version: v, date: m[2]})
+	}
+	return out
+}
+
+// semver is a parsed three-number version with its pre-release tag.
 type semver struct {
 	major int
 	minor int
@@ -72,10 +105,16 @@ func (v semver) less(o semver) bool {
 	return v.extra < o.extra
 }
 
+// findChangelogPath returns the repository's changelog, or the empty string
+// when it cannot be found. The path is spelled through moduleRoot like every
+// other file this package reads: the earlier list of relative candidates also
+// probed a sibling package layout repogate does not have (it sat beside
+// CHANGELOG.md before it moved under internal/), and a candidate naming a
+// directory that does not exist is one more way to read whichever file
+// answers first.
 func findChangelogPath() string {
 	candidates := []string{
-		"../../CHANGELOG.md",
-		"../CHANGELOG.md",
+		filepath.Join(moduleRoot, "CHANGELOG.md"),
 		"CHANGELOG.md",
 	}
 	for _, c := range candidates {
