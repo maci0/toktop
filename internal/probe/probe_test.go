@@ -726,6 +726,42 @@ func TestRunOllamaStopsOnStreamBytes(t *testing.T) {
 	}
 }
 
+// A frame past the scanner buffer is the one line-length hang-up the token
+// and byte budgets cannot reach, because neither counter sees a frame that
+// never completes. An engine answering with one oversized delta produced this,
+// and the operator has to be told that: the raw reader error ("bufio.Scanner:
+// token too long") names the Go standard library, not the engine, and reads
+// identically on a gateway that is working and one that is broken. Both
+// dialects reach the same diagnosis, so both are pinned.
+func TestRunNamesTheOversizedFrame(t *testing.T) {
+	huge := strings.Repeat("a", probeLineMax*2)
+	for _, tc := range []struct {
+		kind, contentType, body string
+	}{
+		{core.KindVLLM, "text/event-stream",
+			"data: {\"choices\":[{\"delta\":{\"content\":\"" + huge + "\"}}]}\n\n"},
+		{core.KindOllama, "application/x-ndjson",
+			`{"response":"` + huge + `"}` + "\n"},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", tc.contentType)
+			fmt.Fprint(w, tc.body)
+		}))
+		s := Run(context.Background(), Request{Kind: tc.kind, Base: srv.URL, Model: "m"})
+		srv.Close()
+
+		if s.OK {
+			t.Errorf("%s: an oversized frame produced a measurement: %+v", tc.kind, s)
+		}
+		if strings.Contains(s.Err, "bufio") {
+			t.Errorf("%s: err = %q, want the engine's behaviour named, not the reader's", tc.kind, s.Err)
+		}
+		if !strings.Contains(s.Err, "16384") {
+			t.Errorf("%s: err = %q, want the frame limit (%d) named", tc.kind, s.Err, probeLineMax)
+		}
+	}
+}
+
 // A usage field far past the requested generation is engine junk, not a
 // measurement. Fall back to the content frames actually observed.
 func TestRunOpenAIRejectsUnboundedUsage(t *testing.T) {

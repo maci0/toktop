@@ -260,6 +260,30 @@ func streamReadErr(ctx context.Context, err error, tokens int, hungUp bool) erro
 	if ctx.Err() == nil && (hungUp || tokens > 0) {
 		return nil
 	}
+	return scanErr(err)
+}
+
+// errFrameTooLong is the Go spelling bufio.Scanner uses when a line is longer
+// than the buffer it was given, and the one line-length hang-up out of the
+// three the client installs can still reach. The other two (token and byte
+// budgets) are counted as frames arrive, so a frame at all of probeLineMax is
+// the one the engine produces when it ignores max_tokens and answers with a
+// single oversized delta. That is a billing shape, not a broken engine, and the
+// raw Go string names neither: the operator reading "token too long" on a
+// gateway that is working perfectly has no way to tell a misbehaving gateway
+// from a dead one.
+const errFrameTooLong = "token too long"
+
+// scanErr names a scanner failure in terms of the engine's behaviour rather
+// than the reader's. Every other scanner error is passed through unchanged —
+// it is already an engine message or a transport failure, and rewriting it
+// would lose what it said — so this is the one line-length diagnosis, not a
+// general one.
+func scanErr(err error) error {
+	if err != nil && strings.Contains(err.Error(), errFrameTooLong) {
+		return fmt.Errorf("engine ignored the %d-token cap and sent one frame over %d bytes",
+			probeTokens, probeLineMax)
+	}
 	return err
 }
 
