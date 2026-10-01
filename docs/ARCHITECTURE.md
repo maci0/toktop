@@ -143,9 +143,9 @@ whose tag names a subset of the POSIX platforms takes no suffix, because a
 suffix would claim more than the tag delivers.
 
 A file built for a tag that is not one platform carries the build-tag name
-last and a subject before it: `internal/procs/procs_linux_root.go` is the
-root-only half of the linux walk, `internal/procs/procs_tooling.go` the half
-darwin and windows share, and `internal/sysmon/sysmon_utsfield.go` the
+last and a subject before it: `internal/procs/procs_linux_root.go` holds the
+`/proc` root the whole linux walk reads, `internal/procs/procs_tooling.go` the
+half darwin and windows share, and `internal/sysmon/sysmon_utsfield.go` the
 `linux || darwin` field reader. The same shape covers build tags that are not
 platforms at all: the `sqlite` tag splits the two source hooks `agentusage`
 decides an agent is readable through.
