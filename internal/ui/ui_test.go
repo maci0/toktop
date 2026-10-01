@@ -1866,6 +1866,40 @@ func TestMinimalViewGuidesRecovery(t *testing.T) {
 		t.Errorf("minimal --agents empty view still tells them to restart:\n%s", out)
 	}
 
+	// The ingest endpoint is the only thing on the frame that says this run is
+	// an ingest run, so a reader who shrank the pane below the setup card has
+	// to be able to find it there too, at every width the strip draws.
+	for _, sz := range [][2]int{{61, 30}, {50, 24}, {40, 20}, {20, 8}} {
+		w, h := sz[0], sz[1]
+		ing := New(Config{Version: "t", IngestAddr: "127.0.0.1:8420"}, nil)
+		ing.w, ing.h, ing.ready = w, h, true
+		got := strip(ing.View())
+		if !strings.Contains(got, "v1/events") {
+			t.Errorf("minimal ingest view at %dx%d lost the endpoint:\n%s", w, h, got)
+		}
+		// Graded like minimalHint: the hint degrades to a whole instruction
+		// rather than to half an address. Only the hint line is checked; the
+		// engines line above it has always shortened this way.
+		var hint string
+		for _, ln := range strings.Split(got, "\n") {
+			if strings.Contains(ln, "POST") {
+				hint = ln
+			}
+		}
+		if hint == "" || strings.Contains(hint, "…") {
+			t.Errorf("minimal ingest view at %dx%d ends on half a hint: %q", w, h, hint)
+		}
+		if lipgloss.Width(got) > w {
+			t.Errorf("minimal ingest view at %dx%d is %d wide", w, h, lipgloss.Width(got))
+		}
+	}
+	// A run with no endpoint keeps the flag advice it always had.
+	noIngest := New(Config{Version: "t"}, nil)
+	noIngest.w, noIngest.h, noIngest.ready = 61, 30, true
+	if got := strip(noIngest.View()); !strings.Contains(got, "--demo") || strings.Contains(got, "v1/events") {
+		t.Errorf("minimal view with no ingest endpoint invented one:\n%s", got)
+	}
+
 	now := time.Now()
 	agents := New(Config{Version: "t"}, nil)
 	nm, _ = agents.Update(snapMsg(core.Snapshot{Agents: []core.AgentEvent{

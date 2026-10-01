@@ -399,6 +399,40 @@ func (m Model) minimalHint() string {
 	return shorten(forms[len(forms)-1], m.w)
 }
 
+// compactEmptyHint is the compact strip's one line of advice for a run that has
+// neither engines nor agents: where to send work, or which flag to re-run with.
+//
+// It is the strip's counterpart to renderEmpty's setup card and to the AGENT
+// FEED panel title, which both name the ingest endpoint when the run has one.
+// That endpoint is the only piece of state unique to such a run — nothing else
+// on the strip distinguishes `toktop --ingest` from a bare `toktop` — so a
+// strip that dropped it left a reader who shrank their pane with no way back to
+// the one thing they asked the run to do. It is graded longest-first the way
+// feedEmptyForms grades the feed's own hint, so a narrow strip still ends on a
+// whole instruction rather than half of an address.
+//
+// "or" keeps the flags from reading as one command carrying all of them.
+func (m Model) compactEmptyHint() string {
+	forms := []string{"try --demo, --add URL, or --agents"}
+	if m.cfg.IngestAddr != "" {
+		forms = []string{
+			"POST events to http://" + core.SanitizeText(m.cfg.IngestAddr) +
+				"/v1/events, or try --demo or --agents",
+			"POST to http://" + core.SanitizeText(m.cfg.IngestAddr) + "/v1/events",
+			"POST to the ingest endpoint",
+			"POST to /v1/events",
+		}
+	}
+	for _, f := range forms {
+		if widthOf(f) <= m.w {
+			return f
+		}
+	}
+	// The last form is a prefix of every one above it, so on a pane narrower
+	// than it the strip still ends on the action rather than on half a URL.
+	return shorten(forms[len(forms)-1], m.w)
+}
+
 // renderMinimal is the degraded view for panes too small for the dashboard:
 // one line per engine, plus orientation the compact layout must carry on its
 // own because the footer and header are not rendered here.
@@ -444,8 +478,7 @@ func (m Model) renderMinimal() string {
 				lines = append(lines, dim(clip("watching local agents…", m.w)))
 			} else {
 				lines = append(lines, clip(styleWarn.Render("no inference engines detected"), m.w))
-				// "or" so this is not read as one command with every flag.
-				lines = append(lines, dim(clip("try --demo, --add URL, or --agents", m.w)))
+				lines = append(lines, dim(clip(m.compactEmptyHint(), m.w)))
 			}
 		}
 		for _, r := range rates {
