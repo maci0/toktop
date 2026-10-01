@@ -131,6 +131,12 @@ func TestSanitizeTextStripsBidiAndZeroWidth(t *testing.T) {
 		{"tag char cannot hide in a name", "clau\U000E0064e", "claue"},
 		{"language tag prefix", "\U000E0001claude", "claude"},
 		{"tag space in a name", "clau\U000E0020de", "claude"},
+		// The variation selectors supplement is Mn, not Cf, so the Cf arm
+		// above does not reach it and the range check is the only thing
+		// stripping it. Both ends of the block, because a bound written
+		// one codepoint short still strips VS17 and reads as covered.
+		{"VS supplement cannot hide in a name", "clau\U000E0100de", "claude"},
+		{"VS supplement, last code point", "clau\U000E01EFde", "claude"},
 	}
 	for _, tc := range cases {
 		if got := SanitizeText(tc.in); got != tc.want {

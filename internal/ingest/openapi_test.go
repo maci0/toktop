@@ -291,6 +291,42 @@ func TestOpenAPIEventCapsMatchTheBounds(t *testing.T) {
 	if !strings.Contains(propertySection(t, "Event", "span_ms"), strconv.FormatInt(maxSpanMS, 10)) {
 		t.Errorf("the Event schema does not name the span bound (%d ms) the handler clamps with", maxSpanMS)
 	}
+	// The two bounds a sender sizes its request against, quoted as literals
+	// in the examples list rather than in a property: a generated client reads
+	// that list to decide what it may send, so a constant drifting under it
+	// turns the answer a sender gets into one nothing told it about. Every
+	// other test here drives the server against the constants themselves, so
+	// a change to the constant alone would pass the whole file.
+	bodyCap := strconv.Itoa(maxEventBody)
+	if !strings.Contains(openapiSource(t), "exceeds "+bodyCap+" byte cap") {
+		t.Errorf("the 413 example does not name the %s-byte body cap maxEventBody enforces", bodyCap)
+	}
+	streamCap := strconv.Itoa(maxInFlightEvents)
+	if !strings.Contains(openapiSource(t), "at most "+streamCap+" event streams") {
+		t.Errorf("the 503 example does not name the %s-stream cap maxInFlightEvents enforces", streamCap)
+	}
+	// The id cap is quoted as a literal twice over: in the 400 the server
+	// sends and in the examples list, both as 128. The table above only ever
+	// compares the schema against the constant, so a change to the constant
+	// moves both sides together and every test in this file still passes; the
+	// number a sender reads off the 400 is the one that has to stay put.
+	if idCap := strconv.Itoa(core.AgentIDMax); idCap != "128" ||
+		!strings.Contains(openapiSource(t), "bad id: must be at most "+idCap+" characters") {
+		t.Errorf("the 400 example does not name the %d-character id cap the handler refuses at, spelled 128 in the spec and the README", core.AgentIDMax)
+	}
+	// The ledger's two bounds, spelled the same way in the schema's prose and
+	// in the README row: a sender that backs off for less than the horizon
+	// gets its replay deduplicated, and one that holds more than the ledger's
+	// count does not. Both are why a retry is safe, and both move with their
+	// constants unless one of them is pinned against the published spelling.
+	horizon := int(core.AgentIDHorizon / time.Minute)
+	if horizon != 15 || !strings.Contains(openapiSource(t), "last "+strconv.Itoa(horizon)+" minutes is ignored") {
+		t.Errorf("the schema does not name the %d-minute dedup horizon core.AgentIDHorizon enforces, spelled 15 in the spec and the README", horizon)
+	}
+	if ledgerMax := strconv.Itoa(core.AgentIDLedgerMax); ledgerMax != "7200" ||
+		!strings.Contains(openapiSource(t), "fewer than "+ledgerMax+" ids") {
+		t.Errorf("the schema does not name the %d-id ledger bound core.AgentIDLedgerMax enforces, spelled 7200 in the spec and the README", core.AgentIDLedgerMax)
+	}
 	// The same ceilings as machine-readable bounds. The prose above is what a
 	// reader gets, but a client generator reads the schema and nothing else,
 	// and `minimum: 0` with no `maximum` reads as "any count up to int64":
