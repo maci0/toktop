@@ -78,8 +78,9 @@ paths:
         Resending a body needs one of the two keys, or the events it carries
         are counted a second time: an `id` on each event, or one
         `Idempotency-Key` on the request, which keys every id-less line by its
-        position in the body. A body carrying neither is accepted, and a replay
-        of it reads `{"accepted":2,"stored":4}`.
+        position in the body. A body carrying neither is stored again on every
+        replay, and the second send reads `{"accepted":2,"stored":2}` rather
+        than the `{"accepted":2,"stored":0}` a keyed replay reads.
       operationId: recordEvents
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"

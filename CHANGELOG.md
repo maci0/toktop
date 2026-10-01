@@ -41,6 +41,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- The agent feed's OpenAPI spec no longer claims a replay of an unkeyed body
+  answers `{"accepted":2,"stored":4}`. The handler decodes every line and can
+  only store a subset of them, so `stored` is never above `accepted`; the
+  number the spec printed was neither answer a replay can produce. A body
+  carrying no `id` and no `Idempotency-Key` has nothing to deduplicate against,
+  so the second send stores both lines again and reads
+  `{"accepted":2,"stored":2}`; under either key it reads
+  `{"accepted":2,"stored":0}`. The spec now names both, and
+  TestOpenAPIReplayProseNamesTheAckAReplayReads in internal/ingest drives two
+  real replays and fails when the prose stops naming the pair the handler
+  writes.
+
 - `--origin` is no longer parsed outside `--demo`. It configures the demo
   timeline and nothing else, so a non-demo run had no use for it, but a
   malformed value still aborted the run with exit code 2 before the startup

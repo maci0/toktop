@@ -2,6 +2,8 @@ package ingest
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -702,6 +704,117 @@ func TestOpenAPIAckExampleIsAPairTheHandlerCanWrite(t *testing.T) {
 		t.Errorf("the 202 example reads accepted %d, stored %d; the feed can only keep a subset of what the wire carried",
 			ack["accepted"], ack["stored"])
 	}
+}
+
+// The operation's prose spells out what a replay reads on its answer, since
+// the Ack schema cannot: the pair is two integers whose relation depends on
+// what the request carried. Both claims are read off the spec and checked
+// against a second send, so a prose example that stopped describing the
+// handler fails here rather than reaching a sender as a promise about its own
+// counts.
+func TestOpenAPIReplayProseNamesTheAckAReplayReads(t *testing.T) {
+	desc := openapiOperationDescription(t, eventsPath, "recordEvents")
+	body := ndjsonEvent("a") + "\n" + ndjsonEvent("b")
+
+	// One server per key, so the first send is what the second replays.
+	read := func(key string) string {
+		t.Helper()
+		s := startIngest(t, &onceRecorder{})
+		url := "http://" + s.Addr() + eventsPath
+		send := func() string {
+			t.Helper()
+			req, err := http.NewRequest(http.MethodPost, url, strings.NewReader(body))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if key != "" {
+				req.Header.Set("Idempotency-Key", key)
+			}
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			raw, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resp.StatusCode != http.StatusAccepted {
+				t.Fatalf("POST %s answered %d, want 202", eventsPath, resp.StatusCode)
+			}
+			return strings.TrimSpace(string(raw))
+		}
+		if first := send(); first != `{"accepted":2,"stored":2}` {
+			t.Fatalf("the first send answered %s, want both lines stored", first)
+		}
+		return send()
+	}
+
+	// The key mints ids, so the replay lands on keys the feed already holds
+	// and keeps nothing. Without one there are no ids to collide, so every
+	// line decodes and is stored a second time.
+	keyed, unkeyed := read("replay-prose"), read("")
+	if keyed != `{"accepted":2,"stored":0}` {
+		t.Errorf("a keyed replay answered %s, which the operation's prose would then misreport", keyed)
+	}
+	if unkeyed != `{"accepted":2,"stored":2}` {
+		t.Errorf("an unkeyed replay answered %s; the feed has no key to suppress it, so both lines are stored again", unkeyed)
+	}
+	for _, ack := range []string{keyed, unkeyed} {
+		if !strings.Contains(desc, "`"+ack+"`") {
+			t.Errorf("the operation's prose does not name the ack a replay reads, %s:\n%s", ack, desc)
+		}
+	}
+}
+
+// openapiOperationDescription is one operation's description block, folded the
+// way a reader sees it: the file wraps it across lines at the column width.
+func openapiOperationDescription(t *testing.T, path, operation string) string {
+	t.Helper()
+	lines := strings.Split(openapiSection(t, path), "\n")
+	start := -1
+	for i, l := range lines {
+		if l == "      operationId: "+operation {
+			// The description is the block scalar above the operationId.
+			for j := i - 1; j >= 0; j-- {
+				if strings.HasPrefix(lines[j], "      description: |") {
+					start = j + 1
+					break
+				}
+				if strings.HasPrefix(lines[j], "      ") && !strings.HasPrefix(lines[j], "        ") {
+					break
+				}
+			}
+			break
+		}
+	}
+	if start < 0 {
+		t.Fatalf("docs/openapi.yaml operation %s declares no description", operation)
+	}
+	// The block scalar continues while the lines are indented past the key and
+	// carries at least one blank line between paragraphs; a blank line here is
+	// a paragraph break, not the end of the block.
+	var out []string
+	for _, l := range lines[start:] {
+		if strings.TrimSpace(l) == "" {
+			out = append(out, "")
+			continue
+		}
+		if !strings.HasPrefix(l, "        ") {
+			break
+		}
+		out = append(out, l)
+	}
+	if len(out) == 0 {
+		t.Fatalf("docs/openapi.yaml operation %s has an empty description", operation)
+	}
+	return strings.Join(strings.Fields(strings.Join(out, " ")), " ")
+}
+
+// ndjsonEvent is one NDJSON line naming agent, with a token count so the
+// two lines of a body are distinguishable in the feed.
+func ndjsonEvent(agent string) string {
+	return fmt.Sprintf(`{"agent":%q,"output_tokens":1}`, agent)
 }
 
 // acceptsExampleBody reports whether one example object decodes and passes the
