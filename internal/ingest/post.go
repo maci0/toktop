@@ -65,9 +65,15 @@ const retryAfterSeconds = 1
 // request rather than from package state every request shares, so a 408 names
 // the ones that applied here. Deadline setting is best effort; on
 // ResponseWriters without support the body degrades to volume-only capping.
+//
+// now is the server's clock, taken as a value rather than called through the
+// Server on every read: a read that took the server lock per chunk would put
+// the collector's own lock between the peer and its deadline. handlePost is
+// the only constructor and always supplies it.
 type progressBody struct {
 	io.ReadCloser
 	rc    *http.ResponseController
+	now   func() time.Time
 	idle  time.Duration // no progress for this long reaps the body
 	life  time.Duration // the whole POST's lifetime, named by the 408
 	until time.Time     // the absolute end, until the lifetime
@@ -90,7 +96,7 @@ func (b *progressBody) arm(deadline time.Time) error {
 }
 
 func (b *progressBody) Read(p []byte) (int, error) {
-	next := time.Now().Add(b.idle)
+	next := b.now().Add(b.idle)
 	if next.After(b.until) {
 		next = b.until
 	}
@@ -199,6 +205,11 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 	// TCP timeout, and the audit line would still read a clean 202. The
 	// refusal rides the request's own audit line rather than being dropped,
 	// the way progressBody.armed records whether a read deadline was accepted.
+	// The write bound is the one deadline left on wall time: it expires
+	// against a socket the OS owns, not against the run's own clock, and
+	// SetWriteDeadline takes a real deadline. A replay that never advances
+	// wall time therefore has to wait the bound out, which is the point: the
+	// refusal that bound prevents is a descriptor held for real seconds.
 	life, idle, write := s.bodyBounds()
 	var writeArm []any
 	armWrite := func() {
@@ -231,8 +242,8 @@ func (s *Server) handlePost(w http.ResponseWriter, r *http.Request) {
 			append([]any{"in_flight", len(slots), "slot_cap", cap(slots)}, writeArm...)...)
 		return
 	}
-	until := time.Now().Add(life)
-	progress := &progressBody{ReadCloser: r.Body, rc: rc, idle: idle, life: life, until: until}
+	until := s.instant().Add(life)
+	progress := &progressBody{ReadCloser: r.Body, rc: rc, now: s.instant, idle: idle, life: life, until: until}
 	_ = progress.arm(until) // covers reads before the first progress extension
 	r.Body = http.MaxBytesReader(w, progress, maxEventBody)
 	br := bufio.NewReader(r.Body)

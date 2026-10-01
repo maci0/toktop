@@ -2028,6 +2028,44 @@ func TestIngestCutsBodyPastAbsoluteLifetime(t *testing.T) {
 	}
 }
 
+// The read deadline a POST arms around its body is what turns a peer that
+// stops sending into a 408, so where it is dated decides which bound a stalled
+// stream is judged against. Dated on the wall clock it is a length of real
+// time a driver never steps: a run replayed on a pinned timeline has to sit
+// out the whole window in real seconds before it can observe the refusal, and
+// two replays of one seed measure it against two different amounts of it. It
+// belongs on the same clock the events themselves are stamped on.
+func TestPostReadDeadlineRidesTheInjectedClock(t *testing.T) {
+	origin := time.Unix(1_700_000_000, 0).UTC()
+	now := origin
+	b := &progressBody{
+		ReadCloser: io.NopCloser(strings.NewReader("")),
+		rc:         &http.ResponseController{},
+		now:        func() time.Time { return now },
+		idle:       30 * time.Second,
+		life:       time.Minute,
+		until:      origin.Add(time.Minute),
+	}
+	// A ResponseController over a body that is not a conn refuses the
+	// deadline, which is the state armed records and the reads below must
+	// survive. The reader hands back its error either way; what the test
+	// reads is the deadline each read armed.
+	_, _ = b.Read(make([]byte, 1))
+	if want := origin.Add(30 * time.Second); !b.last.Equal(want) {
+		t.Fatalf("idle deadline = %v, want %v", b.last, want)
+	}
+	now = origin.Add(45 * time.Second)
+	_, _ = b.Read(make([]byte, 1))
+	if want := origin.Add(time.Minute); !b.last.Equal(want) {
+		t.Fatalf("deadline after the run stepped past the idle window = %v, want the lifetime end %v", b.last, want)
+	}
+	now = origin.Add(2 * time.Minute)
+	_, _ = b.Read(make([]byte, 1))
+	if want := origin.Add(time.Minute); !b.last.Equal(want) {
+		t.Fatalf("deadline past the lifetime = %v, want the lifetime end %v", b.last, want)
+	}
+}
+
 func captureLogger() (*slog.Logger, *bytes.Buffer) {
 	var buf bytes.Buffer
 	lg := slog.New(slog.NewTextHandler(&buf, nil))

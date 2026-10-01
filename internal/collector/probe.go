@@ -216,23 +216,24 @@ func (c *Collector) probeWave(cadenced bool) {
 		if c.probeInflight[key] { // one generation per backend at a time
 			continue
 		}
-		if until, ok := c.probeBackoff[key]; ok && time.Now().Before(until) {
+		if until, ok := c.probeBackoff[key]; ok && now.Before(until) {
 			continue // 429/503: wait out Retry-After before POSTing again
 		}
 		if cadenced {
-			if last, ok := c.probeLast[key]; ok && time.Since(last) < ProbeBackendGap {
+			if last, ok := c.probeLast[key]; ok && core.Age(now, last) < ProbeBackendGap {
 				continue // --probe cadence: this backend was measured recently
 			}
 		}
 		delete(c.probeBackoff, key)
 		c.probeInflight[key] = true
-		// Stamped at launch, so the gap measures the rate generations are
-		// started at rather than how fast they happen to finish. The wall
-		// clock, for the reason the 429 backoff below is: this is a real wait
-		// against a real provider bill, not a position on the collector's
-		// replayable timeline, and a seeded demo must not hold a backend to a
-		// gap measured in simulated seconds.
-		c.probeLast[key] = time.Now()
+		// Stamped at launch on the collector clock, so the gap measures the
+		// rate generations are started at rather than how fast they happen to
+		// finish, and reads against the same timeline as every other gate
+		// this wave applies. Read on the wall clock instead, a replay stepped
+		// through simulated time measured a ten-second gap in microseconds
+		// of it, so the --probe cadence floor held nothing and the same seed
+		// billed a different number of generations on every run.
+		c.probeLast[key] = now
 		live = append(live, t)
 	}
 	// Only a wave that examined a target moves the rotation: a wave whose
@@ -271,17 +272,17 @@ func (c *Collector) probeWave(cadenced bool) {
 			s.At = now
 			if s.RetryAfter > 0 {
 				c.probeMu.Lock()
-				// The wall clock, carrying its monotonic reading, for the same
-				// reason the elapsed time below is measured on it: a backoff is
-				// a real wait, not a position on the collector's timeline. As an
-				// instant on that timeline it survived a clock step badly in
-				// both directions, and this is the direction that costs money:
-				// an NTP step forward past the deadline drops the wait and
-				// re-POSTs into a gateway that just asked for 429 backoff, and
-				// every retry is a billed probe. time.Now carries a monotonic
-				// reading and time.Now().Before uses it, so a step of either
-				// sign leaves the wait the length the engine asked for.
-				c.probeBackoff[t.key] = time.Now().Add(s.RetryAfter)
+				// The wave's own instant, on the collector clock, for the same
+				// reason the cadence stamp above is: this is a gate on when the
+				// next wave may launch, and a gate compared against a clock the
+				// run does not step is no gate at all under a driver. A replay
+				// that never advances the wall clock (and one where real time
+				// happens to pass between two steps) otherwise holds the same
+				// backend for a different length of time and bills a different
+				// number of retries. The generation itself is real I/O and its
+				// elapsed time below is measured on the wall clock, which is the
+				// part that is not a position on the run's timeline.
+				c.probeBackoff[t.key] = now.Add(s.RetryAfter)
 				c.probeMu.Unlock()
 			}
 			// The wall clock, not the collector's: the sample's At follows the

@@ -3,6 +3,8 @@ package collector
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http/httptest"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -98,6 +100,82 @@ func TestRunReplaysFrameForFrameFromOneStep(t *testing.T) {
 	// pass the same diff, so the frames have to carry the run's own history.
 	if !strings.Contains(first[len(first)-1], "\"OutTokPS\"") {
 		t.Fatalf("last frame carries no provider series: %s", first[len(first)-1])
+	}
+}
+
+// The probe wave holds two more gates than the wave gap: the Retry-After a
+// 503 arms, and the ProbeBackendGap floor the --probe cadence applies. Both
+// decide whether a wave launches a generation, so both are answers a replay
+// has to reproduce, and both belong on the same timeline as the wave gap
+// above. A gate read on the wall clock holds a backend for a length of real
+// time the driver never stepped, so the same seed billed a different number
+// of generations on every run, and every retry into a gateway that asked for
+// backoff is billed. The engine here is a 503 naming a 30s Retry-After: the
+// deadline each wave arms is an instant on the run's own clock, and a wave
+// inside the backoff neither launches nor extends it.
+func TestProbeWaveGatesReplayFromOneStepSequence(t *testing.T) {
+	run := func() []string {
+		backend := &probeBackend{retryAfter: 30 * time.Second}
+		backend.broken.Store(true)
+		srv := httptest.NewServer(backend)
+		defer srv.Close()
+
+		origin := time.Unix(1_700_000_000, 0).UTC()
+		now := origin
+		c := New([]provider.Provider{(&fakeProvider{label: "engine", addr: srv.URL}).asProvider()}, time.Second)
+		c.lastModel[srv.URL] = "m"
+		c.SetNow(func() time.Time { return now })
+		defer c.SetNow(nil)
+
+		// probeWaveGap is a package var the audit tests shrink; the backoff
+		// gate is the subject here, and a wave the wave gap refuses would
+		// never reach it.
+		old := probeWaveGap
+		probeWaveGap = 0
+		defer func() { probeWaveGap = old }()
+
+		var out []string
+		wave := func(label string) {
+			c.ProbeAll()
+			waitFor(t, func() bool {
+				c.probeMu.Lock()
+				defer c.probeMu.Unlock()
+				return len(c.probeInflight) == 0
+			}, "probe never cleared")
+			c.probeMu.Lock()
+			until, held := c.probeBackoff[srv.URL]
+			c.probeMu.Unlock()
+			if !held {
+				out = append(out, label+": no backoff armed")
+				return
+			}
+			out = append(out, fmt.Sprintf("%s: backoff until +%s", label, until.Sub(origin)))
+		}
+		wave("wave 0 at +0s")
+		now = now.Add(10 * time.Second)
+		wave("wave 1 at +10s")
+		now = now.Add(25 * time.Second)
+		wave("wave 2 at +35s")
+		return out
+	}
+
+	first, second := run(), run()
+	for i := range first {
+		if first[i] != second[i] {
+			t.Fatalf("probe wave differs between two runs of one step sequence:\nfirst: %s\nsecond: %s", first[i], second[i])
+		}
+	}
+	// The deadline is an instant on the timeline the driver stepped: 30s past
+	// the wave that armed it, unchanged by a wave the backoff held, and 30s
+	// past the step that released it.
+	for i, want := range []string{
+		"wave 0 at +0s: backoff until +30s",
+		"wave 1 at +10s: backoff until +30s",
+		"wave 2 at +35s: backoff until +1m5s",
+	} {
+		if first[i] != want {
+			t.Errorf("step %d answered %q, want %q", i, first[i], want)
+		}
 	}
 }
 

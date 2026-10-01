@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -201,14 +202,21 @@ func TestEngineOutageClearsTheSlowRun(t *testing.T) {
 	}
 }
 
-// probeBackend is a generation endpoint a test drives: it answers 500 until
-// broken is cleared, then one streaming answer probe.Run can read.
+// probeBackend is a generation endpoint a test drives: it answers 503 until
+// broken is cleared, then one streaming answer probe.Run can read. retryAfter
+// is the Retry-After the 503 names, zero for none: a gateway that asks the
+// caller to wait arms the wave's backoff gate, and a test that wants that
+// gate exercised says for how long.
 type probeBackend struct {
-	broken atomic.Bool
+	broken     atomic.Bool
+	retryAfter time.Duration
 }
 
 func (b *probeBackend) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
 	if b.broken.Load() {
+		if b.retryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(b.retryAfter.Seconds())))
+		}
 		http.Error(w, "model unloaded", http.StatusServiceUnavailable)
 		return
 	}

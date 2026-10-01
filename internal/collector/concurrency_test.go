@@ -84,11 +84,18 @@ func TestConcurrentEmitRecordProbeClock(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	// Asserted while the run is still live, and against a deadline rather
+	// than against the writers' duration. Reading the counter once the
+	// writers were done made the assertion a statement about how the OS
+	// scheduler happened to interleave eight writers and a 1ms emit loop: the
+	// whole set can finish inside the first interval on a loaded machine,
+	// the test failed, and the collector had worked exactly as designed. A
+	// frame within the bound is the claim being made, and the bound is the
+	// same one every other wait in this package uses.
+	waitFor(t, func() bool { return frames.Load() > 0 },
+		"the emit loop produced no frame: the concurrent calls above shared no state with the run they were racing")
 	cancel()
 	<-done
-	if frames.Load() == 0 {
-		t.Fatal("the emit loop produced no frame: the concurrent calls above shared no state with the run they were racing")
-	}
 }
 
 // freeNow reports whether mu can be taken right now, taking and releasing it

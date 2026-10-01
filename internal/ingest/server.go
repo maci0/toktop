@@ -162,10 +162,12 @@ func newServer(addr string, rec core.AgentRecorder, lg *slog.Logger) (*Server, e
 }
 
 // SetNow overrides the clock used to stamp events that arrive without a
-// timestamp and to clamp stamps that sit far from arrival. Request timeouts
-// still use wall time. Safe to call while Serve is running: the write is taken
-// under the same lock every handler reads it under. Demo mode passes the
-// simulated clock so harness POSTs stay on the seeded timeline.
+// timestamp, to clamp stamps that sit far from arrival, and to date the read
+// deadlines a POST arms around its body. Request timeouts and the response
+// write bound still use wall time: those expire against sockets the OS owns,
+// not against the run's own clock. Safe to call while Serve is running: the
+// write is taken under the same lock every handler reads it under. Demo mode
+// passes the simulated clock so harness POSTs stay on the seeded timeline.
 func (s *Server) SetNow(fn func() time.Time) {
 	if fn == nil {
 		fn = time.Now
