@@ -59,6 +59,15 @@
   `go` steps; `make check-ci-env` fails when the two copies disagree.
 - No services or databases: everything is stdlib plus the modules in
   `go.mod`.
+- Only to deploy, and never for the edit-test loop or any merge gate:
+  `curl`, which reads `https://toktop.ai/health` so `make site-deploy` and
+  `make site-rollback` can confirm the site is serving before reporting
+  success. Both targets refuse to start without it, because without curl
+  every health attempt fails for a reason that has nothing to do with the
+  site: the poll would run all its attempts, sleep between each, and then
+  report "the site is not serving", which reads as a broken or half-applied
+  upload and sends the operator to roll back a deploy that published
+  perfectly.
 - Only to regenerate the README screenshot (below), and never for the
   edit-test loop or any merge gate: `tmux` to capture the live frame, and
   `magick` (ImageMagick 7) plus `avifenc` (libavif) for `make site-assets`,
@@ -242,6 +251,7 @@ in day-to-day work:
 | `make check-ci-env` | fail unless every workflow env block pins the build inputs the Makefile exports, name and value (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
 | `make check-yaml` | fail unless every workflow in `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` are valid YAML and pass the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
+| `make check-site-tools` | fail unless the site deploy path checks for `curl` before it takes the lock, since the `/health` poll both recipes end in is a curl the Makefile would otherwise take from the machine unnamed (`make check` runs it) |
 | `make check-shell` | fail unless `shellcheck` (at or above the Makefile's `SHELLCHECK_MIN`) clears the bash completion script and `zsh -n` / `fish --no-execute` parse the zsh and fish ones; all three are generated, so a copy kept beside the Go source cannot go stale (`make check` runs it, on the Linux CI leg) |
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make check-changelog-structure` | fail unless no `CHANGELOG.md` section repeats an impact heading, so the entries a second `### Added` collected do not ship unlabelled (`make check` runs it) |
@@ -284,7 +294,8 @@ CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
 the Linux leg of the test job runs eight of the `make check` guards
 (`check-ci-tags`, `check-ci-env`, `check-test-flags`, `check-ci-platforms`,
-`check-help-docs`, `check-changelog-structure`, `check-changelog-covers`,
+`check-help-docs`, `check-site-records`, `check-site-tools`,
+`check-changelog-structure`, `check-changelog-covers`,
 `check-shell`). The ninth,
 `check-yaml`, runs in the
 `scripts` job, which

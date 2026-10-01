@@ -134,6 +134,17 @@ jobs:
       - name: site deploy and rollback record before they call the platform (linux only)
         if: runner.os == 'Linux'
         run: make check-site-records
+      # The same two recipes, one step earlier: both end in a health poll, and
+      # that poll is a curl the Makefile did not name. A machine without one
+      # made every attempt fail for a reason that has nothing to do with the
+      # site, so the poll ran to the end and then reported the deploy as
+      # broken, which is the message an operator reads before rolling back a
+      # Worker that published perfectly. The guard is here so the check stays
+      # ahead of the lock, the way the recipes need it; nothing in the step
+      # above can catch that ordering.
+      - name: the site deploy path names curl before it takes the lock (linux only)
+        if: runner.os == 'Linux'
+        run: make check-site-tools
       # The changelog's shape, not one release's contents: an impact heading
       # repeated inside a section means the entries under the second one ship
       # unlabelled, and the only other place that refuses it is the cut, which

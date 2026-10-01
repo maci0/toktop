@@ -12,6 +12,10 @@ target) and the bun version (`.bun-version`, the same file CI installs), so a
 deploy cannot depend on whatever happens to be on the operator's PATH. Both
 take `dist/site.lock` and both wait for `/health` when they finish, so neither
 a rollback nor a deploy can report success over a site that is not answering.
+The `/health` wait is a `curl`, so both targets refuse to start without one:
+a missing curl fails every attempt for a reason that has nothing to do with
+the site, and the poll would end reporting "the site is not serving", which
+points the operator at a deploy that published perfectly.
 Deploy credentials come from the environment (`CLOUDFLARE_API_TOKEN`, or a
 `wrangler` login already on the machine); nothing about them is written to
 this repo.

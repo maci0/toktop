@@ -616,7 +616,11 @@ Every externally reachable input, with its code location:
     on the site. A marker naming a deploy that never reached wrangler is
     harmless: undoing it restores the version the previous deploy left
     serving, which is the version that was serving a moment ago. The
-    ordering is pinned by `check-site-records` (`make check`). The marker a
+    ordering is pinned by `check-site-records` (`make check`). The `/health`
+    poll both recipes end in is a `curl`, so the deploy path checks for one
+    before it takes the lock, and a machine without it is refused rather than
+    left to report a deploy that published perfectly as a broken one; that
+    ordering is pinned by `check-site-tools` (`make check`). The marker a
     deploy leaves behind holds a
     `manifest` naming the commit, the `wrangler` and `bun` pins, and the
     digests of `worker.js` and of the captures, so the version that reached

@@ -968,8 +968,26 @@ site-fmt: require-bun ## rewrite the included files with the BIOME formatter, th
 # platform call is done. Every recipe that calls wrangler must open with it
 # and carry the rest of its work on the same recipe line: a second line is a
 # second shell, so the trap would fire and free the lock before the deploy ran.
+#
+# The curl check comes before the lock and before the platform call, for the
+# reason every other target here names its own tools (require-bun, gh in
+# release-verify, magick/avifenc in require-encoders, shellcheck/zsh/fish in
+# check-shell). wait_for_site reads the health endpoint over curl, so a
+# machine without one makes every attempt below fail for a reason that has
+# nothing to do with the site: the poll would run all
+# $(SITE_HEALTH_TRIES) attempts, sleep $(SITE_HEALTH_WAIT)s between each, and
+# then report "$(SITE_HEALTH_URL) never answered ok", which reads as a broken
+# or half-applied upload and sends the operator to roll back a deploy that
+# published perfectly. curl is the one tool this path takes from the machine
+# without naming it, so it is named here; the check is a command -v, so it
+# costs nothing and the health poll's own --max-time still bounds the rest.
 define SITE_GUARD
 mkdir -p $(DIST); \
+command -v curl >/dev/null 2>&1 || { \
+	echo "make: curl is not on PATH; it is what reads $(SITE_HEALTH_URL) to confirm the site is serving" >&2; \
+	echo "  install it, or the health poll below cannot distinguish a broken deploy from a missing curl" >&2; \
+	exit 1; \
+}; \
 if ! mkdir $(SITE_LOCK) 2>/dev/null; then \
 	echo "another site deploy or rollback holds $(SITE_LOCK); wait for it, or remove the directory if that process is gone" >&2; \
 	exit 1; \
@@ -1400,6 +1418,56 @@ check-site-records: ## fail unless site-deploy records the deploy before calling
 	fi; \
 	exit $$fail
 
+# wait_for_site reads the health endpoint over curl, and curl is the one tool
+# the deploy path takes from the machine without naming it. Unguarded, a
+# machine without curl made every attempt fail for a reason that has nothing
+# to do with the site, so the poll ran all $(SITE_HEALTH_TRIES) attempts,
+# slept $(SITE_HEALTH_WAIT)s between each, and then reported the site was not
+# serving. That reads as a broken or half-applied upload and sends the
+# operator to roll back a deploy that published perfectly, and the cost is
+# borne in the minutes the poll spends proving nothing.
+#
+# Every other tool this Makefile takes from the host is named before it is
+# needed (require-bun, require-uv, require-encoders, gh in release-verify,
+# shellcheck/zsh/fish in check-shell), so this is the same rule for the one
+# that was missing. The check belongs in $(SITE_GUARD), which both recipes
+# open with, and before the lock: a machine missing curl should cost a
+# command -v, not a lock that a second deploy then waits on.
+#
+# The order is checked here so a reordering cannot reintroduce the shape
+# silently. $(SITE_GUARD) is a define, so it is read off the Makefile the same
+# way the two recipes above are: the curl check before the lock, and both
+# before anything the deploy itself does. A check moved after the wrangler
+# call is a deploy that has already uploaded by the time the missing tool is
+# noticed, which is the half of this no ordering rule below can undo.
+.PHONY: check-site-tools
+check-site-tools: ## fail unless the site deploy path names curl before taking the lock
+	@guard=$$(awk '/^define SITE_GUARD/ { inguard = 1 } /^endef/ { inguard = 0 } inguard { print }' $(MAKEFILE_LIST)); \
+	curl_line=$$(printf '%s\n' "$$guard" | grep -F -n 'command -v curl' | head -1 | cut -d: -f1 || true); \
+	lock_line=$$(printf '%s\n' "$$guard" | grep -F -n 'mkdir $$(SITE_LOCK)' | head -1 | cut -d: -f1 || true); \
+	if [ -z "$$curl_line" ]; then \
+		echo "make check-site-tools: the site deploy path does not check for curl" >&2; \
+		echo "  wait_for_site reads $(SITE_HEALTH_URL) over curl, so a machine without one runs every" >&2; \
+		echo "  attempt, sleeps between each, and then reports the site is not serving, which reads as a" >&2; \
+		echo "  broken deploy. Add 'command -v curl' to \$$(SITE_GUARD), before the lock" >&2; \
+		exit 1; \
+	fi; \
+	if [ -z "$$lock_line" ]; then \
+		echo "make check-site-tools: cannot find the lock step in \$$(SITE_GUARD)" >&2; \
+		exit 1; \
+	fi; \
+	if [ "$$curl_line" -gt "$$lock_line" ]; then \
+		echo "make check-site-tools: \$$(SITE_GUARD) takes the deploy lock before it checks for curl, so a machine" >&2; \
+		echo "  missing curl holds the lock and a second deploy on the same checkout waits on it" >&2; \
+		exit 1; \
+	fi; \
+	for target in site-deploy site-rollback; do \
+		if ! awk -v t="$$target:" -v g='$$(SITE_GUARD)' '$$0 ~ "^" t { inrecipe = 1; next } inrecipe && /^\t/ { if (index($$0, g)) found = 1; next } inrecipe { inrecipe = 0 } END { exit !found }' $(MAKEFILE_LIST); then \
+			echo "make check-site-tools: $$target does not open its recipe with \$$(SITE_GUARD), so the curl check does not reach it" >&2; \
+			exit 1; \
+		fi; \
+	done
+
 .PHONY: fmt
 fmt: ## rewrite all Go files with gofmt (including simplifications)
 	$(GOFMT) -s -w .
@@ -1482,6 +1550,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion s
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
 	@$(MAKE) --no-print-directory check-site-records
+	@$(MAKE) --no-print-directory check-site-tools
 	@$(MAKE) --no-print-directory check-changelog-structure
 	@$(MAKE) --no-print-directory check-changelog-covers
 	@unformatted=$$($(GOFMT) -s -l .); \
