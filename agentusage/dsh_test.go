@@ -491,3 +491,35 @@ func TestDshZstdWindowOfNewlinesCostsNoAllocations(t *testing.T) {
 		t.Fatalf("output %d, want 77: the record after the empty run still counts", got)
 	}
 }
+
+// The context total is the window the model read, so it cannot be smaller
+// than the output the same reading reports. parseDsh rebuilt the total from
+// the parts when the log omitted one and took it as given otherwise, so a log
+// carrying a total of 5 beside an output of 100 published a context window no
+// row supports. floorTotal, which foldCounters and the opencode sqlite reader
+// apply, is the shared rule this adapter now follows too.
+func TestDshTotalIsFlooredAtOutput(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		json string
+		want int
+	}{
+		{"below output", `{"inputTokens":10,"outputTokens":100,"totalTokens":5}`, 100},
+		{"real context", `{"inputTokens":10,"outputTokens":100,"totalTokens":900}`, 900},
+		{"no output to floor against", `{"inputTokens":10,"outputTokens":0,"totalTokens":7}`, 7},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			line := []byte(`{"type":"assistant/message","data":{"usage":` + c.json + `}}`)
+			v, _, ok := parseDsh(line)
+			if !ok {
+				t.Fatal("a populated usage record was rejected")
+			}
+			if v.total != c.want {
+				t.Fatalf("total = %d, want %d", v.total, c.want)
+			}
+			if v.output > 0 && v.total < v.output {
+				t.Fatalf("total %d below output %d: %+v", v.total, v.output, v)
+			}
+		})
+	}
+}

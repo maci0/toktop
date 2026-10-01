@@ -743,3 +743,34 @@ func TestParseJSONReadsPastAnUnrepresentableNumber(t *testing.T) {
 		t.Fatalf("out-of-range counter = %d ok=%v, want 0 and a record", ev.Usage.Output, ok)
 	}
 }
+
+// The context total is the window the model read, so it cannot be smaller
+// than the output the same reading reports. The generic walker rebuilt the
+// total from the parts when a record omitted one and took it as given
+// otherwise, so a record carrying total_tokens beside a larger completion
+// count published a context no row supports. floorTotal is the shared rule
+// every adapter in this package now applies.
+func TestGenericWalkTotalIsFlooredAtOutput(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		line string
+		want int
+	}{
+		{"below output", `{"usage":{"output_tokens":100,"total_tokens":5}}`, 100},
+		{"real context", `{"usage":{"output_tokens":100,"total_tokens":900}}`, 900},
+		{"no output to floor against", `{"usage":{"output_tokens":0,"total_tokens":7}}`, 7},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			v, _, ok := parseGeneric([]byte(c.line))
+			if !ok {
+				t.Fatal("a populated usage record was rejected")
+			}
+			if v.total != c.want {
+				t.Fatalf("total = %d, want %d", v.total, c.want)
+			}
+			if v.output > 0 && v.total < v.output {
+				t.Fatalf("total %d below output %d: %+v", v.total, v.output, v)
+			}
+		})
+	}
+}

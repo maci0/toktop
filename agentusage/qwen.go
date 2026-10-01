@@ -27,11 +27,16 @@ func parseQwen(line []byte) (values, string, bool) {
 	}
 	u := rec.Usage
 	thoughts := counter(u.ThoughtsTokenCount)
+	out := satAdd(counter(u.CandidatesTokenCount), thoughts)
+	in := counter(u.PromptTokenCount)
+	// The context total, floored at the output as foldCounters floors it: a
+	// line carrying a total below what it wrote is a reading nothing supports,
+	// and the gemini adapter over this same shape reports the output instead.
 	v := values{
-		output:   satAdd(counter(u.CandidatesTokenCount), thoughts),
+		output:   out,
 		thinking: thoughts,
-		total:    counter(u.TotalTokenCount),
-		input:    counter(u.PromptTokenCount),
+		total:    floorTotal(counter(u.TotalTokenCount), out),
+		input:    in,
 	}
 	if !v.present() {
 		return values{}, "", false

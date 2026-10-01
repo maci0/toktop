@@ -166,6 +166,10 @@ func parseDsh(line []byte) (values, string, bool) {
 	if tot == 0 {
 		tot = satAdd(prompt, out)
 	}
+	// A log carrying a total below the output it reports is as unsupported a
+	// reading as one that omits it, so both are floored the way foldCounters
+	// and the opencode sqlite reader floor theirs.
+	tot = floorTotal(tot, out)
 	v := values{output: out, thinking: think, total: tot, input: prompt}
 	if !v.present() {
 		return values{}, "", false

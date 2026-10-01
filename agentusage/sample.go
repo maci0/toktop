@@ -199,6 +199,10 @@ func (v values) present() bool {
 // that sum, cached is inside the prompt. thoughts is 0 for a source that
 // folds reasoning into output already, and the total is rebuilt from the
 // parts when the source omits it.
+//
+// The reported total is then floored at the output by floorTotal. A source
+// carrying a total below its own output is as unsupported a reading as one
+// that omits it, and every adapter in this package applies the same rule.
 func foldCounters(prompt, output, thoughts, cached, total int) (values, bool) {
 	in := counter(prompt)
 	out := counter(output)
@@ -209,10 +213,15 @@ func foldCounters(prompt, output, thoughts, cached, total int) (values, bool) {
 	if cache > 0 && tot >= satAdd(parts, cache) && tot != parts {
 		in = satAdd(in, cache)
 	}
-	v := values{output: out, thinking: think, input: in, total: tot}
-	if v.total == 0 {
-		v.total = satAdd(in, satAdd(out, think))
+	// The rebuild uses the post-cache prompt, so a source that omits the
+	// total reports the same parts sum the total would have covered. It runs
+	// before the floor, which only ever raises the total to the output and so
+	// would otherwise swallow this sum whenever the output is positive.
+	rebuilt := satAdd(in, satAdd(out, think))
+	if tot == 0 {
+		tot = rebuilt
 	}
+	v := values{output: out, thinking: think, input: in, total: floorTotal(tot, out)}
 	if !v.present() {
 		return values{}, false
 	}
@@ -277,6 +286,21 @@ func counter64(n int64) int {
 		return 0
 	}
 	return int(c)
+}
+
+// floorTotal is the context a reading reports: the stored total, and never
+// below the output beside it. A turn read at least what it wrote, so a total
+// under the output is a reading nothing supports. counter has already refused
+// a negative total before this sees one, so the zero floor is spent by then.
+//
+// The floor is on the reading, not on any row: one record carrying a total of
+// 5 does not lower a context another reported as 50000, because the reader
+// has already taken the largest total before this runs.
+func floorTotal(total, output int) int {
+	if total < output {
+		return output
+	}
+	return total
 }
 
 // satAdd sums two non-negative counters, saturating instead of wrapping: a

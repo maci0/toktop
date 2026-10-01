@@ -103,10 +103,14 @@ func openCodeDBPath() string {
 // will not nest: a scalar MAX of the two is a per-row fold that silently
 // reports whichever row it saw last. counter already refuses a negative total,
 // so that half of the rule was never missing here; the half that was is the
-// floor against the output. Every JSONL adapter gets it from foldCounters,
-// which rebuilds a total from the parts, and this reader's total is a MAX in
-// SQL, so a store holding a total below the output beside it published a
-// context smaller than the turn that produced it: a reading no row supports.
+// floor against the output. Every JSONL adapter gets the same floor from
+// foldCounters, and this reader's total is a MAX in SQL, so a store holding a
+// total below the output beside it published a context smaller than the turn
+// that produced it: a reading no row supports.
+//
+// floorTotal lives beside foldCounters in sample.go rather than here, so the
+// untagged adapters and this tagged reader apply one rule instead of two
+// copies that could drift.
 //
 // Sessions are the outer loop, then messages through the message index on
 // session_id. CROSS JOIN stops SQLite from reversing that into a scan of
@@ -344,20 +348,4 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok boo
 	// The read itself succeeded whatever the totals came to, so the handle
 	// stays open even when the store holds nothing for this window.
 	return v, true
-}
-
-// floorTotal is the context a reading reports: the stored total, and never
-// below the output beside it. A turn read at least what it wrote, so a total
-// under the output is a reading the rows do not support. counter has already
-// refused a negative total before this sees one, so the zero floor every
-// JSONL adapter also applies is spent here.
-//
-// The floor is on the reading, not on any row: one message carrying a total
-// of 5 does not lower a context another message reported as 50000, because
-// the statement has already picked the largest total before this runs.
-func floorTotal(total, output int) int {
-	if total < output {
-		return output
-	}
-	return total
 }

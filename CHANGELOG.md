@@ -41,6 +41,18 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- A context total below the output beside it no longer reaches the dashboard or
+  any `agentusage` embedder. The rule is that the window a model read cannot be
+  smaller than what that turn wrote, and the opencode SQLite reader had it;
+  `foldCounters` (which gemini and grok go through), `parseQwen`, `parseDsh`
+  and the generic JSONL walker each rebuilt a total from the parts only when
+  the record omitted one and otherwise took what the record carried. A
+  transcript holding `{"output":100,"total":5}` published a context of 5
+  beside an output of 100, and every consumer of the sample read the pair as
+  a measurement. All five now apply one shared `floorTotal`, and the rebuild
+  from the parts runs before it so a record that omits the total still reports
+  the whole sum rather than just its output.
+
 - The `ENGINE STATE` panel no longer drops to a bare `+N` count on a pane
   between 62 and 77 cells, which is most of an 80-column terminal. The column
   takes 31% of the frame, so at the 62-cell minimum dashboard it has fifteen
