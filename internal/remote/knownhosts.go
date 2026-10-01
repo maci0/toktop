@@ -460,7 +460,16 @@ func writeKnownHosts(path string, store map[string]string) error {
 	for _, host := range slices.Sorted(maps.Keys(store)) {
 		b.WriteString(store[host] + "\n")
 	}
-	core.SweepStaleTemps(dir, knownHostsTempPrefix, time.Now())
+	// A leftover the sweep could not unlink is not a reason to fail the
+	// write: the pins are being written either way, and the sweep runs
+	// before it only to keep the directory tidy. It is reported rather than
+	// dropped, so an operator looking at a directory holding an unverified
+	// staging file learns which one left it.
+	if err := core.SweepStaleTemps(dir, knownHostsTempPrefix, time.Now()); err != nil {
+		audit().Warn("toktop: staging file beside the host key store not removed",
+			"path", logcfg.RedactedField(core.RedactHome(path), logcfg.FieldCap),
+			"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
+	}
 	if err := atomicWriteFile(path, b.String()); err != nil {
 		return err
 	}

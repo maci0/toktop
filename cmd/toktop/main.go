@@ -362,18 +362,26 @@ func runMain() int {
 			// what the seed is for.
 			aw.SetPacer(demoSrc.Pacer())
 		}
-		// Run's only error is a second concurrent Run, which this one call
-		// site cannot make, so every condition an operator has to see comes
-		// through here instead. An engine address that will not parse is the
-		// one that matters: left unreported it silently double counts every
-		// agent's tokens against the engine it is already generating through.
-		// The UI shows the condition; the audit log keeps it, because the
-		// banner is gone with the run and a watch that stopped following an
-		// agent looks the same as one that never saw it.
+		// Conditions Run cannot return go through the sink: an engine address
+		// that will not parse is the one that matters, since left unreported
+		// it silently double counts every agent's tokens against the engine it
+		// is already generating through. The UI shows the condition; the audit
+		// log keeps it, because the banner is gone with the run and a watch
+		// that stopped following an agent looks the same as one that never saw
+		// it. The one error Run does return is handled by its caller below.
 		aw.SetOnError(func(err error) {
 			reportFailure(feedErr, slog.LevelWarn, "agent watch failed", err)
 		})
-		go aw.Run(ctx)
+		go func() {
+			// The error Run does return is a refusal to start a second live
+			// loop, which this single call site cannot ask for. Reported
+			// rather than discarded anyway: a watch that never started and a
+			// watch following no agents look the same on screen, and the
+			// collector's Run above is handled the same way.
+			if err := aw.Run(ctx); err != nil {
+				reportFailure(feedErr, slog.LevelError, "agent watch stopped", err)
+			}
+		}()
 	}
 
 	if !f.noIngest && recorder != nil {

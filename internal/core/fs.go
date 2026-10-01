@@ -44,20 +44,31 @@ func ExpandHome(p string) string {
 const StaleTempAge = 24 * time.Hour
 
 // SweepStaleTemps removes staging files an earlier write did not get to rename
-// away, where prefix names the staging files of the caller. Anything it cannot
-// remove is left alone. Callers serialize their writers, so within one process
-// only the crashed runs of earlier sessions are ever this old.
+// away, where prefix names the staging files of the caller. Callers serialize
+// their writers, so within one process only the crashed runs of earlier
+// sessions are ever this old.
 //
 // The ages are measured against now, so a driver decides which leftovers a
 // write sweeps instead of the sweep following the wall clock: which staging
 // files are swept has to be a step the run took, or a write that deletes a
 // peer's in-flight staging file and a write that spares it replay differently.
-func SweepStaleTemps(dir, prefix string, now time.Time) {
+//
+// A directory that cannot be listed is not an error: the write about to run
+// needs that directory far more than the leftovers do, and it fails with the
+// cause itself if it cannot write there. A staging file that cannot be
+// unlinked is a different condition, and is reported, for the reason
+// [DiscardStaged] gives: unverified content sits where the operator looks for
+// the real file, and a sweep that dropped the refusal on the floor left them
+// with a directory holding one and no line saying so. The failures of several
+// files are joined into the one error, so a caller names every leftover rather
+// than only the first.
+func SweepStaleTemps(dir, prefix string, now time.Time) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		return
+		return nil
 	}
 	cutoff := now.Add(-StaleTempAge)
+	var errs error
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasPrefix(e.Name(), prefix) {
 			continue
@@ -66,8 +77,13 @@ func SweepStaleTemps(dir, prefix string, now time.Time) {
 		if err != nil || info.ModTime().After(cutoff) {
 			continue
 		}
-		_ = os.Remove(filepath.Join(dir, e.Name()))
+		name := filepath.Join(dir, e.Name())
+		if rerr := os.Remove(name); rerr != nil && !errors.Is(rerr, fs.ErrNotExist) {
+			errs = errors.Join(errs,
+				fmt.Errorf("left a staging file at %s that must be deleted: %w", name, rerr))
+		}
 	}
+	return errs
 }
 
 // DiscardStaged unlinks the staging file at name on the way out of a write and

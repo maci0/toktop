@@ -116,7 +116,9 @@ func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	SweepStaleTemps(dir, "known_hosts.tmp", sweep)
+	if err := SweepStaleTemps(dir, "known_hosts.tmp", sweep); err != nil {
+		t.Errorf("SweepStaleTemps: %v", err)
+	}
 
 	if _, err := os.Stat(aged); !os.IsNotExist(err) {
 		t.Errorf("the aged staging file survived the sweep: %v", err)
@@ -130,9 +132,54 @@ func TestSweepStaleTempsRemovesOnlyAgedStagingFiles(t *testing.T) {
 }
 
 // A directory the caller cannot read is not a reason to fail the write that
-// is about to happen: the sweep runs before it.
+// is about to happen: the sweep runs before it. So it is not an error either,
+// and the write below reports its own cause if it cannot write there.
 func TestSweepStaleTempsOnMissingDir(t *testing.T) {
-	SweepStaleTemps(filepath.Join(t.TempDir(), "absent"), "toktop.tmp", time.Now())
+	if err := SweepStaleTemps(filepath.Join(t.TempDir(), "absent"), "toktop.tmp", time.Now()); err != nil {
+		t.Errorf("a directory the sweep cannot list reported %v, want nil", err)
+	}
+}
+
+// A staging file the sweep could not unlink is reported, on the terms
+// DiscardStaged gives: unverified content sits where the operator looks for
+// the real file, and dropping the refusal leaves them with a directory
+// holding one and no line saying which.
+func TestSweepStaleTempsReportsAnUnremovableLeftover(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root unlinks a file in a directory it cannot write to")
+	}
+	dir := t.TempDir()
+	old := time.Now().Add(-StaleTempAge - time.Hour)
+	age := func(path string) {
+		t.Helper()
+		if err := os.Chtimes(path, old, old); err != nil {
+			t.Fatal(err)
+		}
+	}
+	held := filepath.Join(dir, "toktop.tmp-old")
+	if err := os.WriteFile(held, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	age(held)
+	// The refusal has to come from the directory itself, since that is where
+	// the unlink happens and it is also what the sweep has to be able to list.
+	// Read-and-search but no write: the entries are visible, the unlink is
+	// refused.
+	if err := os.Chmod(dir, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) })
+
+	err := SweepStaleTemps(dir, "toktop.tmp", time.Now())
+	if err == nil {
+		t.Fatal("an unremovable staging file was not reported")
+	}
+	if !strings.Contains(err.Error(), filepath.Base(held)) {
+		t.Errorf("the error does not name the file it could not delete: %v", err)
+	}
+	if _, err := os.Stat(held); err != nil {
+		t.Errorf("the undeletable staging file went anyway: %v", err)
+	}
 }
 
 // DiscardStaged decides what a caller is told about a staging file left behind
