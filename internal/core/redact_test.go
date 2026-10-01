@@ -246,6 +246,20 @@ func TestRedactAnyUserHomeFoldsAnyAccount(t *testing.T) {
 		// A name longer than any login a system toktop runs on grants is a
 		// file, not an account.
 		{"/home/" + strings.Repeat("n", maxAccountNameLen+1) + ".x", "/home/" + strings.Repeat("n", maxAccountNameLen+1) + ".x"},
+		// The home prefixes overlap, /home/ being the tail of /export/home/
+		// and /nfs/home/, so a home nested inside another is matched by the
+		// shorter prefix in the text the longer one left behind. One pass has
+		// to fold both: a report written from the first pass would carry the
+		// inner account.
+		{"/export/home/a/home/b", "~~"},
+		{"/var/home/me/home/other", "~~"},
+		{"/home/me/home/other", "~~"},
+		{"/srv/homes/a/home/b", "~~"},
+		{"/export/home/a/home/b/home/c", "~~~"},
+		// A "~" the message already carries is a path an agent folded itself,
+		// not a home to fold, so it stays as it is.
+		{"~/.claude/config.json", "~/.claude/config.json"},
+		{"~ not a home /home/me", "~ not a home ~"},
 	}
 	for _, c := range cases {
 		if got := RedactAnyUserHome(c.in); got != c.want {

@@ -141,15 +141,31 @@ func RedactUserHome(user, msg string) string {
 // account's is not a prefix of still folds. Case and Unicode normalization
 // fold for the same reason RedactUserHome folds them: the platform the path
 // was written on is not knowable from here.
+//
+// The prefixes overlap, /home/ being the tail of /export/home/ and
+// /nfs/home/, and folding one of them leaves a "~" with the rest of the path
+// behind it for a later prefix to match. The list is walked until a pass folds
+// nothing, so a home nested inside another is folded too and the message
+// reads the same whether it is redacted once or twice: "/export/home/a/home/b"
+// is "~~", not "~/home/b" from the first call and "~~" from the second. A
+// caller that renders a field and then stores it, as the ingest path does,
+// would otherwise show an account the input named and a report that was
+// scrubbed once.
 func RedactAnyUserHome(msg string) string {
 	if msg == "" {
 		return msg
 	}
 	scan := normalizeSpelling(msg)
-	for _, prefix := range userHomePrefixes {
-		scan = foldAnyHomePrefix(scan, prefix)
+	for {
+		pass := scan
+		for _, prefix := range userHomePrefixes {
+			pass = foldAnyHomePrefix(pass, prefix)
+		}
+		if pass == scan {
+			return scan
+		}
+		scan = pass
 	}
-	return scan
 }
 
 // maxAccountNameLen is the longest name read as an account. POSIX caps a
