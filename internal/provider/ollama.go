@@ -16,9 +16,16 @@ type Ollama struct {
 
 // NewOllama monitors the daemon at base, reachable over plain HTTP without a
 // token.
-func NewOllama(base string) Provider {
+func NewOllama(base string) Provider { return NewOllamaLabeled(base, "ollama") }
+
+// NewOllamaLabeled is [NewOllama] under a label the caller chose. Discovery
+// labels a local daemon "ollama" and cannot tell two of them apart, while a
+// remote one shares a host with every other engine forwarded out of it and
+// needs "host:port". Choosing the constructor by kind is this package's
+// decision; the label is the caller's.
+func NewOllamaLabeled(base, label string) Provider {
 	o := &Ollama{base: strings.TrimRight(base, "/")}
-	return Provider{Label: "ollama", Addr: o.base, Kind: core.KindOllama, Poll: o.poll}
+	return Provider{Label: label, Addr: o.base, Kind: core.KindOllama, Poll: o.poll}
 }
 
 func (o *Ollama) poll(ctx context.Context) (*Metrics, error) {

@@ -145,12 +145,26 @@ func Attach(ctx context.Context, base string) Provider {
 	return Provider{}
 }
 
-func newProvider(kind, base string) Provider {
-	if kind == core.KindOllama {
-		return NewOllama(base)
+// Labeled builds the provider for a base already identified as kind, naming
+// it label. It is [newProvider] with the label the caller chose rather than
+// the kind's own spelling, for a host that serves more than one engine and
+// where "ollama" alone does not say which machine answered.
+//
+// kind is the one identify returned; an empty kind builds nothing, because a
+// base nothing recognized is a decision the caller has to make itself (an
+// --add endpoint polls anyway, as a generic OpenAI-compatible one).
+func Labeled(kind, base, label string) Provider {
+	switch kind {
+	case core.KindOllama:
+		return NewOllamaLabeled(base, label)
+	case "":
+		return Provider{}
+	default:
+		return NewOpenAICompat(base, label, kind)
 	}
-	return NewOpenAICompat(base, kind, kind)
 }
+
+func newProvider(kind, base string) Provider { return Labeled(kind, base, kind) }
 
 // identify returns the provider kind serving base, or "" if none matches.
 // Order matters. OmniRoute and Ollama go first because both serve the OpenAI

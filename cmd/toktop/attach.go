@@ -204,18 +204,12 @@ func attachRemote(ctx context.Context, tgt remote.Target) ([]provider.Provider, 
 
 	var providers []provider.Provider
 	for i, kind := range kinds {
-		if kind != "" {
-			label := fmt.Sprintf("%s:%d", operatorText(tgt.Host), rports[i])
-			p := provider.NewOpenAICompat(bases[i], label, kind)
-			if kind == core.KindOllama {
-				p = provider.NewOllama(bases[i])
-				p.Label = label
-			}
+		label := fmt.Sprintf("%s:%d", operatorText(tgt.Host), rports[i])
+		if p := provider.Labeled(kind, bases[i], label); p.Poll != nil {
 			providers = append(providers, p)
 			continue
 		}
-		fmt.Fprintf(os.Stderr, "toktop: %s:%d is listening but speaks no recognized engine API; skipping\n",
-			operatorText(tgt.Host), rports[i])
+		fmt.Fprintf(os.Stderr, "toktop: %s is listening but speaks no recognized engine API; skipping\n", label)
 		attachLog().Warn("toktop: remote port skipped",
 			"target", logcfg.Field(tgt.LogHost(), logcfg.FieldCap),
 			"remote_port", rports[i],

@@ -367,3 +367,49 @@ func TestScanDecodersRefuseOversizedBody(t *testing.T) {
 		}
 	}
 }
+
+// Which constructor a kind gets is this package's decision, and the remote
+// path in cmd/toktop used to spell it out itself: build the OpenAI-compat
+// provider, then throw it away and build the Ollama one when the kind was
+// ollama, then overwrite the label on whichever survived. Labeled is the one
+// spelling of that, so a caller can no longer reach the wrong constructor by
+// forgetting the second branch. The cases are pinned here because ollama is
+// the only kind with a constructor of its own.
+func TestLabeledPicksTheConstructorAndKeepsTheCallersLabel(t *testing.T) {
+	const base = "http://127.0.0.1:11434"
+	for _, tc := range []struct {
+		kind, label, wantLabel, wantKind string
+	}{
+		{core.KindOllama, "box:11434", "box:11434", core.KindOllama},
+		{core.KindOllama, "ollama", "ollama", core.KindOllama},
+		{core.KindVLLM, "box:8000", "box:8000", core.KindVLLM},
+		// An unrecognized base is the caller's decision, not this package's.
+		{"", "box:9999", "", ""},
+	} {
+		p := Labeled(tc.kind, base, tc.label)
+		if p.Label != tc.wantLabel || p.Kind != tc.wantKind {
+			t.Errorf("Labeled(%q, _, %q) = label %q kind %q, want %q and %q",
+				tc.kind, tc.label, p.Label, p.Kind, tc.wantLabel, tc.wantKind)
+		}
+		if tc.kind != "" && p.Poll == nil {
+			t.Errorf("Labeled(%q, _, %q) built a provider that cannot poll", tc.kind, tc.label)
+		}
+		if tc.kind == "" && p.Poll != nil {
+			t.Error("Labeled with an empty kind built a pollable provider, want none")
+		}
+	}
+
+	// newProvider is Labeled under the kind's own spelling, and its ollama
+	// branch has to be that same constructor rather than a lookalike: a remote
+	// run labels its ollama provider "box:11434" and a local one "ollama",
+	// and both have to poll /api/ps.
+	if got, want := newProvider(core.KindOllama, base), NewOllama(base); got.Addr != want.Addr || got.Label != want.Label || got.Kind != want.Kind {
+		t.Errorf("newProvider(ollama) = %+v, want %+v", got, want)
+	}
+	if got := NewOllama(base); got.Label != "ollama" {
+		t.Errorf("NewOllama label = %q, want %q", got.Label, "ollama")
+	}
+	if got := NewOllamaLabeled(base, "box:11434"); got.Label != "box:11434" || got.Kind != core.KindOllama || got.Addr != base {
+		t.Errorf("NewOllamaLabeled = %+v, want the ollama provider labeled box:11434", got)
+	}
+}
