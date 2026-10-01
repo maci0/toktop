@@ -24,7 +24,8 @@ import (
 // server sets, and that the description still spells each one.
 //
 // The two refusals net/http makes before a handler runs are the exception, and
-// the spec says so on RuntimeRefusal: they never reach the chain that sets it.
+// the spec says so on RuntimeRefusal and RuntimeBadRequest: they never reach
+// the chain that sets it.
 func TestEveryAnswerIsMarkedUncacheable(t *testing.T) {
 	s := startIngest(t, &memRecorder{})
 	base := "http://" + s.Addr()
@@ -63,8 +64,8 @@ func TestEveryAnswerIsMarkedUncacheable(t *testing.T) {
 	}
 
 	// The runtime refusals never reach the chain, so they carry no
-	// Cache-Control and no X-Request-Id. The spec pins that on RuntimeRefusal,
-	// and the header appearing here is what would make it wrong.
+	// Cache-Control and no X-Request-Id. The spec says so on both of them,
+	// and the headers appearing here are what would make it wrong.
 	for _, request := range []string{
 		"POST " + eventsPath + " HTTP/1.1\r\nHost: localhost\r\nX-Request-Id: " +
 			strings.Repeat("x", maxHeaderBytes*2) + "\r\nContent-Length: 0\r\n\r\n",
@@ -92,13 +93,14 @@ func TestEveryAnswerIsMarkedUncacheable(t *testing.T) {
 
 	// The header is declared on every status the file lists, and it is
 	// declared as the value the chain sets rather than as a prose note a
-	// client cannot branch on. RuntimeRefusal is the one block that answers
-	// no handler, so it carries no X-Request-Id and no Cache-Control either;
-	// it is checked on its own above.
+	// client cannot branch on. The runtime refusals are the exception, and are
+	// recognised as ones by what they reference rather than by their status
+	// code: neither carries X-Request-Id or Cache-Control, because neither
+	// reaches the chain that sets them. Both are checked on their own above.
 	for _, e := range ingestEndpoints {
 		section := openapiSection(t, e.path)
 		for _, code := range openapiCodes(section) {
-			if code == "431" {
+			if isRuntimeRefusal(section, code) {
 				continue
 			}
 			if !declaresHeader(section, code, "CacheControl") {
@@ -106,6 +108,33 @@ func TestEveryAnswerIsMarkedUncacheable(t *testing.T) {
 			}
 		}
 	}
+}
+
+// runtimeRefusals are the two answers net/http gives before the handler chain
+// runs: the header budget and the unparseable request line. A status block
+// that is a bare $ref to either is one of them.
+var runtimeRefusals = []string{
+	"#/components/responses/RuntimeRefusal",
+	"#/components/responses/RuntimeBadRequest",
+}
+
+// isRuntimeRefusal reports whether one status's response block is a $ref to a
+// runtime refusal rather than a block the handlers answer.
+//
+// Keyed off the $ref rather than off the status code, because a status can be
+// both: POST /v1/events answers a 400 of its own, naming the field the sender
+// got wrong and carrying every header, and it is also where the runtime
+// answers a 400 carrying no field and no header at all. Exempting "431", and
+// then "400" beside it, would exempt the handler's 400 too and let the spec
+// drop the header from an answer every sender does receive.
+func isRuntimeRefusal(section, code string) bool {
+	block := responseBlock(section, code)
+	for _, ref := range runtimeRefusals {
+		if strings.Contains(block, ref) {
+			return true
+		}
+	}
+	return false
 }
 
 // securityHeaderNames are the answers setSecurityHeaders puts on every
@@ -158,6 +187,15 @@ func openapiDescription(t *testing.T) string {
 // responses under, the way openapiCodes finds them, so a status declared under
 // two operations is read once per declaration.
 func declaresHeader(section, code, header string) bool {
+	return strings.Contains(responseBlock(section, code), "#/components/headers/"+header)
+}
+
+// responseBlock is one status's response block of a path's spec section, from
+// its quoted three-digit key to the next status or the end of the section, and
+// empty for a status the section does not declare. The keys sit at eight
+// spaces of indent under an operation's responses, and a nine-space key is a
+// header of that status rather than a status of its own.
+func responseBlock(section, code string) string {
 	lines := strings.Split(section, "\n")
 	start := -1
 	for i, l := range lines {
@@ -167,7 +205,7 @@ func declaresHeader(section, code, header string) bool {
 		}
 	}
 	if start < 0 {
-		return false
+		return ""
 	}
 	end := len(lines)
 	for i := start + 1; i < len(lines); i++ {
@@ -176,7 +214,7 @@ func declaresHeader(section, code, header string) bool {
 			break
 		}
 	}
-	return strings.Contains(strings.Join(lines[start:end], "\n"), "#/components/headers/"+header)
+	return strings.Join(lines[start:end], "\n")
 }
 
 // rawHead writes a request verbatim and returns the header block of the

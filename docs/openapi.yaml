@@ -135,6 +135,11 @@ paths:
             reason names the field. A stream that failed partway names how
             many earlier events were recorded and whether to resend the rest
             or replay the whole request.
+
+            The runtime answers this status too, for a request line it cannot
+            parse, before the handler runs. That answer carries none of these
+            headers and its body is the literal `400 Bad Request`; see
+            `RuntimeBadRequest`.
           headers:
             X-Request-Id:
               $ref: "#/components/headers/RequestId"
@@ -261,6 +266,8 @@ paths:
               schema:
                 type: string
                 const: "ok\n"
+        "400":
+          $ref: "#/components/responses/RuntimeBadRequest"
         "403":
           description: |
             The `Host` named another machine on a loopback-bound listener. The
@@ -346,6 +353,8 @@ paths:
               $ref: "#/components/headers/RequestId"
             Cache-Control:
               $ref: "#/components/headers/CacheControl"
+        "400":
+          $ref: "#/components/responses/RuntimeBadRequest"
         "403":
           description: |
             The `Host` named another machine on a loopback-bound listener, the
@@ -393,15 +402,32 @@ components:
   responses:
     RuntimeRefusal:
       description: |
-        The answer net/http gives before the request reaches a handler: a
-        header block past the 16 KiB budget the listener is built with, or a
-        request line it cannot parse. Both close the connection, and both
-        carry the status line alone: the body is the runtime's own
-        `431 Request Header Fields Too Large` or `400 Bad Request`, not the
+        The answer net/http gives before the request reaches a handler, when a
+        header block runs past the 16 KiB budget the listener is built with.
+        It closes the connection and carries the status line alone: the body is
+        the runtime's own `431 Request Header Fields Too Large`, not the
         one-line reason naming a field that every other answer on this port
         gives. `X-Request-Id` is absent for the same reason, so a client
         correlating answers by it has nothing to correlate here; the sender's
         own oversized `X-Request-Id` is what produced the refusal.
+      content:
+        text/plain:
+          schema:
+            $ref: "#/components/schemas/Reason"
+    RuntimeBadRequest:
+      description: |
+        The answer net/http gives before the request reaches a handler, when it
+        cannot parse the request line. It closes the connection and carries the
+        status line alone: the body is the runtime's own `400 Bad Request`,
+        naming no field and no `X-Request-Id` to correlate it by.
+
+        Every operation on this port can be given this answer, since it is a
+        property of the request line rather than of the path. On
+        `POST /v1/events` it shares the 400 every rejected body gets, and only
+        the body tells the two apart: the runtime's is the literal text
+        `400 Bad Request`, while the handler's names the field or the bound.
+        A client that cannot produce a request line the runtime refuses will
+        never meet it.
       content:
         text/plain:
           schema:
@@ -432,9 +458,10 @@ components:
         read as no more than that: it never names an event. What comes back is
         the id the sender sent with a home directory in it folded to `~`, the
         same fold the event fields get, so the echoed value is a correlation
-        handle and not a verbatim copy of the header. The two refusals net/http
-        makes before a handler runs (see `RuntimeRefusal`) carry none, and an
-        id long enough to trip the second is itself the reason it is missing.
+        handle and not a verbatim copy of the header. The refusals net/http
+        makes before a handler runs (see `RuntimeRefusal` and
+        `RuntimeBadRequest`) carry none, and an id long enough to trip the
+        first is itself the reason it is missing.
       schema:
         type: string
         maxLength: 64
@@ -454,9 +481,9 @@ components:
         acknowledgement, a `503` naming a full decode table and a `404`
         listing the endpoints are all per-request facts, and a cache holding
         any of them answers the next sender with a run's state rather than
-        with its own. The two refusals net/http makes before a handler runs
-        (see `RuntimeRefusal`) carry none, because they never reach the
-        chain that sets it.
+        with its own. The refusals net/http makes before a handler runs (see
+        `RuntimeRefusal` and `RuntimeBadRequest`) carry none, because they
+        never reach the chain that sets it.
       schema:
         type: string
         const: no-store
