@@ -556,6 +556,37 @@ been re-exec'd by `toktop update`, is stored and counted again. A key is not
 a session, a turn counter, or a fixed string, and the server
 cannot tell a retry from a second sender that picked the same one.
 
+### Engine health lines
+
+An engine is only shown on the dashboard for the frame it fails on, so the
+audit log is the record that outlives the frame. Each engine crosses two
+boundaries and each crossing writes one line, however many polls passed in
+between: a run of failing polls is a line when the engine goes down and a line
+when it returns, not one per second.
+
+| line | level | fields |
+|---|---|---|
+| `toktop: engine not answering` | WARN | `engine`, `addr`, `reason`, `down_for` |
+| `toktop: engine answering again` | INFO | `engine`, `addr`, `down_reason`, `down_for` |
+| `toktop: engine poll slow` | WARN | `engine`, `addr`, `duration`, `slow_for` |
+| `toktop: engine poll back to normal` | INFO | `engine`, `addr`, `slow_for` |
+
+The failure is `reason` on the line that reports it and `down_reason` on the
+line that reports the outage ending, so filtering on `reason` returns what is
+failing now and not the engines that already came back. `duration` on the slow
+line is the poll that tripped the threshold, which no frame carries. A poll
+that stops answering clears the slow latch, since the outage is the louder
+signal and the next answer is measured fresh.
+
+Probes (`--probe`, or `p`) latch the same way and keep the same split:
+`probe failed` is WARN and carries `reason`, and `probe answering again` is
+INFO, carries `down_for`, and carries the measurement that answered
+(`duration`, `ttft_ms`, `tok_per_s`, `tokens`) rather than the failure. A
+probe that keeps answering writes nothing above the floor; `probe ok` is a
+DEBUG line carrying the same measurements, so a throughput regression is
+attributable to a model id without a line per probe tick at the default floor.
+The sample itself lives on the dashboard's probe pane and in `--once --json`.
+
 ## Zero vendor libraries
 
 Host vitals and engine stats come from procfs/sysfs/sysctl, vendor CLIs it shells out to

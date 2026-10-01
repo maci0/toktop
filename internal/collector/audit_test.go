@@ -80,6 +80,50 @@ func TestEngineHealthTransitionsAreAuditedOnce(t *testing.T) {
 	}
 }
 
+// The recovery line names the outage it ends, so an operator can tell which
+// failure cleared; it does not say it under `reason`. `reason` is the field
+// every failure line in this package uses, so an operator's "what is broken
+// right now" filter would read the resolved outage on this line as a live one
+// and page on an engine that has been answering for an hour.
+func TestRecoveryLineNamesTheOutageItEnds(t *testing.T) {
+	fp := &fakeProvider{label: "engine", m: &provider.Metrics{OutTotal: 10}}
+	c := New([]provider.Provider{fp.asProvider()}, time.Second)
+	c.SetNow(func() time.Time { return time.Unix(1_700_000_000, 0).UTC() })
+	t.Cleanup(func() { c.SetNow(nil) })
+	c.procFn = nil
+	logs := captureAudit(t)
+	ch := make(chan core.Snapshot, 1)
+
+	c.emit(context.Background(), ch)
+	<-ch
+	fp.err = errors.New("connection refused")
+	c.emit(context.Background(), ch)
+	<-ch
+	fp.err, fp.m = nil, &provider.Metrics{OutTotal: 20}
+	c.emit(context.Background(), ch)
+	<-ch
+
+	var recovery string
+	for _, l := range strings.Split(logs.String(), "\n") {
+		if strings.Contains(l, "engine answering again") {
+			recovery = l
+			break
+		}
+	}
+	if recovery == "" {
+		t.Fatalf("no recovery line written:\n%s", logs.String())
+	}
+	if strings.Contains(recovery, " reason=") {
+		t.Errorf("recovery line reports a live failure under reason=:\n%s", recovery)
+	}
+	if !strings.Contains(recovery, "down_reason=") {
+		t.Errorf("recovery line does not name the outage it ended:\n%s", recovery)
+	}
+	if !strings.Contains(recovery, "connection refused") {
+		t.Errorf("recovery line lost the failure text it ended:\n%s", recovery)
+	}
+}
+
 // shrinkSlowPoll drops the latency threshold to a value a test can cross
 // without sleeping for the real one.
 func shrinkSlowPoll(t *testing.T, d time.Duration) {

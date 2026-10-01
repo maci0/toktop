@@ -242,7 +242,17 @@ var slowPollThreshold = provider.PollTimeout / 2
 // text that started the outage, and a latency one the duration that tripped it,
 // which no snapshot exposes, since the dashboard shows whether an engine
 // answered but never how long the answer took.
-func logChanges(changes []healthChange, level slog.Level, msg, heldKey string) {
+//
+// reasonKey names the field the failure text is written under, and it is empty
+// for the transitions that have no failure to report. The two are one decision
+// rather than two: a line that names a run that already ended is an operator's
+// "what is broken right now" filter picking up a resolved outage, and every
+// other transition line in this package (auditProbe) already withholds it. So
+// the boundary that starts a run carries the reason and the one that ends it
+// does not, and the field says which failure it was: `reason` on the line that
+// reports the engine going down, `down_reason` on the line that reports it
+// coming back and naming the outage that just ended.
+func logChanges(changes []healthChange, level slog.Level, msg, heldKey, reasonKey string) {
 	if len(changes) == 0 {
 		return
 	}
@@ -252,8 +262,8 @@ func logChanges(changes []healthChange, level slog.Level, msg, heldKey string) {
 			"engine", logcfg.Field(ch.p.Label, 128),
 			"addr", logcfg.Field(ch.p.Addr, logcfg.FieldCap),
 		}
-		if ch.reason != "" {
-			attrs = append(attrs, "reason", logcfg.Field(ch.reason, logcfg.FieldCap))
+		if reasonKey != "" && ch.reason != "" {
+			attrs = append(attrs, reasonKey, logcfg.Field(ch.reason, logcfg.FieldCap))
 		}
 		if ch.took > 0 {
 			attrs = append(attrs, "duration", ch.took.Round(time.Millisecond))

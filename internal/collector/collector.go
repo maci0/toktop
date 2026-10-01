@@ -422,10 +422,14 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	// a stalled stderr must not stall the poll loop the snapshot depends on.
 	refused := c.drainWindowRefusals()
 	c.mu.Unlock()
-	logChanges(buckets[changeDown], slog.LevelWarn, "toktop: engine not answering", "down_for")
-	logChanges(buckets[changeUp], slog.LevelInfo, "toktop: engine answering again", "down_for")
-	logChanges(buckets[changeSlow], slog.LevelWarn, "toktop: engine poll slow", "slow_for")
-	logChanges(buckets[changeFast], slog.LevelInfo, "toktop: engine poll back to normal", "slow_for")
+	// The reason field is named per line, not shared: the outage line carries
+	// the failure under `reason` and the recovery line carries it under
+	// `down_reason`, so a filter for what is failing now does not return the
+	// engines that already came back. See logChanges.
+	logChanges(buckets[changeDown], slog.LevelWarn, "toktop: engine not answering", "down_for", "reason")
+	logChanges(buckets[changeUp], slog.LevelInfo, "toktop: engine answering again", "down_for", "down_reason")
+	logChanges(buckets[changeSlow], slog.LevelWarn, "toktop: engine poll slow", "slow_for", "")
+	logChanges(buckets[changeFast], slog.LevelInfo, "toktop: engine poll back to normal", "slow_for", "")
 	logWindowRefusals(refused)
 	// One line per sweep, not one per engine: the condition is the process's,
 	// not a given engine's, and the engines that saw it said the same thing.

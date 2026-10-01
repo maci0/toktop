@@ -13,6 +13,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Changed
+
+- The `toktop: engine answering again` audit line reports the outage it ended
+  under `down_reason` instead of `reason`. `reason` is the field every failure
+  line carries, so it was the field to filter on for "what is broken right
+  now", and the recovery line was answering that filter with a failure that
+  had already cleared. The failure text is still on the line, under a name
+  that says it ended. The `toktop: engine not answering` line is unchanged,
+  and probes already used this split.
+
 ## [0.23.0] - 2026-09-30
 
 Binaries, checksums, and a CycloneDX SBOM are on

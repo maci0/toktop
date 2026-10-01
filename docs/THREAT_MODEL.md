@@ -1484,7 +1484,11 @@ Recorded as threats with locations; fixes do not happen in this document:
     answered past `slowPollThreshold` (`slowPollThreshold` in health.go, half of
     provider.PollTimeout) with info when the next one answers in time
     (the two slow-latch `logChanges` calls in collector.go), carrying label, addr, duration and
-    slow-for. Both latches are per endpoint, so a run of them writes one line,
+    slow-for. The recovery line carries the failure that ended under
+    `down_reason` rather than `reason` (`logChanges`,
+    internal/collector/health.go), so `reason` returns only what is failing at
+    the moment the line is read, the same split `auditProbe` makes. Both latches
+    are per endpoint, so a run of them writes one line,
     and a failed poll clears the slow latch, because the outage line is the
     loudest signal and the next answer is measured fresh. Events the retained
     window turned away get their own pair of lines from `logWindowRefusals`
