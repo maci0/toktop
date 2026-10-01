@@ -170,7 +170,11 @@ with the account, such as
 ## The website
 
 [toktop.ai](../site/worker.js) is one static page. It sets no cookies, runs
-no scripts, loads nothing third-party, and stores nothing. The Worker runs with
+one script of its own that measures a layout height and writes it as a CSS
+custom property, loads nothing third-party, and stores nothing. That script
+is admitted by a hash in the page's Content-Security-Policy and reaches no
+network, so it neither sends nor receives anything about a visitor. The
+Worker runs with
 Cloudflare's invocation logs off, so no request is recorded with a visitor's IP
 address or user agent; the console lines it writes about its own failures
 carry a ray, a method and a path instead, never the client. That setting is in

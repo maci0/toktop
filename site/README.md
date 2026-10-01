@@ -103,8 +103,9 @@ the longest line on the page. Four equal cells would be a card grid, and a
 card grid is not this product. The browser's own chrome is the page's
 palette too, through one `theme-color` per scheme, so a phone's address bar
 and overscroll glow are the terminal's background rather than a second
-system drawn over it. Neither costs a byte of JavaScript, and the page still
-ships without one.
+system drawn over it. Neither costs a byte of JavaScript, and the only
+script on the page is the bar measurement at the end of the body, which
+observes one element and writes one custom property.
 
 The Worker answers `/health` with `ok` for uptime checks, serves the
 dashboard capture from `public/` at `/dashboard.png`, `/dashboard.avif`,
@@ -163,6 +164,26 @@ captures use, and it is how long a returning browser can paint a page from
 before the deploy that replaced it. The validator is weak (`W/`) because
 the page ships in several encodings under one URL, which one strong tag may
 not span.
+
+## Scripts and the policy that admits them
+
+The page carries exactly one script, at the end of the body: a
+`ResizeObserver` that measures the sticky bar's height and writes it as the
+`--bar-h` custom property the scroll offset reads, so an anchor jump clears
+the bar at any viewport width and text size. Nothing about it is
+caller-shaped and it opens no connection; a reader with scripting off gets
+the over-clearing `--bar-h` fallback in `:root` and a readable page.
+
+Admitting it is a CSP hash rather than `unsafe-inline`. `SCRIPT_HASH` in
+`worker.js` is the SHA-256 of the script's own served text, interpolated
+into `script-src` beside `default-src 'none'`, so the one script runs and
+everything else does not. The two halves are pinned against the bytes the
+Worker actually serves by `worker.test.js`: one test recomputes the digest
+from the served page and refuses `script-src 'unsafe-inline'` and any
+wildcard, and the other asserts the page carries a single script, that it is
+not async, and that it only observes `.bar` and writes an offset. Editing
+the script without re-reading the hash fails a test rather than silently
+disabling the measurement.
 
 ## Encoding
 
@@ -274,7 +295,8 @@ stay silent.
 
 ## Performance budget
 
-One request for the page, no JavaScript, no webfonts, inline CSS only. The
+One request for the page, no JavaScript beyond the bar-measuring script, no
+webfonts, inline CSS only. The
 hero is the real dashboard capture: AVIF (45,559 bytes at 1920px, 25,360 at
 1280px, 10,577 at 768px), then WebP (148,050 / 81,540 / 36,130 bytes), then
 the full-size PNG for a client that speaks neither. A phone lays the figure

@@ -17,10 +17,13 @@ they live and what already stands in their way.
   gate (`ValidateRepo`, `githubRedirect`, `TrustedReleaseURL`), the host
   guard (`loopbackHostGuard`), the HSTS header the site sets on every response,
   and the risk table below each hold as written. No risk changed rank. This
-  pass added the boundary the two cross-process locks were missing from: B8
-  (local processes -> toktop's own on-disk state), summary risk 6, M52, and
-  gap 13, and qualified M12's cross-process serialization as conditional on the
-  lock being creatable, which it had claimed unconditionally. The
+  pass corrected one claim the code had moved under: the site page carries an
+  inline `<script>` since commit 11c9820b and the Worker policy now carries
+  `script-src` naming it by hash, where the model recorded the served page as
+  scriptless. It names the site as boundary B9 (internet -> Worker, page ->
+  visitor browser), adds the threat it opens and M54 as the control that
+  closes it, and records the workflow shell gate `make check-workflow-shell`
+  under M20, which the model did not have. The
   previously highest-ranked risks were re-read against
   `internal/ingest/middleware.go`, `internal/selfupdate/`, and
   `.github/workflows/release.yml` rather than carried from the last pass.
@@ -29,9 +32,9 @@ they live and what already stands in their way.
   point, auth path, or bind default changes
 
 Scope: the `toktop` CLI (single static Go binary), its self-update channel,
-the in-repo `agentusage` readers the binary compiles in, and deployment
-artifacts in this repository (GitHub Actions workflows, Makefile release
-targets, the static site worker at site/worker.js). Out of scope: the
+the in-repo `agentusage` readers the binary compiles in, the public site
+Worker at site/worker.js, and deployment artifacts in this repository
+(GitHub Actions workflows, Makefile release targets). Out of scope: the
 `gauntlet` tool that also imports `agentusage`
 (internal/agentwatch/ consumes it here).
 
@@ -45,7 +48,8 @@ targets, the static site worker at site/worker.js). Out of scope: the
 | 4 | SSH engine relays bind loopback listeners (`127.0.0.1:0`); any local process can reach the remote engines those listeners front | local processes -> remote engines | internal/remote/client.go | Bound loopback-only; no listener auth |
 | 5 | Hot-reload re-execs whatever binary occupies the exe path when its identity changes (Unix); PATH-based vendor CLI lookup executes tools from `$PATH` | build -> runtime, host -> process | internal/selfreload/exec_unix.go; internal/gpu/run.go | Windows Restart does not exec (exec_windows.go); `--no-hot-reload` exists |
 | 6 | The cross-process lock guarding the two files another process may read is created with `O_EXCL`, and a lock that cannot be created makes the read-modify-write run with **no lock at all**; the store and the installed binary both silently lose their serialization under that condition | host filesystem -> toktop, toktop -> toktop (other process) | internal/lockfile/lockfile.go, `With`; internal/remote/knownhosts.go, `lockStore`; internal/selfupdate/install.go, `lockInstall` | Lock is 0600 and exclusive-create, so it is atomic on every filesystem toktop supports; stale locks are broken on an age read through `core.Age`, so a backward clock step cannot wedge a store forever. The no-lock fallback is deliberate (gap 13) and the only way to reach it is a directory toktop cannot create a file in, which the work inside then reports on its own |
-| 7 | Low: ingest poisoning cannot be reconstructed from retained payloads; raising the log floor also hides successful submissions | B1, response readiness | internal/ingest/middleware.go; internal/collector/collector.go | Request metadata logs at info by default; warn/error suppress successes. No authenticated sender identity or durable event store |
+| 7 | Low: ingest poisoning cannot be reconstructed from retained payloads; raising the log floor also hides successful submissions | B1, response readiness | internal/ingest/middleware.go; internal/collector/collector.go | Request metadata logs at info by default; warn/error suppress successes. No authenticated sender identity, and no durable event store |
+| 8 | Low: the public site serves script in the only origin a stranger can reach, so the page is no longer inert; the page is a constant and no request value reaches it, which makes this an exposure to a future edit rather than a live hole, and the deploy credential is the way in | internet -> site Worker, page -> visitor browser | site/worker.js, `SCRIPT_HASH` and `SECURITY_HEADERS`; site/wrangler.jsonc; Makefile, `site-deploy` | One script, admitted by a hash recomputed against the served page in `site/worker.test.js` (M54); GET/HEAD only; the deploy runs from a developer shell with ambient Cloudflare credentials (gap 7) |
 
 Resolved since 2026-08-25: the previous ranking's "bearer token sent to every
 probed endpoint" is closed by origin-scoped token application
@@ -159,6 +163,12 @@ What is worth stealing, corrupting, or denying:
   controls code execution as the user.
 - **Dashboard integrity**: what the operator sees drives triage decisions.
   Poisoned rows are the main prize of the ingest endpoint.
+- **The public site and the download path it carries**: the marketing page is
+  the one asset here a stranger can reach, and it is where the install command
+  and the release link live, so tampering with it is a supply-chain attack
+  delivered by a browser. It became script-bearing in commit 11c9820b, which
+  is what makes the origin worth protecting and not only the bytes it serves
+  (B9, M54).
 - **Operator terminal integrity**: toktop renders attacker-shaped text
   (engine model names, remote vitals, event fields) into a TTY; escape-sequence
   injection would hijack clipboard, cursor, or title.
@@ -495,7 +505,16 @@ Every externally reachable input, with its code location:
     bytes); ill-formed bytes are dropped rather than carried into the agent
     identity (M50, `procText`, agentusage/discover_linux.go). The same walk
     reads `cwd` and, for same-engine attribution, `/proc/<pid>/fd`.
-12. **Site deployment** (operator-run, not CI): `make site-deploy` and
+12. **Public site Worker** (internet-facing, always on once deployed): the
+    exported `fetch` handler is `handle` (site/worker.js), reached over
+    `toktop.ai`, `www.toktop.ai` and the `workers.dev` subdomain
+    (site/wrangler.jsonc, `routes` and `workers_dev`). GET/HEAD only, and the
+    caller controls the request line, the headers and the `Accept-Encoding`
+    negotiation, never the page bytes: the page is a compile-time string, the
+    favicon is embedded, and the image paths come from the asset store. It is
+    the only entry point here a stranger can reach without holding anything
+    (B9), and the only one that returns script to a browser.
+13. **Site deployment** (operator-run, not CI): `make site-deploy` and
     `make site-rollback` take `dist/site.lock` and shell to
     `bunx wrangler@4.126.0 deploy` / `rollback` inside `site/`, then poll
     `https://toktop.ai/health` 6 times, 10s apart, and exit non-zero when
@@ -593,7 +612,7 @@ Deployment surface:
   logs in through wrangler's own OAuth store, and no CI job deploys the site
   (CONTRIBUTING.md, the "Deploying the site" section).
 - The marketing site is a single Cloudflare Worker serving one static page
-  from an embedded string (site/worker.js, about 1,200 lines): the
+  from an embedded string (site/worker.js, about 1,300 lines): the
   worker's exported `fetch` handler is `handle`, and every citation below
   names a symbol or a branch in it rather than a line, because a line in this
   file moves on every page edit. GET/HEAD only (the method guard runs twice,
@@ -610,7 +629,8 @@ Deployment surface:
   `PAGE_CACHE_CONTROL`, `representationFor`), and hardening headers
   (nosniff, HSTS, referrer-policy, CSP
   `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:;
-  base-uri 'none'; form-action 'none'; frame-ancestors 'none'`) on every
+  script-src '<one SCRIPT_HASH>'; base-uri 'none'; form-action 'none';
+  frame-ancestors 'none'`) on every
   page, image, health, and favicon response (`SECURITY_HEADERS`, which holds
   `x-frame-options: DENY` and the HSTS of
   `max-age=31536000; includeSubDomains`, the latter so a subdomain added
@@ -633,8 +653,15 @@ Deployment surface:
   becomes a one-line text/plain body rather than the store's HTML error
   page (`assetErrorBody`), with `cache-control: no-store`
   on any non-200/304 answer so a 404 cannot stick.
-  `style-src 'unsafe-inline'` is idle:
-  the HTML is a compile-time string.
+  `style-src 'unsafe-inline'` is idle: the HTML is a compile-time string.
+  `script-src` is the one directive that is not, and the reason the served
+  page is no longer inert: it carries exactly one inline `<script>`, the
+  `ResizeObserver` that measures the sticky bar into the `--bar-h` custom
+  property the scroll offset reads (the only `<script>` in site/worker.js, and
+  the text `SCRIPT_HASH` digests), and the policy admits that script and
+  nothing else by a hash of that same text. Nothing about the script is
+  caller-shaped, so the hash is a fixed point rather than a per-request
+  decision, and admitting it does not widen what a caller can reach (B9, M54).
   Any path that is neither in `IMAGE_PATHS`, `/health`, nor
   `/favicon.ico` serves
   the marketing page with 200, not a 404 (the catch-all branch of `handle`).
@@ -845,6 +872,28 @@ Deployment surface:
   where `lockInstall` passes `core.RedactHome`, so a lock error naming the
   store prints that path in full while a lock error naming the binary folds
   `$HOME` out of it (response readiness).
+
+- **B9: internet -> site Worker, and the served page -> the reader's
+  browser.** The marketing site is the one surface here a stranger reaches
+  without holding anything, so it is a boundary of its own rather than a
+  paragraph inside the
+  deployment-surface list. Crossing in: any HTTP client reaches `handle`
+  (site/worker.js) over the public names `toktop.ai`, `www.toktop.ai` and the
+  `workers.dev` subdomain (site/wrangler.jsonc, `routes` and `workers_dev`).
+  The caller controls the request line, the headers and the `Accept-Encoding`
+  negotiation; the response body is a compile-time string for the page, embedded
+  bytes for the favicon, and the asset store's own bytes for the image paths, so
+  no request value is interpolated into a page. The one caller-shaped string
+  that reaches an HTML body is not in the page at all: it is the
+  `method not allowed; <path> accepts ...` text answer (`methodNotAllowed`, the
+  only template in the Worker taking `path` and `method`), which is served as
+  `text/plain` through `ERROR_HEADERS` and never parsed as markup, so a caller
+  who controls the path cannot turn it into script. Crossing out: the page now
+  executes script in every visitor's browser, since commit 11c9820b added the
+  one inline `<script>` that `script-src` admits by hash. That is the only place
+  in this repository where an unauthenticated caller's traffic and a script run
+  in the same origin, so it is where the site became attackable rather than
+  merely reachable. M54 is the control; its residual is in the STRIDE list below.
 
 Privilege transitions: toktop gains no privileges at runtime (no setuid,
 no sudo). The ssh connection is the one place code acts with authority beyond
@@ -1105,7 +1154,50 @@ comparison in install.go against the listing read by checksum.go), so a
 - *Elevation of privilege*: none. The lock is held by the same user that
   already writes the file it guards, and a lock held past the stale age is
   broken rather than honored, so the worst a local process gets from planting
-  one is the denial above, not the write.
+  one is the denial above, and never the write.
+
+**B9 (internet -> site Worker, and the page -> the visitor's browser):**
+- *Spoofing*: none from the request side. The page is a constant, so a caller
+  cannot be answered with a different page than a visitor gets, and the
+  favicon and image paths are keyed on a fixed set (`IMAGE_PATHS`,
+  site/worker.js) rather than on a caller-chosen key. The residual sits
+  upstream of this Worker: whoever can serve the name (a certificate issue, an
+  origin compromise before Cloudflare) can serve a different page entirely,
+  and nothing here detects it.
+- *Tampering / script execution (the one that changed on this pass)*: the page
+  carries an inline `<script>` and the policy admits it by hash
+  (`SCRIPT_HASH` and the `script-src` entry of `SECURITY_HEADERS`,
+  site/worker.js), so the page is no longer scriptless. A caller cannot reach
+  that script, because nothing in the response is built from request bytes; the
+  exposure runs the other way, which is why it is recorded as a threat rather
+  than as a fixed bug. Any future path that interpolates a request value into
+  the page, or any edit to the inline script, changes what runs in every
+  visitor's origin under a policy that admits the new text only if
+  `SCRIPT_HASH` and the served bytes move together. The test recomputing the
+  hash from the served page (`site/worker.test.js`, "the CSP admits the
+  bar-measuring script by a hash of its served text", beside
+  `SCRIPT_SRC_RE`) keeps the two from drifting apart silently, and "the
+  bar-measuring script is the page's only script and only writes the offset"
+  keeps a second script from arriving. Both were absent from this file before
+  this pass (M54).
+- *Information disclosure*: `observability.invocation_logs` is off
+  (site/wrangler.jsonc), so no request carrying a visitor IP is persisted, and
+  the Worker writes no line for a served request (`failRequest` covers
+  refusals and failures only). The `method-not-allowed` text answer echoes the
+  caller's own path back to the caller and into the bounded refusal log, which
+  is a caller learning its own input rather than a disclosure.
+- *Denial of service*: the Worker is a CDN isolate; the only caller-controlled
+  cost is a request it refuses (405/404/406/500), each served from a constant
+  or a short text body, and the refusals are capped per event name
+  (`REFUSAL_LOG_CAP`, `loggedPerEvent`) except the one exempt degraded-health
+  line (`UNCAPPED_EVENTS`), which is interval-driven rather than
+  per-request. A compression build is cached per isolate and keyed by
+  `Accept-Encoding` (`representationFor`), so a client offering many codings
+  pays for a build once per isolate per coding, and `OFFERED_CODINGS` is a
+  fixed set.
+- *Elevation of privilege*: none inside the Worker. The site's authority is
+  the Cloudflare account behind `make site-deploy` (deployment surface, gap 7),
+  not anything a request can reach.
 
 ## Existing mitigations map
 
@@ -1132,7 +1224,7 @@ Controls verified in code, with the threats they cover:
 | M17: Password prompt gated on TTY; encrypted keys skipped with guidance. A remote's stderr is quoted into a local error only as a sanitized tail of `stderrTailClusters` 300 grapheme clusters (`stderrTail` and `stderrTailClusters`, internal/remote/session.go, over `core.TailClusters`), and that error string is home-folded before it reaches a frame the operator is told to paste into an issue (internal/remote/stats.go, the `core.RedactHome(core.Snippet(...))` on the failed-poll path, with the peer account dropped by `RedactUser`), so a hostile remote cannot flood the local error or put an operator home path into a diagnostic report through a command that fails | credential handling in headless runs (B4); unbounded remote-chosen text in a displayed error, and a home path in a reported one (B3/B4 disclosure) | internal/remote/auth.go, `answerPasswordPrompt`; internal/remote/session.go, `stderrTail`; core/truncate.go, `TailClusters` 49 |
 | M18: Self-update verification: ValidateRepo (owner/name charset, no path/query), url.JoinPath, GitHub-host asset URLs, redirect pin, refuses without checksums asset, SHA-256 match required before rename, 256 MiB size cap, 2 MiB decompressed checksums cap, temp-file-plus-atomic-rename install. `checksums.txt` records are read by the format's own shape rather than by whitespace: a fixed 64-character hash, the one separator `sha256sum` writes after it, then the name as the rest of the line, with a trailing carriage return dropped with the line. A line that does not parse reports no hash, and a missing hash refuses the install, so a listing an attacker cannot parse fails closed rather than passing an unverified asset. `toktop update --check` prints `rel.HTMLURL` for shell capture, and that page URL is held to the same GitHub-host rule as an asset (`TrustedReleaseURL`); a release naming no GitHub page is reported and nothing is printed for the `url=$(toktop update --check)` capture the help screen documents | path traversal / SSRF / tampered/truncated/unbounded/gzip-bomb downloads reaching execution, and a release-supplied URL captured into a shell variable (B5) | release.go, `ValidateRepo`, `Check`, `githubRedirect` and `TrustedReleaseURL`; checksum.go, `ChecksumFor` and `checksumRecord`; install.go, `applyTo`; cmd/toktop/update.go, `reportRelease` |
 | M19: Flag validation exits 2; `--interval` below 50ms or above 1h rejected (bare numbers are nanoseconds); set-but-invalid `TOKTOP_COLUMNS`/`TOKTOP_LINES` (outside 41-1024 / 21-512) exit 2 under `--once` (and are named as ignored without it); non-TTY stdout aborts the live dashboard; a missing `agents.json` is a no-op but a malformed one exits 2 rather than watching a reduced agent set; unknown `TOKTOP_*` env warned; empty `--ingest` rejected; `--add` userinfo, query and fragment rejected; `--origin` parsed as RFC3339 or Unix seconds and refused when malformed, in a `--demo` run only (`resolveOrigin`, which returns no error for any value outside demo mode because the flag configures the demo timeline and nothing else, so `warnIgnoredFlags` already names it as not in force); both `--seed` and `--origin` named as having no effect without `--demo`; startup config line redacts bearer | misconfiguration acting as silent security-relevant behavior change: empty ingest bind exposing every interface, unitless `--interval 1` hammering engines, oversized `--once` frame OOM, a silently reduced `--agents` watch set, a `?api_key=` credential in argv and in every rendered surface, and a demo replay that differs from the capture it was meant to reproduce | validate.go validateFlags, validateOnceEnv, validateIngestAddr, warnIgnoredFlags, parseOrigin; cmd/toktop/endpoints.go validateAddURL; cmd/toktop/config.go `logActiveConfig` |
-| M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check, the release-source gate (M37), and three drift gates that make the CI build matrix, its build tags and its build environment answerable to the Makefile targets the release job runs (`make check-ci-platforms`, `make check-ci-tags` and `make check-ci-env`, each run by the step named for it in .github/workflows/ci.yml), so a platform that stops being vetted in CI cannot silently keep being published. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, the workflow-level `permissions` block); the release workflow holds `contents: write` for its whole (single) job rather than for the publish step alone, because Actions accepts permissions on the workflow or the job and not on a step (.github/workflows/release.yml, the `release` job's `permissions` block), so the scope that can push a tag and its assets is the scope every step of that job runs with, and it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift, an unvetted shipped platform, and release-channel write scope (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 20-21 and 162-168, Makefile |
+| M20: Supply chain: govulncheck in CI, Dependabot, SHA-pinned workflow actions, SBOM in releases, tag-name identifier check, the release-source gate (M37), and three drift gates that make the CI build matrix, its build tags and its build environment answerable to the Makefile targets the release job runs (`make check-ci-platforms`, `make check-ci-tags` and `make check-ci-env`, each run by the step named for it in .github/workflows/ci.yml), so a platform that stops being vetted in CI cannot silently keep being published. A fourth gate, `make check-workflow-shell` (.github/workflows/ci.yml, the `analyze this workflow's own run blocks` step, the `check-workflow-shell` target and `scripts/workflow-run-blocks.awk`), runs shellcheck over the bash in every workflow `run:` block: that block is the shell code every merge gate is reached through, yamllint parses the document around it and biome does not read it, so a quoting slip in the step that installs zsh and fish and then calls `check-shell` was a gate that installs less than it says and reports a pass. The extractor writes one file per block under `dist/`, named for the workflow and the line the block starts on, so a finding points at a step and a `# shellcheck disable` scopes to that step; the gate refuses a tree where the extractor read nothing, and the `awk` itself is pinned by `internal/repogate/workflow_shell_gate_test.go`, which is what keeps a silently broken extractor from reporting a clean tree over steps nobody analyzed. CI runs with `permissions: contents: read` (.github/workflows/ci.yml, the workflow-level `permissions` block); the release workflow holds `contents: write` for its whole (single) job rather than for the publish step alone, because Actions accepts permissions on the workflow or the job and not on a step (.github/workflows/release.yml, the `release` job's `permissions` block), so the scope that can push a tag and its assets is the scope every step of that job runs with, and it is the one token a workflow or runner compromise would use to poison the update channel of summary risk 3 | vulnerable-dependency drift, an unvetted shipped platform, an unanalyzed merge gate, and release-channel write scope (deployment surface) | .github/workflows/ci.yml, .github/dependabot.yml, .github/workflows/release.yml, 20-21 and 162-168, Makefile, scripts/workflow-run-blocks.awk, internal/repogate/workflow_shell_gate_test.go |
 | M21: Ingest POSTs carrying an `Origin` header refused with 403 (browsers always send Origin on cross-site writes; scripts and agents never do; the endpoint's Content-Type blindness would otherwise let `text/plain` POSTs sail past CORS preflight). On its own this closes cross-origin forgery and nothing else: a page resolving its own name to 127.0.0.1 for one fetch is same-origin with this endpoint, so the browser sends no `Origin` and M21 never fires. M45 is the control that closes that sender class | browser-driven dashboard forgery from any visited web page (B1 spoofing) | post.go, the `Origin` check in `handlePost`; tests internal/ingest/server_test.go; README "Agent feed API" documents it |
 | M22: Remote discovery ports from the `/proc/net/tcp` sweep parsed as 16-bit with port 0 rejected, so hostile `/proc/net/tcp` output cannot plant impossible forward targets; pinned by FuzzParseDiscoveryOutput. Not covered: the shell-probe fallback taken when that sweep returns nothing parses the remote's stdout with `strconv.Atoi` and checks only `p > 0` (`strconv.Atoi` in the shell-probe fallback, discover.go), so a hostile remote answering on that path can put an out-of-range port into `Discovery.Listening` and have it forwarded (gap 8) | tunnel-set manipulation by a hostile ssh remote (B3 elevation/DoS) | remote/discover.go; internal/remote/fuzz_test.go |
 | M23: `--agents` opt-in; `--opencode-db` is a second gate on top of the `sqlite` build tag, on by default with `--agents` and turned off with `--opencode-db=false`; crush has no extra flag because the database lives in the watched project | silent process/file scan the operator did not ask for (B7 disclosure) | main.go; agentusage/source.go; crush_sqlite.go |
@@ -1166,8 +1258,9 @@ Controls verified in code, with the threats they cover:
 | M51: A retained-append answer stays true of a feed holding more than its window. `AppendRetained` (internal/core/core.go) tests `len(s) >= max` rather than `len(s) == max`, so a feed restored from anywhere else is read as the full case it is. An exactly-max test read a feed over the cap as not-yet-full, inserted an arrival that `AppendSorted` trimmed away on the same call, and answered `true` for an event nothing holds, which is the one answer this function exists to keep out of a caller's id ledger and out of the `stored` count it reports back to a sender (B1/B7 tampering, response readiness). Every caller today builds its feed through this function or `AppendSorted` at the same max, so the two lengths always agree and the distinction is invisible; the at-least form is what keeps the answer true if one does not. The refusal path is already latched and audited: `refuseForWindow` (internal/collector/agents.go) records the run of events the window turned away and `storedForWindow` closes it, so a sender whose clock lags reads "kept nothing" with a reason rather than a replay-shaped gap. Pinned by `TestAppendRetainedRefusesOnAFeedOverTheCap` (internal/core/core_test.go) | a `stored` count reporting an event as retained when the feed holds nothing, so the ingest answer and the collector's id ledger both record an event no dashboard row ever showed (B1 tampering) | internal/core/core.go, `AppendRetained`; internal/collector/agents.go, the `AppendRetained` call in `RecordAgent` and the `refuseForWindow` branch beside it |
 | M52: One cross-process lock implementation for both read-modify-writes toktop owns, with the three properties that make it a gate rather than a file. `lockfile.With` (internal/lockfile/lockfile.go) creates with `O_CREATE\|O_EXCL` at 0600, so acquisition is atomic on every filesystem toktop runs on, which a flock over the target file is not on Windows; it stamps a per-acquisition token (pid plus a process-local counter, `newToken`) and releases only while the file still carries that token (`lockIs`), so the process that broke a stale lock and handed the section to a peer cannot delete the peer's lock on its way out — the same read-modify-write race the lock exists to close, which an unconditional remove would have reopened for every holder; and it ages a lock with `core.Age` (internal/core/elapsed.go), which floors a negative age at zero, so an NTP step backwards leaves a lock from a dead process looking fresh rather than making a live one look breakable. `lockStore` creates the store's directory at 0700 before taking `known_hosts.lock`, so a first connect on a fresh install cannot miss the directory, take the `ENOENT` path, and run the write unlocked. The one property it does not have is that a lock it cannot create fails the work: it runs the work instead, and that is gap 13 rather than a control | two toktop processes last-writing the host-key store away and forcing a silent re-TOFU, or a stale-break handing two holders the install section at once (B8 tampering, B3 spoofing, B5 repudiation) | internal/lockfile/lockfile.go, `With`, `newToken`, `lockIs`, `Policy`; internal/core/elapsed.go, `Age`; internal/remote/knownhosts.go, `lockStore` and the `storeMu`/`storeMutex` pair; internal/selfupdate/install.go, `lockInstall`; tests internal/lockfile/lockfile_test.go, internal/remote/knownhosts_superseded_test.go |
 | M53: An audit line stderr refused is reported rather than lost in silence. The slog API discards whatever a handler's `Handle` returns, so every line written through `logcfg.Logger()` was dropped with nothing anywhere saying so: a full disk, a closed redirect, or a pipe whose reader had gone left the operator with a log that reads as a run where nothing happened, on the exact lines that exist to say a store backup failed, a store was read back from its copy, or a rename could not be made durable. The logger now writes through a `lossWriter` that counts a refused or short write and `LossHandler` reports the pending count as one line of its own on the next line the channel accepts, naming the first reason. The count is said once rather than per refusal, because a sink that is already failing is the channel the warning would have to travel on, and it is written through the inner handler so M35's home fold still applies to it. The count is reset when reported, so a run that recovers reports the next loss rather than re-reporting an old one. Documented limits: a run whose channel never takes another line reports nothing, since stderr is the only sink this logger has and reporting into a channel that refuses is how the first line was lost; and a partial write is reported as a loss rather than replayed, since a half-written record is a line no parser can read | an operator reading a log with a hole in it as a run where nothing was reported, and the hole landing exactly on the recovery lines that are the only record a loss happened (B5 repudiation, response readiness) | internal/logcfg/logcfg.go, `Logger`, `lossWriter`, `LossHandler` and `lostNotice`; tests internal/logcfg/loss_test.go |
+| M54: The site's one inline script is admitted by a hash, and the hash is the script's own served text rather than a comment beside it. `SCRIPT_HASH` is a `sha256-` base64 digest of the `<script>` body in the page, interpolated into the `script-src` of `SECURITY_HEADERS` (site/worker.js), so `default-src 'none'` stops applying to scripts and exactly one text is allowed. Two tests hold that pair together from the bytes the Worker actually serves: `site/worker.test.js` recomputes the digest from the served page and compares it against the header, and asserts the policy is not opened further (`SCRIPT_SRC_RE`, `SCRIPT_WILDCARD_RE`, and the refusal of `script-src 'unsafe-inline'`); the second asserts the page carries one script, that it is not async, and that it only observes `.bar` and writes an offset, refusing a network call. A reader with scripting off gets the `:root { --bar-h: 20rem }` fallback, so the page stays readable when the admitted script does not run | script injection into the only origin in this repository a stranger can reach, from any future path that interpolates a request value into the page, and the quieter failure of the page silently reverting to the over-clearing offset when the script and the header drift apart (B9 tampering; asset: dashboard integrity, extended to the site) | site/worker.js, `SCRIPT_HASH` and the `script-src` entry of `SECURITY_HEADERS`; site/worker.test.js, `SCRIPT_SRC_RE`, `SCRIPT_WILDCARD_RE` and the two tests named above |
 
-Documentation claims checked against code on 2026-09-30. What this pass
+Documentation claims checked against code on 2026-10-02. What this pass
 found is in the header; the list below is what holds as written, so the next
 pass has something to re-check rather than a record of what used to be wrong.
 Corrections are made in place and the wrong version is deleted, never
@@ -1256,7 +1349,14 @@ reads as a claim about the code when it is not one.
   forward to the asset store, and it carries the same `SECURITY_HEADERS` set
   as every other answer (`nosniff` and the CSP among them). Its bytes are a
   compile-time constant in the Worker, so a caller controls the path and
-  nothing else about it.
+  nothing else about that route.
+- The served page stopped being scriptless in commit 11c9820b. What this
+  section held about it was re-read against site/worker.js rather than
+  carried: `script-src` is now present in `SECURITY_HEADERS` where the policy
+  was recorded as refusing every script, and the one inline script it admits
+  is named below as a threat (B9) and a control (M54) so no reader is left
+  trusting the older text. The static page and the deployment surface bullets
+  above were re-read with it.
 - `make site-deploy` gained a `check-wrangler-doc` prerequisite (Makefile,
   718, the check at 707-716). It fails the deploy when the `WRANGLER` pin in
   CONTRIBUTING.md and the one this document names have drifted apart, so
@@ -1831,5 +1931,12 @@ Recorded as threats with locations; fixes do not happen in this document:
   which is what keeps a later pass from finding it instead.
 - A correction replaces the wrong line; it does not get a note about the
   correction.
+- Editing the site's inline script is a threat-model change, not only a Worker
+  change: `SCRIPT_HASH` in site/worker.js and the served `<script>` body are
+  one value, and the change that moves one without the other is refused by
+  `site/worker.test.js` rather than by anything here. The same goes for
+  admitting a second script or interpolating a request value into the page;
+  both change what B9 covers and get re-recorded here in the change that lands
+  them.
 - Fixed vulnerabilities move from "Gaps" into the mitigations table with the
   commit that closed them.
