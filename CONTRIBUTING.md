@@ -197,7 +197,7 @@ widths match the `srcset` in `site/worker.js`: 768w is the ~720px slot,
 `-q 32` rather than 40 or 50: the capture is flat color and hard edges, and
 the page downscales each candidate, so 32 is where the bytes stop paying:
 10,577 bytes at 768w against 13,563 at `-q 40`, a 22% cut of the image that is
-73% of a phone's 14,442-byte visit, at 30.0 dB PSNR against the resized
+73% of a phone's 14,571-byte visit, at 30.0 dB PSNR against the resized
 source. The gain
 below 32 is not on screen at the size anyone reads it, so compare a crop
 before moving it.

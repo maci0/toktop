@@ -78,6 +78,15 @@ const FAVICON = `data:image/svg+xml,${encodeURIComponent(FAVICON_SVG)}`;
 const FAVICON_BYTES = new TextEncoder().encode(FAVICON_SVG);
 const FAVICON_PATH = "/favicon.ico";
 
+// The bar-measuring script's SHA-256, as CSP 3.2 spells a hash source. It is
+// pinned rather than derived here because WebCrypto digests are async and
+// the header below is a module-scope constant; worker.test.js recomputes it
+// from the page this Worker serves and compares it against the header this
+// Worker sends, so a script edited without the hash failing that test,
+// rather than the page quietly losing its measured scroll offset.
+// biome-ignore lint/security/noSecrets: a SHA-256 content digest, not a credential. Both it and the script it digests are public, and the test recomputes one from the other.
+const SCRIPT_HASH = "sha256-LT0W/lZKTRME0XWwvMpKvGGWxSppRLS4hyUseJyemP0=";
+
 const HTML = htmlForWire(`<!doctype html>
 <html lang="en">
 <head>
@@ -155,12 +164,20 @@ const HTML = htmlForWire(`<!doctype html>
        happens to be smaller, and --space-runout is the last one before the
        footer. */
     --space-tight: 1.5rem; --space-section: 2.8rem; --space-runout: 4rem;
-    /* The height the sticky bar occupies, which is the one thing on the page
-       that can sit on top of content. It is named rather than written into
-       the scroll offset below because the two have to agree: an offset that
-       under-reads the bar is the bar covering the thing it was meant to
-       clear. The phone breakpoint raises it, the bar wrapping to two rows. */
-    --bar-h: 4rem;
+    /* The scroll offset the sticky bar clears, in px, written by the script
+       at the end of the body from the bar's measured height. CSS cannot read
+       an element's height into scroll-padding-top, and the bar's height is
+       not a function of the type scale alone: the nav wraps to a second line
+       beside the brand at some widths and to a third beside itself at
+       others, so it is the viewport AND the reader's text size together. A
+       rem token tracks one of the two and misses the other, and a token that
+       under-reads is the bar covering the heading it was meant to clear
+       (WCAG 2.4.11 Focus Not Obscured). The value below is what the bar
+       measures before that script runs, and the no-JS fallback for a browser
+       with scripting off; it covers the bar at every width and text size
+       this page can be read at, deliberately over-clearing rather than
+       under. */
+    --bar-h: 20rem;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -344,7 +361,14 @@ const HTML = htmlForWire(`<!doctype html>
   /* A small/1.6 line box is ~21px tall, under the 24px target-size floor
      (WCAG 2.2 AA SC 2.5.8); vertical padding makes each footer item a real
      target instead of leaning on the spacing exception. */
-  footer > * { padding: .3rem 0; }
+  /* The repository URL is one unbroken token, and a flex item will not
+     shrink below its content, so at the 320px reflow width (and at 400%
+     zoom, which is the same constraint) it overflowed the column and
+     dragged the whole page into a horizontal scroll (WCAG 1.4.10 Reflow).
+     min-width: 0 is what lets the item shrink to the space it has been
+     given, and overflow-wrap breaks the token inside that space; the
+     underlined link is still one target, still named by its text. */
+  footer > * { padding: .3rem 0; min-width: 0; overflow-wrap: anywhere; }
   /* The screenshot is the product, not a decoration: a dark terminal
      frame so the capture never sits on the light-scheme paper. The frame
      re-points the page tokens at the dark scheme, so it is a terminal in
@@ -386,14 +410,6 @@ const HTML = htmlForWire(`<!doctype html>
     h1 { font-size: 2rem; }
     .hero { padding-top: 2rem; }
     .grid { grid-template-columns: 1fr; }
-    /* The bar wraps to two rows at this width, so it is taller than the 4rem
-       the desktop rule clears: an anchor jump landed the section heading
-       under the bar it was meant to clear, and on a phone the heading was
-       the only thing naming the section. Two rows of .7rem padding over the
-       brand line and the micro-step nav come to about 4.6rem. Raising the
-       token is all it takes: the scroll offset above reads it, so no rule
-       spells the height a second time. */
-    :root { --bar-h: 6rem; }
   }
 </style>
 </head>
@@ -507,6 +523,31 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
   <a href="https://github.com/maci0/toktop">github.com/maci0/toktop</a>
   <span>MIT licensed</span>
 </footer>
+<!-- The scroll offset tracks the sticky bar. scroll-padding-top reads a
+     length, and the bar's height is the sum of a brand line, however many
+     lines the section list wraps to at this width, and the padding above
+     and below both, at whatever size the reader's browser is set to. That
+     is two independent inputs, and a rem token carries only one of them: the
+     one that grows the bar is the width, so the token was right on a desktop
+     and wrong on the same page read at 200% text on a phone, where the bar
+     stood 30 to 44px taller than the offset cleared and every section
+     heading a nav link names landed underneath it (WCAG 2.4.11 Focus Not
+     Obscured, 2.4.7 Focus Visible, 1.4.4 Resize Text). Measuring is the only
+     way to be right at every width and every text size, and the observer
+     keeps it right when the reader resizes rather than only at load. The
+     inline script, 245 bytes, runs after first paint and does nothing
+     but write one custom property; the --bar-h fallback in :root is what a
+     reader with scripting off gets, and it over-clears. The CSP admits this
+     script and nothing else, by a hash of exactly these bytes. -->
+<script>
+(() => {
+  const bar = document.querySelector(".bar");
+  const root = document.documentElement;
+  new ResizeObserver(([e]) => {
+    root.style.setProperty("--bar-h", Math.ceil(e.borderBoxSize[0].blockSize) + 8 + "px");
+  }).observe(bar);
+})();
+</script>
 </body>
 </html>
 `);
@@ -738,7 +779,14 @@ const SECURITY_HEADERS = {
   "strict-transport-security": "max-age=31536000; includeSubDomains",
   "referrer-policy": "strict-origin-when-cross-origin",
   "content-security-policy":
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+    // script-src names one hash, the bar-measuring script at the end of the
+    // body and nothing else: default-src 'none' would otherwise refuse it and
+    // the measured scroll offset would never be written, leaving every reader
+    // on the over-clearing fallback. The hash is of the script's own text and
+    // is checked against it in worker.test.js, so editing the script without
+    // re-reading it there fails a test rather than silently disabling it.
+    `default-src 'none'; style-src 'unsafe-inline'; img-src 'self' data:; ` +
+    `script-src '${SCRIPT_HASH}'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
 };
 
 const ERROR_HEADERS = {

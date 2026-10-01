@@ -4,6 +4,7 @@
 // Run with `bun test site/` from the repository root (no other deps needed).
 
 import { expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 
@@ -108,9 +109,19 @@ const OPTED_OUT_RE = /forced-color-adjust:\s*none/;
 // The terminal frame re-points the scheme it paints in; every scheme token its
 // text can name has to be in that list.
 const SHOT_FRAME_RE = /\.shot \{[^}]*\}/;
-// The sticky bar's height, named once on :root and raised by the phone
-// breakpoint, and the scrollport offset that has to read it.
+// The scroll offset the sticky bar clears, declared once on :root as the
+// value a reader with scripting off gets, and the flexbox fact that decides
+// whether the footer's longest token can leave the column at 320px.
 const BAR_H_TOKEN_RE = /--bar-h:\s*([\d.]+)rem;/g;
+const FOOTER_CHILDREN_RULE_RE = /footer > \* \{[^}]*\}/;
+const SET_PROPERTY_RE = /setProperty\("--bar-h"/;
+const SCRIPT_SRC_RE = /script-src '([^']+)'/;
+const SCRIPT_WILDCARD_RE = /script-src[^;]*\*/;
+const INLINE_SCRIPT_RE = /<script>([\s\S]*?)<\/script>/;
+const SCRIPT_ATTRS_RE = /<script\b[^>]*>([\s\S]*?)<\/script>/g;
+const ASYNC_ATTR_RE = /\b(?:async|defer)\b/;
+const NETWORK_RE = /fetch|XMLHttpRequest|addEventListener/;
+const EXTERNAL_SRC_RE = /<(?:script|link)\b[^>]*\bsrc=/;
 const call = (headers = {}, init = {}) =>
   worker.fetch(
     new Request(ORIGIN + (init.path ?? "/"), {
@@ -351,7 +362,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4564);
+    expect(bytes.byteLength).toBe(4733);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1138,26 +1149,76 @@ test("accessibility contracts: skip link, motion preferences, focus indicators, 
   expect(identityBody.includes('<html lang="en">')).toBe(true);
 });
 
-// The bar is sticky over the page, so the scroll offset has to clear it, and it
-// has to be the offset the scrollport uses rather than one written onto a
-// section: a per-element margin covers an anchor jump and nothing else, so the
-// browser bringing a focus stop into view on Tab still put the ring under the
-// bar, and a keyboard user tabbing the bar's own links watched it disappear
-// (WCAG 2.4.11 Focus Not Obscured, 2.4.7 Focus Visible). The offset is read
-// from a token so the phone breakpoint's taller bar cannot drift from it.
-test("the scroll offset clears the sticky bar for every way the page scrolls", () => {
-  const heights = [...identityBody.matchAll(BAR_H_TOKEN_RE)].map((match) => Number(match[1]));
-  expect(heights, "the bar height is not named once on :root and once on the phone").toHaveLength(
-    2,
-  );
-  expect(
-    heights[1],
-    "the phone bar wraps to two rows and is the taller of the two",
-  ).toBeGreaterThan(heights[0]);
+// The bar is sticky over the page, so the scroll offset has to clear it, and
+// it has to be the offset the scrollport uses rather than one written onto a
+// section: a per-element margin covers an anchor jump and nothing else, so
+// the browser bringing a focus stop into view on Tab still put the ring
+// under the bar, and a keyboard user tabbing the bar's own links watched it
+// disappear (WCAG 2.4.11 Focus Not Obscured, 2.4.7 Focus Visible).
+//
+// The offset cannot be a hand-written length. The bar's height is the brand
+// line, plus however many lines the section list wraps to AT THIS WIDTH,
+// plus padding, at THIS reader's text size: two independent inputs, and one
+// rem token tracks the text size while saying nothing about the width. The
+// token that shipped (4rem, raised to 6rem on a phone) was right on a
+// desktop and wrong on the same page at 200% text on a phone, where the bar
+// stood 30-44px taller than the offset cleared and every section heading a
+// nav link names landed underneath it. So the bar is measured and the
+// measurement is what scroll-padding-top reads. These assertions pin the
+// mechanism, and the browser-level check in the comment is what pins the
+// behavior: an offset that stops tracking the bar has to fail here.
+test("the scroll offset is measured from the bar, not written as a length", () => {
+  // One declaration of the token, with a value that over-clears rather than
+  // under: it is what a reader with scripting off gets, and the one below
+  // that shrinks it to the truth on first paint.
+  const declared = [...identityBody.matchAll(BAR_H_TOKEN_RE)];
+  expect(declared, "--bar-h is not declared exactly once on :root").toHaveLength(1);
+  const fallback = Number(declared[0][1]);
+  expect(fallback, "the scripting-off fallback does not over-clear").toBeGreaterThanOrEqual(10);
   expect(identityBody).toContain("html { scroll-padding-top: var(--bar-h); }");
-  // No element-level offset left behind: two spellings of the same clearance is
-  // one of them going stale.
+  // The observer writes the measured height, so the offset follows the bar
+  // when the reader resizes and not only at load.
+  expect(identityBody).toContain("new ResizeObserver");
+  expect(identityBody).toMatch(SET_PROPERTY_RE);
+  // No element-level offset left behind: two spellings of the same
+  // clearance is one of them going stale.
   expect(identityBody).not.toContain("scroll-margin-top");
+});
+
+// default-src 'none' refuses every script, so the one script the page runs
+// is admitted by a hash rather than by loosening the policy. A hash that
+// no longer matches the script is a page that has silently lost its
+// measured scroll offset and gone back to the over-clearing fallback,
+// which no other assertion here can see: the CSP is sent as a header and
+// the script is in the body. So the two are compared here, from the bytes
+// this Worker actually serves.
+test("the CSP admits the bar-measuring script by a hash of its served text", async () => {
+  const csp = (await call()).headers.get("content-security-policy");
+  expect(csp).toContain("default-src 'none'");
+  const declared = csp.match(SCRIPT_SRC_RE);
+  expect(declared, "the CSP names no script-src").not.toBeNull();
+  // The policy is not opened up past the one script: no unsafe-inline and
+  // no wildcards, so an injected script still has nothing to be allowed by.
+  expect(csp).not.toContain("script-src 'unsafe-inline'");
+  expect(csp).not.toMatch(SCRIPT_WILDCARD_RE);
+  const served = identityBody.match(INLINE_SCRIPT_RE);
+  expect(served, "the served page carries no script").not.toBeNull();
+  const digest = `sha256-${createHash("sha256").update(served[1], "utf8").digest("base64")}`;
+  expect(digest, "the CSP hash does not match the script the page serves").toBe(declared[1]);
+});
+
+// The page's only script measures the bar. It is the one thing on the page
+// that costs the phone's visit a parse, so what it may do is pinned: a script
+// that grew into a fetch, or one that blocks first paint, shows up here and
+// in the visit test's byte ceiling rather than passing quietly.
+test("the bar-measuring script is the page's only script and only writes the offset", () => {
+  const scripts = [...identityBody.matchAll(SCRIPT_ATTRS_RE)];
+  expect(scripts).toHaveLength(1);
+  expect(scripts[0][0]).not.toMatch(ASYNC_ATTR_RE);
+  // It observes and writes one custom property; nothing else.
+  expect(scripts[0][1]).toContain("ResizeObserver");
+  expect(scripts[0][1]).toContain(".bar");
+  expect(scripts[0][1]).not.toMatch(NETWORK_RE);
 });
 
 // The blink has to stop, not just be skippable by preference. A user who
@@ -1299,6 +1360,23 @@ test("the section list wraps at every width, not only on a phone", () => {
   }
 });
 
+// 320 CSS px is the narrowest a reflowable page has to survive, and 400% zoom
+// on a 1280 screen lands on it. The footer's repository URL is one unbroken
+// token, and a flex item will not shrink below its content, so at that width
+// it was 311px wide inside a 266px column: the page gained a horizontal
+// scrollbar and everything else on it sat off the right edge (WCAG 1.4.10
+// Reflow). min-width:0 is what lets the item take the width it has been
+// given and overflow-wrap is what breaks the token inside it; either alone
+// does not, which is why both are pinned.
+test("no unbroken token overflows the column at the 320px reflow width", () => {
+  const match = identityBody.match(FOOTER_CHILDREN_RULE_RE);
+  const footer = match === null ? "" : match[0];
+  expect(footer, "the footer child rule matched no rule").toContain("min-width: 0");
+  expect(footer, "the footer child rule matched no rule").toContain("overflow-wrap: anywhere");
+  // The URL is the token that overflows, so it is the one that has to break.
+  expect(identityBody).toContain(">github.com/maci0/toktop</a>");
+});
+
 // RFC 6928 initcwnd: ten ~1460-byte segments (~14 KB). Identity bytes plus
 // inline CSS are everything there is, so staying under this keeps first paint
 // at one round trip. The identity size is the record: a copy change that
@@ -1312,9 +1390,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13294);
-  expect(gzipped).toBe(4564);
-  expect(brotli).toBe(3865);
+  expect(identity).toBe(13567);
+  expect(gzipped).toBe(4733);
+  expect(brotli).toBe(3994);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1350,7 +1428,7 @@ test("the READMEs record the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_442);
+  expect(visit[0][1]).toBe(14_571);
   for (const name of ["CONTRIBUTING.md", "Makefile"]) {
     const quoted = readFileSync(join(import.meta.dir, "..", name), "utf8").match(VISIT_TOTAL_RE);
     expect(`${name} quotes ${quoted?.[1]}`).toBe(
@@ -1392,13 +1470,16 @@ test("every answer, served or failed, reports the edge cost in Server-Timing", a
 });
 
 // Two requests, both from this origin: the document and the one hero image
-// its srcset picks. Nothing else is fetched, because the page has no script,
-// no webfont and no external stylesheet, and the favicon is a data URI rather
-// than a file. The per-asset ceilings below bound each half; this bounds the
-// pair, which is what a phone on a mobile network actually waits for.
+// its srcset picks. Nothing else is fetched, because the page fetches nothing
+// at all: no webfont, no external stylesheet, and the favicon is a data URI
+// rather than a file. The one script is inline and only measures the sticky
+// bar, so it costs a parse rather than a request (the test above pins what it
+// is allowed to do). The per-asset ceilings below bound each half; this
+// bounds the pair, which is what a phone on a mobile network waits for.
 test("a phone's visit is the document and the 768w capture, and fits in 25 KB", async () => {
-  expect(identityBody.includes("<script")).toBe(false);
   expect(identityBody.includes('rel="stylesheet"')).toBe(false);
+  // No src or href the browser has to go and get: the document and one image.
+  expect(identityBody).not.toMatch(EXTERNAL_SRC_RE);
   // The one <link> is the data-URI favicon: a link to a file would be a
   // fourth thing on the critical path.
   const links = [...identityBody.matchAll(/<link\b[^>]*>/g)];
@@ -1409,7 +1490,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_442);
+  expect(visit).toBe(14_571);
   expect(visit).toBeLessThan(25_000);
 });
 
