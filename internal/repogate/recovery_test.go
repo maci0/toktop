@@ -113,3 +113,68 @@ func TestEveryPackageThatWritesToDiskIsInTheRecoveryTable(t *testing.T) {
 		}
 	}
 }
+
+// The audit log is the record that says a recovery happened or failed: the
+// lines naming an engine going down, a store backup that could not be written,
+// a store read back from its copy, and a rename that could not be made durable
+// are the only trace any of those left. It is state a run keeps after it
+// exits, and toktop writes it wherever stderr points rather than to a file of
+// its own, so the state inventory has to say so: a row that names it, an RPO
+// and an RTO that price losing it, and the failure domain that says its
+// durability is the operator's redirect.
+//
+// The second half is pinned against the code rather than against the prose. The
+// claim is that toktop never opens a log file, so the log's durability is the
+// operator's redirect and not a setting here. A logger that grew an os.Open of
+// its own would give the log a path of its own to back up, and the inventory
+// row would then be wrong; this fails rather than letting that drift reach an
+// operator in the middle of a restore.
+func TestTheAuditLogIsInventoryAndItIsStderrOnly(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join(moduleRoot, filepath.FromSlash(recoveryTable)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		what, row string
+	}{
+		{"the state inventory", "| the audit log |"},
+		{"the RPO table", "| RPO for the audit log |"},
+		{"the RTO table", "| RTO for the audit log |"},
+	} {
+		if !strings.Contains(string(doc), want.row) {
+			t.Errorf("%s carries no row for %s: it is the record that says a recovery happened or failed, "+
+				"so what losing it costs belongs beside what losing the pin store costs",
+				recoveryTable, want.what)
+		}
+	}
+
+	// os.Stderr, not a file: the whole claim is that the log's durability is
+	// the operator's redirect.
+	fset := token.NewFileSet()
+	path := filepath.Join(moduleRoot, "internal", "logcfg", "logcfg.go")
+	file, perr := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+	if perr != nil {
+		t.Fatalf("parse %s: %v", path, perr)
+	}
+	writesAFile := false
+	ast.Inspect(file, func(n ast.Node) bool {
+		sel, ok := n.(*ast.SelectorExpr)
+		if !ok {
+			return true
+		}
+		pkg, ok := sel.X.(*ast.Ident)
+		if !ok || pkg.Name != "os" {
+			return true
+		}
+		switch sel.Sel.Name {
+		case "Create", "CreateTemp", "Open", "OpenFile", "WriteFile":
+			writesAFile = true
+		}
+		return true
+	})
+	if writesAFile {
+		t.Errorf("internal/logcfg opens a file of its own, so the audit log has a path of its own; "+
+			"%s still names it as stderr-only, which is now wrong. Add where the log lives and what losing it costs",
+			recoveryTable)
+	}
+}

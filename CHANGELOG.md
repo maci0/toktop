@@ -51,6 +51,19 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   a value it could not read would silently leave the timeline on the wall
   clock.
 
+- `docs/RECOVERY.md` now lists the audit log as state. It is the record that
+  says a recovery happened or failed: an engine going down, a store backup
+  that could not be written, a store read back from its copy, and a rename
+  that could not be made durable leave no trace anywhere else, and the
+  inventory that named every file the tree writes named none of them because
+  toktop opens no log file of its own. The RPO and RTO tables say what losing
+  it costs (the diagnosis, not the data -- an intact store has nothing to
+  restore, and the next run re-reports a store still missing its copy), and
+  the failure-domain list says its durability is the operator's redirect of
+  stderr, which is the same half backing up the config directory already was.
+  A test pins those rows and fails if `internal/logcfg` ever opens a file of
+  its own, since a log with a path of its own would need a backup step here.
+
 ## [0.23.0] - 2026-09-30
 
 Binaries, checksums, and a CycloneDX SBOM are on

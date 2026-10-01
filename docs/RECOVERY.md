@@ -13,6 +13,7 @@ somebody else's data.
 
 | State | Where | Written by |
 | --- | --- | --- |
+| the audit log | wherever the operator redirected the process's stderr, which toktop never chooses and never opens: it writes no log file of its own (`internal/logcfg/logcfg.go`, `NewSwapLogger`/`Logger` build a `slog.Logger` over `os.Stderr`). A run whose stderr is a terminal loses the log with the terminal, so nothing here assumes a path | every subsystem's `audit()` |
 | ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts`; a config directory that is itself unusable names no store, and the run fails at connect (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
 | a copy of the store, refreshed by every write, and rewritten from the store by the next connect that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
 | the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, by the next connect once that replacement is in place (`clearSupersededCopy`), or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
@@ -51,8 +52,10 @@ ledger that makes a retry count once is held the same way, so a retry that
 crosses a restart is stored and counted again instead of being suppressed.
 
 There is no database, no durable queue, no cache directory and no uploaded
-file. Nothing to back up beyond the pin store, which is why this file is
-short.
+file. Apart from the pin store there is nothing here to back up, which is why
+this file is short. The audit log is the other thing that outlives a run, and
+it outlives it only as long as whatever stderr is pointed into, so keeping it
+is the operator's redirect rather than a setting here.
 
 ## What toktop deletes
 
@@ -90,6 +93,8 @@ installed binary with it:
 
 | Question | Answer |
 | --- | --- |
+| RPO for the audit log | every line not yet captured wherever stderr is pointed, which on a terminal is all of them: toktop opens no log file, so a run whose stderr is a TTY leaves no record at all. Nothing is recovered and nothing can be, since the log is not toktop's file to copy back. The cost of losing it is the diagnosis, not the data: the lines that report an engine going down, a store backup that could not be written, a store recovered from its copy and a rename that could not be made durable are the only record that any of those happened, and a store that is intact has nothing to restore. Redirect stderr to a file to keep them (`toktop 2>>toktop.log`), which is the operator's half the same way backing up the config directory is. |
+| RTO for the audit log | nothing to restore, so it is not a recovery step: the questions it answered are re-answered by the run itself, since the collector re-reports an engine that is still down and the store check re-reports a copy that is still missing. |
 | RPO for agent events posted to `--ingest` | everything acknowledged but not yet outlived, which is every event the run held: the feed is process memory, so a quit, an update re-exec or a crash costs the whole feed and nothing recovers it (`RecordAgent`, `core.AgentHistoryLen`). The RTO is the sender's own, since only the sender holds a copy. |
 | RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next connect: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
@@ -423,6 +428,12 @@ deployment has to be made from a checkout rather than from a note.
   A credential that can delete the store can delete the copy, so a backup
   under a different account or a different medium is the only thing that
   survives a compromised account.
+- The audit log shares whatever failure domain stderr points into, and toktop
+  does not create or protect it: on a terminal it is in the terminal's, and a
+  file the operator redirected it into is under the same credential as the
+  store. It is not a backup gap in the sense the store is one, because no copy
+  of it could restore a pin or a binary; what it holds is the diagnosis, and
+  the diagnosis of a store that is intact is re-derived by the next run.
 - The site's only history is the deployment list on one Cloudflare account,
   and a credential holding it can delete it as well as the Worker. A
   rollback that depends on that list is therefore no more durable than the
