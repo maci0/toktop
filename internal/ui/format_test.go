@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/maci0/toktop/internal/core"
 )
 
 // Truncation must respect both limits at once: the visible-cell budget, and
@@ -145,10 +147,43 @@ func TestHumanBytesSubMebiTier(t *testing.T) {
 		{1 << 20, "1MiB"},
 		{3<<20 + 512<<10, "4MiB"},
 		{1 << 30, "1.0GiB"},
+		// The GiB tier ran out of digits at 1023.95: "%.1f" of 1023.95
+		// prints 1024.0, so a host with 2TiB of RAM rendered "2048.0GiB".
+		{1024<<30 - 1, "1024.0GiB"},
+		{1024 << 30, "1.0TiB"},
+		{2 << 40, "2.0TiB"},
+		// A sub-KiB value floors to "0KiB" rather than wrapping, and one
+		// already rounding up keeps its carry (1.5KiB -> 2KiB, above).
+		{512, "0KiB"},
+		{700, "1KiB"},
 	}
 	for _, tc := range tests {
 		if got := humanBytes(tc.in); got != tc.want {
 			t.Errorf("humanBytes(%d) = %q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+// humanBytesShort is the strip's form of the same value: the same unit
+// ladder, so it must carry the same rounding fix. A host with 2TiB of RAM
+// rendered "2048G" while the panel beside it read "2.0TiB", two spellings
+// of one magnitude off by the same factor.
+func TestHumanBytesShortTibiTier(t *testing.T) {
+	tests := []struct {
+		in   uint64
+		want string
+	}{
+		{0, "0K"},
+		{1 << 20, "1M"},
+		{1 << 30, "1.0G"},
+		{12 << 30, "12G"},
+		{1024<<30 - 1, "1024G"},
+		{1024 << 30, "1.0T"},
+		{3 << 40, "3.0T"},
+	}
+	for _, tc := range tests {
+		if got := humanBytesShort(tc.in); got != tc.want {
+			t.Errorf("humanBytesShort(%d) = %q, want %q", tc.in, got, tc.want)
 		}
 	}
 }
@@ -185,6 +220,18 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 		{999999, "1.0M"},
 		{1000000, "1.0M"},
 		{12500000, "12.5M"},
+		// The M form runs out of digits at 999.95M exactly as the k form
+		// does at 999.95k: an agent whose session totals 999,950,000
+		// tokens (a busy day on one agent, or the windowed total on a
+		// fleet) printed "1000.0M", a count one digit short of the
+		// magnitude it names.
+		{999949000, "999.9M"},
+		{999950000, "1.0G"},
+		{1500000000, "1.5G"},
+		// core.MaxEventTokens is the ceiling every producer clamps a
+		// counter to, so this is the largest a retained event can carry:
+		// it must still name its own magnitude.
+		{core.MaxEventTokens, "1099.5G"},
 	}
 	for _, tc := range counts {
 		if got := fmtCount(tc.n); got != tc.want {
@@ -211,6 +258,11 @@ func TestUnitBoundariesDoNotChangeSpelling(t *testing.T) {
 		{999949, "999.9k"},
 		{999950, "1.0M"},
 		{2500000, "2.5M"},
+		// Same overflow as fmtCount's, one tier up: the M form printed
+		// "1000.0M" for every rate from 999,950,000 to 999,999,999.
+		{999949000, "999.9M"},
+		{999950000, "1.0G"},
+		{2500000000, "2.5G"},
 	}
 	for _, tc := range rates {
 		if got := fmtRate(tc.v); got != tc.want {

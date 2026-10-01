@@ -423,10 +423,12 @@ func TestProcLineVRAMSumSaturates(t *testing.T) {
 			{Name: "b", SizeVRAM: 1 << 30},
 		},
 	})
-	// MaxUint64 + 1GiB saturates to MaxUint64, and MaxUint64/(1<<30) is
-	// 17179869184.0. A wrapping sum lands on exactly 1<<30 instead, which
+	// MaxUint64 + 1GiB saturates to MaxUint64, and MaxUint64/2^40 is
+	// 16777216.0. A wrapping sum lands on exactly 1<<30 instead, which
 	// formats as "1.0GiB" and would satisfy a bare "contains GiB" check.
-	const want = "17179869184.0GiB"
+	// The TiB form carries the magnitude: the GiB tier used to print
+	// "16777216.0GiB", a figure that names none of it.
+	const want = "16777216.0TiB"
 	if !strings.Contains(got, want) {
 		t.Fatalf("VRAM sum = %q, want the saturated figure %q", got, want)
 	}
@@ -438,8 +440,10 @@ func TestProcLineCtxCountFitsInt64(t *testing.T) {
 	}))
 	// 1<<63 token counts: a scan for a minus sign anywhere in the row would
 	// also fire on a model name like llama-3, and a wrapping conversion lands
-	// on 1<<63/1e9 = 9.2M rather than 9223372036854.8M.
-	const want = "9223372036854.8M"
+	// on 1<<63/1e9 = 9.2M rather than the true 9.2T. The G tier carries it;
+	// the M form used to print "9223372036854.8M", a count two units below
+	// what its own suffix named.
+	const want = "9223372036.9G"
 	if !strings.Contains(got, want) {
 		t.Fatalf("ctx = %q, want the unsigned 1<<63 token count %q", got, want)
 	}

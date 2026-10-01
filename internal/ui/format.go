@@ -50,10 +50,14 @@ const (
 // rate drops its decimal (10.0k/tok/s reads better as 10k, and a dot-separated
 // rate looks like a float the reader must convert); countNoDecimal is where a
 // count changes unit to M, keeping its one decimal since the trailing zero
-// there is uniform.
+// there is uniform, and gigaNoDecimal is the same step for G. Every tier
+// keeps one decimal, so the unit changes spelling on a rounded value rather
+// than on a bare multiple: that is what stops the M form printing "1000.0M"
+// for a count of 999,950,000 and the k form printing "1000k" for 999,500.
 const (
 	rateNoDecimal  = 10000
 	countNoDecimal = 1000000
+	gigaNoDecimal  = 1000000000
 )
 
 // The k suffix starts at a whole thousand, the same place fmtCount starts
@@ -68,6 +72,11 @@ func fmtRate(v float64) string {
 	}
 	k := v / 1000
 	switch {
+	case k/1000 >= unitRound:
+		// Past this point the M form cannot hold the value either, for the
+		// same reason the k form cannot: "%.1f" of 999.95 prints 1000.0, so a
+		// rate of 999,950,000 reads as 1,000,000,000.
+		return fmt.Sprintf("%.1fG", k/1000/1000)
 	case k >= unitRound:
 		// Past this point the k form cannot hold the value: "%.0f" of 999.95
 		// prints 1000, so a rate of 999,950 reads as 1,000,000. The M form
@@ -93,6 +102,16 @@ func fmtRate(v float64) string {
 func fmtCount(n int64) string {
 	k := float64(n) / 1000
 	switch {
+	case n >= gigaNoDecimal || k/1000 >= unitRound:
+		// The same overflow the M arm below is guarded against, one tier up:
+		// a session total past a billion tokens printed "1000.0M", which is
+		// the M form already carrying a magnitude it cannot name. The
+		// count comparison is on n, the exact int64, because
+		// gigaNoDecimal is an exact integer boundary and n carries the
+		// whole value up to 2^53; the scaled comparison covers a count
+		// past 2^53, where k/1000 still orders the value correctly even
+		// though k/1000/1000 has lost the low digits.
+		return fmt.Sprintf("%.1fG", k/1000/1000)
 	case n >= countNoDecimal || k >= unitRound:
 		return fmt.Sprintf("%.1fM", k/1000)
 	case n >= 1000:
@@ -139,8 +158,18 @@ func fmtDur(d time.Duration) string {
 // humanBytes renders a byte count. The KiB tier exists because a sub-MiB
 // value (a small size_vram) would otherwise round to a flat "0MiB", reading
 // as no allocation at all.
+//
+// The TiB tier is the same overflow unitRound guards for fmtCount, one unit
+// up: "%.1f" of 1023.95 prints 1024.0, so a host with 2TiB of RAM printed
+// "2048.0GiB" and a saturated VRAM sum printed "16777216.0GiB". Both are
+// magnitudes the GiB tier cannot name, and the longer suffix costs a column
+// the footer budgets for a shorter one, so the unit is chosen before the
+// rendering rather than after.
 func humanBytes(b uint64) string {
 	const g = 1 << 30
+	if b >= 1024*g {
+		return fmt.Sprintf("%.1fTiB", float64(b)/(g*1024))
+	}
 	if b >= g {
 		return fmt.Sprintf("%.1fGiB", float64(b)/g)
 	}
@@ -151,9 +180,15 @@ func humanBytes(b uint64) string {
 }
 
 // humanBytesShort is the compact form used in the system strip. Same unit,
-// shorter suffix: the strip has no room for "iB".
+// shorter suffix: the strip has no room for "iB". The TiB tier carries the
+// same rounding humanBytes guards: without it a host with 2TiB of RAM read
+// "2048G", and the G tier below is the whole number its suffix promises
+// only up to the point "%.0f" still has three digits to print.
 func humanBytesShort(b uint64) string {
 	const m = 1 << 20
+	if b >= 1024<<30 {
+		return fmt.Sprintf("%.1fT", float64(b)/(1<<40))
+	}
 	if b >= 10<<30 {
 		return fmt.Sprintf("%.0fG", float64(b)/(1<<30))
 	}
