@@ -234,7 +234,8 @@ in day-to-day work:
 | `make site-check` | `bun test site/` |
 | `make site-assets` | rebuild the shipped dashboard captures in `site/public/` from `docs/images/dashboard.png`, then run `bun test site/` (needs `magick`, `avifenc`, and the pinned `bun`) |
 | `make readme-assets` | rebuild the README's dashboard capture in `docs/images/dashboard.avif` from the same source frame, then run `bun test site/` (same tools) |
-| `make site-deploy` | run `site-lint`, `site-check`, and `check-deploy-source`, then deploy the site Worker at the `WRANGLER` pin, record what it uploaded in `dist/site.deployed/manifest`, and poll `/health` |
+| `make site-deploy` | run `site-lint`, `site-check`, and `check-deploy-source`, then record what it is about to upload in `dist/site.deployed/manifest` *before* deploying the site Worker at the `WRANGLER` pin, and poll `/health` (the record lands first, so a run killed mid-deploy still leaves `make site-rollback` something to undo) |
+| `make check-site-records` | fail unless `site-deploy` records the deploy before it calls wrangler and `site-rollback` consumes that record before it does (`make check` runs it) |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
 | `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, hands `-tags` one quoted argument, and keeps `-shuffle=on` (`make check` runs it) |

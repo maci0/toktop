@@ -578,10 +578,22 @@ Every externally reachable input, with its code location:
     `SITE_ROLLED_BACK`, `SITE_HEALTH_URL`, `SITE_HEALTH_TRIES` and
     `SITE_HEALTH_WAIT` assignments; the target and function names are the
     anchors here, not their line numbers). A rollback undoes the most recent
-    deployment whoever shipped it, so a deploy that reported success records
-    `dist/site.deployed` and a rollback moves it to `dist/site.rolled-back`:
+    deployment whoever shipped it, so a deploy records `dist/site.deployed`
+    and a rollback moves it to `dist/site.rolled-back`:
     a second rollback has nothing of this tree's to undo and exits 0 without
-    calling wrangler. The marker a deploy leaves behind holds a
+    calling wrangler. Each recipe does that bookkeeping before it calls
+    wrangler, not after, and the two orders are the same rule: a run killed
+    part-way leaves the record in the state that matches what the platform
+    did. A deploy interrupted after the upload leaves the new Worker live
+    and the marker naming it, so the rollback that run still needs is
+    available; a rollback interrupted the same way leaves the marker already
+    moved aside, so the next run finds nothing of this tree's to undo rather
+    than undoing the undo and putting the version somebody is escaping back
+    on the site. A marker naming a deploy that never reached wrangler is
+    harmless: undoing it restores the version the previous deploy left
+    serving, which is the version that was serving a moment ago. The
+    ordering is pinned by `check-site-records` (`make check`). The marker a
+    deploy leaves behind holds a
     `manifest` naming the commit, the `wrangler` and `bun` pins, and the
     digests of `worker.js` and of the captures, so the version that reached
     production is on record without reading the Cloudflare dashboard; a
@@ -726,9 +738,9 @@ Deployment surface:
   Every other event stays capped, because a cap applied to the state it
   exists to expose buries that state.
   Deployment is a local make target, not a CI job: `make site-deploy`
-  takes `dist/site.lock`, runs `bunx wrangler@4.126.0 deploy` with ambient
-  Cloudflare credentials, records `dist/site.deployed` and the manifest of
-  what it uploaded, polls
+  takes `dist/site.lock`, records `dist/site.deployed` and the manifest of
+  what it is about to upload, runs `bunx wrangler@4.126.0 deploy` with ambient
+  Cloudflare credentials, polls
   `https://toktop.ai/health` 6 times at 10s,
   and points at `make site-rollback` on failure. It depends on `site-lint`,
   `site-check`, `check-wrangler-doc`, and `check-deploy-source` (Makefile,

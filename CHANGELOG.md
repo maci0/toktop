@@ -927,6 +927,20 @@ Binaries, checksums, and a CycloneDX SBOM are on
   name. Both targets remove the directory instead, so the record is replaced
   rather than buried.
 
+- `make site-deploy` and `make site-rollback` wrote their record of what they
+  did to Cloudflare *after* the platform call, so an interrupted run left the
+  site in a state no later run could undo. A deploy killed after the upload by
+  Ctrl-C, a closed terminal, or a health poll that never finished left the new
+  Worker live with no `dist/site.deployed`, and the next `make site-rollback`
+  reported "nothing to roll back" and exited -- the one rollback a
+  half-finished deploy needs was the one that could not be performed. A
+  rollback killed the same way left `dist/site.deployed` in place, and the next
+  `make site-rollback` called wrangler again: a rollback of a rollback, putting
+  back the version somebody was in the middle of escaping. Both recipes now
+  keep the record before the call, so an interrupted run leaves it in the
+  state that matches what the platform did, and `make check-site-records` (in
+  `make check` and in CI) fails the build if either order is ever swapped back.
+
 - A remote target can no longer exhaust memory through its own stdout. The
   peer's answer to a discovery sweep or a vitals poll landed in an unbounded
   buffer, so a host that streamed for the length of the command exhausted the

@@ -272,7 +272,19 @@ SITE_LOCK         := $(DIST)/site.lock
 # live is the record a rollback needs and a build sweep is not entitled to
 # take. The one a deploy leaves behind holds a manifest of what it uploaded
 # (SITE_DEPLOYINFO), and a rollback moves it with the directory, so the
-# version that was undone is still on record.
+# version that was undone stays on record.
+#
+# A deploy writes this marker BEFORE it calls the platform, not after. Written
+# after, the record exists only for a run that survived to the end: a deploy
+# killed by Ctrl-C, by a closed terminal, or by the health poll never finishing
+# leaves the new version live with no marker, and the next `make site-rollback`
+# reads "nothing to roll back" and exits. The run that has to be undone is
+# exactly the one that did not finish, so writing it after names the only
+# deploys that need no undo. Written first it is the opposite: a marker with no
+# upload behind it rolls back to the version the previous deploy left serving,
+# which is the version that was serving a moment ago, and a deploy that never
+# reached the platform leaves nothing to undo at all. The marker is a claim, not
+# a receipt, and the claim is cheap to make and cheap to keep.
 SITE_DEPLOYED     := $(DIST)/site.deployed
 SITE_ROLLED_BACK  := $(DIST)/site.rolled-back
 # -bindnow is the Go spelling of -Wl,-z,now: without it the linux ELF ships
@@ -1326,10 +1338,10 @@ check-deploy-source: ## fail unless the files 'make site-deploy' uploads are com
 .PHONY: site-deploy
 site-deploy: require-bun site-lint site-check check-wrangler-doc check-deploy-source ## gate with site-lint/site-check, deploy the site Worker at the WRANGLER pin, then wait for /health
 	@$(SITE_GUARD) \
-	(cd site && bunx wrangler@$(WRANGLER) deploy) || exit 1; \
+	mkdir -p $(SITE_DEPLOYED) || { echo "cannot record $(SITE_DEPLOYED) before deploying, so a run interrupted here would leave a live upload that 'make site-rollback' cannot find" >&2; exit 1; }; \
 	rm -rf $(SITE_ROLLED_BACK); \
-	mkdir -p $(SITE_DEPLOYED) || { echo "deployed, but cannot record $(SITE_DEPLOYED); the next 'make site-rollback' would find nothing to undo" >&2; exit 1; }; \
-	$(SITE_DEPLOYINFO) || { echo "deployed, but cannot write the manifest in $(SITE_DEPLOYED); the audit trail of what is serving is in the Cloudflare deployment log instead" >&2; exit 1; }; \
+	$(SITE_DEPLOYINFO) || { echo "cannot write the manifest in $(SITE_DEPLOYED); the audit trail of what is serving is in the Cloudflare deployment log" >&2; exit 1; }; \
+	(cd site && bunx wrangler@$(WRANGLER) deploy) || { echo "not deployed; $(SITE_DEPLOYED) records this run, so 'make site-rollback' still has something to act on" >&2; exit 1; }; \
 	wait_for_site || { echo "deploy finished but the site is not serving; roll back with 'make site-rollback'" >&2; exit 1; }
 
 .PHONY: site-rollback
@@ -1341,10 +1353,52 @@ site-rollback: require-bun ## roll the site Worker back to the version before th
 		echo "to recover from this machine anyway, check the deployment list in the Cloudflare dashboard for what the deploy before this one was, then run 'cd site && bunx wrangler@$(WRANGLER) rollback' once, or check out the commit that served correctly and run 'make site-deploy' from it"; \
 		exit 0; \
 	fi; \
-	(cd site && bunx wrangler@$(WRANGLER) rollback) || exit 1; \
-	rm -rf $(SITE_ROLLED_BACK); \
-	mv $(SITE_DEPLOYED) $(SITE_ROLLED_BACK) || { echo "rolled back, but cannot move $(SITE_DEPLOYED) aside; the next 'make site-rollback' would undo this one as well" >&2; exit 1; }; \
+	rm -rf $(SITE_ROLLED_BACK) || { echo "cannot clear $(SITE_ROLLED_BACK); the deploy it holds was already undone once, so a rollback from here would undo this one as well" >&2; exit 1; }; \
+	mv $(SITE_DEPLOYED) $(SITE_ROLLED_BACK) || { echo "cannot move $(SITE_DEPLOYED) aside; no rollback has run, so 'make site-rollback' is still the right next step" >&2; exit 1; }; \
+	(cd site && bunx wrangler@$(WRANGLER) rollback) || { echo "not rolled back; $(SITE_ROLLED_BACK) holds what an earlier run already undid, so this deploy is still the one live" >&2; exit 1; }; \
 	wait_for_site || { echo "rollback finished but the site is not serving; retry, or read the deployment log in the Cloudflare dashboard" >&2; exit 1; }
+
+# The site deploy and the site rollback are the one pair here whose second run
+# does damage, and both are the same defect in opposite directions: the record
+# of what a run did to the platform, and when it is written relative to the
+# platform call. Written after the call, a run killed before its recipe ends is
+# invisible to the undo that needs it, and the undo nobody can perform is the
+# one a half-finished deploy requires. Consumed after the call, a rollback
+# killed the same way leaves its record in place, and the next run undoes the
+# undo: the version somebody is escaping goes straight back onto the site.
+#
+# Both recipes therefore keep one rule, checked here so a reordering cannot
+# reintroduce either shape silently: site-deploy records the deploy before
+# calling wrangler, and site-rollback consumes the record before calling it.
+#
+# Read off the two recipes as one block, recipe lines only, because each is a
+# single continued command and the step that comes first on it is the one that
+# decides. Comments are dropped because the ones above name all four steps, and
+# the block stops before this recipe so nothing here matches itself. The four
+# patterns are the record step each target's own command names and the platform
+# call each one makes, and the checks below are only the two orders; what the
+# steps are, and every failure they can report, is the recipes' own.
+.PHONY: check-site-records
+check-site-records: ## fail unless site-deploy records the deploy before calling wrangler and site-rollback consumes it before calling wrangler
+	@block() { awk '/^site-deploy:/ { inrecipes = 1 } /^\.PHONY: check-site-records/ { inrecipes = 0 } inrecipes && /^\t/ { print }' $(MAKEFILE_LIST); }; \
+	deploy_mark=$$(block | grep -F -n 'mkdir -p $$(SITE_DEPLOYED)' | head -1 | cut -d: -f1); \
+	deploy_call=$$(block | grep -F -n 'wrangler@$$(WRANGLER) deploy)' | head -1 | cut -d: -f1); \
+	rollback_move=$$(block | grep -F -n 'mv $$(SITE_DEPLOYED)' | head -1 | cut -d: -f1); \
+	rollback_call=$$(block | grep -F -n 'wrangler@$$(WRANGLER) rollback)' | head -1 | cut -d: -f1); \
+	fail=0; \
+	if [ -z "$$deploy_mark" ] || [ -z "$$deploy_call" ] || [ -z "$$rollback_move" ] || [ -z "$$rollback_call" ]; then \
+		echo "make check-site-records: cannot find the record and platform-call steps of site-deploy and site-rollback" >&2; \
+		fail=1; \
+	elif [ "$$deploy_mark" -gt "$$deploy_call" ]; then \
+		echo "make check-site-records: site-deploy records the deploy after it calls wrangler, so a deploy interrupted" >&2; \
+		echo "  before its recipe ends leaves a live upload that 'make site-rollback' reports as nothing to undo" >&2; \
+		fail=1; \
+	elif [ "$$rollback_move" -gt "$$rollback_call" ]; then \
+		echo "make check-site-records: site-rollback consumes the record after it calls wrangler, so a rollback interrupted" >&2; \
+		echo "  before its recipe ends leaves that record in place and the next run rolls back the rollback" >&2; \
+		fail=1; \
+	fi; \
+	exit $$fail
 
 .PHONY: fmt
 fmt: ## rewrite all Go files with gofmt (including simplifications)
@@ -1427,6 +1481,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion s
 	@$(MAKE) --no-print-directory check-ci-platforms
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
+	@$(MAKE) --no-print-directory check-site-records
 	@$(MAKE) --no-print-directory check-changelog-structure
 	@$(MAKE) --no-print-directory check-changelog-covers
 	@unformatted=$$($(GOFMT) -s -l .); \

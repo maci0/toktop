@@ -123,6 +123,17 @@ jobs:
       - name: every documented make target is in make help (linux only)
         if: runner.os == 'Linux'
         run: make check-help-docs
+      # The site deploy and the site rollback each keep a record of what they
+      # did to the platform, and each once kept it in the order that is unsafe:
+      # a deploy interrupted after the upload leaves a live Worker that nothing
+      # can undo, and a rollback interrupted after its platform call leaves the
+      # next run free to undo it again, which puts the version somebody is
+      # escaping back on the site. Reading the recipes here catches a
+      # reordering the moment it lands; otherwise the only way to find out is to
+      # interrupt a real deploy.
+      - name: site deploy and rollback record before they call the platform (linux only)
+        if: runner.os == 'Linux'
+        run: make check-site-records
       # The changelog's shape, not one release's contents: an impact heading
       # repeated inside a section means the entries under the second one ship
       # unlabelled, and the only other place that refuses it is the cut, which
