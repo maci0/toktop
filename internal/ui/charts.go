@@ -18,7 +18,7 @@ func (m Model) renderCharts() string {
 	w := m.w - 4 // panel borders + padding
 	cad := m.chartCadence()
 	outH, _, _ := m.sectionHeights()
-	agg, grid := m.rateSeries(w, cad, true)
+	agg, grid := m.rateSeries(w, cad, true, true)
 	out := panel(
 		m.throughputTitle(w, seriesPeak(agg)),
 		BrailleChart(agg, w, outH, ChartStyle{Heat: heatColor, Grid: grid}),
@@ -29,7 +29,7 @@ func (m Model) renderCharts() string {
 	// with no labels on either. Left on the uniform cadence, pressing t made the
 	// pair disagree about how much wall clock a column spans, and a reader
 	// comparing the two traces had no way to tell the mode had split them.
-	inVals := m.rateValues(w, cad, false)
+	inVals, _ := m.rateSeries(w, cad, false, false)
 	in := panel(
 		// Same text alternative as THROUGHPUT: the prompt plot is one braille
 		// row, so the current rate in the title is the only number on the frame
@@ -50,27 +50,15 @@ const chartCompressedDefault = true
 // doubles moving left.
 const compressBlock = 12
 
-// rateSeries produces one direction's throughput series plus the grid
-// boundaries for the active timescale mode. Both charts read it, so the two
-// plots stacked in the frame can never be on different timescales.
-func (m Model) rateSeries(w int, cadence time.Duration, out bool) ([]float64, map[int]bool) {
+// rateSeries produces one direction's throughput series plus, when wantBounds
+// is set, the grid boundaries for the active timescale mode. Both charts of a
+// stacked pair read it, so the two plots can never be on different timescales.
+func (m Model) rateSeries(w int, cadence time.Duration, out, wantBounds bool) ([]float64, map[int]bool) {
 	if !m.chartCompressed {
 		return aggHist(m.snap, out, w, cadence), nil
 	}
 	tv := timedSeries(m.snap, out, cadence)
-	vals, bounds := compressSeriesOpts(tv, newestOf(tv), w, compressBlock, true)
-	return vals, bounds
-}
-
-// rateValues is rateSeries for the second chart of a pair, which draws on the
-// first chart's grid and needs no boundaries of its own.
-func (m Model) rateValues(w int, cadence time.Duration, out bool) []float64 {
-	if !m.chartCompressed {
-		return aggHist(m.snap, out, w, cadence)
-	}
-	tv := timedSeries(m.snap, out, cadence)
-	vals, _ := compressSeriesOpts(tv, newestOf(tv), w, compressBlock, false)
-	return vals
+	return compressSeriesOpts(tv, newestOf(tv), w, compressBlock, wantBounds)
 }
 
 // throughputTitle is the chart heading: the current rate, the peak the plot is

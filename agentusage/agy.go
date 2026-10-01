@@ -64,39 +64,26 @@ func agySessionCwd(path string) (string, bool) {
 
 // agyConversationID is the brain/<id> directory a transcript lives under.
 func agyConversationID(path string) string {
-	dir := filepath.Dir(path)
-	for range agyHistoryDepth {
-		parent := filepath.Dir(dir)
-		if filepath.Base(parent) == "brain" {
-			id := filepath.Base(dir)
-			if id == "" || id == "." || id == string(filepath.Separator) {
-				return ""
-			}
-			return id
-		}
-		if parent == dir {
-			break
-		}
-		dir = parent
+	dir, ok := walkUpDirs(path, agyHistoryDepth, func(dir string) (string, bool) {
+		return dir, filepath.Base(filepath.Dir(dir)) == "brain"
+	})
+	if !ok {
+		return ""
 	}
-	return ""
+	id := filepath.Base(dir)
+	if id == "" || id == "." || id == string(filepath.Separator) {
+		return ""
+	}
+	return id
 }
 
 // agyStoreRoot is the directory that holds history.jsonl or
 // cache/last_conversations.json above this transcript.
 func agyStoreRoot(path string) string {
-	dir := filepath.Dir(path)
-	for range agyHistoryDepth {
-		if agyHasIndex(dir) {
-			return dir
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return ""
+	root, _ := walkUpDirs(path, agyHistoryDepth, func(dir string) (string, bool) {
+		return dir, agyHasIndex(dir)
+	})
+	return root
 }
 
 func agyHasIndex(dir string) bool {

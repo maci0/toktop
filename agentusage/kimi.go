@@ -146,18 +146,7 @@ func kimiRoots(dir string, now time.Time) []string {
 // state.json swapped for a symlink out of the session directory is refused the
 // same way a transcript symlink is.
 func kimiSessionCwd(wirePath string) (string, bool) {
-	dir := filepath.Dir(wirePath)
-	for range kimiSessionDepth {
-		if cwd, ok := readKimiState(dir); ok {
-			return cwd, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return "", false
+	return walkUpDirs(wirePath, kimiSessionDepth, readKimiState)
 }
 
 // kimiSessionDepth bounds the walk from a wire log to the session directory

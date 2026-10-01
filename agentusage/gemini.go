@@ -6,7 +6,6 @@ package agentusage
 import (
 	"bytes"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 )
 
@@ -95,18 +94,7 @@ func geminiToolCallsRepeat(raw json.RawMessage) bool {
 // sits beside chats/, not in it, and the walk looks for the file rather than
 // counting levels.
 func geminiSessionCwd(path string) (string, bool) {
-	dir := filepath.Dir(path)
-	for range geminiRootDepth {
-		if cwd, ok := readGeminiRoot(dir); ok {
-			return cwd, true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return "", false
+	return walkUpDirs(path, geminiRootDepth, readGeminiRoot)
 }
 
 func readGeminiRoot(dir string) (string, bool) {

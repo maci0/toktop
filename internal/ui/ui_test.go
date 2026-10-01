@@ -1132,7 +1132,7 @@ func TestTimescaleToggleMovesBothCharts(t *testing.T) {
 	}{{true, true}, {false, false}} {
 		m.chartCompressed = tc.compressed
 		for _, out := range []bool{true, false} {
-			vals, bounds := m.rateSeries(100, time.Second, out)
+			vals, bounds := m.rateSeries(100, time.Second, out, tc.wantBounds)
 			if len(vals) == 0 {
 				t.Fatalf("compressed=%v out=%v: empty series", tc.compressed, out)
 			}
