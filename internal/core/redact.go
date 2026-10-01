@@ -168,10 +168,19 @@ func RedactAnyUserHome(msg string) string {
 	}
 }
 
-// maxAccountNameLen is the longest name read as an account. POSIX caps a
-// login name at 32 characters and no system toktop runs on exceeds a hundred,
-// so a longer run is a file name in a directory that happens to be spelled
-// "home", and folding it would replace a readable path with a bare "~".
+// maxAccountNameLen is the longest name read as an account, counted in
+// characters and not in bytes. POSIX caps a login name at 32 characters and
+// no system toktop runs on exceeds a hundred, so a longer run is a file name
+// in a directory that happens to be spelled "home", and folding it would
+// replace a readable path with a bare "~".
+//
+// The cap is in characters because the thing it bounds is a name a person
+// reads. Counted in bytes it reached a third of the way through a
+// non-Latin name: a 34-character Japanese account name is 102 bytes, so
+// /home/<name>/proj was read as a file called <name> in a directory called
+// "home" and copied through, account name and all, by every fold in this
+// file. The loop below already counts one rune at a time, so the unit is the
+// only thing that had to change.
 const maxAccountNameLen = 100
 
 // foldAnyHomePrefix rewrites every home in msg that one prefix introduces to
@@ -229,7 +238,7 @@ func homeNameStartsAt(msg string, at int) bool {
 // reader that cannot see the file system, and the account is the one that must
 // not survive.
 func accountName(msg string) (name string, ok bool) {
-	end := 0
+	end, chars := 0, 0
 	for end < len(msg) {
 		r, w := utf8.DecodeRuneInString(msg[end:])
 		if r == '/' || r == '\\' {
@@ -239,9 +248,12 @@ func accountName(msg string) (name string, ok bool) {
 			return "", false
 		}
 		end += w
+		if chars++; chars > maxAccountNameLen {
+			break
+		}
 	}
 	name = msg[:end]
-	if name == "" || name[0] == '.' || len(name) > maxAccountNameLen {
+	if name == "" || name[0] == '.' || chars > maxAccountNameLen {
 		return "", false
 	}
 	return name, true

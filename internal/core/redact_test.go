@@ -246,6 +246,12 @@ func TestRedactAnyUserHomeFoldsAnyAccount(t *testing.T) {
 		// A name longer than any login a system toktop runs on grants is a
 		// file, not an account.
 		{"/home/" + strings.Repeat("n", maxAccountNameLen+1) + ".x", "/home/" + strings.Repeat("n", maxAccountNameLen+1) + ".x"},
+		// The bound is in characters. Counted in bytes it cut a non-Latin name
+		// a third of the way along: 34 Japanese characters are 102 bytes, so
+		// this account was read as a file in a directory that happens to be
+		// spelled "home" and the name survived into every log line, report
+		// and issue the fold exists to keep it out of.
+		{"/home/" + strings.Repeat("日", 34) + "/proj", "~/proj"},
 		// The home prefixes overlap, /home/ being the tail of /export/home/
 		// and /nfs/home/, so a home nested inside another is matched by the
 		// shorter prefix in the text the longer one left behind. One pass has
