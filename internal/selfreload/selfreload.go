@@ -10,6 +10,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/maci0/toktop/internal/core"
 	"github.com/maci0/toktop/internal/logcfg"
 )
 
@@ -47,8 +48,19 @@ func Watch(ctx context.Context, exePath string, interval time.Duration, onChange
 		switch {
 		case err != nil && !down:
 			down = true
+			// Both values go through logcfg, the fold every other audit line
+			// in this tree applies and the only one that reaches what a stat
+			// failure carries. Handed over raw, the error is a *fs.PathError
+			// rather than a string, and logcfg.HomeHandler folds the home
+			// directory out of string attributes only: the path attribute
+			// below was written as "~" while the error kept the account's own
+			// directory name in full, on the very line that reports the image
+			// is unreadable. Neither value was single-lined either, so an
+			// executable path carrying a newline or an escape wrote a second
+			// line into the log, or a sequence the operator's terminal ran.
 			audit().Warn("toktop: cannot read the running executable, so a rebuild will not be picked up",
-				"path", exePath, "error", err)
+				"path", logcfg.Field(core.RedactHome(exePath), logcfg.FieldCap),
+				"error", logcfg.RedactedField(err.Error(), logcfg.FieldCap))
 		case err == nil && down:
 			down = false
 			audit().Info("toktop: the running executable is readable again")

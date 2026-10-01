@@ -12,6 +12,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/maci0/toktop/internal/logcfg"
 )
 
 // records collects the audit lines Watch writes, so a test can read what an
@@ -163,5 +165,68 @@ func TestWatchDoesNotFireOnTheFirstSightAfterAnOutage(t *testing.T) {
 		}
 		cancel()
 		<-done
+	})
+}
+
+// The line that reports an unreadable image is the one a developer pastes into
+// an issue, and it names the path that failed. Two folds have to reach it.
+//
+// The error is a PathError, not a string: logcfg.HomeHandler rewrites the home
+// directory out of string attributes only, so an error handed over as a value
+// kept the account's own directory name in full on the very line that exists to
+// explain the failure, while the path beside it folded to "~". And neither
+// value was single-lined, so an image path carrying a newline wrote a second
+// line into the audit stream and an escape ran in the operator's terminal.
+//
+// Driven through the real HomeHandler rather than the bare recorder, since the
+// fold under test is the one that lives in the handler.
+func TestWatchFoldTheExecutableAndItsStatFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		home := t.TempDir()
+		t.Setenv("HOME", home)
+		t.Setenv("USERPROFILE", home)
+		r := &records{}
+		auditLog.Set(func() *slog.Logger {
+			return slog.New(logcfg.HomeHandler{Handler: r})
+		})
+		t.Cleanup(func() { auditLog.Set(nil) })
+
+		// Never created, so every poll fails: the file name carries an escape
+		// and a newline, the two bytes a log line must not hold.
+		exe := filepath.Join(home, "tok\x1b[31mred\nnewline")
+
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan struct{})
+		go func() { defer close(done); Watch(ctx, exe, 5*time.Millisecond, func() {}) }()
+		synctest.Wait()
+		time.Sleep(100 * time.Millisecond)
+		synctest.Wait()
+		cancel()
+		<-done
+
+		lines := r.snapshot()
+		var warned bool
+		for _, l := range lines {
+			if !strings.Contains(l, "rebuild will not be picked up") {
+				continue
+			}
+			warned = true
+			if strings.Contains(l, home) {
+				t.Errorf("the audit line named the home directory: %q", l)
+			}
+			if strings.Contains(l, "\x1b") {
+				t.Errorf("the audit line carried a raw escape sequence: %q", l)
+			}
+			if strings.Contains(l, "\n") {
+				t.Errorf("the audit line carried a raw newline: %q", l)
+			}
+			if !strings.Contains(l, "path=~/") {
+				t.Errorf("the path attribute was not folded to ~: %q", l)
+			}
+		}
+		if !warned {
+			t.Fatalf("the unreadable image was not reported; lines: %v", lines)
+		}
 	})
 }

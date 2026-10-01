@@ -141,15 +141,23 @@ type HomeHandler struct {
 func (h HomeHandler) Handle(ctx context.Context, r slog.Record) error {
 	msg := core.RedactHome(r.Message)
 	// One walk to decide whether a rebuild is needed, so a record carrying no
-	// home directory is forwarded without collecting anything.
+	// home directory is forwarded without collecting anything. An error
+	// attribute always counts as changed: foldHomeAttrs rewrites it to a
+	// string whatever it says, so the fast path has to leave the record it is
+	// handed or the attribute keeps the kind it arrived with.
 	changed := false
 	r.Attrs(func(a slog.Attr) bool {
-		if a.Value.Kind() != slog.KindString {
-			return true
-		}
-		if s := core.RedactHome(a.Value.String()); s != a.Value.String() {
-			changed = true
-			return false
+		switch a.Value.Kind() {
+		case slog.KindString:
+			if s := core.RedactHome(a.Value.String()); s != a.Value.String() {
+				changed = true
+				return false
+			}
+		case slog.KindAny:
+			if _, ok := a.Value.Any().(error); ok {
+				changed = true
+				return false
+			}
 		}
 		return true
 	})
@@ -176,14 +184,29 @@ func (h HomeHandler) Handle(ctx context.Context, r slog.Record) error {
 
 // foldHomeAttrs rewrites the home directory in the string attributes of a
 // record or of a WithAttrs call, and copies the slice it is given so a
-// caller's own attributes are never written through. A non-string attribute is
-// carried over untouched: a group is the one value this does not walk, and a
-// number, a duration or a time hold no path.
+// caller's own attributes are never written through.
+//
+// An error is folded too, and to a string, because that is the value a stat,
+// open or read failure arrives as. Handed over as a value rather than as a
+// string it is a kind this walk used to pass over untouched, so a line reading
+// "error", err printed the account's own directory name in full on the very
+// line that exists to explain the failure, while the path beside it folded to
+// "~". os.PathError is the shape that turns up: its Error names the file it
+// failed on. Rewriting it as a string also drops the type the log had no use
+// for, since the text is what a reader reads.
+//
+// The remaining kinds are carried over: a group is the one value this does not
+// walk, and a number, a duration or a time hold no path.
 func foldHomeAttrs(attrs []slog.Attr) []slog.Attr {
 	folded := make([]slog.Attr, len(attrs))
 	for i, a := range attrs {
-		if a.Value.Kind() == slog.KindString {
+		switch a.Value.Kind() {
+		case slog.KindString:
 			a.Value = slog.StringValue(core.RedactHome(a.Value.String()))
+		case slog.KindAny:
+			if err, ok := a.Value.Any().(error); ok && err != nil {
+				a.Value = slog.StringValue(core.RedactHome(err.Error()))
+			}
 		}
 		folded[i] = a
 	}

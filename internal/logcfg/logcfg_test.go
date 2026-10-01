@@ -6,11 +6,15 @@ package logcfg
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -409,5 +413,119 @@ func TestRedactedFieldRedactsBeforeTheCapAndCollapse(t *testing.T) {
 				t.Errorf("%s: RedactedField(%q, %d) = %q still carries %s", c.name, c.in, c.n, got, ip)
 			}
 		}
+	}
+}
+
+// An error handed to the logger as a value is the shape a stat, open or read
+// failure arrives as, and it is what nearly every audit line in the tree
+// carries. It holds a path: os.PathError names the file it failed on.
+//
+// So the fold has to reach it. It did not: a non-string attribute was carried
+// over untouched, so "error", err printed the account's own directory name in
+// full while the path attribute beside it folded to "~", and the two halves of
+// one line disagreed about how private the same path was.
+func TestHomeHandlerFoldsHomeOutOfAnErrorAttribute(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "someone")
+	t.Setenv("HOME", home)
+
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)})
+	// The path error a failed os.Stat hands back, and the wrapped form too,
+	// since a wrapped failure arrives the same way.
+	lg.Warn("cannot read the running executable",
+		"path", home+"/bin/toktop",
+		"error", &os.PathError{Op: "stat", Path: home + "/bin/toktop", Err: syscall.ENOENT},
+		"wrapped", fmt.Errorf("read store: %w", &os.PathError{Op: "open", Path: home + "/store.db", Err: syscall.EACCES}))
+
+	got := buf.String()
+	if strings.Contains(got, home) {
+		t.Errorf("the line named the home directory: %s", got)
+	}
+	if !strings.Contains(got, "~/bin/toktop") {
+		t.Errorf("the error was not folded to ~: %s", got)
+	}
+	if !strings.Contains(got, "~/store.db") {
+		t.Errorf("the wrapped error was not folded to ~: %s", got)
+	}
+	// The reason still has to survive: a line that hides the path must not
+	// hide why the read failed.
+	if !strings.Contains(got, "no such file") {
+		t.Errorf("the fold ate the reason: %s", got)
+	}
+}
+
+// The fast path in Handle forwards a record whose attributes need no rewrite
+// without rebuilding it. An error attribute must not take that path, because
+// foldHomeAttrs rewrites it to a string whatever it says: forwarded as it
+// arrived, the line keeps the kind it was handed.
+func TestHomeHandlerRewritesAnErrorAttributeWithNothingToFold(t *testing.T) {
+	t.Setenv("HOME", filepath.Join(string(filepath.Separator), "home", "someone"))
+
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)})
+	lg.Warn("no home anywhere on this line", "error", errors.New("engine refused the connection"))
+
+	got := buf.String()
+	// The text handler quotes a value holding spaces, so match the text rather
+	// than the attribute's exact spelling.
+	if !strings.Contains(got, "engine refused the connection") {
+		t.Errorf("the error was not written as text: %s", got)
+	}
+}
+
+// WithAttrs writes into every line the returned logger logs, so an unfolded
+// error there names the account for as long as the log is kept. The same fold
+// has to reach it.
+func TestHomeHandlerFoldsHomeOutOfAnErrorFromWithAttrs(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "someone")
+	t.Setenv("HOME", home)
+
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)}).
+		With("error", &os.PathError{Op: "open", Path: home + "/store.db", Err: syscall.EACCES})
+	lg.Warn("store read failed")
+
+	got := buf.String()
+	if strings.Contains(got, home) {
+		t.Errorf("With named the home directory: %s", got)
+	}
+	if !strings.Contains(got, "~/store.db") {
+		t.Errorf("With did not fold the error: %s", got)
+	}
+}
+
+// A non-error value is left alone rather than flattened to a string: a caller
+// that put one there wants the type, and no such value is on the audit path
+// today.
+func TestHomeHandlerLeavesNonErrorValuesAlone(t *testing.T) {
+	t.Setenv("HOME", filepath.Join(string(filepath.Separator), "home", "someone"))
+	var buf bytes.Buffer
+	lg := slog.New(HomeHandler{Handler: slog.NewTextHandler(&buf, nil)})
+	lg.Warn("keep the shape", "count", 7, "dur", 3*time.Second, "structured", struct{ N int }{N: 1})
+	got := buf.String()
+	for _, want := range []string{"count=7", "dur=", "structured="} {
+		if !strings.Contains(got, want) {
+			t.Errorf("line lost %q: %s", want, got)
+		}
+	}
+}
+
+// A nil error carries nothing to fold, and flattening it to a string would turn
+// it into the literal text "<nil>" where the log had shown it as an absent
+// value. The guard in foldHomeAttrs leaves it as the nil it arrived as, which
+// is what a reader comparing against the underlying handler sees.
+func TestHomeHandlerSkipsANilError(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "someone")
+	t.Setenv("HOME", home)
+
+	var got, want bytes.Buffer
+	slog.New(slog.NewTextHandler(&want, nil)).Warn("no failure here", "error", error(nil))
+	slog.New(HomeHandler{Handler: slog.NewTextHandler(&got, nil)}).Warn("no failure here", "error", error(nil))
+
+	if !strings.Contains(got.String(), "<nil>") {
+		t.Fatalf("a nil error no longer reads as nil: %s", got.String())
+	}
+	if !strings.Contains(want.String(), "<nil>") {
+		t.Fatalf("the underlying handler stopped rendering a nil error: %s", want.String())
 	}
 }
