@@ -4,6 +4,10 @@
 
 - Go, at the version pinned in `go.mod`. `make` sets `GOTOOLCHAIN` to that
   exact version so a newer compiler on the host cannot change the artifact.
+  The pin is exact, not a floor: a host on any other patch of the same minor
+  is fine, because `GOTOOLCHAIN` makes the go command fetch the pinned
+  toolchain on the first build, but that first run needs network access.
+  `make prereqs` says which of the two states the machine is in.
   CI installs the same version via `go-version-file: go.mod`.
 - GNU Make and bash (`SHELL := /bin/bash` in the Makefile). Make 3.82 or
   newer: `.SHELLFLAGS` carries `errexit` and `pipefail` into every recipe, and
@@ -99,8 +103,11 @@ make demo        # build and run against a simulated fleet
 
 `make prereqs` lists every missing or mismatched tool in one run and exits
 non-zero if any is left, so the whole set gets installed before the first
-failure instead of one tool per round trip. The per-target checks still fire
-where the tool is used, so it never replaces them.
+failure instead of one tool per round trip. It also reports whether the
+`go.mod` toolchain is already here or still to be downloaded, which is the
+one gap that does not fail the run but does cost the first build a network
+round trip. The per-target checks still fire where the tool is used, so it
+never replaces them.
 
 ## The edit-test loop
 

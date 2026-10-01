@@ -146,6 +146,24 @@ ifeq ($(GO_VERSION),)
 $(error go.mod has no 'go' line; cannot pin GOTOOLCHAIN)
 endif
 export GOTOOLCHAIN := go$(GO_VERSION)
+# A host on another toolchain gets $(GOTOOLCHAIN) downloaded on the first go
+# command, and that download is the first thing to fail on a machine without
+# network: behind a proxy, offline, or with an unreachable GOPROXY, the go
+# command prints "go: downloading goX ... verifying module ... permission
+# denied" or "... 404 Not Found" and the recipe ends there. Those read as a
+# broken module cache or a corrupt go.sum, which neither is, and neither of
+# which the fix involves. Ask once at parse time instead, so the answer names
+# the pinned toolchain and the two ways out. Nothing is fetched when the host
+# already runs the pin, so a fully cached checkout pays only the env read.
+GO_HAS_TOOLCHAIN := $(shell $(GO) env GOVERSION 2>/dev/null)
+ifneq ($(GO_HAS_TOOLCHAIN),)
+ifneq ($(GO_HAS_TOOLCHAIN),$(GOTOOLCHAIN))
+GO_FETCH_TOOLCHAIN := $(shell $(GO) version 2>&1 >/dev/null)
+ifneq ($(GO_FETCH_TOOLCHAIN),)
+$(error make: go.mod pins $(GOTOOLCHAIN), which GOTOOLCHAIN selects, and the host go ($(GO_HAS_TOOLCHAIN)) cannot fetch it: $(GO_FETCH_TOOLCHAIN) Install that toolchain, or point GOPROXY at a module proxy this machine can reach)
+endif
+endif
+endif
 # A go.work in this directory or any parent puts the build in workspace mode
 # and resolves the module graph through it, so the same source builds a
 # different binary depending on what sits above the checkout. Off is the
@@ -477,6 +495,13 @@ help: ## show available targets
 # the compiler and the only one the race tests will use, with no fallback to
 # gcc or clang. Testing the fallback as well reported ok for a CC that does not
 # exist, so prereqs cleared a machine that make test then refused to build.
+#
+# The go check runs the compiler with the same GOTOOLCHAIN every recipe gets,
+# so the version it reports is the one the first `make build` will actually
+# run. Asking `go env` with no override answered from the host toolchain and
+# printed "ok" beside a version the pin would go download instead, which is
+# exactly the check a new contributor needs: whether the compiler this build
+# wants is already here, or whether the first build pays for it.
 .PHONY: prereqs
 prereqs: ## check every tool the merge gates need, naming all gaps at once
 	@fail=0; \
@@ -484,10 +509,15 @@ prereqs: ## check every tool the merge gates need, naming all gaps at once
 	gap() { printf '  MISSING  %s\n' "$$1" >&2; fail=1; }; \
 	$(UV_TOO_OLD); \
 	$(VERSION_OLD); \
-	if command -v $(GO) >/dev/null 2>&1; then \
-		ok "go $$($(GO) env GOVERSION) (go.mod pins $(GO_VERSION); make selects it)"; \
+	if have=$$($(GO) env GOVERSION 2>/dev/null) && [ -n "$$have" ]; then \
+		if [ "$$have" = "$(GOTOOLCHAIN)" ]; then \
+			ok "go $$have (the exact version go.mod pins; every recipe selects it)"; \
+		else \
+			ok "go $$have on PATH, $(GOTOOLCHAIN) selected by GOTOOLCHAIN"; \
+			printf '  note     the first make build downloads that toolchain over the network\n' >&2; \
+		fi; \
 	else \
-		gap "go is not on PATH; install the version go.mod pins ($(GO_VERSION))"; \
+		gap "go is not on PATH, or $(GO) env failed; install Go and the version go.mod pins ($(GO_VERSION))"; \
 	fi; \
 	if [ "$(RACE)" = "0" ]; then \
 		ok "C compiler not needed (RACE=0 skips the race detector)"; \

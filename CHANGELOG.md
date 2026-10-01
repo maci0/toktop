@@ -90,7 +90,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `TestRunOpenAIMemoForgetsOnRefusal` and `TestRunOpenAIMemoIsPerEngine` in
   internal/probe pin all three.
 
-
 - A context total below the output beside it no longer reaches the dashboard or
   any `agentusage` embedder. The rule is that the window a model read cannot be
   smaller than what that turn wrote, and the opencode SQLite reader had it;
