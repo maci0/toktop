@@ -706,6 +706,39 @@ func TestIngestTreatsNullFieldsAsOmitted(t *testing.T) {
 	}
 }
 
+// The one empty value the id field adds to the null rule above: a sender that
+// builds the key from an identifier it could not fill in sends "" rather than
+// leaving the key out, and that has to read as the absent id it is. It is the
+// field where it matters most, because an id is the dedup key: an empty one
+// refused would break every such sender, and an empty one stored would fold
+// every such event onto one id and drop all but the first as a duplicate.
+// Read as absent, the event is keyed from the request Idempotency-Key like any
+// other id-less line, which is a key the sender chose.
+func TestIngestTreatsAnEmptyIDAsOmitted(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+
+	req, err := http.NewRequest(http.MethodPost, "http://"+s.Addr()+"/v1/events",
+		strings.NewReader(`{"id":"","agent":"coder","output_tokens":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Idempotency-Key", "turn-empty-id")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf(`{"id":""} rejected: %d %q`, resp.StatusCode, body)
+	}
+	awaitEvents(t, rec, 1)
+	if got, want := rec.evs[0].ID, derivedEventID(derivedKeyPrefix("turn-empty-id"), 1); got != want {
+		t.Errorf(`{"id":""} stored %q, want the derived id %q`, got, want)
+	}
+}
+
 // A blank ts is the one empty value the endpoint reads as absent rather than
 // as a malformed stamp: a sender that formats a timestamp it could not fill in
 // gets the arrival instant instead of a 400 it cannot act on.

@@ -34,6 +34,39 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Added
 
+- A wrong method on the site Worker now answers with a body naming the path
+  and the methods it takes (`method not allowed; /health accepts GET, HEAD,
+  not POST`), the envelope the ingest port's `404` and `405` already use. The
+  reason was the bare string `method not allowed`, which named neither the
+  path nor the accepted methods: a client that logs a body without its
+  headers, or that reads the line the way it reads `/health`, was left with a
+  failure that did not say which request it belonged to or what the request
+  should have been. Both refusal sites, the page and the image paths, now
+  answer from one `notAllowedMessage`, and the `Allow` header still carries
+  the list for a client that reads headers.
+
+- The agent feed's OpenAPI spec now declares a `maximum` on the four numeric
+  event fields, `prompt_tokens`, `output_tokens`, `thinking_tokens` and
+  `span_ms`. The ceilings were already in the descriptions and were the ones
+  the handler clamps with, but a client generator reads the schema and not the
+  prose, and `minimum: 0` with no `maximum` reads as "any count up to
+  int64": the generated sender writes values the server silently clamps to
+  zero, and the totals it expected never arrive. Each `maximum` is
+  `core.MaxEventTokens` or the span bound, and
+  `TestOpenAPIEventCapsMatchTheBounds` pins both, so a bound that drifts in
+  either file fails there rather than in a sender's token count.
+
+- The agent feed's OpenAPI spec and the README now say that an `id` sent as
+  `null` or as an empty string reads as one left out, the rule every other
+  field on the schema follows. The handler has always done this: an empty id
+  is keyed from the request `Idempotency-Key` like any other id-less line,
+  rather than refused (which would break every sender that builds the key
+  from an identifier it could not fill in) or stored (which would fold every
+  such event onto one id and drop all but the first as a duplicate). The
+  schema declared `minLength: 1` without saying what a sender sending `""`
+  actually gets.
+  `TestIngestTreatsAnEmptyIDAsOmitted` pins the behavior.
+
 - The agent feed's OpenAPI spec now declares the `Cache-Control: no-store`
   answer header on every status either path lists. The ingest server has set
   it ahead of routing since the start, so it rides every answer a handler

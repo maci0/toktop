@@ -113,7 +113,10 @@ fetches nothing at all. The answer carries a strong `ETag` derived from the
 icon's own bytes and revalidates to a bodyless `304`, because a client that
 asks for the path blind asks again on every visit; it is separate from the
 page's validator, so holding one never revalidates the other. Wrong methods
-are `405` with `Allow: GET, HEAD`.
+are `405` with `Allow: GET, HEAD` and a body naming the path and the methods
+it takes (`method not allowed; /favicon.ico accepts GET, HEAD, not POST`),
+the envelope the ingest port's `404` and `405` use, so a client written
+against either surface parses one reason instead of two.
 `/health` reports
 `degraded` with a `503` while the captures are not being served, rather than
 `ok`: the page still serves then, but every capture it shows is a 404, so a

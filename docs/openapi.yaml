@@ -548,7 +548,11 @@ components:
             stored id would drop the second event as a duplicate. The one
             printable character is the floor: whitespace and control characters
             are stripped before the id is stored, so an id of them is empty by
-            the time it is keyed and is refused the same way. Omitted, a
+            the time it is keyed and is refused the same way. Sent as `null` or
+            as an empty string, `id` reads as one left out, the rule every
+            other field on this schema follows, so the event is keyed from the
+            request `Idempotency-Key` instead; a sender that must not lose the
+            key sends a real one rather than `""`. Omitted, a
             request `Idempotency-Key` is used instead.
         ts:
           type: string
@@ -580,6 +584,7 @@ components:
         prompt_tokens:
           type: integer
           minimum: 0
+          maximum: 1099511627776
           default: 0
           description: |
             Prompt tokens billed. A negative count or one above 2^40 clamps to
@@ -588,11 +593,13 @@ components:
         output_tokens:
           type: integer
           minimum: 0
+          maximum: 1099511627776
           default: 0
           description: Output tokens generated, under the same bounds as prompt_tokens.
         thinking_tokens:
           type: integer
           minimum: 0
+          maximum: 1099511627776
           default: 0
           description: |
             The reasoning share of the output, under the same bounds as
@@ -607,6 +614,7 @@ components:
         span_ms:
           type: integer
           minimum: 0
+          maximum: 86400000
           default: 0
           description: |
             How long the model spent on this event's tokens, in milliseconds.

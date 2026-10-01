@@ -291,6 +291,25 @@ func TestOpenAPIEventCapsMatchTheBounds(t *testing.T) {
 	if !strings.Contains(propertySection(t, "Event", "span_ms"), strconv.FormatInt(maxSpanMS, 10)) {
 		t.Errorf("the Event schema does not name the span bound (%d ms) the handler clamps with", maxSpanMS)
 	}
+	// The same ceilings as machine-readable bounds. The prose above is what a
+	// reader gets, but a client generator reads the schema and nothing else,
+	// and `minimum: 0` with no `maximum` reads as "any count up to int64":
+	// the generated sender writes values the server silently clamps, and the
+	// totals it expected never arrive. Each maximum is the constant the
+	// handler clamps with, so a bound that drifts in either file fails here
+	// rather than in a sender's token count.
+	numericCaps := map[string]int64{
+		"prompt_tokens":   core.MaxEventTokens,
+		"output_tokens":   core.MaxEventTokens,
+		"thinking_tokens": core.MaxEventTokens,
+		"span_ms":         maxSpanMS,
+	}
+	for field, want := range numericCaps {
+		section := propertySection(t, "Event", field)
+		if !strings.Contains(section, "maximum: "+strconv.FormatInt(want, 10)) {
+			t.Errorf("the Event schema declares no maximum: %d for %q, which the handler clamps at", want, field)
+		}
+	}
 }
 
 // declaredCaps maps each property of one schema to the maxLength it declares.

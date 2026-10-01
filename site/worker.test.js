@@ -473,6 +473,19 @@ test("non-GET methods and /health keep their contract", async () => {
   expect(denied.headers.get("allow")).toBe("GET, HEAD");
   expect(denied.headers.get("content-type")).toBe("text/plain; charset=utf-8");
   expect(denied.headers.get("cache-control")).toBe("no-store");
+  // The reason names the path and the methods it takes, the envelope the
+  // ingest port's 404 and 405 use, so a body logged without its headers
+  // says which request it belongs to. One line, newline included, the
+  // shape /health answers ok in.
+  expect(await denied.text()).toBe("method not allowed; / accepts GET, HEAD, not POST\n");
+  // The same reason from the other refusal site, an image path rather than
+  // the page catch-all, so both are pinned by one contract.
+  const deniedImage = await call({}, { method: "PUT", path: "/dashboard.avif", env });
+  expect(deniedImage.status).toBe(405);
+  expect(deniedImage.headers.get("allow")).toBe("GET, HEAD");
+  expect(await deniedImage.text()).toBe(
+    "method not allowed; /dashboard.avif accepts GET, HEAD, not PUT\n",
+  );
   const health = await call({}, { path: "/health", env });
   expect(health.status).toBe(200);
   expect(await health.text()).toBe("ok\n");

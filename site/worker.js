@@ -905,6 +905,23 @@ function assetErrorBody(status) {
   return "asset store error\n";
 }
 
+// The reason a wrong method gets, naming the path and the methods it takes:
+// "method not allowed; /health accepts GET, HEAD, not POST". The Allow header
+// carries the same list for a client that reads headers, and the body carries
+// it for a client that reads the line the way it reads /health, and it names
+// the path so a body logged without its headers says which request it belongs
+// to. This is the envelope the ingest port's 404 and 405 already use
+// (internal/ingest/endpoints.go), so a client written against either surface
+// parses one reason instead of two.
+//
+// Every path here takes GET and HEAD, so the accepted list is one constant
+// rather than read off a route table this Worker does not keep.
+const ALLOWED_METHODS = "GET, HEAD";
+
+function notAllowedMessage(path, method) {
+  return `method not allowed; ${path} accepts ${ALLOWED_METHODS}, not ${method}`;
+}
+
 // The capture a health check reads. One file answers for the set, and this is
 // the one every page view depends on from outside the page: the social
 // crawlers that fetch og:image ask for exactly this path, so a deploy that
@@ -1050,9 +1067,14 @@ async function handle(request, env, started) {
   const url = new URL(request.url);
   if (IMAGE_PATHS.has(url.pathname)) {
     if (request.method !== "GET" && request.method !== "HEAD") {
-      return failRequest(request, started, 405, "method-not-allowed", "method not allowed", {
-        allow: "GET, HEAD",
-      });
+      return failRequest(
+        request,
+        started,
+        405,
+        "method-not-allowed",
+        notAllowedMessage(url.pathname, request.method),
+        { allow: ALLOWED_METHODS },
+      );
     }
     if (!env?.ASSETS) {
       // Every image on the page is now a 404 and /health reports the missing
@@ -1108,9 +1130,14 @@ async function handle(request, env, started) {
     return new Response(asset.body, { status: asset.status, headers });
   }
   if (request.method !== "GET" && request.method !== "HEAD") {
-    return failRequest(request, started, 405, "method-not-allowed", "method not allowed", {
-      allow: "GET, HEAD",
-    });
+    return failRequest(
+      request,
+      started,
+      405,
+      "method-not-allowed",
+      notAllowedMessage(url.pathname, request.method),
+      { allow: ALLOWED_METHODS },
+    );
   }
   if (url.pathname === "/health") {
     // Uptime probes hit this continuously; caching it would only blur
