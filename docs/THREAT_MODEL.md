@@ -5,140 +5,18 @@ with file references so each claim can be re-verified against code. Individual
 vulnerabilities and their fixes belong to sec-review; this file records where
 they live and what already stands in their way.
 
-- **Last reviewed:** 2026-10-02, against this commit. This pass re-read every
-  symbol this file names and found eight that no longer exist: the drain caps
-  are one `bearer.DrainCap` rather than `drainCap` and `probeDrainCap`, and
-  `bearer.DrainAndClose` rather than `drainAndClose` (M8); the self-update
-  durability claim named a `flushInstallDir` helper the package does not have,
-  so M12 now names the three `core.SyncDir` call sites themselves, and drops
-  the "skips the flush on Windows" half of that claim, which the Windows
-  install path contradicts; the asset-URL entry point is `TrustedReleaseURL`
-  through the `trustedAssetURL` var; the collector's audit logger is
-  `audit()` over `auditLog`. Two counts moved: twelve ssh `target` call sites,
-  not thirteen, and the Worker is about 1,200 lines rather than just under a
-  thousand. Eleven citations had drifted off their code, so each now names
-  the symbol, branch or make target the churning-file rule already asks for,
-  and the site's HSTS is recorded as `max-age=31536000; includeSubDomains`,
-  which the header set carries on every response. No risk changed rank and no
-  entry point, boundary or gap moved: each correction is a citation or a count
-  inside a claim the previous passes had already verified. Every constant,
-  cap, route, flag and environment variable this file names was re-read at
-  this commit and holds as written. This pass corrected
-  three claims the last few changes left stale and took up the controls that
-  landed beside them. M35 no longer holds that the handler folds string
-  attributes only: an attribute whose value is an `error` is folded too, so a
-  failed stat or read no longer prints the absolute path it failed on. The
-  audit-trail inventory no longer counts six subsystems: the run-level
-  recorders (ingest startup and the re-exec in cmd/toktop/main.go, the startup
-  config record, the host-vitals sources in internal/sysmon, the process
-  listing in internal/procs, and the hot-reload watcher in internal/selfreload)
-  write through the same logger and floor and are named where they write. M4
-  and M10 now say which clock each bound is dated on: the ingest body's read
-  deadlines and the probe wave's cadence floor and 429/503 backoff moved onto
-  the injected clock, while the response write bound and the generation's own
-  elapsed time stay on wall time. No risk changed rank: each of the three is a
-  redaction or a bound that covers a threat already ranked, and the two
-  remaining changes since the prior pass (the opencode context floor and the
-  chart series sort) touch display correctness, not a boundary. The prior pass
-  ran on 2026-09-30 and its findings are kept below in the order it made
-  them; the pass before that re-read every constant, cap, route, flag and
-  environment variable this
-  file names and found them all holding as written, so no risk changed rank,
-  and took up the two controls that landed after it (M50, M51, described at
-  the end of this header). Every mitigation row,
-  entry point, and constant this file names was re-read in the code: the
-  defaults and caps (`maxInFlightEvents` 64, `maxHeaderBytes` 16 KiB,
-  `maxReportedName` 64, `ModelNameMax` 256, `maxLineBytes` 8 MiB,
-  `maxDefinitionsBytes` 8 MiB, `jsonBodyMax` 4 MiB, `textCap` 8 MiB,
-  `bearer.DrainCap` 64 KiB, `maxToolOutput` 1 MiB,
-  `maxAssetBytes` 256 MiB, `AgentHistoryLen` 512,
-  `ProbeHistoryLen` 128, `maxSaneTokens` 1<<40, `SnippetCap` 256,
-  `maxEvalDuration` 24h, `zstdMaxFrameBytes` 8 MiB, `forwardAcceptRetryMax`
-  5 s, the ssh and poll
-  timeouts), the self-update gate (`ValidateRepo`, `githubRedirect`,
-  `TrustedReleaseURL`, the refusal when a release carries no
-  `checksums.txt`), the bearer call sites and origin scoping, the SQLite
-  DSN flags, and the M21/M30/M34/M45/M47 controls named in the table below.
-  All hold as written, so no risk changed rank. One claim did not: this file
-  recorded the ingest health route as never audited, and a degraded probe is
-  now written once on the crossing into saturation and once on the way out
-  (`auditHealth`, internal/ingest/health.go, on the `healthDegraded` latch).
-  That crossing is M30's detection half rather than an unrecorded 503, and the
-  entry-point and response-readiness entries now say so. The same pass took up
-  the controls the last few changes landed and this file had not: the
-  tail-drain bounds on the poll and probe error paths (M8), the accept-retry
-  pacing cap on a forwarded port (M13), and the ssh-agent dial bound
-  (`agentDialTimeout`). What it also corrected is citation form: a set of
-  line numbers had drifted away from the code they pointed at, and the
-  churning-file rule at the end of this file already prescribes the fix. The
-  drifted citations now name symbols,
-  and the rule's list of churning files covers the packages where the drift
-  was observed. Two asset citations named the wrong file
-  outright: the claude and codex session roots live in the built-in
-  definitions map in `agentusage/registry.go`, not in the parsers this file
-  pointed at. This pass took up the controls that landed after the last one:
-  the macOS identity probe reading `system_profiler` through the shared
-  `cappedOutput` (M33), the opencode usage statement's explicit unbounded
-  form (M24), the `checksums.txt` record parsed by the format's shape rather
-  than by whitespace (M18), the site's `health-degraded` line exempt from the
-  refusal-log cap, and the transcript read audit covering the tail snapshot.
-  Every constant, cap, route, flag and environment variable this file names
-  was re-read at this commit and holds as written, so no risk changed rank.
-  A later pass over the same commit found the entry points, boundaries,
-  mitigations and claims unchanged, and corrected the rest of the citation
-  drift it had left: the `M40` and asset citations now name `LogHost` and
-  `RedactUser` by symbol and the audit sites by package, three controls named
-  the wrong file (`warnUnknownEnv`, `reportedField` and `maxReportedName` in
-  `cmd/toktop/validate.go`, `logActiveConfig` in `cmd/toktop/config.go`), and
-  the rule's list of churning files now covers `internal/remote/` and
-  `internal/collector/`, where the drifted numbers were. This pass took up
-  three controls that landed after that one, none of which any row named: the
-  leap second the ingest stamp grammar now accepts (`parseLeapSecond`,
-  internal/ingest/event.go), the latch that records a health answer the
-  prober never received (`auditHealthUnwritten`, internal/ingest/health.go),
-  and the durability of the two writes this tree stages and renames, which
-  report a directory flush they could not make rather than dropping it
-  (`syncStoreDir`, internal/remote/knownhosts.go; `install`,
-  `installDisplacing` and `restoreDisplaced` in
-  internal/selfupdate/install.go, over `SyncDir` in
-  internal/core/fs.go). The pin-store entry above now says which of those
-  failures are the write's own and which stay warnings, since a store write
-  reported as durable past a failed flush is exactly the claim a reader
-  builds on. No risk changed rank: each of the three sits behind a write or a
-  clamp M12 and M6 already cover, and a stamp the sender invents still lands
-  wherever the two-minute clamp puts it. This pass took up the control and the
-  contract change that landed after it and that no row above named. The sender
-  fold is the one that mattered: `foldSenderHome` (`core.RedactAnyUserHome` over
-  `core.RedactHome`, internal/ingest/event.go) reaches every home in a
-  client-shaped field rather than only the account this process runs as, and
-  M49 records it with the prefix list it reads the account off
-  (`userHomePrefixes`) and the two limits that bound it. M46 named
-  `core.RedactHome` as the fold the panic payload takes; it takes this one, and
-  the row now says so. `--origin` is parsed by `resolveOrigin` only in a run
-  that reads it, so M19's refusal is demo-scoped, which is where the flag has
-  any effect. The B1 replay statement was corrected the other way: it read as
-  though every replay showed up as `accepted` above `stored`, which holds only
-  for a body carrying an `id` or an `Idempotency-Key`; an unkeyed body is stored
-  again in full and the two counters agree, which docs/openapi.yaml now says, so
-  it is recorded as gap 12. One count moved: twelve ssh `target` call sites,
-  not eleven (internal/remote/forward.go is one of them). No risk changed rank:
-  the sender fold removes an account name M35 could not reach, the replay shape
-  sits under the absent sender identity gap 1 already records, and `--origin`
-  configures a demo replay. This pass took up the two controls that landed
-  after it and that no row above named, both at boundaries this file already
-  carries. `procText` (agentusage/discover_linux.go) drops ill-formed bytes
-  where the `/proc` walk decodes `comm` and `cmdline`, because the kernel cuts
-  `comm` at 15 bytes and `canonicalTool` composes to NFC over a string that
-  x/text leaves a lone 0xc3 in, so a half rune would key the agent identity on
-  bytes no other reader of the same process can produce; M50 records it, and
-  the B7 entry point now says the decode happens at that boundary rather than
-  at each use. `AppendRetained` (internal/core/core.go) refuses on a feed
-  holding *at least* the cap rather than exactly it, so a feed restored from
-  anywhere else is read as full rather than as having room for one more entry
-  the trim would drop on the same call; M51 records it. Neither changes a
-  rank: a process the walk cannot name was already reported as no agent, and a
-  feed holding more than its window has no spare room to fill, so each sits
-  inside a bound M5's retention cap and M7's clamps already carry.
+- **Last reviewed:** 2026-10-02, against this commit. Every constant, cap,
+  route, flag and environment variable this file names was re-read in the
+  code, and every symbol was checked for existence: the bounds (`maxInFlightEvents`
+  64, `maxHeaderBytes` 16 KiB, `maxReportedName` 64, `ModelNameMax` 256,
+  `maxLineBytes` 8 MiB, `maxDefinitionsBytes` 8 MiB, `jsonBodyMax` 4 MiB,
+  `textCap` 8 MiB, `bearer.DrainCap` 64 KiB, `maxToolOutput` 1 MiB,
+  `maxAssetBytes` 256 MiB, `AgentHistoryLen` 512, `ProbeHistoryLen` 128,
+  `maxSaneTokens` 1<<40, `SnippetCap` 256, `maxEvalDuration` 24h,
+  `zstdMaxFrameBytes` 8 MiB, `forwardAcceptRetryMax` 5 s), the self-update
+  gate (`ValidateRepo`, `githubRedirect`, `TrustedReleaseURL`), the host
+  guard (`loopbackHostGuard`), the HSTS header the site sets on every response,
+  and the risk table below each hold as written. No risk changed rank.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
