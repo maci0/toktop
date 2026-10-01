@@ -47,6 +47,32 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   and there it was the only place inside the product still leaving the quit
   undocumented: the full-size list names both jobs and the compact one did not.
   `TestCompactHelpNamesEscapeFromDashboard` pins the wording and the fit.
+- The ssh host-key pin store is no longer emptied by the connect that finds it
+  missing. Each connect copies the store to the backup beside it, and a store
+  deleted on its own left that copy as the only record of every pin on the
+  host, so the copy step wrote an empty store over it. An empty store parses and
+  is not older than the store it replaced, which is exactly the state a fresh
+  install is in, so the next connect trusted whatever key the host presented:
+  the silent re-TOFU the copy exists to refuse, on the one host whose pins were
+  the ones worth keeping. The copy step now writes nothing when the store is
+  absent. Restoring the store is the operator's `cp`, which the connect that
+  reports the copy still holding its pins already names.
+  `TestACopyTheStoreIsGoneWithIsNotRewrittenOver` and
+  `TestAConnectAfterTheStoreWasRemovedKeepsTheCopy` in internal/remote pin it.
+- `make site-rollback` now fails, with the deployment list to read, when this
+  machine has no record of a deploy at all. The target acts on the marker
+  `make site-deploy` leaves behind, so on any other checkout it printed
+  "nothing to roll back" and exited 0. That is the answer for a rollback this
+  tree already did, and it was the answer for a machine that never deployed
+  what is serving, where the platform's deployment list holds the only undo
+  there is. An incident that ran the recovery step from the wrong checkout, or
+  after a clean took `dist/`, ended with the bad Worker live because the step
+  reported that there was nothing to do. The two states are told apart now: the
+  one on record stays a no-op at exit 0, the no-record state prints the pinned
+  `wrangler deployments list` and `wrangler rollback [<version-id>]` commands to
+  run once against a version read there, and exits 2. `make
+  check-site-rollback-states` fails if the two branches merge again or the
+  second returns to exit 0.
 - A `--probe` run against an OpenAI-compatible engine that rejects one of the
   request shapes no longer pays for that rejection on every wave. The probe
   walks `max_tokens`, `max_completion_tokens` and `stream_options` in turn to

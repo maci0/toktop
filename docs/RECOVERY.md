@@ -408,18 +408,35 @@ waits for `https://toktop.ai/health` to answer `ok` (the body names no
 version, so that is an availability check and not a confirmation of what is
 serving).
 
-The target does nothing unless `dist/site.deployed` exists, the marker
-`site-deploy` leaves behind: it prints why and exits 0 rather than rolling a
-second time. That marker is what stops a second rollback from
-undoing the first and putting the broken deployment back, and it lives under
-`dist/`, which `make clean` sweeps around: the clean deletes everything else
-in `dist/` and leaves the two markers (`site.deployed`, `site.rolled-back`)
-where they are, because a build sweep is not entitled to take the record of a
-deployment that is live. Deleting `dist/` by hand does take it, and after
-that a rollback of a deploy from this tree changes nothing and says "nothing to
-roll back" while the bad deployment is still live. The way out is `wrangler
-rollback` at the pin the Makefile names (4.126.0), once, having checked the
-deployment list in the Cloudflare dashboard for what the first rollback undid.
+The target acts only when `dist/site.deployed` exists, the marker
+`site-deploy` leaves behind, and the state with no marker is answered two
+ways rather than one:
+
+- `dist/site.rolled-back` exists, meaning a rollback from this tree already
+  happened: the target prints why and exits 0 rather than rolling a second
+  time. That is what stops a second rollback from undoing the first and putting
+  the broken deployment back.
+- Neither marker exists, meaning this machine deployed nothing that is serving
+  (or is not the checkout that did): the target prints the deployment list to
+  read, the pinned command to run once against a version read from it, and the
+  other ways back, then exits **2**. It is a failure because the site is
+  broken and this recipe cannot reach the undo by itself, and it does not call
+  `wrangler` for the operator: a versionless rollback on a machine that cannot
+  say what the last good deployment was is the damage the marker exists to
+  prevent.
+
+```sh
+cd site && bunx wrangler@4.126.0 deployments list   # read what to go back to
+cd site && bunx wrangler@4.126.0 rollback [<version-id>]   # once, on a version read there
+```
+
+Both markers live under `dist/`, which `make clean` sweeps around: the clean
+deletes everything else in `dist/` and leaves the two (`site.deployed`,
+`site.rolled-back`) where they are, because a build sweep is not entitled to
+take the record of a deployment that is live. Deleting `dist/` by hand does take
+them, and that is the state above: a rollback from that machine exits 2 and
+names the deployment list, instead of reporting "nothing to roll back" while the
+bad deployment is still live.
 
 A rollback reaches one version back. Further back than the platform's
 deployment history is a redeploy, not a rollback, and its source is git:

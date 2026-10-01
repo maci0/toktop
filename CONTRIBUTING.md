@@ -245,6 +245,7 @@ in day-to-day work:
 | `make readme-assets` | rebuild the README's dashboard capture in `docs/images/dashboard.avif` from the same source frame, then run `bun test site/` (same tools) |
 | `make site-deploy` | run `site-lint`, `site-check`, and `check-deploy-source`, then record what it is about to upload in `dist/site.deployed/manifest` *before* deploying the site Worker at the `WRANGLER` pin, and poll `/health` (the record lands first, so a run killed mid-deploy still leaves `make site-rollback` something to undo) |
 | `make check-site-records` | fail unless `site-deploy` records the deploy before it calls wrangler and `site-rollback` consumes that record before it does (`make check` runs it) |
+| `make check-site-rollback-states` | fail unless `site-rollback` keeps a rollback this tree already did at exit 0 and answers a machine with no deploy record at a non-zero exit naming the platform's deployment list (`make check` runs it) |
 | `make check-wrangler-doc` | fail unless CONTRIBUTING.md's login command and docs/THREAT_MODEL.md's deploy path name the Makefile's `WRANGLER` pin (`make pr` and `site-deploy` run it) |
 | `make check-ci-tags` | fail unless every `go test` / `go vet` / staticcheck line in `.github/workflows/` carries the zone tag, and every `go vet` line carries `-tests=true` (`make check` runs it) |
 | `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, hands `-tags` one quoted argument, and keeps `-shuffle=on` (`make check` runs it) |
@@ -256,7 +257,7 @@ in day-to-day work:
 | `make check-help-docs` | fail unless every target in this table carries the `## ` description `make help` reads, so a documented target is never missing from the listing (`make check` runs it) |
 | `make check-changelog-structure` | fail unless no `CHANGELOG.md` section repeats an impact heading, so the entries a second `### Added` collected do not ship unlabelled (`make check` runs it) |
 | `make check-changelog-covers` | fail unless `CHANGELOG.md` moved since the last release tag whenever `README.md`, `cmd/toktop/help.go`, `docs/openapi.yaml`, `agentusage/`, `internal/ui/json.go`, `site/worker.js` or `site/README.md` did. Every other changelog gate reads the file's shape, not the diff it describes, so this is the one that notices a change shipping under notes written for other commits (`make check` and `make release` run it) |
-| `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with no deploy of this tree to undo is a no-op, and no gate runs, so it works on a tree that does not pass |
+| `make site-rollback` | roll the site Worker back to the version before the last deploy, then poll `/health`; a second run with a rollback already on record is a no-op, and no gate runs, so it works on a tree that does not pass; with no marker of either kind it names the deployment list to read and exits 2 rather than reporting nothing to do while a broken Worker is live |
 | `make vet-cross` | vet + staticcheck on every release platform (the pre-ship gate release.yml runs) |
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make check-api` | verify VERSION drops no declaration `agentusage` exported at the last release (`make release` runs it; a patch is refused, a minor bump passes only once CHANGELOG.md records the removal under `Breaking`) |
@@ -292,11 +293,11 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
-the Linux leg of the test job runs eight of the `make check` guards
+the Linux leg of the test job runs nine of the `make check` guards
 (`check-ci-tags`, `check-ci-env`, `check-test-flags`, `check-ci-platforms`,
-`check-help-docs`, `check-site-records`, `check-site-tools`,
-`check-changelog-structure`, `check-changelog-covers`,
-`check-shell`). The ninth,
+`check-help-docs`, `check-site-records`, `check-site-rollback-states`,
+`check-site-tools`, `check-changelog-structure`, `check-changelog-covers`,
+`check-shell`). The tenth,
 `check-yaml`, runs in the
 `scripts` job, which
 installs the pinned tool env that target lints with.

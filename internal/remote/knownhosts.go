@@ -725,6 +725,10 @@ func settleOperatorRestore(path string) {
 // is the one write that cannot lower the RPO. A copy that parses and is not
 // older than the store is left alone, which is the case every healthy run
 // takes and the only one that does no work.
+//
+// A store that is gone is the one state this writes nothing in, because the
+// copy beside it is then the only record of every pin on the host. See the
+// lock body below.
 func checkStoreCopy(path string) {
 	why := staleStoreCopy(path)
 	if why == "" {
@@ -740,6 +744,18 @@ func checkStoreCopy(path string) {
 		}
 		b, err := os.ReadFile(path)
 		if err != nil {
+			// A store that is not there has nothing to copy, and the one
+			// case this step must not act on is a store beside its copy:
+			// restoreStore reads the copy back in exactly that state, and
+			// overwriting it with an empty store would leave a lost store
+			// that reads as holding no pins, which is the silent re-TOFU
+			// the copy exists to prevent. The operator's own copy of the
+			// directory comes with the store inside it, but a store removed
+			// on its own leaves the copy behind, and this is where that copy
+			// is the only record of every pin on the host.
+			if os.IsNotExist(err) {
+				return nil
+			}
 			return err
 		}
 		// A store that does not parse is readKnownHosts's error, and the

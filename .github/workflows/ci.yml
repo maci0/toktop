@@ -134,6 +134,15 @@ jobs:
       - name: site deploy and rollback record before they call the platform (linux only)
         if: runner.os == 'Linux'
         run: make check-site-records
+      # The rollback's two empty-marker states, which the step above cannot
+      # see: a rollback this tree already did has to stay a no-op, and a
+      # machine with no record of a deploy at all has to answer with a
+      # non-zero exit and the platform's deployment list. Folded into one
+      # answer, or back to an exit 0, the recovery step for a broken site
+      # reports that there is nothing to do while the bad Worker is live.
+      - name: a rollback with nothing on record is a failure, not a no-op (linux only)
+        if: runner.os == 'Linux'
+        run: make check-site-rollback-states
       # The same two recipes, one step earlier: both end in a health poll, and
       # that poll is a curl the Makefile did not name. A machine without one
       # made every attempt fail for a reason that has nothing to do with the

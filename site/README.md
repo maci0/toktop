@@ -37,18 +37,27 @@ version that was undone is on record too. Both are under `dist/`, and
 whichever deployment is most recent, whoever shipped it, so running the undo
 twice rolls back a rollback and puts the version that broke back on the site.
 A deploy that reported success leaves `dist/site.deployed` behind, and a
-rollback moves it to `dist/site.rolled-back`: a second rollback finds nothing
-of this tree's to undo, says so, and exits 0 without calling wrangler at all.
-The markers are directories under `dist/`, so `make dist-clean` leaves them
-alone and `make clean` leaves them alone too. A clean that took them would
-make the rollback refuse with "nothing to roll back" while the deployment it
-would have undone is the one serving, and a routine clean is what somebody
-runs first when the site looks wrong. The deploy lock is
+rollback moves it to `dist/site.rolled-back`: a second rollback finds that,
+says the first undo is already on record, and exits 0 without calling wrangler
+at all. Neither marker means this machine deployed nothing that is serving, or
+is not the checkout that did, and that is the state where the site is broken
+and this target cannot reach the undo by itself: it prints the deployment list
+to read, the pinned command to run once against a version read from it, and the
+other ways back, then exits 2 rather than 0, because a bad Worker left live
+behind an exit code that reads "nothing to do" is the outcome the run exists to
+prevent. It stops there on purpose: only the deployment list says which version
+to go back to, and a rollback guessed at on the wrong machine is the damage the
+markers exist to prevent. The markers are directories under `dist/`, so `make
+dist-clean` leaves them alone and `make clean` leaves them alone too. A clean
+that took them would put every rollback into that exit-2 state, which is why a
+routine clean, the first thing somebody runs when the site looks wrong, keeps
+them. The deploy lock is
 held the same way, and `make clean` refuses while it is held: removing `dist/`
 out from under a running deploy would free a lock nobody is watching and let a
 second upload race the first. They record what
-this tree did, not what the site is serving, so on a machine that never ran
-`make site-deploy` a rollback is a no-op rather than a guess.
+this tree did, not what the site is serving, so a rollback from a machine that
+never ran `make site-deploy` is a question answered on the platform's list, not
+a guess this target makes.
 
 `worker.js` holds the HTML: it is a template literal, so there is nothing to
 bundle. The palette lives in the `DARK` and `LIGHT` objects at the top of that

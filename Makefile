@@ -1369,16 +1369,31 @@ site-deploy: require-bun site-lint site-check check-wrangler-doc check-deploy-so
 .PHONY: site-rollback
 site-rollback: require-bun ## roll the site Worker back to the version before the last deploy, then wait for /health
 	@$(SITE_GUARD) \
-	if [ ! -d $(SITE_DEPLOYED) ]; then \
-		echo "nothing to roll back: no deploy from this tree is waiting to be undone ($(SITE_DEPLOYED) is absent)"; \
-		echo "'wrangler rollback' with no version undoes the most recent deployment whoever shipped it, so a second run here would roll back a rollback and put the version you just undid back on the site"; \
+	if [ ! -d $(SITE_DEPLOYED) ] && [ -d $(SITE_ROLLED_BACK) ]; then \
+		echo "nothing to roll back: $(SITE_ROLLED_BACK) records a rollback this tree already did, and it is the only record of one"; \
+		echo "'wrangler rollback' with no version undoes the most recent deployment whoever shipped it, so a second run here would roll back that rollback and put the version you just undid back on the site"; \
 		echo "to recover from this machine anyway, check the deployment list in the Cloudflare dashboard for what the deploy before this one was, then run 'cd site && bunx wrangler@$(WRANGLER) rollback' once, or check out the commit that served correctly and run 'make site-deploy' from it"; \
 		exit 0; \
+	fi; \
+	if [ ! -d $(SITE_DEPLOYED) ]; then \
+		echo "nothing to roll back, and NO ROLLBACK FROM THIS TREE IS ON RECORD: $(SITE_DEPLOYED) is absent, so this machine did not deploy what is serving (or deploys a different checkout than the one running this)" >&2; \
+		echo "'wrangler rollback' with no version undoes the most recent deployment whoever shipped it, and that is the only undo the platform has. A wrong rollback puts the broken version back, so read the deployment list in the Cloudflare dashboard first and check what the deploy before the most recent one was:" >&2; \
+		echo "  cd site && bunx wrangler@$(WRANGLER) deployments list" >&2; \
+		echo "  cd site && bunx wrangler@$(WRANGLER) rollback \[<version-id>\]   # once, on a version you have just read there" >&2; \
+		echo "or check out the commit that served correctly and run 'make site-deploy' from it" >&2; \
+		echo "(a rollback this tree did leave $(SITE_ROLLED_BACK) behind, and then the undo above would be the second)" >&2; \
+		exit 2; \
 	fi; \
 	rm -rf $(SITE_ROLLED_BACK) || { echo "cannot clear $(SITE_ROLLED_BACK); the deploy it holds was already undone once, so a rollback from here would undo this one as well" >&2; exit 1; }; \
 	mv $(SITE_DEPLOYED) $(SITE_ROLLED_BACK) || { echo "cannot move $(SITE_DEPLOYED) aside; no rollback has run, so 'make site-rollback' is still the right next step" >&2; exit 1; }; \
 	(cd site && bunx wrangler@$(WRANGLER) rollback) || { echo "not rolled back; $(SITE_ROLLED_BACK) holds what an earlier run already undid, so this deploy is still the one live" >&2; exit 1; }; \
 	wait_for_site || { echo "rollback finished but the site is not serving; retry, or read the deployment log in the Cloudflare dashboard" >&2; exit 1; }
+
+# The two empty-marker branches above are not the same answer, and the second
+# one is a failure. Both records survive 'make clean' and 'make dist-clean', so
+# a rollback from the deploying machine can find them at all; check-site-
+# rollback-states is what keeps that true of the answer, and the reasoning
+# behind it is there.
 
 # The site deploy and the site rollback are the one pair here whose second run
 # does damage, and both are the same defect in opposite directions: the record
@@ -1418,6 +1433,51 @@ check-site-records: ## fail unless site-deploy records the deploy before calling
 	elif [ "$$rollback_move" -gt "$$rollback_call" ]; then \
 		echo "make check-site-records: site-rollback consumes the record after it calls wrangler, so a rollback interrupted" >&2; \
 		echo "  before its recipe ends leaves that record in place and the next run rolls back the rollback" >&2; \
+		fail=1; \
+	fi; \
+	exit $$fail
+
+# The other half of the same rule, and it is about the two states a rollback
+# that finds nothing can be in. $(SITE_DEPLOYED) absent with
+# $(SITE_ROLLED_BACK) beside it is a rollback this tree already did: a second
+# run must stop, because the versionless rollback the platform offers would
+# undo that undo and put the version somebody is escaping back on the site.
+# Both absent is the other state entirely. Nothing on this machine deployed
+# what is serving, or this is not the checkout that did, so the site is
+# broken and the platform holds the only undo there is; reporting that as
+# "nothing to roll back" and exiting 0 ends the incident with the bad Worker
+# live, which is the one outcome the marker exists to prevent. It exits 2
+# instead and names the deployment list to read and the pinned command to run
+# once against a version read from it. It does not call wrangler for the
+# operator: a rollback guessed at on a machine that cannot say what the last
+# good deployment was is the damage above.
+#
+# The two answers have to stay apart, and the second one has to stay a
+# non-zero exit, so both branches are pinned here: the marker that has to be
+# beside it, the marker that must not be, and the order the two are tested in,
+# read off the recipe the way check-site-records reads its two steps. A
+# rewrite that folds them back into one answer, exits 0 from the second, or
+# tests the bare absence first and swallows a rollback already on record fails
+# here rather than in the incident.
+.PHONY: check-site-rollback-states
+check-site-rollback-states: ## fail unless site-rollback tells an already-undone rollback from a deploy it has no record of
+	@recipe() { awk '/^site-rollback:/ { inrecipe = 1; next } /^\.PHONY: check-site-rollback-states/ { inrecipe = 0 } inrecipe && /^\t/ { sub(/^\t@/, ""); print }' $(MAKEFILE_LIST); }; \
+	already=$$(recipe | grep -F -n '&& [ -d ' | head -1 | cut -d: -f1 | tr -d '[:space:]'); \
+	none=$$(recipe | grep -F -n '[ ! -d ' | grep -v -F '&& [ -d ' | head -1 | cut -d: -f1 | tr -d '[:space:]'); \
+	stop=$$(recipe | grep -F -n 'exit 0;' | head -1 | cut -d: -f1 | tr -d '[:space:]'); \
+	failed=$$(recipe | grep -F -n 'exit 2;' | head -1 | cut -d: -f1 | tr -d '[:space:]'); \
+	fail=0; \
+	if [ -z "$$already" ] || [ -z "$$none" ] || [ -z "$$stop" ] || [ -z "$$failed" ]; then \
+		echo "make check-site-rollback-states: cannot find both empty-marker branches of site-rollback and their two exits" >&2; \
+		fail=1; \
+	elif [ "$$none" -lt "$$already" ]; then \
+		echo "make check-site-rollback-states: site-rollback tests the bare absence of the deploy record before it tests the" >&2; \
+		echo "  rollback already on record, so the second branch also catches the first and the answer is wrong in both states" >&2; \
+		fail=1; \
+	elif [ "$$failed" -le "$$stop" ]; then \
+		echo "make check-site-rollback-states: site-rollback reports a broken site with no record of a deploy as exit 0" >&2; \
+		echo "  (the 'nothing to roll back' branch), so an incident ends with the bad Worker live because the recovery" >&2; \
+		echo "  step said there was nothing to do; that state has to be a non-zero exit" >&2; \
 		fail=1; \
 	fi; \
 	exit $$fail
@@ -1554,6 +1614,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion s
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
 	@$(MAKE) --no-print-directory check-site-records
+	@$(MAKE) --no-print-directory check-site-rollback-states
 	@$(MAKE) --no-print-directory check-site-tools
 	@$(MAKE) --no-print-directory check-changelog-structure
 	@$(MAKE) --no-print-directory check-changelog-covers

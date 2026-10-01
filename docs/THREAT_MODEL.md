@@ -604,8 +604,16 @@ Every externally reachable input, with its code location:
     anchors here, not their line numbers). A rollback undoes the most recent
     deployment whoever shipped it, so a deploy records `dist/site.deployed`
     and a rollback moves it to `dist/site.rolled-back`:
-    a second rollback has nothing of this tree's to undo and exits 0 without
-    calling wrangler. Each recipe does that bookkeeping before it calls
+    a second rollback finds that marker, says the undo is already on record,
+    and exits 0 without calling wrangler. Neither marker is a third state, and
+    it is a failure rather than a no-op: the site is broken, this machine
+    deployed nothing that is serving or is not the checkout that did, and the
+    versionless rollback the platform offers is the only undo there, so the
+    target prints the deployment list to read and the pinned command to run
+    once against a version read from it, then exits 2 without calling
+    wrangler, because a rollback guessed at on a machine that cannot say what
+    the last good deployment was is the damage the markers exist to prevent.
+    Each recipe does its bookkeeping before it calls
     wrangler, not after, and the two orders are the same rule: a run killed
     part-way leaves the record in the state that matches what the platform
     did. A deploy interrupted after the upload leaves the new Worker live
@@ -786,7 +794,8 @@ Deployment surface:
   undone. The lock, the poll and
   the failure exit are shared with `make site-rollback`, so a rollback
   cannot race a deploy and cannot report success over a site that is not
-  answering, and the recorded marker makes the rollback itself run once
+  answering, and the recorded marker makes the rollback itself run once, with
+  the no-record state reported as a failure rather than passed over
   (Makefile, the `site-deploy` and `site-rollback` targets and the
   `wait_for_site` function they share).
 
