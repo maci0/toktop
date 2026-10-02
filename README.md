@@ -448,7 +448,11 @@ run that answered, and it is gone when that run exits, is re-exec'd by
 posted to, the sender keeps its own copy. See [docs/RECOVERY.md](docs/RECOVERY.md)
 for the rest of what toktop holds and what a lost run costs.
 
-Other statuses: `400` for malformed JSON, a bad `ts`, a token count outside the
+Other statuses: `400` for an empty body (`empty body: expected one JSON
+object or an NDJSON stream`), a body whose root is an array, string, number,
+`true`, `false` or `null` (which names the kind it got), malformed JSON (which
+names the body offset it failed at, or `bad json: truncated` when the body
+ended early), a bad `ts`, a token count outside the
 64-bit range, or an `id` that cannot be stored whole, `408` when a stream
 stalls mid-body (the body names which bound broke: no bytes for a minute, or
 the 10 minute lifetime), `413` past the 1 MiB body cap, and `431` past the

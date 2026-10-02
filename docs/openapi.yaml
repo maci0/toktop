@@ -141,9 +141,15 @@ paths:
             The body is not a JSON object or NDJSON stream, a `ts` is not an
             RFC 3339 string, a token count or `span_ms` is outside the 64-bit
             range or is not a number, or an `id` cannot be stored whole. The
-            reason names the field. A stream that failed partway names how
-            many earlier events were recorded and whether to resend the rest
-            or replay the whole request.
+            reason names the field. An empty body reads as `empty body:
+            expected one JSON object or an NDJSON stream`, and a body whose
+            root is an array, string, number, `true`, `false` or `null` names
+            the kind it got, so the one line tells a sender to send an object
+            rather than an array. A malformed object names the body offset it
+            failed at, and a truncated one reads `bad json: truncated`, so a
+            sender streaming many events can seek to the failing line. A stream
+            that failed partway names how many earlier events were recorded and
+            whether to resend the rest or replay the whole request.
 
             The runtime answers this status too, for a request line it cannot
             parse, before the handler runs. That answer carries none of these
@@ -542,6 +548,9 @@ components:
         - "bad ts: must be an RFC 3339 string"
         - "bad json: prompt_tokens is out of range"
         - "bad id: must be at most 128 characters"
+        - "empty body: expected one JSON object or an NDJSON stream"
+        - "bad json: expected a JSON object or NDJSON stream, got array"
+        - "bad json: truncated"
         - "not found; endpoints: /v1/events (POST); /healthz (GET, HEAD)"
         - "method not allowed; /v1/events accepts POST, not PUT"
         - "browser-originated requests are not accepted; post from a script or agent without an Origin header"
