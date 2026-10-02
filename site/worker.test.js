@@ -27,6 +27,13 @@ const ANSI16_ENTRY_RE = /^\s*(\d+): (\(\d+, \d+, \d+\))/gm;
 const EDGE_DUR_RE = /^edge;dur=(\d+)$/;
 // A border on :hover draws a second line under a link's underline.
 const HOVER_BORDER_RE = /a:hover[^}]*border-/;
+// The Makefile build tags the install command has to match, the command
+// itself, and the agent-name list agentusage/definitions.go declares.
+const MAKE_TAGS_RE = /^TAGS\s+\?=\s*(\S+)/m;
+const MAKE_ZONE_TAG_RE = /^ZONE_TAG\s*:?=\s*(\S+)/m;
+const GO_INSTALL_RE = /go install[^<]*/;
+const KNOWN_AGENTS_RE = /knownAgents = \[\]string\{([^}]*)\}/;
+const QUOTED_NAME_RE = /"([\w-]+)"/g;
 const DUR_SUFFIX_RE = /dur=\d+(?:\.\d+)?$/;
 const IMG_TAG_RE = /<img\b[^>]*>/g;
 // The transfer sizes site/README.md states as prose, and the phone visit it
@@ -367,7 +374,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4747);
+    expect(bytes.byteLength).toBe(4852);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -819,6 +826,43 @@ test("dashboard images reject non-GET/HEAD without fetching assets", async () =>
 test("served HTML does not carry source comments", () => {
   expect(identityBody.includes("<!--")).toBe(false);
   expect(identityBody.includes("/*")).toBe(false);
+});
+
+// The install command is the one thing on the page a reader runs verbatim, so
+// its tags are the release binaries' own: the Makefile builds every binary with
+// `-tags "$(strip $(TAGS) $(ZONE_TAG))"` (TAGS=sqlite, ZONE_TAG=timetzdata), and
+// a command naming only one of them built a different program than the page is
+// about. Without timetzdata the header clock and the feed stamps resolve against
+// the host's zone files and fall back to UTC on a host that has none, which is
+// the case a downloaded binary does not have. The tags are read from the
+// Makefile rather than repeated here, so a build that changes its own tag list
+// fails this instead of the page quietly teaching an old command.
+test("the install command carries the tags the release binaries are built with", () => {
+  const makefile = readFileSync(join(import.meta.dir, "..", "Makefile"), "utf8");
+  const driver = makefile.match(MAKE_TAGS_RE)?.[1];
+  const zone = makefile.match(MAKE_ZONE_TAG_RE)?.[1];
+  expect(driver).toBe("sqlite");
+  expect(zone).toBe("timetzdata");
+  const command = identityBody.match(GO_INSTALL_RE)?.[0] ?? "";
+  expect(command).toContain(`-tags "${driver} ${zone}"`);
+  // Both tags are then explained, so the command above is not an incantation
+  // the reader has to take on trust.
+  expect(identityBody).toContain(`<code>${driver}</code>`);
+  expect(identityBody).toContain(`<code>${zone}</code>`);
+});
+
+// The agents the page names are the agents the package recognises: a list that
+// has fallen behind agentusage/definitions.go describes a smaller product than
+// the one being installed, and the page is the only place a reader meets a name
+// before the binary is in front of them.
+test("the agent list names every agent the package recognises", () => {
+  const source = readFileSync(join(import.meta.dir, "..", "agentusage", "definitions.go"), "utf8");
+  const block = source.match(KNOWN_AGENTS_RE)?.[1] ?? "";
+  const known = [...block.matchAll(QUOTED_NAME_RE)].map(([, name]) => name);
+  expect(known.length).toBeGreaterThan(10);
+  for (const agent of known) {
+    expect(identityBody).toContain(agent);
+  }
 });
 
 test("hero is the captured dashboard, not an ASCII stand-in", () => {
@@ -1489,9 +1533,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13609);
-  expect(gzipped).toBe(4747);
-  expect(brotli).toBe(4008);
+  expect(identity).toBe(13801);
+  expect(gzipped).toBe(4852);
+  expect(brotli).toBe(4092);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1527,7 +1571,7 @@ test("the READMEs record the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_585);
+  expect(visit[0][1]).toBe(14_669);
   for (const name of ["CONTRIBUTING.md", "Makefile"]) {
     const quoted = readFileSync(join(import.meta.dir, "..", name), "utf8").match(VISIT_TOTAL_RE);
     expect(`${name} quotes ${quoted?.[1]}`).toBe(
@@ -1589,7 +1633,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_585);
+  expect(visit).toBe(14_669);
   expect(visit).toBeLessThan(25_000);
 });
 

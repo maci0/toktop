@@ -474,9 +474,11 @@ const HTML = htmlForWire(`<!doctype html>
 
   <section id="install" aria-labelledby="install-heading">
   <h2 id="install-heading">Install</h2>
-<pre tabindex="0" role="region" aria-label="Install commands"><code>go install -tags sqlite github.com/maci0/toktop/cmd/toktop@latest</code></pre>
-  <p class="dim">The <code>sqlite</code> tag matches the release binaries: without it
-  crush and opencode stores are unreadable. No Go toolchain?
+<pre tabindex="0" role="region" aria-label="Install commands"><code>go install -tags "sqlite timetzdata" github.com/maci0/toktop/cmd/toktop@latest</code></pre>
+  <p class="dim">Both tags match the release binaries. <code>sqlite</code>, because
+  without it crush and opencode stores are unreadable; <code>timetzdata</code>,
+  because the header clock and the feed stamps resolve against the host's zone
+  files and fall back to UTC on a host that has none. No Go toolchain?
   <a href="https://github.com/maci0/toktop/releases">Releases</a> has a binary for
   linux, macos or windows (amd64 and arm64), and <code>toktop update</code> keeps it
   current.</p>
@@ -499,7 +501,7 @@ toktop ssh://you@box      <span class="dim"># watch another host over ssh</span>
     <li><b>System</b><p>GPU/NPU, VRAM, temps, power beside the throughput.</p><code>nv0 82° 69% · vram 57G/80G · 397W</code></li>
   </ul>
   <p class="dim">Transcripts: claude, codex, qwen, copilot, kimi, gemini, grok,
-  agy, cursor-agent, pi, prime-agent, feynman, omp, clanker, and dsh
+  agy, cursor-agent, pi, prime-agent, feynman, omp, clanker, microagent, and dsh
   (zstd or plain JSONL);
   opencode and crush keep SQLite (needs the <code>sqlite</code> tag).
   Agents on a watched engine show <code>via &lt;engine&gt;</code>, counted once.</p>
