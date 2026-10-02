@@ -85,17 +85,20 @@ const utcStamp = "2006-01-02T15:04:05.000000000Z07:00"
 // durable, so a stderr that is full, redirected to a full disk, or closed
 // loses the operator exactly the line they would have read. See the handler
 // for what is reported and when.
+//
+// The count of refused lines is per process, not per logger: see
+// [stderrLoss].
 func Logger() *slog.Logger {
 	lvl, err := ParseLogLevel(os.Getenv(LevelEnv))
 	if err != nil {
 		lvl = slog.LevelInfo // main already rejected this; stay quiet if constructed in tests
 	}
-	// One counter for the stderr this logger writes to, and the same stderr
-	// for every record: the packages that audit all reach it through one
-	// SwapLogger holding the logger this returns, so a process counts its lost
-	// lines once against the one channel they went missing from.
-	lw := &lossWriter{w: os.Stderr}
-	return slog.New(HomeHandler{Handler: LossHandler{w: lw, inner: slog.NewTextHandler(lw, &slog.HandlerOptions{
+	// stderrLoss rather than a counter built here, so every logger this
+	// function hands out counts the refused lines against the one channel they
+	// were lost from. The reason that matters is the call sites: every package
+	// that audits holds Logger as a func value and calls it per line, so a
+	// per-call counter was read by nothing after the line it counted.
+	return slog.New(HomeHandler{Handler: LossHandler{w: stderrLoss, inner: slog.NewTextHandler(stderrLoss, &slog.HandlerOptions{
 		Level:       lvl,
 		ReplaceAttr: utcTime,
 	})}})
@@ -112,8 +115,30 @@ func Logger() *slog.Logger {
 // thing failing, and a warning nobody can read is not a signal either; the
 // count is reported once, by the next write stderr accepts, which is also the
 // first moment there is a channel to say it on.
+//
+// stderrLoss is the process audit sink: one stderr, and one count of what it
+// refused, shared by every logger Logger hands out. It is a package variable
+// rather than one per call because every auditing package holds Logger as a
+// func value and calls it per line (internal/remote, internal/collector,
+// internal/procs, internal/gpu, internal/sysmon, internal/selfreload,
+// internal/ingest, cmd/toktop). A counter built inside the call died with the
+// call that made it: a line stderr refused was counted into state nothing
+// would read again, and the next line any other logger took found nothing
+// pending. The loss was then exactly as silent as it was before this counter
+// existed, which is the one outcome the handler above exists to prevent.
+//
+// The destination is resolved on every write rather than captured here,
+// because os.Stderr is a package variable that a caller may replace (a
+// redirect, a test's pipe) and a sink holding the descriptor from before the
+// replacement would keep writing to the stderr the process no longer reads.
+var stderrLoss = &lossWriter{stderr: func() io.Writer { return os.Stderr }}
+
 type lossWriter struct {
-	w io.Writer
+	// stderr is where a write goes when no other sink was installed on this
+	// writer; the field below overrides it. Kept a function so the default
+	// follows os.Stderr, which a caller may replace after the writer is built.
+	stderr func() io.Writer
+	fixed  io.Writer // the test's stub, or nil
 
 	mu      sync.Mutex
 	lost    uint64
@@ -125,7 +150,7 @@ type lossWriter struct {
 // as surely as a failed one, and io.Writer's contract makes both a non-nil
 // error, so the two are one branch here.
 func (l *lossWriter) Write(p []byte) (int, error) {
-	n, err := l.w.Write(p)
+	n, err := l.out().Write(p)
 	if err != nil || n < len(p) {
 		if err == nil {
 			err = errWriteRefused
@@ -150,6 +175,15 @@ func (l *lossWriter) Write(p []byte) (int, error) {
 		return n, errWriteRefused
 	}
 	return n, nil
+}
+
+// out is the sink this write goes to: the one installed on the writer, or the
+// process stderr as it is now rather than as it was when the writer was built.
+func (l *lossWriter) out() io.Writer {
+	if l.fixed != nil {
+		return l.fixed
+	}
+	return l.stderr()
 }
 
 // errWriteRefused is what a short write reports. The wrapped error is the

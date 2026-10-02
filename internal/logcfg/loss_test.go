@@ -6,7 +6,9 @@ package logcfg
 import (
 	"bytes"
 	"errors"
+	"io"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -20,7 +22,7 @@ import (
 // lost lines, not silence.
 func TestALostAuditLineIsReportedOnTheNextOneThatLands(t *testing.T) {
 	w := &stubWriter{refuse: 3}
-	lw := &lossWriter{w: w}
+	lw := &lossWriter{fixed: w}
 	lg := slog.New(LossHandler{w: lw, inner: slog.NewTextHandler(lw, nil)})
 
 	for i := range 3 {
@@ -53,7 +55,7 @@ func TestALostAuditLineIsReportedOnTheNextOneThatLands(t *testing.T) {
 // into a flood and buries the records that do get through.
 func TestTheLossIsReportedOnceAndNotRepeated(t *testing.T) {
 	w := &stubWriter{refuse: 2}
-	lw := &lossWriter{w: w}
+	lw := &lossWriter{fixed: w}
 	lg := slog.New(LossHandler{w: lw, inner: slog.NewTextHandler(lw, nil)})
 
 	lg.Warn("first")
@@ -77,7 +79,7 @@ func TestTheLossIsReportedOnceAndNotRepeated(t *testing.T) {
 // failing, so the first is what an operator acts on.
 func TestTheFirstReasonIsTheOneKeptForTheNextReport(t *testing.T) {
 	w := &stubWriter{refuse: 2, firstErr: errors.New("no space left on device"), thenErr: errors.New("broken pipe")}
-	lw := &lossWriter{w: w}
+	lw := &lossWriter{fixed: w}
 	lg := slog.New(LossHandler{w: lw, inner: slog.NewTextHandler(lw, nil)})
 
 	lg.Warn("lost one")
@@ -103,7 +105,7 @@ func TestTheLossNoticeIsFoldedLikeEveryOtherLine(t *testing.T) {
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home) // windows
 	w := &stubWriter{refuse: 1}
-	lw := &lossWriter{w: w}
+	lw := &lossWriter{fixed: w}
 	lg := slog.New(HomeHandler{Handler: LossHandler{w: lw, inner: slog.NewTextHandler(lw, nil)}})
 
 	lg.Warn("cannot read " + filepath.Join(home, "toktop", "known_hosts"))
@@ -120,7 +122,7 @@ func TestTheLossNoticeIsFoldedLikeEveryOtherLine(t *testing.T) {
 // worse than one that never arrived, because it looks like it did.
 func TestAShortWriteIsCountedAsALostLine(t *testing.T) {
 	w := &stubWriter{short: 1}
-	lw := &lossWriter{w: w}
+	lw := &lossWriter{fixed: w}
 	lg := slog.New(LossHandler{w: lw, inner: slog.NewTextHandler(lw, nil)})
 
 	lg.Warn("truncated line")
@@ -136,7 +138,7 @@ func TestAShortWriteIsCountedAsALostLine(t *testing.T) {
 // been reported stays reported rather than being counted again.
 func TestAHealthyRunReportsNothing(t *testing.T) {
 	w := &stubWriter{}
-	lw := &lossWriter{w: w}
+	lw := &lossWriter{fixed: w}
 	lg := slog.New(LossHandler{w: lw, inner: slog.NewTextHandler(lw, nil)})
 
 	lg.Info("toktop: ingest listening", "addr", "127.0.0.1:0")
@@ -147,6 +149,42 @@ func TestAHealthyRunReportsNothing(t *testing.T) {
 	}
 	if !strings.Contains(w.buf.String(), "ingest listening") {
 		t.Errorf("the handler dropped a line that landed: %s", w.buf.String())
+	}
+}
+
+// Two loggers, one loss. Every auditing package holds Logger as a func value
+// and calls it per line, so a loss counted against the logger that refused the
+// line is only reported at all if some *other* logger can see the count. While
+// each call built its own counter, a full disk took one subsystem's line and
+// nothing anywhere said so: the log read as a run in which the store backup
+// that failed never happened, which is the silence the whole handler is here
+// to prevent. Pinned across two Logger calls, because a same-logger test
+// passes either way and would not have caught it.
+func TestALossOnOneLoggerIsReportedByAnother(t *testing.T) {
+	w := &stubWriter{refuse: 1}
+	old := stderrLoss
+	stderrLoss = &lossWriter{fixed: w}
+	t.Cleanup(func() { stderrLoss = old })
+
+	first := Logger()
+	second := Logger()
+	first.Warn("toktop: host key store backup not written", "path", "~/toktop/known_hosts")
+	second.Info("toktop: ingest listening", "addr", "127.0.0.1:0")
+
+	got := w.buf.String()
+	if !strings.Contains(got, "1 audit line(s) could not be written") {
+		t.Fatalf("a line one logger lost was not reported by another: %s", got)
+	}
+	// Reported once, on the first line that lands (here the second logger's),
+	// and as a record of its own, so a reader parsing the log does not
+	// attribute it to the record it followed.
+	for _, line := range strings.Split(strings.TrimSpace(got), "\n") {
+		if strings.Contains(line, "could not be written") && strings.Contains(line, "ingest listening") {
+			t.Errorf("the loss notice shares a line with the record it followed: %s", line)
+		}
+	}
+	if n := strings.Count(got, "could not be written"); n != 1 {
+		t.Errorf("the loss was reported %d times, want 1: %s", n, got)
 	}
 }
 
@@ -162,6 +200,56 @@ type stubWriter struct {
 	thenErr       error
 
 	buf bytes.Buffer
+}
+
+// The sink follows os.Stderr as it is now, not as it was when the process
+// sink was built. Sharing one counter across loggers is only safe if the sink
+// itself is still read per write: a process that redirects stderr after the
+// first audit line -- a supervisor capturing a long-running dashboard, a test
+// swapping in a pipe -- would otherwise keep writing to the descriptor it
+// inherited, so the capture would show a run that logged nothing while the
+// terminal it was meant to replace filled with the lines. Sharing the counter
+// is what made this worth pinning: the writer stopped being built per call,
+// and with it the read of its destination at construction time.
+func TestARedirectedStderrIsFollowedByTheSharedSink(t *testing.T) {
+	// The shipped sink, not a fresh one: this is a property of how
+	// stderrLoss is built, so replacing it would test the replacement.
+	if stderrLoss.fixed != nil {
+		t.Fatal("the process sink has a fixed destination, so it cannot follow a replaced os.Stderr")
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	realStderr := os.Stderr
+	os.Stderr = w
+	t.Cleanup(func() {
+		os.Stderr = realStderr
+		r.Close()
+		w.Close()
+	})
+
+	// Both loggers are built after the replacement and both have to reach
+	// it: the point is that the shared sink resolves os.Stderr per write
+	// rather than holding the descriptor it saw when it was built.
+	first := Logger()
+	second := Logger()
+	first.Info("toktop: ingest listening", "addr", "127.0.0.1:0")
+	second.Warn("toktop: host key store backup not written")
+
+	w.Close()
+	var buf bytes.Buffer
+	if _, err := io.Copy(&buf, r); err != nil {
+		t.Fatal(err)
+	}
+	got := buf.String()
+	for _, want := range []string{"ingest listening", "host key store backup not written"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q did not reach the redirected stderr, so the audit log went somewhere "+
+				"the operator is not reading: %s", want, got)
+		}
+	}
 }
 
 const stubReason = "audit sink is closed"

@@ -146,21 +146,10 @@ func tofu() (ssh.HostKeyCallback, error) {
 	if err != nil {
 		return nil, err
 	}
-	// A store that survived only under one of the copies beside it is put
-	// back on the next connect, so the copies are backups again rather than
-	// where the store has permanently moved to. Best effort: readKnownHosts
-	// reads them on every run either way, so a restore that cannot land costs
-	// nothing but the tidiness, and a store that cannot be parsed at all is
-	// the probe's error to report, not this one's to swallow.
-	//
-	// settleOperatorRestore is the other half of that sentence, for the loss
-	// the operator repairs by hand: a store that is present because they put
-	// it back is finished, and the marks and the behind-copy that repair
-	// leaves are spent here rather than standing beside a store nobody lost.
-	restoreStore(path)
-	checkStoreCopy(path)
-	settleOperatorRestore(path)
-	clearSupersededCopy(path)
+	// The four steps below are the store's integrity pass, and they are one
+	// function rather than four here, so a caller that is not a connect can
+	// run the same pass. See [CheckStore].
+	settleStore(path)
 	return func(hostname string, _ net.Addr, key ssh.PublicKey) error {
 		if strings.ContainsAny(hostname, " \t\r\n\x00") {
 			return fmt.Errorf("invalid hostname %q: contains whitespace or newline", hostname)
@@ -570,6 +559,48 @@ func clearInterruptedWrite(path string) {
 // A restore spends the marks that justified it (clearInterruptedWrite): once
 // the store is back, they are the evidence of a loss that no longer happened,
 // and leaving them would turn the next deletion into a second, unwanted one.
+//
+// settleStore is the store's integrity pass, in the order a connect and a
+// startup check both need it: read-recovery first (a store that survived only
+// under a copy beside it is put back), then the copy check and the
+// operator-restore settle (both read the store restoreStore may have just
+// written), then the superseded-copy clear, which keys off a store that parses.
+//
+// Best effort throughout, and every failure is reported rather than returned:
+// readKnownHosts already refuses a store it cannot parse, so these steps run
+// only on stores that do read, and their work is tidying the state beside the
+// store so the *next* run is not the one that discovers it. A step that fails
+// must not fail a connect over a backup that matters only if the store is lost.
+func settleStore(path string) {
+	restoreStore(path)
+	checkStoreCopy(path)
+	settleOperatorRestore(path)
+	clearSupersededCopy(path)
+}
+
+// CheckStore runs the store's integrity pass without connecting to anything,
+// and reports whether this environment names a store at all.
+//
+// A run with no ssh:// target never reaches tofu(), so before this the pass
+// ran only on a connect: a run that attached to http:// endpoints, ran --demo,
+// or did a local --once left a store whose copy was missing or damaged exactly
+// as it found it, silently, for the whole run. The store is the only state
+// toktop writes that a copy protects and the copy is the only backup of it, so
+// a run is the wrong place to learn that backup is unusable: whether this run
+// dials a host or not, the store is what the next one reads.
+//
+// It is a no-op where the environment names no store (an unusable home, a
+// relative XDG_CONFIG_HOME). That case is warnNoHostKeyStore's line to print,
+// which the caller has done by the time a run gets here.
+func CheckStore() bool {
+	path := knownHostsPath()
+	if path == "" {
+		return false
+	}
+	settleStore(path)
+	return true
+}
+
 func restoreStore(path string) {
 	// Only a store that is actually gone is worth a lock. Taking one on every
 	// connect would make a dashboard pay a peer's full storeLockWait to learn

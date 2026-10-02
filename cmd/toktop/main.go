@@ -234,6 +234,20 @@ func runMain() int {
 	// ssh connections than the run opened.
 	logActiveConfig(os.Stderr, f, explicit, len(f.adds), len(targets), opencodeOn)
 
+	// The host-key store's integrity pass, once per run, before any subsystem
+	// starts and whether or not this run dials an ssh host. It recovers a
+	// store an interrupted write left missing, rewrites a copy that cannot
+	// recover one, settles a restore the operator performed by hand, and
+	// clears a superseded copy beside a store that parses. Every one of those
+	// is a state the next connect would otherwise be the first to find, so a
+	// run that only attached to http:// endpoints, or ran --demo, or did a
+	// local --once, left all four exactly as it found them: the store is the
+	// only state toktop writes and its copy the only backup of it, so whether
+	// this run uses the store is not what decides whether it is safe. Each
+	// step reports itself when it acts, so a healthy run pays one stat per
+	// file and writes nothing.
+	remote.CheckStore()
+
 	// Only when --ingest was given explicitly should an unusable listen
 	// address abort the run; the default-enabled endpoint degrades gracefully.
 	ingestSet := explicit["ingest"]

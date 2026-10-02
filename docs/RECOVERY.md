@@ -13,10 +13,10 @@ somebody else's data.
 
 | State | Where | Written by |
 | --- | --- | --- |
-| the audit log | wherever the operator redirected the process's stderr, which toktop never chooses and never opens: it writes no log file of its own (`internal/logcfg/logcfg.go`, `NewSwapLogger`/`Logger` build a `slog.Logger` over `os.Stderr`). A stderr that refuses a line has the refusal counted and reported on the next line it accepts (`LossHandler`), so a channel that failed shows in the log rather than as a gap in it. A run whose stderr is a terminal loses the log with the terminal, so nothing here assumes a path | every subsystem's `audit()` |
+| the audit log | wherever the operator redirected the process's stderr, which toktop never chooses and never opens: it writes no log file of its own (`internal/logcfg/logcfg.go`, `NewSwapLogger`/`Logger` build a `slog.Logger` over `os.Stderr`). A stderr that refuses a line has the refusal counted against one counter shared by every logger in the process (`stderrLoss`) and reported on the next line it accepts, by whichever subsystem wrote that line (`LossHandler`), so a channel that failed shows in the log rather than as a gap in it. A run whose stderr is a terminal loses the log with the terminal, so nothing here assumes a path | every subsystem's `audit()` |
 | ssh host-key pin store | `$XDG_CONFIG_HOME/toktop/known_hosts` when `XDG_CONFIG_HOME` is absolute, otherwise `os.UserConfigDir()/toktop/known_hosts`; a config directory that is itself unusable names no store, and the run fails at connect (`internal/remote/knownhosts.go`, `defaultKnownHostsPath`) | `writeKnownHosts` |
-| a copy of the store, refreshed by every write, and rewritten from the store by the next connect that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
-| the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, by the next connect once that replacement is in place (`clearSupersededCopy`), or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
+| a copy of the store, refreshed by every write, and rewritten from the store by the next run that finds it missing, damaged or older than the store | the same path plus `.bak` (`writeBackup`, `checkStoreCopy`) | `writeBackup` |
+| the store a killed Windows update left behind | the store path plus `.displaced` (`replaceFile`), removed by the replacement that supersedes it, by the next run once that replacement is in place (`clearSupersededCopy`), or by the restore that recovered the store from it (`clearInterruptedWrite`) | `replaceFile` |
 | the cross-process write lock, while a write holds it | the store path plus `.lock` (`storeLockSuffix`, created and removed by `internal/lockfile/lockfile.go`, which `lockStore` and `lockInstall` both take), removed on release, broken when older than a minute | `lockStore` |
 | a download being installed | a `.toktop-update-*` file beside the binary (`internal/selfupdate/install.go`, `updateTempPrefix`), removed on success and swept on the next run; a failed run that could not delete it says where it is | `install` |
 | the install lock, while a replacement holds it | the installed binary plus `.lock` (`internal/selfupdate/install.go`, `installLockSuffix`), removed on release, broken when older than a minute | `lockInstall` |
@@ -68,7 +68,7 @@ installed binary with it:
 - `known_hosts.displaced` is cleared before `replaceFile` moves a store aside,
   and a copy that could not be cleared fails the write by name, so the
   operator learns which file has to be deleted by hand. One that survives a
-  replacement that did land is reported the same way, and the next connect
+  replacement that did land is reported the same way, and the next run
   removes it: beside a store that parses, it holds the pins from before a write
   the store already carries, and its name answering `interruptedWrite` is what
   would turn a later re-pin into a restore of the rejected key
@@ -96,10 +96,10 @@ installed binary with it:
 
 | Question | Answer |
 | --- | --- |
-| RPO for the audit log | every line not yet captured wherever stderr is pointed, which on a terminal is all of them: toktop opens no log file, so a run whose stderr is a TTY leaves no record at all. Nothing is recovered and nothing can be, since the log is not toktop's file to copy back. The cost of losing it is the diagnosis, not the data: the lines that report an engine going down, a store backup that could not be written, a store recovered from its copy and a rename that could not be made durable are the only record that any of those happened, and a store that is intact has nothing to restore. A channel that refuses a line is reported rather than left silent: every line `slog` discards, which is all of them, is counted and the count is written as one line of its own on the next line stderr accepts, naming the reason it refused, so a full disk or a closed redirect cannot read as a run that had nothing to report (`LossHandler`, `internal/logcfg/logcfg.go`). A run that never writes another line reports nothing, and the loss is then indistinguishable from a quiet run: the ceiling of a log whose only sink is the channel that failed. Redirect stderr to a file to keep them (`toktop 2>>toktop.log`), which is the operator's half the same way backing up the config directory is. |
+| RPO for the audit log | every line not yet captured wherever stderr is pointed, which on a terminal is all of them: toktop opens no log file, so a run whose stderr is a TTY leaves no record at all. Nothing is recovered and nothing can be, since the log is not toktop's file to copy back. The cost of losing it is the diagnosis, not the data: the lines that report an engine going down, a store backup that could not be written, a store recovered from its copy and a rename that could not be made durable are the only record that any of those happened, and a store that is intact has nothing to restore. A channel that refuses a line is reported rather than left silent: every line `slog` discards, which is all of them, is counted against the one counter the process's stderr has (`stderrLoss`), and the count is written as one line of its own on the next line that channel accepts, whatever subsystem wrote it, naming the reason it refused, so a full disk or a closed redirect cannot read as a run that had nothing to report (`LossHandler`, `internal/logcfg/logcfg.go`). A run that never writes another line reports nothing, and the loss is then indistinguishable from a quiet run: the ceiling of a log whose only sink is the channel that failed. Redirect stderr to a file to keep them (`toktop 2>>toktop.log`), which is the operator's half the same way backing up the config directory is. |
 | RTO for the audit log | nothing to restore, so it is not a recovery step: the questions it answered are re-answered by the run itself, since the collector re-reports an engine that is still down and the store check re-reports a copy that is still missing. |
 | RPO for agent events posted to `--ingest` | everything acknowledged but not yet outlived, which is every event the run held: the feed is process memory, so a quit, an update re-exec or a crash costs the whole feed and nothing recovers it (`RecordAgent`, `core.AgentHistoryLen`). The RTO is the sender's own, since only the sender holds a copy. |
-| RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next connect: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
+| RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next run: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
 | RPO for a bad release | the installed binary, and only the binary: it is the one file an update replaces. The pin store is a file beside it, not a record inside it, so no pin is lost with a bad release. The release page is the other copy, and it is not the only one: the tag rebuilds the same bytes ([Rebuilding a release instead of downloading it](#rebuilding-a-release-instead-of-downloading-it)). |
@@ -145,7 +145,7 @@ rejected key back. A new killed write leaves new marks, so a later loss is
 still recovered, on its own evidence.
 
 The `cp` above is an operator's restore, and it lands the file without
-touching anything beside it, so the next connect finishes the job:
+touching anything beside it, so the next run finishes the job:
 `settleOperatorRestore` (`internal/remote/knownhosts.go`) spends the marks the
 same way toktop's own restore does, refreshes `known_hosts.bak` from the store
 that was just put back so the copy is not left a write behind, and says both on
@@ -224,6 +224,31 @@ against the fingerprint the host presents today. If it differs, the host
 was rebuilt or the line is wrong: leave the store alone and work out which,
 rather than replacing the pin to make the connect succeed.
 
+The store's integrity pass runs at startup, whether or not this run dials an
+ssh host: `cmd/toktop` calls `remote.CheckStore` once after the config line
+(`internal/remote/knownhosts.go`), which is `tofu`'s own pass factored out
+into `settleStore`. It ran only on a connect before, so a run that only
+attached to http:// endpoints, ran `--demo`, or did a local `--once` left a
+store whose copy was missing, damaged or a write behind exactly as it found
+it, silently, for the whole run. That is the wrong place to leave it: the
+store is the only state toktop writes and its copy the only backup of it, and
+the run that finds the backup unusable is not the run that uses the store.
+`CheckStore` returns false where the environment names no store at all, which
+is the case the `$XDG_CONFIG_HOME` warning already names.
+
+Four tests in `internal/remote/checkstore_test.go` hold it:
+`TestCheckStoreSettlesAStoreNoConnectWouldHaveReached` puts back a store the
+way an operator's `cp` does, with a displaced copy and the marks of the write
+that lost it still beside it, and holds that a run with no ssh target settles
+all of it and leaves the pins alone;
+`TestCheckStoreRebuildsACopyThatCannotRecoverTheStore` damages the copy and
+holds that it is rewritten from the store and the rewrite is logged;
+`TestCheckStoreReportsAnEnvironmentWithNoStore` holds that an environment
+naming no store reports false rather than creating one; and
+`TestCheckStoreSaysNothingAboutAHealthyStore` holds the common case silent, so
+a run that reported something every time would not train the operator to skip
+the lines that matter.
+
 There is no operator-facing restore check to run, but the round trip is
 pinned by tests rather than by inspection. The sequence above is run end to
 end, in the order it is performed, by
@@ -246,13 +271,13 @@ read it back from each copy, and
 the freshest of the two, so a restore cannot hand back fewer pins than the
 operator had. `go test ./internal/remote/` runs them.
 
-The copy the store is recovered from is checked on every connect rather than
+The copy the store is recovered from is checked on every run rather than
 only at the write that would have refreshed it:
 `TestCheckStoreCopyRewritesACopyItCannotRecoverTheStore` removes the copy,
 ages it behind the store and damages it in turn, and pins that each is
 rewritten from the store, logged, and not reported again once it is current;
 `TestCheckStoreCopyLeavesACurrentCopyAlone` pins that a backed-up store costs
-a connect nothing. A copy that is silently gone is therefore a state the next
+a run nothing. A copy that is silently gone is therefore a state the next
 run repairs, not one that has to be noticed.
 
 The two halves of the re-pin rule are pinned together in
@@ -480,9 +505,10 @@ deployment has to be made from a checkout rather than from a note.
   the diagnosis of a store that is intact is re-derived by the next run. What
   toktop does protect is the operator's ability to know the log is incomplete:
   a channel that refuses a line is counted, and the count is reported on the
-  next line the channel takes (`LossHandler`), so a full disk or a closed
-  redirect is a line in the log rather than a silence an operator reads as
-  "nothing happened". The count is said once, and a run whose channel never
+  next line the channel takes, by any logger in the process rather than only
+  the one that lost the line (`LossHandler`, `stderrLoss`), so a full disk or a
+  closed redirect is a line in the log rather than a silence an operator reads
+  as "nothing happened". The count is said once, and a run whose channel never
   takes another line reports nothing: the ceiling of a sink that is the same
   channel that failed.
 - The site's only history is the deployment list on one Cloudflare account,
