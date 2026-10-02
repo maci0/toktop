@@ -307,7 +307,7 @@ def select_faces(
     faces: dict[str, FreeTypeFont] = {}
     onscreen = {screen.buffer[y][x].data for y in range(rows) for x in range(cols)}
     for ch in onscreen:
-        if ch in (" ", ""):
+        if ch in {" ", ""}:
             continue
         for face in (*primary, *fallbacks):
             if _covers(face, ch):
@@ -412,8 +412,7 @@ def render(src: str, out: str, scale: int, cols: int, rows: int) -> None:
         raise SystemExit(1) from e
 
     try:
-        with Path(src).open("rb") as f:
-            data = f.read().rstrip(b"\r\n")
+        data = Path(src).read_bytes().rstrip(b"\r\n")
     except OSError as e:
         print(f"screenshot.py: {src}: {e}", file=sys.stderr)
         raise SystemExit(1) from e
