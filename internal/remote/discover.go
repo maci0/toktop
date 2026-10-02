@@ -62,11 +62,7 @@ func Discover(ctx context.Context, c *Client, wellKnown []int) (*Discovery, erro
 		if err != nil {
 			return nil, fmt.Errorf("port probe failed: %w", err) // unreachable host: nothing else will work either
 		}
-		for f := range strings.FieldsSeq(out) {
-			if p, err := strconv.Atoi(f); err == nil && p > 0 {
-				d.Listening = append(d.Listening, p)
-			}
-		}
+		d.Listening = parseProbeOutput(out)
 	}
 
 	// Engine-port hints are optional: a failing or missing cmdline sweep just
@@ -150,12 +146,43 @@ func parseNetTCP(out string) []int {
 			continue
 		}
 		p, err := strconv.ParseUint(hexPort, 16, 16)
-		if err != nil || p == 0 { // port 0 is not a listener anything can reach
+		if err != nil {
 			continue
 		}
-		seen[int(p)] = true
+		if port := usablePort(int(p)); port != 0 {
+			seen[port] = true
+		}
 	}
 	return slices.Sorted(maps.Keys(seen))
+}
+
+// parseProbeOutput reads the shell-probe fallback's stdout, one decimal port
+// per field, the same bound parseNetTCP applies: whatever a hostile remote
+// prints, only a real 1..65535 port reaches ForwardSet and the tunnel dial.
+func parseProbeOutput(out string) []int {
+	seen := map[int]bool{}
+	for f := range strings.FieldsSeq(out) {
+		p, err := strconv.Atoi(f)
+		if err != nil {
+			continue
+		}
+		if port := usablePort(p); port != 0 {
+			seen[port] = true
+		}
+	}
+	return slices.Sorted(maps.Keys(seen))
+}
+
+// usablePort maps a parsed number onto the port it can be, collapsing
+// everything that is not a bindable port onto 0 so the callers' single entry
+// drops it. Port 0 is not a listener anything can reach, and 65535 is the top
+// of the TCP range: a wider reading would let a hostile remote plant
+// impossible listeners that later drive the tunnel set and the local dial.
+func usablePort(p int) int {
+	if p < 1 || p > 65535 {
+		return 0
+	}
+	return p
 }
 
 // probeScript prints listening ports from the given candidate list. Uses bash

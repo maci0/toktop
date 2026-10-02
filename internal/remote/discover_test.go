@@ -223,3 +223,16 @@ func TestNetTCPScriptMarksAnUnreadableProcNetTCP(t *testing.T) {
 		t.Fatalf("a missing /proc/net/tcp6 was reported as an unreadable sweep:\n%s", out)
 	}
 }
+
+// The shell-probe fallback stdout is whatever a remote prints, and its ports
+// reach the tunnel dial unconditionally, so it holds the same 1..65535 bound
+// parseNetTCP does. Atoi alone admitted anything up to its own range, so a
+// remote answering 99999999 planted a forward set no local dial can use.
+func TestParseProbeOutputBoundsPorts(t *testing.T) {
+	got := parseProbeOutput("11434 0 65536 99999999 8080 65535 notaport -1 11434 007\n")
+	// 007 is port 7: a leading zero is a spelling, not a rejection.
+	want := []int{7, 8080, 11434, 65535}
+	if !slices.Equal(got, want) {
+		t.Errorf("parseProbeOutput = %v, want %v", got, want)
+	}
+}

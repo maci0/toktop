@@ -84,6 +84,15 @@ func FuzzParseDiscoveryOutput(f *testing.F) {
 		d.EnginePorts = assertPorts(t, "engine", enginePorts(parseProcScan(out)))
 		assertPorts(t, "forward set", d.ForwardSet([]int{11434, 8080, 3000}))
 
+		// The shell-probe fallback is a second parser over the same hostile
+		// stdout, and its ports reach the tunnel dial unconditionally, so the
+		// same bound applies: Atoi alone would admit a number no port is.
+		probed := parseProbeOutput(out)
+		if again := parseProbeOutput(out); !slices.Equal(again, probed) {
+			t.Fatal("parseProbeOutput is not deterministic")
+		}
+		assertPorts(t, "probe", probed)
+
 		for _, info := range parseProcScan(out) {
 			if info.PID <= 0 {
 				t.Fatalf("pid %d survived parseProcScan: %+v", info.PID, info)
