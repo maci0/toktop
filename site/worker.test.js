@@ -58,6 +58,11 @@ const ARIA_LABELLEDBY_ATTR_RE = /aria-labelledby=/;
 const FOCUS_KILLED_RE = /main\s*:\s*focus[^{]*\{\s*outline:\s*none/;
 const SHELL_PROMPT_RE = /<figcaption><span class="dim" aria-hidden="true">\$<\/span>/;
 const KBD_RULE_RE = /kbd\s*\{[^}]*\}/;
+// The one radius the page is allowed to draw, named in :root so that a second
+// rounded box is argued for there rather than typed into whichever rule wanted
+// one.
+const RADIUS_RULE_RE = /border-radius:\s*([^;}]+)/g;
+const RADIUS_TOKEN_RE = /--radius-key:\s*([\d.]+px);/;
 const BAR_RULE_RE = /\.bar \{[^}]*\}/;
 const NAV_CSS_RE = /nav \{[^}]*\}/;
 const PRE_RULE_RE = /pre \{[^}]*\}/;
@@ -362,7 +367,7 @@ test("implicit identity does not outweigh an accepted compressed representation"
   for (const ae of ["gzip;q=0.5", "br;q=0.1, gzip;q=0.5", "gzip;q=0.001"]) {
     const res = await call({ "accept-encoding": ae });
     const bytes = new Uint8Array(await res.arrayBuffer());
-    expect(bytes.byteLength).toBe(4733);
+    expect(bytes.byteLength).toBe(4747);
     expect(res.headers.get("content-encoding")).toBe("gzip");
     expect(await decompress(bytes, "gzip")).toBe(identityBody);
   }
@@ -1140,6 +1145,100 @@ test("no purple or violet in the palette of any of the three files", () => {
   }
 });
 
+// The light scheme is a designed variant, and the judgment it rests on is a
+// temperature one, which is the one kind of palette decision no contrast
+// measurement on the page can see: replacing these three near-whites with
+// pure paper passes every ratio above, because the difference between
+// #fbfbf9 and #ffffff is invisible to all of them. What separates them is
+// which side of neutral they sit on. The dark scheme is cool (phosphor on
+// cold glass); the light scheme is warm (paper), and the ink is cool in both,
+// so a reader in either scheme is still reading inside one world.
+//
+// Measured as warm or cool by which channel leads, not by a hue in degrees: a
+// near-neutral's hue swings under a single digit of change, so the sign of the
+// red-minus-blue channel difference is the claim that survives a hex written by
+// hand or by another tool. That reads neutrals only, where the sign means
+// something; the accent and the warm are saturated and are compared as hues.
+test("the two schemes are chosen apart: cool glass, warm paper, cool ink", () => {
+  const dark = scheme("dark");
+  const light = scheme("light");
+
+  // Surfaces. Red above blue is warm paper; blue above red is the cold glass
+  // the dark scheme is named for. Every surface token is checked, so warming
+  // the panel alone is as loud a failure as warming the page.
+  for (const token of ["bg", "panel", "line"]) {
+    expect(channels(dark[token]), `${token} dark is not cool`).toBeLessThan(0);
+    expect(channels(light[token]), `${token} light is not warm`).toBeGreaterThan(0);
+  }
+  // Ink and secondary text stay cool in both: the neutrals carry the scheme's
+  // temperature and the type carries the terminal's.
+  for (const token of ["fg", "dim"]) {
+    expect(channels(dark[token]), `${token} dark is not cool`).toBeLessThan(0);
+    expect(channels(light[token]), `${token} light is not cool`).toBeLessThan(0);
+  }
+  // The gap has to be a decided one, not a stray digit. The dark page runs
+  // ten channels cool (#0d1117) and the light paper two warm (#fbfbf9);
+  // #ffffff ties and is the "cleanup" that erases this whole judgment while
+  // passing every ratio above. Three either way is the floor that keeps a
+  // hand-typed hex a stride or two from landing on a tie by accident.
+  expect(channels(dark.bg), "the dark page needs cool air in it").toBeLessThanOrEqual(-3);
+  expect(channels(light.bg), "the light page needs warm air in it").toBeGreaterThanOrEqual(2);
+
+  // And the identity holds across both: the accent and the warm are the same
+  // two hues in either scheme, only lighter. A light scheme that picked a
+  // different green would be a second brand, and this is what catches it.
+  for (const token of ["accent", "warm"]) {
+    expect(
+      Math.abs(hue(light[token]) - hue(dark[token])),
+      `${token} changes hue between schemes`,
+    ).toBeLessThan(15);
+  }
+
+  function scheme(which) {
+    const out = {};
+    const re =
+      which === "dark" ? /--dark-([\w-]+):\s*(#[0-9a-f]{6})/gi : /--([\w-]+):\s*(#[0-9a-f]{6})/gi;
+    for (const [, token, hex] of identityBody.matchAll(re)) {
+      // The dark names are declared under :root too, so a light read has to
+      // skip them or every token resolves to the dark value.
+      if (which === "light" && token.startsWith("dark-")) continue;
+      if (token in out) continue;
+      out[token] = hex;
+    }
+    return out;
+  }
+  // Red minus blue across 0-255: negative is cool, positive is warm, zero ties.
+  function channels(hex) {
+    return parseInt(hex.slice(1, 3), 16) - parseInt(hex.slice(5, 7), 16);
+  }
+  function hue(hex) {
+    const ch = [0, 2, 4].map((i) => parseInt(hex.slice(1 + i, 3 + i), 16) / 255);
+    const r = ch[0];
+    const g = ch[1];
+    const b = ch[2];
+    const max = Math.max(r, g, b);
+    const delta = max - Math.min(r, g, b);
+    if (delta === 0) return 0;
+    const h =
+      max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
+    return (((h * 60) % 360) + 360) % 360;
+  }
+});
+
+// The page has exactly one radius, on the one control that is a physical key.
+// Every other box is a rule and a background, which is what a terminal draws;
+// a rounded code block would be the page borrowing a web app's soft-edged
+// cards to describe a frame that has no corner radius at all. The value is a
+// named token rather than a literal, so a second rounded box has to be argued
+// for in :root instead of typed into whichever rule happened to want one.
+test("the keycap holds the page's only radius", () => {
+  const kbd = identityBody.match(KBD_RULE_RE)?.[0] ?? "";
+  expect(kbd).toContain("border-radius: var(--radius-key)");
+  const radii = [...identityBody.matchAll(RADIUS_RULE_RE)].map(([, v]) => v.trim());
+  expect(radii).toEqual(["var(--radius-key)"]);
+  expect(identityBody.match(RADIUS_TOKEN_RE)?.[1], "--radius-key is declared").toBeDefined();
+});
+
 test("accessibility contracts: skip link, motion preferences, focus indicators, and landmarks", () => {
   expect(identityBody.includes('class="skip-link"')).toBe(true);
   expect(identityBody.includes("prefers-reduced-motion: no-preference")).toBe(true);
@@ -1390,9 +1489,9 @@ test("recorded transfer sizes stay inside the initial congestion window", async 
     .byteLength;
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
-  expect(identity).toBe(13567);
-  expect(gzipped).toBe(4733);
-  expect(brotli).toBe(3994);
+  expect(identity).toBe(13609);
+  expect(gzipped).toBe(4747);
+  expect(brotli).toBe(4008);
   expect(identity).toBeLessThan(budget);
   expect(gzipped).toBeLessThan(budget);
   expect(brotli).toBeLessThan(budget);
@@ -1428,7 +1527,7 @@ test("the READMEs record the transfer sizes the page actually ships", async () =
   }
   // The same pair the phone test bounds above, stated as the whole visit.
   expect(visit).toEqual([[stated[2], stated[2] + assetBytes("dashboard-768.avif")]]);
-  expect(visit[0][1]).toBe(14_571);
+  expect(visit[0][1]).toBe(14_585);
   for (const name of ["CONTRIBUTING.md", "Makefile"]) {
     const quoted = readFileSync(join(import.meta.dir, "..", name), "utf8").match(VISIT_TOTAL_RE);
     expect(`${name} quotes ${quoted?.[1]}`).toBe(
@@ -1490,7 +1589,7 @@ test("a phone's visit is the document and the 768w capture, and fits in 25 KB", 
   const brotli = new Uint8Array(await (await call({ "accept-encoding": "br" })).arrayBuffer())
     .byteLength;
   const visit = brotli + assetBytes("dashboard-768.avif");
-  expect(visit).toBe(14_571);
+  expect(visit).toBe(14_585);
   expect(visit).toBeLessThan(25_000);
 });
 
