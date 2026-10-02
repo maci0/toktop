@@ -31,14 +31,14 @@ func TestOpenAIFrameShapes(t *testing.T) {
 		{"text line", "hello", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got, ok := openaiFrame([]byte(tc.line))
+			got, ok := openaiFrame(tc.line)
 			if ok != tc.ok {
 				t.Fatalf("ok = %v, want %v", ok, tc.ok)
 			}
-			if string(got) != tc.want {
+			if got != tc.want {
 				t.Errorf("payload = %q, want %q", got, tc.want)
 			}
-			if ok && !json.Valid(got) && string(got) != "[DONE]" {
+			if ok && !json.Valid([]byte(got)) && got != "[DONE]" {
 				t.Errorf("payload %q is not decodable JSON", got)
 			}
 		})

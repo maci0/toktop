@@ -83,6 +83,19 @@ CHANGELOG_WATCHED = README.md cmd/toktop/help.go docs/openapi.yaml agentusage in
 # message naming the fix rather than passing. The release runner checks out at
 # fetch-depth: 1 by default, which is how an exported removal once reached a
 # published release with every gate reporting green.
+#
+# The other way to compare nothing is for `go doc` itself to fail, and the
+# pipeline it used to run through had that hole: `go doc ... | awk | sort -u >
+# base.txt` reports the exit status of the last command, which is sort's and
+# always zero, so a `go doc` failing on a package that does not parse left both
+# sides empty, `comm -23` found nothing removed, and the gate exited 0
+# reporting a removal-free release over a comparison it never made. The two
+# `go doc` calls now run on their own with their exit status checked, and a
+# side that read no declarations at all is refused rather than diffed: an
+# exported-surface gate that cannot see the surface must never report that as
+# a pass. TestCheckAPIGate in internal/repogate drives this gate directly, so a
+# recipe that stops matching the file it reads fails there instead of standing
+# as the reason a release is safe.
 CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
 	if ! git rev-parse HEAD >/dev/null 2>&1; then \
 		echo "make: check-api needs a git checkout; the exported surface is read from the tree" >&2; \
@@ -107,8 +120,23 @@ CHECK_API = if [ '$(VERSION)' = 'dev' ]; then exit 0; fi; \
 	[ -f "$$awk" ] || awk="$$work/scripts/api-surface.awk"; \
 	fail=0; \
 	for pkg in $(PUBLIC_PKGS); do \
-		( cd "$$work" && $(GO) doc -all "$$pkg" ) | awk -f "$$awk" | sort -u > "$$work/base.txt" || exit 1; \
-		$(GO) doc -all "$$pkg" | awk -f "$$awk" | sort -u > "$$work/head.txt" || exit 1; \
+		( cd "$$work" && $(GO) doc -all "$$pkg" ) > "$$work/base.raw" 2>"$$work/base.err"; \
+		base_rc=$$?; \
+		$(GO) doc -all "$$pkg" > "$$work/head.raw" 2>"$$work/head.err"; \
+		head_rc=$$?; \
+		if [ "$$base_rc" -ne 0 ] || [ "$$head_rc" -ne 0 ]; then \
+			echo "make: check-api could not read the exported surface of $$pkg, so it has nothing to compare and will not call the release safe:" >&2; \
+			echo "  go doc failed against the release tree ($$base_rc) and this one ($$head_rc)." >&2; \
+			sed 's/^/  /' "$$work/base.err" >&2; \
+			sed 's/^/  /' "$$work/head.err" >&2; \
+			exit 1; \
+		fi; \
+		awk -f "$$awk" < "$$work/base.raw" | sort -u > "$$work/base.txt"; \
+		awk -f "$$awk" < "$$work/head.raw" | sort -u > "$$work/head.txt"; \
+		if [ ! -s "$$work/base.txt" ] || [ ! -s "$$work/head.txt" ]; then \
+			echo "make: check-api read no declarations from $$pkg on one side of the comparison, so it is comparing two empty sets and would pass any removal:" >&2; \
+			exit 1; \
+		fi; \
 		gone=$$(comm -23 "$$work/base.txt" "$$work/head.txt"); \
 		if [ -n "$$gone" ]; then \
 			prev=$$(printf '%s' "$$base" | sed 's/^v//'); \

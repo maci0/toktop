@@ -23,9 +23,52 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `HOME` first and `USERPROFILE` second, so a Git Bash or MSYS2 shell keeps the
   path it had, and the refusal now names the variable that was actually
   missing. `make check-install-prefix` pins all four cases.
+- `make check-api` can no longer report a release as removing nothing when it
+  never made the comparison. It read each side of the exported-surface diff
+  through `go doc -all ... | awk | sort -u > file`, and a pipeline reports the
+  exit status of its last command, which is `sort`'s and always zero: a `go doc`
+  that failed on a package that does not parse left both files empty, `comm -23`
+  over two empty sets found nothing removed, and the gate exited 0 green. Both
+  `go doc` calls now run on their own with their exit status checked, and a
+  side that read no declarations at all is refused rather than diffed. The gate
+  is also driven directly by `TestCheckAPIGate` in `internal/repogate`, so a
+  recipe that stops matching the Makefile it is supposed to be reading fails
+  there instead of standing as the reason a release is safe.
+- Ports a hostile `ssh://` target names are bounded to the TCP range before
+  they reach a tunnel. The `/proc/net/tcp` sweep already dropped a port
+  outside `1..65535` (and port 0, which is not a listener anything can
+  reach), but the shell-probe fallback covering a host where that sweep fails
+  read its stdout with `strconv.Atoi` and a `p > 0` test, so a remote
+  answering `99999999` planted a listening port in the forward set that no
+  local dial can use. Both parsers now share one `usablePort`, so only a real
+  port survives whatever a remote prints, and a leading zero still reads as
+  the port it spells. A target that only ever reported real ports is
+  unaffected, and one that planted impossible ones now has them dropped
+  rather than forwarded. `TestParseProbeOutputBoundsPorts` and the
+  `FuzzParseDiscoveryOutput` pass in `internal/remote` pin the bound.
 
 ### Changed
 
+- The startup config line now names every `--add` endpoint, and the site's
+  install command now spells the tags the release binaries carry. On the
+  config line: `--add` decides which engine a run measures and which origin
+  the bearer token rides to, and nothing else in the startup record named
+  either — the attach lines come later, and the dashboard shows an endpoint
+  as a row rather than as the address the operator typed — so a record
+  carrying only that some were attached could not be reproduced from. Each
+  endpoint now appears as its own `add=<URL>` key, in the prose line and in
+  the audit record alike, in the order they were given on the command line.
+  The value is one `validateAddURL` already cleared of userinfo, query and
+  fragment, and it is folded before printing, so an endpoint spelled with a
+  terminal escape cannot repaint the operator's screen. The key is new and
+  nothing else moved on the line, so a reader keyed on the rest of it reads
+  the same. On the site: the install command named `-tags sqlite` alone while
+  `make` builds and the README installs with `-tags "sqlite timetzdata"`, so
+  a reader following the site got a binary without the embedded zone
+  database, which falls back to UTC on a host with no zone files. The
+  command now carries both tags and the copy beside it names what each one
+  is for. `microagent` joins the transcript list there too: it has been read
+  since 0.21.0 and the site was the one place still omitting it.
 - The agent feed now says exactly what `POST /v1/events` accepts as the
   separator between two events in a stream. The README table, the prose below
   it and the operation description in `docs/openapi.yaml` all described the

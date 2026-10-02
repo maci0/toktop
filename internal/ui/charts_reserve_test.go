@@ -21,93 +21,93 @@ func agentEvents(end time.Time, n int) []core.AgentEvent {
 	return evs
 }
 
-// TestTimedSeriesReservesOnlyWhenTheGridFills pins the reservation rule
-// timedSeriesEnd sizes its slice against: room for the dense agent grid is
-// held only when the feed holds an event this direction counts that did not
-// go through an engine, because that is the only condition under which the
-// grid's columns are appended. A run watching engines alone reserves no grid,
-// so its series slice is exactly the engine samples.
-func TestTimedSeriesReservesOnlyWhenTheGridFills(t *testing.T) {
-	end := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+// reserveSnapshot is a one-engine snapshot whose history is n samples a
+// second apart ending at end, which is the shape timedSeries reserves against.
+func reserveSnapshot(end time.Time, n int) core.Snapshot {
 	prov := core.ProviderSnapshot{
-		OutHist:   make([]float64, 4),
-		OutStamps: make([]time.Time, 4),
-		InHist:    make([]float64, 4),
-		InStamps:  make([]time.Time, 4),
+		OutHist:   make([]float64, n),
+		OutStamps: stamps(end, n, time.Second),
+		InHist:    make([]float64, n),
+		InStamps:  stamps(end, n, time.Second),
 	}
 	for i := range prov.OutHist {
 		prov.OutHist[i] = float64(i)
-		prov.OutStamps[i] = end.Add(-time.Duration(3-i) * time.Second)
 		prov.InHist[i] = float64(i)
-		prov.InStamps[i] = prov.OutStamps[i]
 	}
-	s := core.Snapshot{Providers: []core.ProviderSnapshot{prov}}
+	return core.Snapshot{Providers: []core.ProviderSnapshot{prov}}
+}
 
-	// Engines alone: neither direction reserves a grid.
-	tv, e := timedSeriesEnd(s, true, time.Second)
-	if e != end {
-		t.Errorf("end = %v, want the newest engine stamp %v", e, end)
+// TestTimedSeriesReservesOnlyWhatItAppends pins the reservation timedSeries
+// sizes its slice against: the dense agent grid is appended only when the feed
+// holds an event this direction counts that did not go through an engine,
+// because that is the only condition under which the grid's columns reach the
+// series. A run watching engines alone appends no grid, so a reservation that
+// counted one anyway would size every frame's slice for samples it never
+// holds.
+func TestTimedSeriesReservesOnlyWhatItAppends(t *testing.T) {
+	end := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	const n = 4
+	s := reserveSnapshot(end, n)
+
+	// Engines alone: neither direction appends a grid.
+	tv := timedSeries(s, true, time.Second)
+	if got, want := len(tv), n; got != want {
+		t.Errorf("engines-only series len = %d, want %d: the dense grid was appended for a feed that never fills it", got, want)
 	}
-	if got, want := cap(tv), len(prov.OutHist); got != want {
-		t.Errorf("engines-only series cap = %d, want %d: the agent grid was reserved for a run that never fills it", got, want)
-	}
-	if got, want := len(tv), len(prov.OutHist); got != want {
-		t.Errorf("engines-only series len = %d, want %d", got, want)
+	if got, want := cap(tv), n+core.HistoryLen; got != want {
+		t.Errorf("engines-only series cap = %d, want %d", got, want)
 	}
 
 	// A feed with unattributed tokens fills the grid, and both directions
-	// reserve for it.
+	// append it.
 	withAgents := s
 	withAgents.Agents = agentEvents(end, 2)
 	for _, out := range []bool{true, false} {
-		tv, e := timedSeriesEnd(withAgents, out, time.Second)
-		if e != end {
-			t.Errorf("out=%v: end = %v, want %v", out, e, end)
-		}
-		if got, want := len(tv), len(prov.OutHist)+core.HistoryLen; got != want {
-			t.Errorf("out=%v: series len = %d, want %d", out, got, want)
+		tv := timedSeries(withAgents, out, time.Second)
+		if got, want := len(tv), n+core.HistoryLen; got != want {
+			t.Errorf("out=%v: series len = %d, want %d: the filled grid was not appended", out, got, want)
 		}
 		if cap(tv) < len(tv) {
 			t.Errorf("out=%v: series cap %d is below its length %d", out, cap(tv), len(tv))
 		}
 	}
 
-	// Every event through an engine: no reservation, in either direction.
+	// Every event through an engine: no grid is appended, in either
+	// direction, so the series is the engine samples and nothing else.
 	viaEngine := s
 	viaEngine.Agents = agentEvents(end, 2)
 	for i := range viaEngine.Agents {
 		viaEngine.Agents[i].ViaEngine = "ollama"
 	}
 	for _, out := range []bool{true, false} {
-		if tv, _ := timedSeriesEnd(viaEngine, out, time.Second); cap(tv) != len(prov.OutHist) {
-			t.Errorf("out=%v: engine-attributed feed reserved cap %d, want %d", out, cap(tv), len(prov.OutHist))
+		if got, want := len(timedSeries(viaEngine, out, time.Second)), n; got != want {
+			t.Errorf("out=%v: engine-attributed feed appended %d entries, want %d", out, got, want)
 		}
 	}
 }
 
-// TestHasAgentTokensAgreesWithDenseHist pins the reservation helper to the
-// filter it stands in for: hasAgentTokens reports true exactly when
-// agentDenseHist returns a grid with a nonzero column.
-func TestHasAgentTokensAgreesWithDenseHist(t *testing.T) {
+// TestSeriesLengthTracksTheGrid pins the same rule from the other side: what
+// timedSeries appends is exactly the nonzero dense grid the feed produces for
+// that direction. It is the property the reservation above exists to serve,
+// stated directly so a change to either side of it is caught here.
+func TestSeriesLengthTracksTheGrid(t *testing.T) {
 	end := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
+	const n = 4
 	feeds := map[string][]core.AgentEvent{
-		"empty":   nil,
-		"zero":    {{At: end}},
-		"output":  agentEvents(end, 3),
-		"viaonly": {{At: end, ViaEngine: "ollama", OutputTokens: 9, PromptTokens: 9}},
+		"empty":                    nil,
+		"zero":                     {{At: end}},
+		"unattributed":             agentEvents(end, 3),
+		"prompt only":              {{At: end, PromptTokens: 5}},
+		"old prompt only":          {{At: end.Add(-time.Hour), OutputTokens: 7, PromptTokens: 7}},
+		"everything via an engine": agentEvents(end, 3),
 	}
-	feeds["output via engine"] = agentEvents(end, 3)
-	for i := range feeds["output via engine"] {
-		feeds["output via engine"][i].ViaEngine = "ollama"
+	for i := range feeds["everything via an engine"] {
+		feeds["everything via an engine"][i].ViaEngine = "ollama"
 	}
-	feeds["prompt only"] = []core.AgentEvent{{At: end, PromptTokens: 5}}
-	feeds["old prompt only"] = []core.AgentEvent{{
-		At:           end.Add(-time.Hour),
-		OutputTokens: 7,
-		PromptTokens: 7,
-	}}
 
 	for name, feed := range feeds {
+		s := reserveSnapshot(end, n)
+		s.Agents = feed
 		for _, out := range []bool{true, false} {
 			grid := agentDenseHist(feed, out, end, core.HistoryLen, time.Second)
 			nonzero := false
@@ -116,8 +116,16 @@ func TestHasAgentTokensAgreesWithDenseHist(t *testing.T) {
 					nonzero = true
 				}
 			}
-			if got := hasAgentTokens(feed, out, end, core.HistoryLen, time.Second); got != nonzero {
-				t.Errorf("%s out=%v: hasAgentTokens = %v, grid nonzero = %v", name, out, got, nonzero)
+			series := timedSeries(s, out, time.Second)
+			want := n
+			if nonzero {
+				want = n + core.HistoryLen
+			}
+			if len(series) != want {
+				t.Errorf("%s out=%v: series len = %d, want %d (grid nonzero = %v)", name, out, len(series), want, nonzero)
+			}
+			if cap(series) < len(series) {
+				t.Errorf("%s out=%v: series cap %d is below its length %d", name, out, cap(series), len(series))
 			}
 		}
 	}

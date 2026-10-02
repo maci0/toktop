@@ -28,37 +28,47 @@ func benchEnginesOnly() core.Snapshot {
 	return core.Snapshot{At: now, Providers: provs}
 }
 
-// BenchmarkTimedSeriesEndEnginesOnly measures the engines-only series build:
-// a run watching engines with no agent feed never fills the dense grid, so the
-// series must not reserve room for it.
-func BenchmarkTimedSeriesEndEnginesOnly(b *testing.B) {
-	s := benchEnginesOnly()
-	b.ReportAllocs()
-	for b.Loop() {
-		tv, end := timedSeriesEnd(s, true, time.Second)
-		if len(tv) == 0 || end.IsZero() {
-			b.Fatal("empty series")
-		}
-	}
-}
-
-// BenchmarkTimedSeriesEndWithAgents is the same series over a feed that does
-// fill the grid, so the reservation still has to cover it.
-func BenchmarkTimedSeriesEndWithAgents(b *testing.B) {
+// benchWithAgents is benchEnginesOnly over a feed that does fill the dense
+// agent grid, so the series appends it and the reservation has to cover it.
+func benchWithAgents() core.Snapshot {
 	s := benchEnginesOnly()
 	now := time.Unix(1789581724, 0)
 	s.Agents = make([]core.AgentEvent, core.AgentHistoryLen)
 	for i := range s.Agents {
 		s.Agents[i] = core.AgentEvent{
-			At: now.Add(time.Duration(i) * time.Second),
+			At:    now.Add(time.Duration(i) * time.Second),
 			Agent: "claude", OutputTokens: int64(20 + i%97), PromptTokens: int64(100 + i),
 		}
 	}
+	return s
+}
+
+// BenchmarkTimedSeriesEnginesOnly measures the engines-only series build: a
+// run watching engines with no agent feed never fills the dense grid, so the
+// series reserves room for it without appending to it.
+func BenchmarkTimedSeriesEnginesOnly(b *testing.B) {
+	s := benchEnginesOnly()
 	b.ReportAllocs()
 	for b.Loop() {
-		tv, end := timedSeriesEnd(s, true, time.Second)
-		if len(tv) == 0 || end.IsZero() {
+		if len(timedSeries(s, true, time.Second)) == 0 {
 			b.Fatal("empty series")
+		}
+	}
+}
+
+// BenchmarkTimedSeriesWithAgents is the same series over a feed that does
+// fill the grid, so the reservation still has to cover it.
+func BenchmarkTimedSeriesWithAgents(b *testing.B) {
+	s := benchWithAgents()
+	b.ReportAllocs()
+	for b.Loop() {
+		tv := timedSeries(s, true, time.Second)
+		if len(tv) == 0 {
+			b.Fatal("empty series")
+		}
+		// The engines' own samples plus the dense grid appended for the feed.
+		if want := 3*core.HistoryLen + core.HistoryLen; len(tv) != want {
+			b.Fatalf("series len = %d, want %d", len(tv), want)
 		}
 	}
 }
