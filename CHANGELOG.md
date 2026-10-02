@@ -14,6 +14,21 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 ## [Unreleased]
 
 ### Fixed
+- A second `toktop update` no longer recovers the displaced binary out from
+  under a peer that is mid-install. The recovery that runs before the download
+  decides what to do by stat-ing the installed path, and it read that without
+  the install lock, so two runs in two terminals could interleave: the run that
+  held the lock renames the installed binary aside and renames the new one in,
+  and between those two renames the installed path is missing on purpose. The
+  other run read that missing path as the debris of a killed update and
+  renamed the peer's displaced binary back over it, so the peer's own install
+  then failed with nothing to move and the update reported a rename error for a
+  binary that was there a moment earlier. The recovery takes the same lock the
+  install takes, which is what the package's comment on the lock already
+  claimed: a peer does not replace it mid-replace, from the recovery as well
+  as from the install. A run that finds no peer still recovers before its
+  download, so a binary left displaced by a kill and a download that then fails
+  offline are repaired exactly as before.
 - The `--once --json` report is encodable again when a rate overflows. JSON
   has no spelling for a NaN or an infinity, and `encoding/json` refuses the
   whole document over one unusable value, so a single engine whose counter

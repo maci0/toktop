@@ -46,7 +46,20 @@ func applyTo(ctx context.Context, rel *Release, self string) (installed string, 
 	// that then fails (offline, rate-limited, checksum mismatch) would leave
 	// it that way. Restoring first is a no-op unless the installed path is
 	// missing.
-	if err := restoreDisplaced(self, self+displacedSuffix); err != nil {
+	//
+	// It runs under the install lock, which the check below and the rename at
+	// the end of this function already take. Deciding what to do by stat-ing
+	// the installed path is a read of state a peer install is part way through
+	// mutating: installDisplacing renames the installed binary aside before it
+	// renames the new one in, so between its two renames the installed path is
+	// missing by design and the displaced one is a live install rather than the
+	// debris of a kill. A second run reading that missing path concludes the
+	// peer was killed and renames the peer's displaced binary back over the
+	// path the peer is about to write, which is the mid-replace replace the
+	// lock exists to prevent, arrived at from the recovery rather than the
+	// install. The same lock also keeps this run's own rename out of a peer's
+	// section, so the two orders settle the way one run does.
+	if err := lockInstall(self, func() error { return restoreDisplaced(self, self+displacedSuffix) }); err != nil {
 		return "", err
 	}
 	want := AssetName(rel.Version())
@@ -334,6 +347,14 @@ func installDisplacing(tmpName, self string) error {
 // and the displaced one is not: an update that never started, or one that
 // completed, leaves nothing to recover and must not have a stale file put
 // under a path that is already correct.
+//
+// "Missing" is read off the file system, so this is only a safe question to ask
+// while no peer install is in its section: installDisplacing makes the
+// installed path missing on purpose, between renaming the running binary aside
+// and renaming the new one in. Every caller that is not already inside
+// [lockInstall] must take the lock around it — see the recovery in applyTo —
+// or it reads a live install as the debris of a kill and renames the peer's
+// displaced binary out from under it.
 //
 // The displaced file is one this package renamed aside, so it is always a
 // regular file. Anything else at that path is not a leftover of an update and
