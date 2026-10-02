@@ -108,7 +108,26 @@ func activeConfig(f *cliFlags, explicit map[string]bool, nAdd, nRemote int, open
 	if nRemote > 0 && !f.demo {
 		cfg = append(cfg, configFlag{key: "ssh", value: strconv.Itoa(nRemote)})
 	}
+	// The endpoints themselves, not just their count: --add is the knob that
+	// decides which engine a run measures and which origin the bearer token
+	// rides to, and a record carrying only that some were attached cannot be
+	// reproduced from. The ssh row above is a count for the same reason of
+	// brevity (the hosts are in the attach lines that follow), but an --add
+	// endpoint has no other line in the startup record naming it.
+	//
+	// Every value here is an argv --add that validateAddURL already cleared
+	// of userinfo, query and fragment, so this is the one place in the line
+	// where operator-supplied text is printed rather than a count, and it is
+	// safe for the same reason the dashboard, the audit log and the --json
+	// report are: a URL that could carry a credential was refused at parse.
+	// operatorText folds it in both the prose line and the audit record.
+	// One key per endpoint rather than a joined list, so a reader can tell
+	// two endpoints apart, and the repeated key is what the startup line
+	// already does with a knob that has a list form.
 	if nAdd > 0 && !f.demo {
+		for _, raw := range f.adds {
+			cfg = append(cfg, configFlag{key: "add", value: raw})
+		}
 		if tok := resolveBearer(f.bearer, explicit["bearer"]); tok != "" {
 			// set or refused, never bare "set": bearer.Set runs after this
 			// line and turns down a token carrying CR or LF, leaving the run

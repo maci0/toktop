@@ -2415,6 +2415,45 @@ func TestLogActiveConfig(t *testing.T) {
 			t.Fatalf("logActiveConfig() leaked bearer: %q", got)
 		}
 	})
+	// --add names the engine a run measures and the origin the bearer token
+	// rides to, and nothing else in the startup record names either: the
+	// attach lines come later, and the dashboard shows an endpoint as a row
+	// rather than as the address the operator typed. A record carrying only
+	// that some were attached cannot be reproduced from.
+	t.Run("every --add endpoint is named", func(t *testing.T) {
+		f := &cliFlags{
+			interval: time.Second,
+			ingest:   "127.0.0.1:8420",
+			adds:     []string{"http://127.0.0.1:11434", "https://api.example.com/v1"},
+		}
+		var buf strings.Builder
+		logActiveConfig(&buf, f, map[string]bool{}, 2, 0, false)
+		got := buf.String()
+		for _, want := range []string{"add=http://127.0.0.1:11434", "add=https://api.example.com/v1"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("logActiveConfig() = %q, want %s", got, want)
+			}
+		}
+	})
+	// The value is folded on the way out, so an endpoint spelled with a
+	// terminal escape cannot repaint the operator's screen through the
+	// startup line, the way one reaching the audit log would.
+	t.Run("an --add endpoint is folded, never printed raw", func(t *testing.T) {
+		f := &cliFlags{
+			interval: time.Second,
+			ingest:   "127.0.0.1:8420",
+			adds:     []string{"http://host\x1b[2J:8000"},
+		}
+		var buf strings.Builder
+		logActiveConfig(&buf, f, map[string]bool{}, 1, 0, false)
+		got := buf.String()
+		if strings.Contains(got, "\x1b") {
+			t.Fatalf("logActiveConfig() = %q, want the escape sequence stripped", got)
+		}
+		if !strings.Contains(got, "add=http://host") {
+			t.Fatalf("logActiveConfig() = %q, want the endpoint named", got)
+		}
+	})
 }
 
 // --opencode-db is on by default: --agents reads opencode's store without

@@ -998,11 +998,15 @@ silently adjusted; so do out-of-range `TOKTOP_COLUMNS` / `TOKTOP_LINES` when
 `--add` endpoint reached over plain `http://` on a host that is not this
 machine is named at startup: the bearer token would cross the network in
 cleartext. Startup prints one line of the knobs that apply (`interval`,
-`ingest`, mode flags, and `columns` / `lines` for a `TOKTOP_COLUMNS` /
-`TOKTOP_LINES` frame override in force); bearer tokens appear only as
+`ingest`, mode flags, `add=<URL>` per `--add` endpoint, and `columns` / `lines`
+for a `TOKTOP_COLUMNS` / `TOKTOP_LINES` frame override in force); bearer
+tokens appear only as
 `bearer=set`, or
 `bearer=refused` when the token carries a line break and is therefore turned
-down, leaving the `--add` endpoints queried unauthenticated.
+down, leaving the `--add` endpoints queried unauthenticated. An `--add` URL
+reaching the line is one `validateAddURL` already cleared of userinfo, query
+and fragment, so the startup record names the engine a run measures without
+being able to carry a credential of its own.
 
 ## Build & test
 
