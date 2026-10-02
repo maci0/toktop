@@ -67,10 +67,19 @@ paths:
     post:
       summary: Record one event or a stream of them
       description: |
-        One JSON object, or a newline-delimited stream of them. Events decode
-        and record line by line: a body that fails halfway keeps everything
-        before the failing line, and the answer says how many were recorded
-        and how to recover.
+        One JSON object, or a stream of them. Events decode and record one at
+        a time: a body that fails halfway keeps everything before the failing
+        value, and the answer says how many were recorded and how to recover.
+
+        The usual stream form is newline-delimited (NDJSON, one object per
+        line), which is what the `application/x-ndjson` example below shows.
+        The decoder is looser than that on purpose: between two objects any
+        JSON whitespace will do, and no separator is required at all, so
+        `{...} {...}` and `{...}{...}` are two-event bodies exactly like two
+        lines. Only a non-whitespace, non-object byte where a separator could
+        go is a `400`, naming the body offset it failed at. A comma between
+        two objects is such a byte, so a body that joins them with commas is
+        refused after its first event rather than read as one array.
 
         The body is read as JSON or NDJSON whatever the `Content-Type` says,
         so a plain `curl -d` works unmodified.

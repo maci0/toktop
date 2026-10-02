@@ -393,7 +393,7 @@ move it, `--no-ingest` to turn it off) and speaks plain HTTP/JSON:
 
 | endpoint | purpose |
 |---|---|
-| `POST /v1/events` | record events; body is one JSON object or an NDJSON stream |
+| `POST /v1/events` | record events; body is one JSON object or a stream of them (NDJSON is the usual form: one per line) |
 | `GET`, `HEAD` `/healthz` | liveness probe, answers `ok`; `503` with `Retry-After: 1` naming the in-flight count while every event slot is held. A `HEAD` carries the `GET`'s headers and no body, `Content-Length` included, so a probe reads the same answer either way |
 
 A field sent as `null` is the same as one left out, so a sender assembling a
@@ -546,8 +546,14 @@ id is a correlation id only: the `req` on the log
 line is the same value, and neither it nor the sender's own key is read as an
 event id.
 
-Streams are recorded line by line: if a later line fails, events before it
-stay recorded and the error states how many. Retrying a stream (or a
+Streams are recorded one event at a time: if a later event fails, the events
+before it stay recorded and the error states how many. NDJSON, one object per
+line, is the usual way to send a stream, but the decoder is looser than that:
+between two objects any JSON whitespace will do, and no separator is required,
+so `{...} {...}` and `{...}{...}` are two-event bodies exactly like two lines.
+Only a non-whitespace, non-object byte where a separator could go is refused
+(a comma between objects is such a byte), and it is refused after the events
+before it were recorded. Retrying a stream (or a
 successful POST whose 202 was lost) is safe when each event carries a stable
 `id`, or when the POST carries `Idempotency-Key` (filled in for events that
 omit `id`). Without either, replaying the kept lines would duplicate them.

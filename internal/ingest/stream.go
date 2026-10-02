@@ -27,8 +27,14 @@ type streamResult struct {
 
 // decodeStream decodes the request body one JSON object at a time, recording
 // each as it goes, and reports how the stream ended. Events are recorded
-// before the next line is read, so a body that fails halfway leaves everything
-// before the failing line in the feed; the returned counts say so.
+// before the next value is read, so a body that fails halfway leaves
+// everything before the failing value in the feed; the returned counts say
+// so. NDJSON (one object per line) is the usual stream form, but the decoder
+// is not line-bound: any JSON whitespace separates two objects and no
+// separator is required, so `{...} {...}` is a two-event body exactly like
+// two lines. Only a non-whitespace, non-object byte where a separator could go
+// (a comma between objects, say) is a failure, and it is one after the events
+// before it were already recorded.
 //
 // keyPrefix is derivedKeyPrefix(replayKey), computed once by the caller for the
 // whole body and reused for every id-less line.

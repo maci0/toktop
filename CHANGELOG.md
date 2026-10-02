@@ -13,6 +13,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Changed
+
+- The agent feed now says exactly what `POST /v1/events` accepts as the
+  separator between two events in a stream. The README table, the prose below
+  it and the operation description in `docs/openapi.yaml` all described the
+  body as one JSON object or a newline-delimited (NDJSON) stream, but the
+  decoder is looser than that on purpose: it reads one JSON object at a time,
+  so any JSON whitespace separates two of them and no separator is required at
+  all. `{...} {...}` and `{...}{...}` are two-event bodies exactly like two
+  lines. A sender reading the old wording could not tell whether a body
+  without newlines was one malformed event or two good ones, and a client that
+  concatenated objects without a newline between them got two events recorded
+  rather than the error the wording implied. The three places that state the
+  contract now name the separators the decoder really takes, and that a
+  non-whitespace, non-object byte where a separator could go (a comma between
+  two objects, which is what a hand-joined body produces) is a `400` landing
+  after the events before it were recorded. No accepted or refused body
+  changed, so every existing sender is unaffected.
+
 ## [0.24.0] - 2026-10-02
 
 Binaries, checksums, and a CycloneDX SBOM are on
