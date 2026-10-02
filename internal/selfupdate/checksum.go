@@ -125,6 +125,12 @@ func checksumRecord(line string) (sum, file string, ok bool) {
 		return "", "", false
 	}
 	i++ // the one blank sha256sum writes after the hash, in both modes
+	// The separator is the last byte of the line, so there is no name to read
+	// and nothing left to inspect the mode from: a listing line that ends
+	// right after it is a truncated record, not one with an empty name.
+	if i == len(line) {
+		return "", "", false
+	}
 	switch {
 	case line[i] == '*': // binary mode
 		i++
@@ -137,7 +143,11 @@ func checksumRecord(line string) (sum, file string, ok bool) {
 	// Leading ones are dropped: a name that starts with a space is
 	// indistinguishable from the format's own separator, which is the one
 	// ambiguity sha256sum itself does not resolve either.
-	return sum, line[skipBlanks(line, i):], true
+	name := line[skipBlanks(line, i):]
+	if name == "" {
+		return "", "", false // a separator with no name is a truncated record
+	}
+	return sum, name, true
 }
 
 func isBlank(c byte) bool { return c == ' ' || c == '\t' || c == '\r' }

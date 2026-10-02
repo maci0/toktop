@@ -46,6 +46,17 @@ func FuzzChecksumListing(f *testing.F) {
 		{[]byte(emptySHA + "x  " + asset + "\n"), asset},
 		{[]byte(emptySHA + "  " + asset + " extra\n"), asset},
 		{[]byte("not a hash  " + asset + "\n"), asset},
+		// A line whose separator is its last byte. The record reader steps
+		// past the separator before it inspects the mode, so these are the
+		// lines that reach a name that is not there at all; they read the same
+		// with a tab as with a space, and the binary-mode marker at the end of
+		// a line is the one spelling that still names an empty file.
+		{[]byte(emptySHA + " "), asset},
+		{[]byte(emptySHA + "\t"), asset},
+		{[]byte(emptySHA + " \r"), asset},
+		{[]byte(emptySHA + " *"), asset},
+		{[]byte(emptySHA + "  "), asset},
+		{[]byte(emptySHA), asset},
 		{[]byte(""), asset},
 		{[]byte("\x1f\x8b"), asset},
 		{[]byte("not gzip at all"), "toktop"},
