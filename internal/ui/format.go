@@ -392,7 +392,17 @@ func widthOf(s string) int {
 // count would let the result render wider than n and break panel alignment.
 // The cut also only ever lands between grapheme clusters (user-perceived
 // characters): slicing a flag emoji into lone regional indicators or an
-// accented letter off its combining mark would print garbage in the pane.
+// accented letter off its combining mark would print garbage in the pane. A
+// ZWJ the cut strands is dropped, the rule core.TruncateClusters applies for
+// the same reason.
+//
+// The strings shortened here are the agent names, model ids, notes, engine
+// labels and event text a run displays, so they arrive in every script the
+// engines and agents using it happen to speak: Latin with combining marks,
+// CJK, Cyrillic, Arabic, Devanagari, and emoji built from ZWJ sequences. A cut
+// has to be right for all of them, which is why it counts cells rather than
+// runes (CJK and most emoji are two columns wide) and lands on cluster
+// boundaries rather than byte or rune ones.
 func shorten(s string, n int) string {
 	if n <= 0 {
 		return ""
@@ -417,8 +427,19 @@ func shorten(s string, n int) string {
 		b.WriteString(cluster)
 		w += rw
 	}
-	b.WriteRune('…')
-	return b.String()
+	// A cluster boundary is not always far enough back to avoid a stranded
+	// joiner, which is why core.TruncateClusters and core.TailClusters drop
+	// them at both ends: a base letter with a trailing ZWJ is one cluster to
+	// uniseg and the emoji it points at is the next, so the cut above lands
+	// between the two and the joiner survives into the result. A joiner with
+	// nothing on one side of it has lost its partner, and a pane printing one
+	// renders a mark no reader can name.
+	//
+	// The joiners are dropped here for the same reason the sanitizer keeps
+	// them everywhere else: these strings are agent names, model ids, notes
+	// and engine labels in any script, and ZWJ is what every emoji sequence is
+	// built from, so "café" + U+200D is an input this cut really takes.
+	return strings.TrimRight(strings.TrimLeft(b.String(), core.ZWJ), core.ZWJ) + "…"
 }
 
 // clip cuts a rendered (possibly styled) line to w visible cells, appending

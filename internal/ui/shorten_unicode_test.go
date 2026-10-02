@@ -9,6 +9,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/maci0/toktop/internal/core"
 	"github.com/rivo/uniseg"
 	unorm "golang.org/x/text/unicode/norm"
 )
@@ -109,4 +110,51 @@ func splitGraphemeClusters(s string) []string {
 		out = append(out, c)
 	}
 	return out
+}
+
+// The one grapheme boundary a cut can land on that is not a character
+// boundary: a base letter with a trailing ZWJ is one cluster to uniseg, and
+// the emoji that joiner points at is the next. A cut between them leaves the
+// joiner in the result, and core.SanitizeText keeps ZWJ on purpose so emoji
+// sequences survive whole, so the joiner reaches shorten in real text: an
+// agent name, a model id or a note written with an emoji after a word.
+//
+// A joiner with nothing on one side of it stands for a character that was not
+// kept, and a pane printing one renders a mark no reader can name. The same
+// rule drops them at both ends of core.TruncateClusters and core.TailClusters.
+func TestShortenDropsStrandedJoiners(t *testing.T) {
+	// A trailing joiner that must lose its partner, a leading one that has
+	// none to begin with, and a joiner facing a space: none of them may come
+	// back carrying a joiner next to the ellipsis.
+	inputs := []struct {
+		name string
+		s    string
+	}{
+		{"trailing joiner", "caf\u00e9\u200d\U0001f469\u200d\U0001f4bb"},
+		{"letter then joiner", "x\u200d\U0001f469\u200d\U0001f4bb"},
+		{"bare joiner", "\u200d\U0001f469"},
+		{"joiner then space", "\U0001f469\u200d tail"},
+	}
+	for _, in := range inputs {
+		cut := 0
+		for n := 1; n <= lipgloss.Width(in.s)+2; n++ {
+			got := shorten(in.s, n)
+			head := strings.TrimSuffix(got, "\u2026")
+			if head == in.s {
+				continue // fits whole, so nothing was cut and nothing to drop
+			}
+			cut++
+			if strings.HasPrefix(head, core.ZWJ) || strings.HasSuffix(head, core.ZWJ) {
+				t.Errorf("shorten(%s, %d) = %q: a cut on %q kept a joiner at its edge",
+					in.name, n, got, in.s)
+			}
+			if lipgloss.Width(got) > n {
+				t.Errorf("shorten(%s, %d) = %q, %d cells wide, over the budget",
+					in.name, n, got, lipgloss.Width(got))
+			}
+		}
+		if cut == 0 {
+			t.Errorf("shorten(%s) never cut the input, so nothing was exercised", in.name)
+		}
+	}
 }
