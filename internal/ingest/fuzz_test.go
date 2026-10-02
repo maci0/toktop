@@ -29,6 +29,11 @@ func FuzzHandlePost(f *testing.F) {
 		[]byte(`{"agent":"coder","via_engine":"127.0.0.1:11434","output_tokens":50}`),
 		[]byte(`{"via_engine":"127.0.0.1:11434\u001b]0;x\u0007"}`),
 		[]byte(`{"id":"turn-1","agent":"coder","output_tokens":50}`),
+		// One id repeated inside a single body: the line decodes, the feed
+		// refuses it, and the ack has to read accepted above stored.
+		[]byte("{\"id\":\"turn-1\",\"agent\":\"coder\",\"output_tokens\":50}\n{\"id\":\"turn-1\",\"agent\":\"coder\",\"output_tokens\":60}"),
+		// The same id written in two decompositions of the same text.
+		[]byte("{\"id\":\"cafe\\u0301\",\"agent\":\"a\"}\n{\"id\":\"café\",\"agent\":\"b\"}"),
 		[]byte(`{"id":"` + strings.Repeat("a", 300) + `","agent":"x"}`),
 		[]byte("{\"agent\":\"a\",\"ts\":\"2026-01-02T03:04:05Z\"}\n{\"agent\":\"b\",\"ts\":\"2026-01-02T05:04:05+02:00\"}"),
 		[]byte(`{"agent":"py","ts":"2026-01-02T03:04:05.123456Z"}`),
@@ -76,10 +81,16 @@ func FuzzHandlePost(f *testing.F) {
 			if rec.count() == 0 {
 				t.Fatal("202 accepted but no event recorded")
 			}
-			// Events written to the wire must match those actually recorded.
+			// accepted counts the wire, stored what the feed took, and the
+			// recorder dedups the way the collector's does, so a repeated id
+			// inside one body is the case that separates them: stored must
+			// then read below accepted, and it must equal what was kept.
+			// accepted == stored is the ordinary case, so it is not asserted
+			// either way here; what must hold is the direction and the count.
 			var ack, stored int
-			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 || ack != rec.count() || stored != rec.count() {
-				t.Fatalf("ack %q vs %d recorded events", respBody, rec.count())
+			if n, _ := fmt.Sscanf(respBody, `{"accepted":%d,"stored":%d}`, &ack, &stored); n != 2 ||
+				stored != rec.count() || stored > ack {
+				t.Fatalf("ack %q vs %d recorded events, stored must count what the feed kept", respBody, rec.count())
 			}
 		case http.StatusBadRequest, http.StatusRequestEntityTooLarge:
 			// A mid-stream failure keeps the events decoded before it; each

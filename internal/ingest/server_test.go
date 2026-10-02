@@ -34,6 +34,12 @@ import (
 // appended before it, and reading rec.evs directly after that is not a race.
 // Spinning on rec.count() from the test goroutine was both the race and a
 // one-second wall-clock budget that could expire on a loaded runner.
+//
+// It refuses a repeated id, the way the collector's own RecordAgent does. A
+// recorder that took everything made every handler's `if rec.RecordAgent(ev)
+// { stored++ }` true, so `stored` tracked `accepted` for reasons the test
+// asserted rather than reasons the handler decided, and the two branches of a
+// mid-stream failure's "received, N recorded" message had no test at all.
 type memRecorder struct {
 	mu   sync.Mutex
 	evs  []core.AgentEvent
@@ -42,6 +48,10 @@ type memRecorder struct {
 
 func (m *memRecorder) RecordAgent(ev core.AgentEvent) bool {
 	m.mu.Lock()
+	if core.HasAgentID(m.evs, ev.ID) {
+		m.mu.Unlock()
+		return false
+	}
 	if m.seen == nil {
 		m.seen = make(chan struct{}, 1)
 	}
@@ -1558,7 +1568,9 @@ func TestIngestRefusesUnstorableId(t *testing.T) {
 // counts characters, so an id of 128 two-byte runes (256 bytes) and one of 128
 // decomposed pairs (384 bytes) are both at the cap. A cap counted in bytes
 // would cut both. The stored id is the NFC spelling, so one sender's id holds
-// one key in the collector's dedup window however the sender wrote it.
+// one key in the collector's dedup window however the sender wrote it: the
+// decomposed spelling of the second id is the same event as the composed one,
+// and the feed refuses it rather than counting the sender's tokens twice.
 func TestIngestKeepsIdAtCap(t *testing.T) {
 	rec := &memRecorder{}
 	s := startIngest(t, rec)
@@ -1571,12 +1583,31 @@ func TestIngestKeepsIdAtCap(t *testing.T) {
 		{decomposed, composed},
 	} {
 		body := fmt.Sprintf(`{"id":%q,"agent":"coder"}`, tc.posted)
-		if code, _ := postBody(t, "http://"+s.Addr()+"/v1/events", body); code != http.StatusAccepted {
+		code, got := postBody(t, "http://"+s.Addr()+"/v1/events", body)
+		if code != http.StatusAccepted {
 			t.Fatalf("id of %d bytes: status = %d", len(tc.posted), code)
 		}
-		awaitEvents(t, rec, i+1)
-		if got := rec.evs[i].ID; got != tc.want {
-			t.Errorf("id = %q (%d bytes), want %q whole and NFC", got, len(got), tc.want)
+		if i < 2 {
+			awaitEvents(t, rec, i+1)
+			// A cap counted in bytes would have cut the composed and the
+			// decomposed spellings, and the NFC form is what lands.
+			if id := rec.evs[i].ID; id != tc.want {
+				t.Errorf("id = %q (%d bytes), want %q whole and NFC", id, len(id), tc.want)
+			}
+			if strings.Contains(got, `"stored":0`) {
+				t.Errorf("a distinct id at the cap was refused: %q", got)
+			}
+			continue
+		}
+		// The two spellings are one id, so the third POST decodes and stores
+		// nothing. A test that only ever posted the composed form passes
+		// against a handler that stored the id unnormalized, which is the
+		// spelling the collector's dedup window keys on.
+		if !strings.Contains(got, `"accepted":1,"stored":0`) {
+			t.Fatalf("the decomposed spelling of a stored id: %q, want accepted 1 stored 0", got)
+		}
+		if rec.count() != 2 {
+			t.Fatalf("stored %d events, want 2: one id written two ways is one event", rec.count())
 		}
 	}
 }
@@ -2414,7 +2445,62 @@ func TestUnkeyedStreamFailureAsksForResume(t *testing.T) {
 	}
 }
 
-// with /healthz still reporting ok. Refuse it instead of binding.
+// A mid-stream failure reports what the feed kept, and the two branches are
+// not the same sentence: when a line decoded but the feed refused it as a
+// duplicate, calling those lines "recorded" sends a sender looking for rows
+// it never got. The gap between the two counts is the point of the message,
+// so it is named. This is the branch no other test reached: a recorder that
+// takes everything makes stored == decoded on every path.
+func TestStreamFailureNamesTheStoredGap(t *testing.T) {
+	rec := &memRecorder{}
+	s := startIngest(t, rec)
+	url := "http://" + s.Addr() + "/v1/events"
+
+	// Line 2 repeats line 1's id, so it decodes and is refused; line 3 is
+	// malformed and stops the stream with two decoded, one kept.
+	stream := `{"id":"turn-1","agent":"coder","output_tokens":5}` + "\n" +
+		`{"id":"turn-1","agent":"coder","output_tokens":6}` + "\n" +
+		`{"agent":"coder","prompt_tokens":"many"}`
+
+	code, msg := postKeyed(t, url, stream, "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body = %q)", code, msg)
+	}
+	if !strings.Contains(msg, "2 earlier events in this stream were received, 1 recorded") {
+		t.Errorf("a refused line must be named as received, not recorded: %q", msg)
+	}
+	if strings.Contains(msg, "were recorded") {
+		t.Errorf("a stream that kept 1 of 2 must not say both were recorded: %q", msg)
+	}
+	if rec.count() != 1 {
+		t.Fatalf("kept %d events, want 1", rec.count())
+	}
+
+	// The same stream with every line distinct keeps all of them and takes
+	// the other branch. Both are needed: a handler that always printed one
+	// form, or always the other, would pass half of this.
+	rec2 := &memRecorder{}
+	s2 := startIngest(t, rec2)
+	distinct := `{"id":"turn-1","agent":"coder","output_tokens":5}` + "\n" +
+		`{"id":"turn-2","agent":"coder","output_tokens":6}` + "\n" +
+		`{"agent":"coder","prompt_tokens":"many"}`
+	code, msg = postKeyed(t, "http://"+s2.Addr()+"/v1/events", distinct, "")
+	if code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body = %q)", code, msg)
+	}
+	if !strings.Contains(msg, "2 earlier events in this stream were recorded") {
+		t.Errorf("every line kept must be reported as recorded: %q", msg)
+	}
+	if strings.Contains(msg, "received,") {
+		t.Errorf("a fully kept stream must not name a stored gap: %q", msg)
+	}
+	if rec2.count() != 2 {
+		t.Fatalf("kept %d events, want 2", rec2.count())
+	}
+}
+
+// A server that cannot be built must not come up half-bound, with /healthz
+// still reporting ok. Refuse it instead of binding.
 func TestNewServerNeedsRecorder(t *testing.T) {
 	// The recorder is refused before the address is bound, so the message
 	// has to be the one about the recorder: a bare non-nil error would be
