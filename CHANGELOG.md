@@ -15,6 +15,38 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ### Fixed
 
+- `toktop update` no longer panics on a checksums listing line that ends on its
+  own separator. `checksumRecord` stepped past the separator and then read the
+  next byte to tell text mode from binary mode, with nothing checking that a
+  byte was there: a `checksums` file truncated mid-write, or one edited by hand,
+  panicked the updater with `index out of range [65] with length 65` instead of
+  reporting a listing it could not read. A line ending right after its separator
+  is now read as the truncated record it is, along with one whose separator is
+  followed by nothing but blanks. A well-formed line is unaffected.
+  `FuzzChecksumListing` in `internal/selfupdate` carries the six truncated
+  spellings as seeds.
+- An `ssh_config` `Host` block whose wildcard has to span an accented character
+  applies again. `patternMatch` advanced the `*` backtrack by a byte, sliding
+  the wildcard into the middle of a rune, where the byte compare reads a
+  continuation byte (`0x80`-`0xBF`) that no ASCII pattern byte equals: the
+  star could never resume past the rune it was stuck in, so `Host a*a*` reported
+  no match for `aa*é` and a block written for an accented host silently stopped
+  applying, leaving the dial on the default port with the default key. Both
+  wildcards now consume one character rather than one byte, and an ill-formed
+  name is still decided on the bytes that arrived, where there is no character
+  to take. A pattern over ASCII host names is unaffected.
+  `TestPatternMatch` in `internal/remote` pins the backtrack and the
+  ill-formed cases.
+- `toktop help --check` now names the command the flag belongs to, as
+  `toktop --check` already did. A flag written after `help` is the same
+  placement mistake as one written before it, and only the first side answered
+  it: `toktop --check` printed `unknown option "--check" (toktop update
+  --check)` while `toktop help --check` printed `unknown option "--check"` and
+  nothing else, so a reader who left the subcommand out on the wrong side of
+  the word was told nothing about which command they had. A flag no subcommand
+  declares is still answered with nothing, since a misplaced word that names no
+  command has no hint to give. The `a subcommand flag after help names its
+  subcommand` subtest in `TestRunHelp` in `cmd/toktop` pins both spellings.
 - `make install` and `make uninstall` now work in a Windows shell. `PREFIX`
   defaulted to `$HOME/.local`, and Windows names the home directory
   `USERPROFILE` while leaving `HOME` unset, so the default expanded to nothing
@@ -93,6 +125,30 @@ Binaries, checksums, and a CycloneDX SBOM are on
 
 ### Fixed
 
+- A `--probe` generation a model declined, or a host-side content filter cut, is
+  refused rather than scored. Both arrive over HTTP `200` carrying the shape of
+  an ordinary completion -- a choice with a little text in it, sometimes a
+  usage count beside it -- and decoded as one they yield a time to first token
+  and a decode rate for text no model produced, which the pane then draws
+  beside real measurements with nothing to tell them apart. Both dialects now
+  refuse it the way they already refuse an SSE `error` frame: a choice whose
+  `refusal` is set, or whose `finish_reason` is one of `content_filter`,
+  `refusal`, `SAFETY`, `RECITATION`, `BLOCKLIST`, `PROHIBITED_CONTENT` or
+  `SPII`, is reported as `failed engine refused: <reason>`, where the reason is
+  the model's own sentence in front of the provider's one-word vocabulary when
+  it gave both. The set is closed rather than a check for anything but the
+  ordinary endings, so a provider adding a spelling does not make a healthy
+  engine read as broken. The OpenAI-compatible dialect reads it on both the
+  streaming and the single-body path, since an engine that ignored
+  `stream:true` answers a filtered turn in one piece, and the Ollama dialect
+  reads the same set off the `done_reason` frame field on every frame rather
+  than the terminal one, because a serving stack in front of the daemon can end
+  a turn without marking it done. An ordinary ending (`stop`, `tool_calls`,
+  `length`, `eos_token`, `END_TURN`) is unchanged, so an engine that answers
+  normally measures exactly as it did before this.
+  `TestRunRefusesATurnNoModelDecoded`, `TestRunMeasuresOrdinaryFinishReasons`
+  and `TestRunOllamaMeasuresOrdinaryDoneReasons` in `internal/probe` pin the
+  refusal and the ordinary endings beside it.
 - A second `toktop update` no longer recovers the displaced binary out from
   under a peer that is mid-install. The recovery that runs before the download
   decides what to do by stat-ing the installed path, and it read that without
