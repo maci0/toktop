@@ -834,15 +834,47 @@ vet: ## run go vet (both halves of the sqlite tag gate)
 vet-cross: ## vet + staticcheck every release platform from PLATFORMS
 	@mkdir -p $(DIST)/bin
 	@env GOBIN=$(CURDIR)/$(DIST)/bin $(GO) install tool || exit 1
-	@for target in $(PLATFORMS); do \
-		goos=$${target%/*}; goarch=$${target#*/}; \
-		echo "checking $$goos/$$goarch"; \
-		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS_BARE) ./... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS) ./agentusage/... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS_BARE) ./... || exit 1; \
-		env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS) ./agentusage/... || exit 1; \
-	done
-	@rm -rf $(DIST)/bin
+# The platforms are analyzed independently and read the same sources, so they
+# run together the way the cross-build does: one platform's vet and staticcheck
+# read nothing another platform is writing, and each go invocation already
+# parallelizes across packages. Run one after another, the six platforms
+# serialized on a gate that runs before every release and in release.yml.
+#
+# Findings are collected per platform rather than streamed, because six
+# backgrounded jobs writing to one terminal interleave their output and a
+# finding ends up filed under the wrong GOOS. Each platform's four runs report
+# under its own heading when they say anything, so a finding reads against the
+# GOOS that produced it. A clean platform stays silent: the sequential loop
+# printed its heading unconditionally and said nothing after it, so the heading
+# carried no information there.
+#
+# Every pid is waited on individually: `wait` with no argument reports the last
+# job's status, which would let a failing platform pass behind a passing one.
+	@log=$$(mktemp -d); trap 'rm -rf "$$log"' EXIT; \
+	jobs=""; \
+	for target in $(PLATFORMS); do \
+		goos=$${target%/*}; goarch=$${target#*/}; out="$$log/$${goos}_$${goarch}.log"; \
+		( \
+			env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS_BARE) ./... || exit 1; \
+			env GOOS=$$goos GOARCH=$$goarch $(GO) vet -mod=readonly $(VET_TESTS) $(GOTAGS) ./agentusage/... || exit 1; \
+			env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS_BARE) ./... || exit 1; \
+			env GOOS=$$goos GOARCH=$$goarch $(DIST)/bin/staticcheck $(GOTAGS) ./agentusage/... || exit 1; \
+		) > "$$out" 2>&1 & \
+		jobs="$$jobs $$!:$$out"; \
+	done; \
+	fail=0; \
+	for job in $$jobs; do \
+		pid=$${job%%:*}; out=$${job#*:}; \
+		status=0; wait "$$pid" || status=$$?; \
+		if [ -s "$$out" ]; then \
+			echo "checking $$(basename "$$out" .log)"; cat "$$out"; \
+		fi; \
+		if [ "$$status" != 0 ]; then \
+			echo "make vet-cross: $$(basename "$$out" .log) failed vet or staticcheck" >&2; fail=1; \
+		fi; \
+	done; \
+	rm -rf $(DIST)/bin; \
+	exit $$fail
 
 .PHONY: lint
 lint: ## run staticcheck (both halves of the sqlite tag gate)
@@ -1971,14 +2003,42 @@ test-dist: dist-clean ## build every release platform without packaging
 	@$(CHECK_VERSION)
 	@mkdir -p $(DIST)
 	@rm -f $(DIST)/$(BINARY)_*
-	@for target in $(PLATFORMS); do \
+# One go build per platform, and the platforms are independent: six different
+# GOOS/GOARCH pairs read the same sources and write six different files under
+# dist/, and each go build already parallelizes a package at a time. Running
+# them one after another left the machine's cores idle between builds (measured
+# here: 4m44s of CPU behind 52s of wall clock), so the release build paid for
+# six builds serialized and the six caches filled one after another. Backgrounded
+# together and waited on once, they overlap each other's compilation and the
+# wall clock falls toward the slowest single build.
+#
+# The wait is the whole point: `wait` without arguments returns the exit status
+# of the last job waited for, so a platform that failed while a later one
+# succeeded would report ok and ship five artifacts plus a broken one. Every pid
+# is waited on individually instead, so no single success can speak for the
+# rest. Each pid carries its own artifact name in the same word, because the
+# name is what tells a reader which platform broke; two parallel lists paired up
+# by position named the wrong one whenever an earlier build failed.
+#
+# The artifacts are still named and written exactly as before, so the bytes and
+# the checksums do not move: this is scheduling, not a change to the recipe's
+# output.
+	@jobs=""; \
+	for target in $(PLATFORMS); do \
 		goos=$${target%/*}; goarch=$${target#*/}; ext=""; \
 		if [ "$$goos" = "windows" ]; then ext=".exe"; fi; \
 		name="$(BINARY)_$(VERSION)_$${goos}_$${goarch}$${ext}"; \
 		echo "building $$name"; \
-		CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch \
-			$(GO) build $(GOTAGS) $(GO_BUILDFLAGS) -ldflags "$(LDFLAGS)" -o $(DIST)/$$name $(CMD) || exit 1; \
-	done
+		( CGO_ENABLED=0 GOOS=$$goos GOARCH=$$goarch \
+			$(GO) build $(GOTAGS) $(GO_BUILDFLAGS) -ldflags "$(LDFLAGS)" -o $(DIST)/$$name $(CMD) ) & \
+		jobs="$$jobs $$!:$$name"; \
+	done; \
+	fail=0; \
+	for job in $$jobs; do \
+		pid=$${job%%:*}; name=$${job#*:}; \
+		if ! wait "$$pid"; then echo "make test-dist: $$name failed to build" >&2; fail=1; fi; \
+	done; \
+	exit $$fail
 
 # The path of the artifact for this host, out of $(DIST). The release job
 # smoke-tests it, and spelling the name in the workflow instead would be a
