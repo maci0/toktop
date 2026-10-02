@@ -5,10 +5,10 @@ import (
 	"testing"
 )
 
-// TestOpenAIFrameShapes pins the byte-based frame parser to the lines an
-// OpenAI-compatible stream actually emits, and to the one it must reject: a
-// data field carrying no payload is not a frame, because handing the caller an
-// empty payload fails the whole probe over a line that is not malformed.
+// TestOpenAIFrameShapes pins the frame parser to the lines an OpenAI-compatible
+// stream actually emits, and to the one it must reject: a data field carrying no
+// payload is not a frame, because handing the caller an empty payload fails the
+// whole probe over a line that is not malformed.
 func TestOpenAIFrameShapes(t *testing.T) {
 	for _, tc := range []struct {
 		name string
