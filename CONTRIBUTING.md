@@ -303,12 +303,12 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
-the Linux leg of the test job runs nine of the `make check` guards
+the Linux leg of the test job runs eleven of the `make check` guards
 (`check-ci-tags`, `check-ci-env`, `check-test-flags`, `check-ci-platforms`,
 `check-help-docs`, `check-site-records`, `check-site-rollback-states`,
 `check-site-tools`, `check-changelog-structure`, `check-changelog-covers`,
-`check-shell`). The tenth,
-`check-yaml`, runs in the
+`check-shell`). `check-workflow-shell` also runs there, and
+`check-yaml` runs in the
 `scripts` job, which
 installs the pinned tool env that target lints with.
 Vulnerability analysis follows the host platform's build constraints.
