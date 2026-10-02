@@ -456,3 +456,45 @@ func TestSpacesDoesNotAllocateWithinTheTable(t *testing.T) {
 		t.Errorf("spaces allocated %v times per call; the table is sliced, not built", allocs)
 	}
 }
+
+// singleCellRune binary-searches the table instead of walking it, which is
+// only the same answer while the table stays sorted by start and no two
+// ranges overlap. Both properties, and the answer itself, are checked against
+// the definition of the table here, so an edit that unsorts or overlaps it
+// cannot pass a benchmark run as an improvement.
+func TestSingleCellRuneMatchesItsTable(t *testing.T) {
+	want := func(r rune) bool {
+		for _, rg := range singleCellRunes {
+			if r >= rg[0] && r <= rg[1] {
+				return true
+			}
+		}
+		return false
+	}
+	for i, rg := range singleCellRunes {
+		if rg[0] > rg[1] {
+			t.Fatalf("range %d is U+%04X..U+%04X, inverted", i, rg[0], rg[1])
+		}
+		if i > 0 && singleCellRunes[i-1][0] >= rg[0] {
+			t.Fatalf("range %d starts at U+%04X, not above the previous start U+%04X; "+
+				"the search needs the table sorted", i, rg[0], singleCellRunes[i-1][0])
+		}
+		if i > 0 && singleCellRunes[i-1][1] >= rg[0] {
+			t.Fatalf("range %d (U+%04X) overlaps range %d (ends U+%04X)",
+				i, rg[0], i-1, singleCellRunes[i-1][1])
+		}
+	}
+	// Every code point up to the top of the table, so each range's first and
+	// last code point and every gap between two ranges is covered.
+	for r := rune(0); r <= singleCellRunes[len(singleCellRunes)-1][1]; r++ {
+		if got := singleCellRune(r); got != want(r) {
+			t.Fatalf("singleCellRune(U+%04X) = %v, the table says %v", r, got, want(r))
+		}
+	}
+	// Above the table too: a rune past the last range must decline.
+	for _, r := range []rune{0x2900, 0xFFFD, 0x1F600, 0x10FFFF} {
+		if singleCellRune(r) {
+			t.Errorf("U+%04X counted as a single cell; it is past every range", r)
+		}
+	}
+}

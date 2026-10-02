@@ -65,7 +65,7 @@ func (m Model) renderFeed() string {
 func (m Model) feedTitle(w, statsN, nRows int, rates []core.AgentRate) string {
 	title := "AGENT FEED"
 	add := func(part string) {
-		if lipgloss.Width(title)+lipgloss.Width(part) <= w {
+		if widthOf(title)+widthOf(part) <= w {
 			title += part
 		}
 	}

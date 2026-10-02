@@ -8,8 +8,6 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/maci0/toktop/internal/core"
 )
 
@@ -81,7 +79,7 @@ func (m Model) renderHeader() string {
 	// Ticks and snapshot stamps may carry UTC or a sender offset; show the
 	// viewer's clock, matching feedLine.
 	right += styleDim.Render(m.clock.Local().Format("15:04:05"))
-	left := fitSegments(segs, m.w-lipgloss.Width(right)-1)
+	left := fitSegments(segs, m.w-widthOf(right)-1)
 	return joinSpread(left, right, m.w)
 }
 
@@ -96,7 +94,7 @@ type headerSeg struct {
 // segments is joined with. The separator is the same string on every pair, so
 // its styled width is measured once rather than inside the shed loop, which
 // re-rendered and re-walked it on every pass.
-var headerSegWidth = sync.OnceValue(func() int { return lipgloss.Width(sepDim) })
+var headerSegWidth = sync.OnceValue(func() int { return widthOf(sepDim) })
 
 // fitSegments sheds the highest-numbered segments (rightmost first) until
 // the dim-piped row fits avail cells. When nothing sheddable remains it hard
@@ -116,7 +114,7 @@ func fitSegments(segs []headerSeg, avail int) string {
 	widths := make([]int, len(kept))
 	total := 0
 	for i, s := range kept {
-		widths[i] = lipgloss.Width(s.text)
+		widths[i] = widthOf(s.text)
 		total += widths[i]
 		if i > 0 {
 			total += sep
@@ -148,7 +146,7 @@ func fitSegments(segs []headerSeg, avail int) string {
 		parts[i] = s.text
 	}
 	line := strings.Join(parts, sepDim)
-	if w := lipgloss.Width(line); w > avail {
+	if w := widthOf(line); w > avail {
 		line = clip(line, avail)
 	}
 	return line

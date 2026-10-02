@@ -90,7 +90,7 @@ func (m Model) throughputTitle(w int, peak float64) string {
 	tail := mode + styleInfo.Render("[t]")
 	if peak > 0 {
 		p := dim(" · peak ▲") + styleValue.Render(fmtRate(peak)) + dim(" tok/s")
-		if lipgloss.Width(title)+lipgloss.Width(p)+lipgloss.Width(tail) <= w {
+		if widthOf(title)+widthOf(p)+widthOf(tail) <= w {
 			title += p
 		}
 	}
@@ -102,7 +102,7 @@ func (m Model) throughputTitle(w int, peak float64) string {
 func promptTitle(w int, peak, now float64) string {
 	title := "PROMPT " + styleInfo.Render("▼ "+fmtRate(now)+" tok/s")
 	if peak > 0 {
-		if p := dim(" · peak ▼") + styleValue.Render(fmtRate(peak)) + dim(" tok/s"); lipgloss.Width(title)+lipgloss.Width(p) <= w {
+		if p := dim(" · peak ▼") + styleValue.Render(fmtRate(peak)) + dim(" tok/s"); widthOf(title)+widthOf(p) <= w {
 			title += p
 		}
 	}

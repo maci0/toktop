@@ -167,9 +167,9 @@ func agentRows(rates []core.AgentRate, now time.Time) []string {
 			since = dim("time unknown")
 		}
 		rateCells[i], tokCells[i], sinceCells[i] = rate, tok, since
-		nameW = max(nameW, lipgloss.Width(names[i]))
-		rateW = max(rateW, lipgloss.Width(rate))
-		tokW = max(tokW, lipgloss.Width(tok))
+		nameW = max(nameW, widthOf(names[i]))
+		rateW = max(rateW, widthOf(rate))
+		tokW = max(tokW, widthOf(tok))
 	}
 	out := make([]string, 0, len(rates))
 	for i := range rates {
@@ -218,7 +218,7 @@ func (m Model) renderAgentsOnly() string {
 	// the whole frame past the pane (same rule as feedTitle).
 	title := "AGENTS"
 	add := func(part string) {
-		if lipgloss.Width(title)+lipgloss.Width(part) <= w {
+		if widthOf(title)+widthOf(part) <= w {
 			title += part
 		}
 	}

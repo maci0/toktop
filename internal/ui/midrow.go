@@ -2,11 +2,7 @@ package ui
 
 // The mid row: the engines, engine state and probes panels side by side.
 
-import (
-	"fmt"
-
-	"github.com/charmbracelet/lipgloss"
-)
+import "fmt"
 
 func (m Model) renderMidRow() string {
 	pw := m.w * 38 / 100
@@ -62,12 +58,12 @@ func (m Model) engineStateTitle(w, shown int) string {
 // bare "+3" beside the long heading is the dead end moreMarker exists to avoid,
 // so it is not a reason to keep the cells the heading spent.
 func moreTitle(title, short string, w, hidden int) string {
-	if hidden > 0 && lipgloss.Width(short) < lipgloss.Width(title) {
+	if hidden > 0 && widthOf(short) < widthOf(title) {
 		// Prefer the long heading, but only while it can carry a marker that
 		// names what the count is; then the short one, which takes the widest
 		// marker it can hold at all before it falls back to the bare number.
 		for _, t := range []string{title, short} {
-			if fitsNamedMore(hidden, lipgloss.Width(t), w) {
+			if fitsNamedMore(hidden, widthOf(t), w) {
 				return t + moreMarker(t, w, hidden)
 			}
 		}
@@ -84,7 +80,7 @@ func moreTitle(title, short string, w, hidden int) string {
 func fitsNamedMore(hidden, titleWidth, w int) bool {
 	for _, form := range moreForms(hidden) {
 		for gap := 2; gap >= 1; gap-- {
-			if titleWidth+lipgloss.Width(form)+gap <= w {
+			if titleWidth+widthOf(form)+gap <= w {
 				return true
 			}
 		}
@@ -111,7 +107,7 @@ func moreMarker(title string, w, hidden int) string {
 	if hidden <= 0 {
 		return ""
 	}
-	form, gap, ok := fitMore(hidden, lipgloss.Width(title), w)
+	form, gap, ok := fitMore(hidden, widthOf(title), w)
 	if !ok {
 		return ""
 	}
@@ -140,7 +136,7 @@ func moreNote(w, hidden int) string {
 func fitMore(hidden, titleWidth, w int) (form string, gap int, ok bool) {
 	for _, form := range append(moreForms(hidden), bareMoreForm(hidden)) {
 		for gap := 2; gap >= 1; gap-- {
-			if titleWidth+lipgloss.Width(form)+gap <= w {
+			if titleWidth+widthOf(form)+gap <= w {
 				return form, gap, true
 			}
 		}

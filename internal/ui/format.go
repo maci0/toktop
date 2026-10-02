@@ -298,9 +298,22 @@ var singleCellRunes = [...][2]rune{
 	{0x2800, 0x28FF},
 }
 
+// The table is searched, not walked: plainWidth calls this for every
+// box-drawing, braille and typographic rune in a frame, and the panels are
+// built mostly of them. The linear scan read up to 20 pairs per rune, which
+// the StaticFrame profile put at 15% of the frame's instructions on its own;
+// a binary search over the same sorted table answers in five comparisons.
+// The fuzz test over plainWidth and the two tests above pin the answer, so the
+// ranges are already known sorted and disjoint.
 func singleCellRune(r rune) bool {
-	for _, rg := range singleCellRunes {
-		if r >= rg[0] && r <= rg[1] {
+	lo, hi := 0, len(singleCellRunes)
+	for lo < hi {
+		mid := int(uint(lo+hi) >> 1)
+		if r < singleCellRunes[mid][0] {
+			hi = mid
+		} else if r > singleCellRunes[mid][1] {
+			lo = mid + 1
+		} else {
 			return true
 		}
 	}

@@ -75,17 +75,18 @@ func perfSnap() core.Snapshot {
 var perfFrameSizes = [][2]int{{120, 40}, {200, 50}}
 
 // allocBudget is the garbage one full frame at perfSnap's scale may create.
-// Measured at 1344 (120x40) and 1364 (200x50) once the gauge bars, the sys
+// Measured at 1317 (120x40) and 1328 (200x50) once the gauge bars, the sys
 // strip and the rate labels stopped handing a foreground color to
 // lipgloss.Style.Render per call (Style.Render resolves the color against the
-// active termenv profile every time, which allocated on every frame) and
+// active termenv profile every time, which allocated on every frame),
 // compressSeries kept its per-engine bucket tables flat instead of
-// materializing a row per occupied bucket; the budget leaves ~8% headroom so
-// a benign allocation shift does not fail the gate but a regression that
-// reinstates per-cell, per-bucket or per-render churn does.
+// materializing a row per occupied bucket, and the frame's own width
+// measurements went through widthOf rather than lipgloss directly; the budget
+// leaves ~8% headroom so a benign allocation shift does not fail the gate but
+// a regression that reinstates per-cell, per-bucket or per-render churn does.
 var allocBudget = map[[2]int]float64{
-	{120, 40}: 1450,
-	{200, 50}: 1500,
+	{120, 40}: 1420,
+	{200, 50}: 1440,
 }
 
 // TestStaticFrameAllocBudget is the deterministic gate for the render path.
@@ -126,6 +127,18 @@ var allocBudget = map[[2]int]float64{
 //
 //	before  8.4M instructions, 1.66M branches
 //	after   6.4M instructions, 1.31M branches
+//
+// The last step put widthOf on the width the frame asks for itself. The
+// plainWidth fast path already answered a styled row in one byte pass, but
+// twenty-five call sites still asked lipgloss directly, so every panel title,
+// header segment and mid-row fit test paid a genSplit plus a grapheme walk
+// for a string that is mostly ASCII and box drawing. And singleCellRune,
+// which plainWidth calls for every rune that is not printable ASCII, walked
+// all twenty ranges linearly; the table is sorted and disjoint, so five
+// binary-searched comparisons answer the same question. Per frame at 200x50:
+//
+//	before  129.0M instructions, 26.4M branches, 1365 allocs (~396us)
+//	after   116.9M instructions, 24.0M branches, 1328 allocs (~323us)
 func TestStaticFrameAllocBudget(t *testing.T) {
 	prev := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.Ascii)

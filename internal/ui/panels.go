@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/lipgloss"
-
 	"github.com/maci0/toktop/internal/core"
 	unorm "golang.org/x/text/unicode/norm"
 )
@@ -97,7 +95,7 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	// thing telling them apart. ENGINE STATE and the plain report name it too;
 	// the block did not, so two engines of one kind read as the same line. A
 	// label that only repeats the badge adds nothing and is dropped.
-	room := w - lipgloss.Width(row) - 1
+	room := w - widthOf(row) - 1
 	label := strings.TrimSpace(core.SingleLine(p.Label))
 	// The label is engine-supplied and the kind is a token, so they meet in
 	// both normalization forms: an engine naming itself "café" in NFD
@@ -140,7 +138,7 @@ func providerBlock(p core.ProviderSnapshot, w int) []string {
 	// edge of a default-width pane, so a queue backing up read as a missing
 	// value. GaugeBar spends w cells of bar plus " NN%", behind the "kv " label.
 	stats := styleDim.Render(engineStats(p, w-2))
-	if bar := min(w-2-lipgloss.Width(stats)-1-3-4, maxGaugeBar); bar >= minGaugeBar {
+	if bar := min(w-2-widthOf(stats)-1-3-4, maxGaugeBar); bar >= minGaugeBar {
 		return append(block, clip("  kv "+GaugeBar(p.KVPct, bar, kvHeat)+" "+stats, w))
 	}
 	return append(block, clip("  "+stats, w))
@@ -230,7 +228,7 @@ func (m Model) gaugesBody(w, rows int) (string, int) {
 		// the clip; the pointer joins only while the column is wide enough to
 		// spell it, the way the titles on the same row build themselves.
 		line := "no healthy engines"
-		if tail := " (see ENGINES)"; lipgloss.Width(line)+lipgloss.Width(tail) <= w {
+		if tail := " (see ENGINES)"; widthOf(line)+widthOf(tail) <= w {
 			line += tail
 		}
 		return dim(line), 0
@@ -309,7 +307,7 @@ func (m Model) probeReadout() string {
 func (m Model) probesTitle(w int) string {
 	title := "PROBES"
 	add := func(part string) {
-		if lipgloss.Width(title)+lipgloss.Width(part) <= w {
+		if widthOf(title)+widthOf(part) <= w {
 			title += part
 		}
 	}
@@ -332,7 +330,7 @@ func (m Model) probesTitle(w int) string {
 	// enough for "last <ttft> <rate>" printed the rate a second time, because
 	// the fallback was appended after the full reading had already joined.
 	full := " " + dim("last") + " " + fmtMs(last.TTFTms) + " " + rate
-	if lipgloss.Width(title)+lipgloss.Width(full) <= w {
+	if widthOf(title)+widthOf(full) <= w {
 		return title + full
 	}
 	add(" " + rate)
@@ -363,7 +361,7 @@ func probeOutcome(p core.ProbeSample, w int) string {
 		return out
 	}
 	full := fmtRate(p.TokPS) + " tok/s " + dim("ttft") + " " + fmtMs(p.TTFTms)
-	if lipgloss.Width(full) > w {
+	if widthOf(full) > w {
 		return fmtRate(p.TokPS) + "/s " + fmtMs(p.TTFTms)
 	}
 	return full
@@ -385,7 +383,7 @@ func (m Model) probesBody(w, h int) string {
 		line := mark + " " + outcome
 		// "✓ " and the separating space are the two cells the mark spends
 		// before the measurement starts.
-		if cells := w - 2 - lipgloss.Width(outcome) - 1; cells >= probeModelMin {
+		if cells := w - 2 - widthOf(outcome) - 1; cells >= probeModelMin {
 			line = mark + " " + styleDim.Render(shorten(core.SingleLine(p.Model), cells)) + " " + outcome
 		}
 		out.WriteString(clip(line, w) + "\n")
