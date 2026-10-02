@@ -192,7 +192,12 @@ func timedSeries(s core.Snapshot, out bool, cadence time.Duration) []timedVal {
 		vals, _ := historyOf(s.Providers[i], out)
 		n += len(vals)
 	}
-	n += core.AgentHistoryLen + core.HistoryLen
+	// The agent block below appends one entry per column of the dense grid,
+	// and that grid is HistoryLen wide whatever the feed retains, so
+	// AgentHistoryLen entries are never appended. Reserving both oversized
+	// the slice by 512 entries per direction, twice a frame, on a run that
+	// holds no agents at all.
+	n += core.HistoryLen
 	tv := make([]timedVal, 0, n)
 	var end time.Time
 	for i := range s.Providers {
