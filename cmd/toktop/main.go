@@ -88,7 +88,7 @@ func runMain() int {
 		return runVersion(os.Stdout, nil)
 	}
 	if parseErr != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %s%s%s\n", flagParseError(parseErr), valueHint(parseErr), subcommandFlagHint(parseErr))
+		fmt.Fprintf(os.Stderr, "toktop: %s%s%s\n", flagParseError(parseErr), valueHint(parseErr), subcommandFlagHint(unknownFlagName(parseErr)))
 		usage(os.Stderr)
 		return 2
 	}

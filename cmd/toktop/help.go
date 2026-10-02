@@ -287,12 +287,14 @@ var subcommandFlags = map[string]string{
 // flag that is genuinely undefined is answered, and only with a command line
 // that would work; a name no subcommand declares gets nothing, as a misplaced
 // word that names no command does.
-func subcommandFlagHint(err error) string {
-	name, ok := strings.CutPrefix(err.Error(), unknownFlagPrefix)
-	if !ok {
-		return ""
-	}
-	line, ok := subcommandFlags[strings.TrimLeft(name, "-")]
+//
+// The name comes from the call site, not off a parse error, so the flag
+// package's single-dash spelling is normalized here once: main has a parse
+// failure to hand, `toktop help --check` has only the word the reader wrote.
+// A flag that belongs to a subcommand is the same placement mistake written on
+// either side of the word, and it has to be answered the same way on both.
+func subcommandFlagHint(flagName string) string {
+	line, ok := subcommandFlags[strings.TrimLeft(flagName, "-")]
 	if !ok {
 		return ""
 	}
@@ -365,6 +367,14 @@ var versionFlags = []string{"--version", "-version", "-v"}
 
 // isVersionArg reports whether arg is one of the spellings of --version.
 func isVersionArg(arg string) bool { return slices.Contains(versionFlags, arg) }
+
+// unknownFlagName is the flag name out of the flag package's unknown-flag
+// message, and empty for every other parse failure, so subcommandFlagHint is
+// only ever asked about a flag the package actually reported as undefined.
+func unknownFlagName(err error) string {
+	name, _ := strings.CutPrefix(err.Error(), unknownFlagPrefix)
+	return name
+}
 
 // explicitHelpArg reports the help or version flag named in args, and why a
 // line carrying one should not have failed to parse.
@@ -448,7 +458,10 @@ func runHelp(out io.Writer, args []string) int {
 		return outputStatus(usage(out))
 	}
 	if strings.HasPrefix(args[0], "-") {
-		fmt.Fprintf(os.Stderr, "toktop: unknown option %q (see 'toktop --help')\n", args[0])
+		// subcommandFlagHint, the hint `toktop --check` already gives: a flag
+		// that lives on `update` written after `help` is the same placement
+		// mistake as one written before it, and only this side was silent.
+		fmt.Fprintf(os.Stderr, "toktop: unknown option %q%s (see 'toktop --help')\n", args[0], subcommandFlagHint(args[0]))
 		return 2
 	}
 	fmt.Fprintf(os.Stderr, "toktop: no help topic for %q (see 'toktop --help')\n", args[0])

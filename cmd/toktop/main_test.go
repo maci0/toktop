@@ -1041,7 +1041,12 @@ func TestSubcommandFlagHintNamesTheSubcommand(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := subcommandFlagHint(errors.New(tc.in)); got != tc.want {
+			// subcommandFlagHint takes a bare name; unknownFlagName pulls it
+			// out of the package's message and returns "" for every other
+			// parse failure, which is the "a failure that is not an unknown
+			// flag" case asking the same question with no name to answer.
+			got := subcommandFlagHint(unknownFlagName(errors.New(tc.in)))
+			if got != tc.want {
 				t.Errorf("subcommandFlagHint(%q) = %q, want %q", tc.in, got, tc.want)
 			}
 		})
@@ -1872,6 +1877,32 @@ func TestRunHelp(t *testing.T) {
 		}
 		if strings.Contains(got, "no help topic") {
 			t.Fatalf("stderr = %q, a dashed arg is an option not a topic", got)
+		}
+	})
+	t.Run("a subcommand flag after help names its subcommand", func(t *testing.T) {
+		// The same placement mistake has to read the same way whichever
+		// side of `help` it is written on: `toktop --check` answers
+		// "(toktop update --check)" while `toktop help --check` used to
+		// answer nothing, so only one of the two told the reader which
+		// command they had left out.
+		for _, arg := range []string{"--check", "--repo", "-check", "--bogus"} {
+			t.Run(arg, func(t *testing.T) {
+				var code int
+				got := captureStderr(t, func() { code = runHelp(io.Discard, []string{arg}) })
+				if code != 2 {
+					t.Fatalf("runHelp(%s) = %d, want 2", arg, code)
+				}
+				line, owned := subcommandFlags[strings.TrimLeft(arg, "-")]
+				if !owned {
+					if strings.Contains(got, "toktop update --") {
+						t.Fatalf("runHelp(%s) = %q, a flag no subcommand owns gets no hint", arg, got)
+					}
+					return
+				}
+				if !strings.Contains(got, line) {
+					t.Fatalf("runHelp(%s) = %q, want it to name %q", arg, got, line)
+				}
+			})
 		}
 	})
 	t.Run("extra after update topic is a usage error", func(t *testing.T) {
