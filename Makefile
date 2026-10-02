@@ -1814,6 +1814,18 @@ check-api: ## verify VERSION removes nothing PUBLIC_PKGS exported at the last re
 # against the release it follows and not against the commit ahead of it. A
 # checkout with no tag to compare against, or no git at all, has no diff and
 # is let past.
+#
+# A touched CHANGELOG.md is not an entry for the range. One entry written for a
+# different subject satisfies the range test for every other commit in it, and
+# that is the shape a real unannounced change takes: a fix commits its notes,
+# and a later commit moving a watched surface rides them. The obvious repair is
+# to test per commit, and it was measured here: it named 21 commits since
+# 0.23.0, 8 of them a refactor, a test or a perf change that the range test's
+# own comment says needs no entry (`agentusage` is watched, so a rename of an
+# unexported identifier moves it). A rule that fires on those trains the entry
+# to be boilerplate, which is the outcome the watched list was narrowed to
+# prevent, so the range test stands as it is and the three entries it let
+# through since 0.23.0 are written by hand instead.
 .PHONY: check-changelog-covers
 check-changelog-covers: ## fail if a consumer-facing surface moved since the last release with no CHANGELOG.md entry
 	@if ! git rev-parse HEAD >/dev/null 2>&1; then exit 0; fi; \

@@ -14,6 +14,25 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 ## [Unreleased]
 
 ### Fixed
+- The `--once --json` report is encodable again when a rate overflows. JSON
+  has no spelling for a NaN or an infinity, and `encoding/json` refuses the
+  whole document over one unusable value, so a single engine whose counter
+  delta over a short interval reached the top of the float64 range cost the
+  caller every number on the report: `--once --json` printed nothing and
+  returned an error rather than the measurements it was asked for. The sums
+  that reach the report now saturate instead of overflowing, and each float
+  that reaches the encoder is finite, so the report is written. An unbounded
+  positive reading reads as the largest double there is and a negative one as
+  the smallest, which is the finite value the field's own meaning puts at the
+  end of its range; a NaN reads as no throughput, the same answer
+  `rateOrZero` already gives a corrupt cell rather than a merely enormous one.
+  A finite value is untouched, so an ordinary report is byte-identical to one
+  written before this. The drawn header and the plain report gained the same
+  bound, so a saturating total reads as the largest double beside engines
+  that measured fine rather than as `+Inf tok/s`.
+  `TestAggSaturatesInsteadOfOverflowingToInf` in internal/ui pins the sum,
+  the per-engine readings written out unsummed, and the report the encoder
+  accepts.
 - codex's rollout no longer publishes a context window smaller than the output
   beside it. The rule the earlier floor commit set is that the window a model
   read cannot be smaller than what that turn wrote, and `parseCodex` was the one
@@ -53,6 +72,27 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   `TestEveryProcessListerArmsTheGroupKill` and
   `TestEveryProcessListerArmsThePipeGrace` in internal/procs pin that neither
   platform's lister drops either half.
+- An engine that answers its model listing while refusing or timing out on the
+  Prometheus `/metrics` scrape is now audited, instead of being drawn healthy
+  with every throughput number zero and nothing on the frame saying the
+  counters never arrived. The poll succeeds, so this was neither a down nor a
+  slow engine and neither latch reported it, and the audit log -- the record
+  that outlives the frame -- had no line for it at all. Two new lines are
+  written on the same latching terms as the answering ones: WARN
+  `toktop: engine metrics scrape failing` carrying `engine`, `addr` and
+  `reason`, and INFO `toktop: engine metrics scrape recovered` carrying
+  `engine`, `addr`, `scrape_failed_for` and `down_reason`, one line per run
+  however many polls passed inside it. The failure rides on
+  the poll result rather than as a poll error, because the engine is answering
+  and reporting it as down would name an outage the operator cannot reproduce;
+  it is `reason` on the line that reports it and `down_reason` on the line
+  that reports the run ending, which is the split every other pair already
+  used. A poll that stops answering clears this latch along with the slow one,
+  so an outage cannot leave a measurement run set that reports a recovery no
+  one saw start. The README's engine-health table now lists both.
+  `TestScrapeFailureOnAnAnsweringEngineIsAuditedOnce` and
+  `TestScrapeRunIsSupersededByAnOutage` in internal/collector pin the pair and
+  the supersession.
 - The audit line for a request refused by the router now carries the reason
   the caller was answered with instead of a label for the class of it. A `404`
   and a `405` logged `error="not found"` and `error="method not allowed"`,
@@ -369,6 +409,24 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   acknowledged counts, its saturation state and its endpoint list. The two
   refusals the Go runtime makes before a handler runs are the documented
   exception, since they never reach the chain that sets it.
+
+- The agent feed's OpenAPI spec now declares the runtime's `400` on every
+  operation, as a shared `RuntimeBadRequest` response. A request line
+  `net/http` cannot parse is refused before a handler runs, so every path on
+  the port can be given that answer and not one of them listed it; the spec
+  folded it into the same `RuntimeRefusal` response as the `431`, which a
+  header block over 16 KiB earns and a malformed request line does not. A
+  generated client built from the document had no arm for a status the server
+  actually sends, so it reached the unknown-status path on a request a proxy
+  or a load balancer could rewrite. The new response says what a caller can
+  tell apart: it closes the connection and carries the status line alone,
+  with the runtime's own `400 Bad Request` as the body and no `X-Request-Id`
+  to correlate it by, which is the same exception the `no-store` entry above
+  names. On `POST /v1/events` it shares the `400` every rejected body gets and
+  only the body tells the two apart, since the handler's names the field or
+  the bound. `TestRuntimeBadRequestIsDeclaredOnEveryOperation` and
+  `TestRuntimeBadRequestIsGivenOnAProbePath` in internal/ingest pin that no
+  operation is left without it.
 
 ### Breaking
 
