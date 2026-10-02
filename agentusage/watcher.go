@@ -686,6 +686,23 @@ func (w *Watcher) readSource(src tokenSource) (values, bool) {
 // snapshot has not landed yet, this call is the retry: a success becomes
 // the baseline and reports nothing, so pre-attach tokens are never the
 // first "growth".
+//
+// A store the baseline never saw is snapshotted the same way and contributes
+// nothing on the call that adopts it. A sessionSource resolves its database by
+// walking the working directory, so the set of stores is not fixed at attach:
+// a project that runs the agent for the first time while the dashboard is up
+// gains one, and a reinstall can move a session store to a path the walk
+// resolves differently. Such a store holds sessions that predate this attach,
+// and reading its counters as a delta against a missing (zero) baseline
+// credits all of them at once, which is the history dump the baseline exists
+// to prevent. Adopting the store on sight keeps that promise for the store as
+// well as for the watcher: the first reading of a new store establishes what
+// it had already spent, and only what it spends afterwards is counted.
+//
+// The store is keyed on its own path, not on the session ids within it. A
+// session id the baseline does not hold is a session that started after
+// attach, and its first turn is this attach's to count; only a store that was
+// never snapshotted at all makes every id in it history.
 func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
 	if !w.hasSessionBase {
 		base, ok := ss.sessions(w.dirs, time.Time{})
@@ -702,7 +719,29 @@ func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
 	}
 	var outN, inN int64
 	for path, sess := range cur {
-		base := w.sourceBase[path]
+		base, known := w.sourceBase[path]
+		if !known {
+			// Unbounded rather than since-bounded: what this store had spent
+			// is the baseline, and the since filter would leave out everything
+			// it wrote before w.since, which is exactly what must be adopted.
+			// A read that fails leaves the store unadopted, so the next poll
+			// tries again rather than counting it against a baseline that
+			// never landed.
+			adopted, aok := ss.sessions(w.dirs, time.Time{})
+			if !aok {
+				return values{}, false
+			}
+			if w.sourceBase == nil {
+				w.sourceBase = map[string]map[string]sessionCounts{}
+			}
+			for p, s := range adopted {
+				w.sourceBase[p] = s
+			}
+			base, known = w.sourceBase[path]
+			if !known {
+				continue // the store vanished between the two reads
+			}
+		}
 		for id, tokens := range sess {
 			b := base[id]
 			if d := tokens.output - b.output; d > 0 {

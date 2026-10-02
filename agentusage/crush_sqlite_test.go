@@ -711,3 +711,44 @@ func TestStoreReadLatchTableIsCapped(t *testing.T) {
 		t.Error("the oldest key survived the cap; eviction must drop from the front of the order")
 	}
 }
+
+// A store that first reads after attach must not have its whole history
+// credited to this attach. crushDBPath resolves the database by walking up from
+// the working directory, so a project that runs crush for the first time while
+// the dashboard is up gains a store the attach baseline never saw. The
+// baseline holds no entry for its path, so every counter in it becomes a delta
+// against zero and the whole session lands on this attach as growth.
+//
+// The session is dated before the attach on purpose. That is the case the fix
+// has to hold, and the one that would still fail if the guard only snapshotted
+// whatever the path was missing: the since filter already drops a row the store
+// wrote before the watcher attached, so this row cannot be excluded by age. It
+// reaches the count because its path is new.
+func TestCrushStoreAppearingAfterAttachIsNotCountedAsGrowth(t *testing.T) {
+	dir := t.TempDir()
+	skipIfCrushAbove(t, dir)
+	start := time.Now()
+	w := Watch("crush", dir, start)
+	if w == nil {
+		t.Fatal("crush is readable in this build, so Watch must return a watcher")
+	}
+	// Nothing to read at attach: no store exists yet.
+	if got := w.Poll(); !got.Empty() {
+		t.Fatalf("attached to a tree with no store but read %+v", got)
+	}
+	// crush runs for the first time in this project and writes a session whose
+	// counters predate the attach. The store is new to this watcher, so none of
+	// it can have been spent since it attached.
+	crushDB(t, dir, map[string][3]int64{
+		"old": {5000, 8000, start.Add(-time.Hour).UnixMilli()},
+	})
+	if got := w.Poll(); !got.Empty() {
+		t.Fatalf("a store that appeared after attach counted its whole history: %+v", got)
+	}
+	// Growth written after attach is still counted, once the store is known.
+	putCrushSession(t, dir, "old", 5100, 8300, time.Now().Add(time.Second).UnixMilli())
+	got := w.Poll()
+	if got.Output != 100 || got.Input != 300 {
+		t.Fatalf("output %d input %d, want the 100 output and 300 prompt tokens written after attach", got.Output, got.Input)
+	}
+}
