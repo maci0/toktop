@@ -99,11 +99,68 @@ installed binary with it:
 | RPO for the audit log | every line not yet captured wherever stderr is pointed, which on a terminal is all of them: toktop opens no log file, so a run whose stderr is a TTY leaves no record at all. Nothing is recovered and nothing can be, since the log is not toktop's file to copy back. The cost of losing it is the diagnosis, not the data: the lines that report an engine going down, a store backup that could not be written, a store recovered from its copy and a rename that could not be made durable are the only record that any of those happened, and a store that is intact has nothing to restore. A channel that refuses a line is reported rather than left silent: every line `slog` discards, which is all of them, is counted against the one counter the process's stderr has (`stderrLoss`), and the count is written as one line of its own on the next line that channel accepts, whatever subsystem wrote it, naming the reason it refused, so a full disk or a closed redirect cannot read as a run that had nothing to report (`LossHandler`, `internal/logcfg/logcfg.go`). A run that never writes another line reports nothing, and the loss is then indistinguishable from a quiet run: the ceiling of a log whose only sink is the channel that failed. Redirect stderr to a file to keep them (`toktop 2>>toktop.log`), which is the operator's half the same way backing up the config directory is. |
 | RTO for the audit log | nothing to restore, so it is not a recovery step: the questions it answered are re-answered by the run itself, since the collector re-reports an engine that is still down and the store check re-reports a copy that is still missing. |
 | RPO for agent events posted to `--ingest` | everything acknowledged but not yet outlived, which is every event the run held: the feed is process memory, so a quit, an update re-exec or a crash costs the whole feed and nothing recovers it (`RecordAgent`, `core.AgentHistoryLen`). The RTO is the sender's own, since only the sender holds a copy. |
-| RPO for pinned host keys | zero, provided the pin store is copied with its directory. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next run: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
+| RPO for pinned host keys | zero, provided the store's directory is copied out of the failure domain it shares with its own copies ([Backing the store up](#backing-the-store-up)); against the copies beside the store it is whatever the last write did not refresh. A store that loses its last write costs the pins added since the copy, and the copy is a write behind whenever a write reported that it could not refresh it: the store is durable at that point, so the failure is a warning naming the path, not an error (`writeKnownHosts`). A copy that stayed behind stays behind only until the next run: `checkStoreCopy` finds a copy that is missing, damaged, or older than the store, rewrites it from the store, and logs that it did, so the gap closes itself instead of waiting to be noticed. |
 | RTO for the pin store | seconds: it is one text file, restored by copying it back. Nothing to replay, reconcile or rebuild. |
 | RTO for a lost install | one download from the release page. There is no install state to recover. |
 | RPO for a bad release | the installed binary, and only the binary: it is the one file an update replaces. The pin store is a file beside it, not a record inside it, so no pin is lost with a bad release. The release page is the other copy, and it is not the only one: the tag rebuilds the same bytes ([Rebuilding a release instead of downloading it](#rebuilding-a-release-instead-of-downloading-it)). |
 | What a lost pin store actually costs | a forced re-trust, not a dashboard outage, and that happens whenever the store is gone, because deleting it is how a host is re-pinned on purpose. The copies beside it are read back only where a write did not finish: a leftover staging file or a displaced copy beside the store is the evidence (`interruptedWrite`), and without one the store is treated as holding no pins, so the next connect accepts whatever key that host presents. Losing the store mid-write therefore costs nothing, while a store removed by hand drops the protection against a key change as well as against a first-contact interception, and that is the price of the re-pin gesture. It is also why the read path treats a store it cannot trust as an error rather than as "nothing pinned". |
+
+## Backing the store up
+
+The copies beside the store are not the backup the RPO table prices. They sit
+in the same directory, under the same credential, and are removed by whatever
+removes that directory, so they cover a store that is damaged, emptied or
+overwritten and nothing else. What survives the losses they cannot — a lost
+home directory, a replaced machine, a compromised account — is a copy the
+operator put somewhere else. That copy is the only backup this project has, and
+making it is a step outside toktop.
+
+Take it whenever a host is pinned, which is the first connect to each one, so
+copying on a schedule that outlives a pin leaves the gap the restore then closes
+by hand. Copy the whole directory rather than the store: the copies are what a
+restore reads (`known_hosts.bak`, `known_hosts.displaced`), so an archive
+holding only `known_hosts` is a copy of the one file its neighbours already
+cover. `known_hosts.lock` is a lock a running toktop holds, and one copied out
+of a live directory is stale the moment it lands.
+
+```sh
+store=~/.config/toktop        # or $XDG_CONFIG_HOME/toktop
+tar -czf "$HOME/toktop-store-$(date +%F).tgz" -C "$(dirname "$store")" toktop
+```
+
+Put the archive where the same credential cannot delete it from, since a
+credential holding the store holds this copy too: another machine, another
+account, or removable media that is not the home directory. A copy kept beside
+the store protects against nothing the copies beside the store do not already.
+
+Verify the archive, because a backup that was never restored is a hypothesis.
+`tar -tzf` lists what it holds, and the store's own check is the one
+[verifying a restore](#verifying-a-restore) uses:
+
+```sh
+archive="$HOME/toktop-store-$(date +%F).tgz"
+tar -tzf "$archive"                              # names toktop/known_hosts
+tmp=$(mktemp -d) && tar -xzf "$archive" -C "$tmp" \
+  && ssh-keygen -l -f "$tmp/toktop/known_hosts"; rm -rf "$tmp"
+```
+
+The fingerprints it prints are the pins the operator had when the copy was
+taken. Compare them against what each host presents today: a host rebuilt in
+between presents a different one, and that is the host to judge by hand rather
+than to overwrite a pin for.
+
+To put the directory back after a loss, unpack the archive where the store
+lives and let the next run settle it:
+
+```sh
+tar -xzf toktop-store-<date>.tgz -C "$(dirname "$store")"
+toktop --version    # any run reaches the store's startup pass
+```
+
+The store comes back with the marks a killed write left beside it, so the next
+run reads a restore rather than a loss and settles it: `settleOperatorRestore`
+spends the marks and brings the copy current, and says both on the audit log
+([Restoring the pin store](#restoring-the-pin-store)).
 
 ## Restoring the pin store
 
@@ -492,11 +549,14 @@ deployment has to be made from a checkout rather than from a note.
   anything that removes the config directory. The copies cover a store that
   is damaged, emptied, or overwritten by another tool; they do not cover a
   lost home directory. Backing the directory up is the operator's half, and
-  is the only backup step in this project.
+  is the only backup step in this project:
+  [Backing the store up](#backing-the-store-up) is it, what it copies, where
+  it has to go, and how to check that the archive it made can be read back.
 - Both copies are written under the same user credential as the store.
   A credential that can delete the store can delete the copy, so a backup
   under a different account or a different medium is the only thing that
-  survives a compromised account.
+  survives a compromised account. The operator's copy has to be one of those,
+  not a fourth file in the same directory.
 - The audit log shares whatever failure domain stderr points into, and toktop
   does not create or protect it: on a terminal it is in the terminal's, and a
   file the operator redirected it into is under the same credential as the
