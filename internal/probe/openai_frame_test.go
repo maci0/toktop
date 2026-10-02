@@ -2,8 +2,6 @@ package probe
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
 	"testing"
 )
 
@@ -43,17 +41,4 @@ func TestOpenAIFrameShapes(t *testing.T) {
 			}
 		})
 	}
-}
-
-// feedFrames returns the body of an SSE stream carrying one data frame per
-// content chunk, then the terminating [DONE] frame.
-func feedFrames(chunks ...string) string {
-	var b strings.Builder
-	for _, c := range chunks {
-		b.WriteString(`data: {"choices":[{"delta":{"content":`)
-		b.WriteString(fmt.Sprintf("%q", c))
-		b.WriteString("}}]}\n\n")
-	}
-	b.WriteString("data: [DONE]\n\n")
-	return b.String()
 }
