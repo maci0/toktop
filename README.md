@@ -1022,7 +1022,7 @@ make test-pkg PKG=./internal/ui    # one package while iterating
 make test-pkg PKG=./internal/core RUN=TestSanitizeTextPreservesUTF8
 make test-pkg PKG=./agentusage     # both halves of the sqlite tag gate
 make test-pkg PKG=./internal/ui RACE=0   # faster loop, no race detector
-make install                    # install into PREFIX/bin (default ~/.local/bin)
+make install                    # install into PREFIX/bin (default ~/.local/bin, or %USERPROFILE%\.local\bin on windows)
 make uninstall                  # remove it again
 ```
 
@@ -1030,6 +1030,13 @@ make uninstall                  # remove it again
 `VERSION` says: `dev` unless it is set, which is what `--version` then reports
 and what `toktop update` replaces on the first run. A build that answers with a
 real version is `make install VERSION=x.y.z`.
+
+`PREFIX` is derived from the environment rather than named outright: `$HOME` on
+POSIX, `$USERPROFILE` on Windows (which leaves `HOME` unset), and `$HOME` first
+where both are set, so a Git Bash or MSYS2 shell keeps the path it had. With
+neither set — `make` under `sudo`, a systemd unit, a CI container — `PREFIX` is
+empty and both recipes refuse rather than creating `/.local/bin` as root; pass
+`PREFIX=<dir>` to install somewhere else.
 
 Cross-compiles (no cgo anywhere); `make test-dist` is the same flags the
 release uses (`-trimpath -buildvcs=false -mod=readonly -buildmode=pie`, plus

@@ -117,6 +117,15 @@ jobs:
       - name: the build matrix below is the Makefile's PLATFORMS
         if: runner.os == 'Linux'
         run: make check-ci-platforms
+      # PREFIX is derived from the environment rather than named outright, and
+      # the two variables it reads are not both set on every platform the
+      # matrix above builds for: windows names the home directory USERPROFILE
+      # and leaves HOME unset. The recipe answers that case here rather than in
+      # the windows job, which is where a broken default would otherwise first
+      # be noticed by an operator running `make install`.
+      - name: make install resolves a prefix on every platform PLATFORMS names (linux only)
+        if: runner.os == 'Linux'
+        run: make check-install-prefix
       # The fourth doc guard: a target added to CONTRIBUTING.md's table
       # without the '## ' comment is missing from `make help`, so the run that
       # is supposed to find it is the one that never learns the name.

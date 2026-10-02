@@ -1281,6 +1281,50 @@ check-ci-platforms: ## fail if the ci.yml build matrix does not match PLATFORMS
 		exit 1; \
 	fi
 
+# PREFIX is the one install input the tree derives from the environment rather
+# than naming outright, and the two variables it reads are not both set on
+# every platform this project builds for: Windows names the home directory
+# USERPROFILE and leaves HOME unset, so a default reading only $HOME expanded
+# to nothing there and `make install` refused with a message naming an unset
+# HOME the operator never had. That is breakage on a claimed, CI-tested
+# platform (windows/amd64 and windows/arm64 are in PLATFORMS, and windows-2022
+# runs the test matrix), and the default is one ?: line that reads the same on
+# a machine with both variables set, so nothing else would have caught it.
+#
+# The four cases are the ones the expansion can be in: a POSIX home, a Windows
+# one, both (Git Bash and MSYS2 set HOME too, and the POSIX spelling is the one
+# that has always been there), and neither (make under sudo, a systemd unit, a
+# CI container), which has to stay empty rather than becoming '/.local' and
+# scattering a user binary outside any prefix. Each case runs this same
+# Makefile's own prefix-probe target under a doctored environment rather than
+# re-spelling the expansion here, so the line under test is the line that
+# ships and a change to it cannot leave this recipe agreeing with a formula
+# nothing else uses.
+.PHONY: check-install-prefix
+check-install-prefix: ## fail if PREFIX resolves to no installable prefix on a platform PLATFORMS ships for
+	@fail=0; \
+	for c in posix windows both neither; do \
+		want=$$(case $$c in \
+			posix)   printf '/home/dev/.local' ;; \
+			windows) printf 'C:/Users/dev/.local' ;; \
+			both)    printf '/h/.local' ;; \
+			*)       printf '' ;; \
+		esac); \
+		have=$$(case $$c in \
+			posix)   env -u USERPROFILE HOME=/home/dev $(MAKE) --no-print-directory prefix-probe ;; \
+			windows) env -u HOME USERPROFILE='C:\Users\dev' $(MAKE) --no-print-directory prefix-probe ;; \
+			both)    env HOME=/h USERPROFILE='C:\Users\dev' $(MAKE) --no-print-directory prefix-probe ;; \
+			*)       env -u HOME -u USERPROFILE $(MAKE) --no-print-directory prefix-probe ;; \
+		esac); \
+		if [ "$$have" != "$$want" ]; then \
+			echo "make check-install-prefix: PREFIX with a $$c home is '$$have', want '$$want'," >&2; \
+			echo "  so 'make install' refuses on a platform PLATFORMS ships a binary for, or scatters the" >&2; \
+			echo "  binary outside any prefix; the default is the PREFIX line above, HOME then USERPROFILE" >&2; \
+			fail=1; \
+		fi; \
+	done; \
+	exit $$fail
+
 # Every merge gate in this repo is a step in a workflow, and a workflow is the
 # one file here no analyzer reads: gofmt, staticcheck, vet, biome, ruff, mypy
 # and black all look elsewhere. A YAML error there is worse than an unused
@@ -1733,6 +1777,7 @@ check: ## verify go.mod, gofmt -s formatting, vet, staticcheck, the completion a
 	@$(MAKE) --no-print-directory check-ci-tags
 	@$(MAKE) --no-print-directory check-ci-env
 	@$(MAKE) --no-print-directory check-ci-platforms
+	@$(MAKE) --no-print-directory check-install-prefix
 	@$(MAKE) --no-print-directory check-yaml
 	@$(MAKE) --no-print-directory check-help-docs
 	@$(MAKE) --no-print-directory check-site-records
@@ -2232,10 +2277,16 @@ repro-check-pair: ## repro-check over REPRO_PLATFORMS (what the PR gate runs)
 
 # XDG user bin on Linux; override on macOS so the binary lands on PATH
 # (PREFIX=/usr/local or PREFIX=$(brew --prefix)). Empty rather than '/.local'
-# when HOME is unset (make under sudo, a systemd unit, a CI container): a
+# when no home is named (make under sudo, a systemd unit, a CI container): a
 # recursive mkdir of '/.local/bin' then succeeds as root and scatters a user
 # binary outside any prefix. install refuses that instead.
-PREFIX ?= $(if $(HOME),$(HOME)/.local)
+#
+# Windows names the home directory USERPROFILE and does not set HOME, so
+# reading only $HOME left PREFIX empty there and every `make install` on a
+# Windows checkout fell through to the refusal above with a message about an
+# unset HOME the operator never had. Both are read, and the POSIX one first so
+# a developer with both set (Git Bash, MSYS2) keeps the path they had.
+PREFIX ?= $(if $(HOME),$(HOME)/.local,$(if $(USERPROFILE),$(subst \,/,$(USERPROFILE))/.local))
 
 # The name install writes. Windows resolves a command by its PATHEXT, so a
 # copy without .exe runs from Git Bash and from nowhere else; the artifact
@@ -2256,11 +2307,21 @@ endif
 # again.
 INSTALL_TMP = .toktop-install-
 
+# The reader check-install-prefix drives. A target of its own rather than a
+# line of that recipe, so the recipe can hand it a different HOME and
+# USERPROFILE and read the answer back. It prints PREFIX with no quoting and no
+# newline of its own, so what the recipe compares is exactly the string the
+# install recipe would create a directory under.
+.PHONY: prefix-probe
+prefix-probe:
+	@printf '%s' '$(PREFIX)'
+
 .PHONY: install
-install: build ## install into PREFIX/bin (default ~/.local/bin)
+install: build ## install into PREFIX/bin (default ~/.local/bin, or %USERPROFILE%/.local/bin on windows)
 	@if [ -z "$(PREFIX)" ] || [ "$(PREFIX)" = "/" ]; then \
 		echo "make install: PREFIX='$(PREFIX)' is not a directory to install into." >&2; \
-		echo "  HOME is unset, so ~/.local does not name one here; pass PREFIX=<dir>." >&2; \
+		echo "  no home directory is named (HOME on POSIX, USERPROFILE on windows), so ~/.local" >&2; \
+		echo "  does not resolve to one here; pass PREFIX=<dir>." >&2; \
 		exit 1; \
 	fi
 	mkdir -p "$(PREFIX)/bin"
@@ -2280,7 +2341,7 @@ install: build ## install into PREFIX/bin (default ~/.local/bin)
 # says so when there is nothing installed rather than reporting a clean
 # uninstall, so a mistyped PREFIX cannot read as a removal that happened.
 .PHONY: uninstall
-uninstall: ## remove the binary from PREFIX/bin (default ~/.local/bin)
+uninstall: ## remove the binary from PREFIX/bin (default ~/.local/bin, or %USERPROFILE%/.local/bin on windows)
 	@if [ -z "$(PREFIX)" ] || [ "$(PREFIX)" = "/" ]; then \
 		echo "make uninstall: PREFIX='$(PREFIX)' is not a directory to uninstall from." >&2; \
 		exit 1; \

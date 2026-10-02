@@ -238,7 +238,7 @@ in day-to-day work:
 | `make test-asan` | all tests again under `-asan` (both sqlite tag halves); the go command refuses `-race -asan` together, so this is a second run and not a flag on `make test`. It skips `TestStaticFrameAllocBudget` by name, because an instrumented allocator makes an exact allocation count meaningless; `make test` still asserts that budget. Linux CI and `make ci` run it; it needs a C compiler and does not enter the edit-test loop |
 | `make test-pkg` | one package or test: `PKG=./internal/ui` `[RUN=TestName]` `[TESTTAGS=sqlite]` `[RACE=0]` |
 | `make cover` | coverage summary per package into `dist/` |
-| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + shellcheck plus zsh/fish parse over the completion scripts + shellcheck over the workflows' `run:` blocks + yamllint over `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-shell`, `check-workflow-shell`, `check-yaml`, `check-help-docs`, `check-changelog-structure`, `check-changelog-covers`) |
+| `make check` | go.mod tidy-diff + gofmt -s + staticcheck + vet + shellcheck plus zsh/fish parse over the completion scripts + shellcheck over the workflows' `run:` blocks + yamllint over `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` + the doc and CI guards (`check-test-flags`, `check-ci-tags`, `check-ci-env`, `check-ci-platforms`, `check-install-prefix`, `check-shell`, `check-workflow-shell`, `check-yaml`, `check-help-docs`, `check-changelog-structure`, `check-changelog-covers`) |
 | `make ci` | Go merge gates: tidy-diff, fmt, lint, vet, govulncheck, race tests, address-sanitized tests |
 | `make pr` | every PR merge gate except the OS matrix: `ci` + `site-lint` + `site-check` + `check-wrangler-doc` + `scripts-check` + `repro-check-pair` |
 | `make fmt` | rewrite files with gofmt -s |
@@ -260,6 +260,7 @@ in day-to-day work:
 | `make check-test-flags` | fail unless every `go test` line in the Makefile carries the zone tag, keeps `$(race_flag)` off the tag value, hands `-tags` one quoted argument, and keeps `-shuffle=on` (`make check` runs it) |
 | `make check-ci-env` | fail unless every workflow env block pins the build inputs the Makefile exports, name and value (`make check` runs it) |
 | `make check-ci-platforms` | fail unless the `ci.yml` build matrix and the Makefile's `PLATFORMS` are the same set (`make check` runs it) |
+| `make check-install-prefix` | fail unless `PREFIX` resolves to an installable prefix on every platform `PLATFORMS` ships a binary for: it reads `HOME` then `USERPROFILE`, and a Windows shell names the home directory with the second and leaves the first unset (`make check` runs it) |
 | `make check-yaml` | fail unless every workflow in `.github/workflows/`, `.github/dependabot.yml` and `docs/openapi.yaml` are valid YAML and pass the `.yamllint` rule set, at the `yamllint` pin in `scripts/requirements-dev.txt` (`make check` runs it) |
 | `make check-site-tools` | fail unless the site deploy path checks for `curl` before it takes the lock, since the `/health` poll both recipes end in is a curl the Makefile would otherwise take from the machine unnamed (`make check` runs it) |
 | `make check-shell` | fail unless `shellcheck` (at or above the Makefile's `SHELLCHECK_MIN`) clears the bash completion script and `zsh -n` / `fish --no-execute` parse the zsh and fish ones; all three are generated, so a copy kept beside the Go source cannot go stale (`make check` runs it, on the Linux CI leg) |
@@ -303,9 +304,10 @@ resolves a genuine collision, through the Cloudflare dashboard's deploy log.
 
 CI (`.github/workflows/ci.yml`) runs gofmt -s and `go mod tidy -diff` on
 Linux only, plus `make govulncheck` for both sqlite tag halves on Linux, and
-the Linux leg of the test job runs eleven of the `make check` guards
+the Linux leg of the test job runs twelve of the `make check` guards
 (`check-ci-tags`, `check-ci-env`, `check-test-flags`, `check-ci-platforms`,
-`check-help-docs`, `check-site-records`, `check-site-rollback-states`,
+`check-install-prefix`, `check-help-docs`, `check-site-records`,
+`check-site-rollback-states`,
 `check-site-tools`, `check-changelog-structure`, `check-changelog-covers`,
 `check-shell`). `check-workflow-shell` also runs there, and
 `check-yaml` runs in the

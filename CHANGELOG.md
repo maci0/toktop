@@ -13,6 +13,17 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Fixed
+
+- `make install` and `make uninstall` now work in a Windows shell. `PREFIX`
+  defaulted to `$HOME/.local`, and Windows names the home directory
+  `USERPROFILE` while leaving `HOME` unset, so the default expanded to nothing
+  and both recipes refused with a message about an unset `HOME` the operator
+  never had — on a platform the project ships `toktop.exe` for. `PREFIX` reads
+  `HOME` first and `USERPROFILE` second, so a Git Bash or MSYS2 shell keeps the
+  path it had, and the refusal now names the variable that was actually
+  missing. `make check-install-prefix` pins all four cases.
+
 ### Changed
 
 - The agent feed now says exactly what `POST /v1/events` accepts as the
