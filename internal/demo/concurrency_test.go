@@ -60,6 +60,15 @@ func TestConcurrentFramesProbesAndEvents(t *testing.T) {
 	// came. The first frame above needed no tick; every one after it does.
 	writing := make(chan struct{})
 	stepping := make(chan struct{})
+	// One step is fired before the writers begin. The first frame above came
+	// from the loop's own warm read, which needs no tick; every frame after
+	// it waits for the pacer. The writers can finish in microseconds, and the
+	// stepper's own tick is a millisecond away, so a fast run published
+	// nothing while the writers were in it and the assertion below failed on
+	// a run that never raced anything. Firing here puts a second frame in
+	// flight while the writers run, which is the overlap the check exists
+	// for, without depending on how loaded the box is.
+	pace.Fire(s.Now())
 	go func() {
 		defer close(stepping)
 		for {

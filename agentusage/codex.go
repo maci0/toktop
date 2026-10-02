@@ -58,10 +58,14 @@ func parseCodex(line []byte) (values, string, bool) {
 		if remain := satSub(total, out); remain > in {
 			in = remain
 		}
+		// total_tokens is the rollout's own context figure, so floorTotal
+		// applies as it does in every other adapter: a record carrying a
+		// total under the output beside it reports a context window smaller
+		// than the tokens just written, which no reading supports.
 		v := values{
 			output:   out,
 			thinking: think,
-			total:    total,
+			total:    floorTotal(total, out),
 			input:    in,
 		}
 		if !v.present() {

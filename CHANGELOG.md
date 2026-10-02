@@ -14,6 +14,20 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 ## [Unreleased]
 
 ### Fixed
+- codex's rollout no longer publishes a context window smaller than the output
+  beside it. The rule the earlier floor commit set is that the window a model
+  read cannot be smaller than what that turn wrote, and `parseCodex` was the one
+  reader left out of it: it took `total_tokens` from the rollout verbatim, so a
+  record carrying `{"output_tokens":5000,"total_tokens":100}` published a
+  context of 100 against an output of 5000, and every consumer of the sample
+  read the pair as a measurement. Because codex counters are cumulative the
+  two drift independently, so the window stays below the output across
+  readings even when no single record is inconsistent: `total_tokens` is the
+  largest context seen while the output keeps growing under it until a later
+  record raises it. `parseCodex` now applies the same shared `floorTotal` as
+  `parseQwen`, `parseDsh`, the generic JSONL walker and the opencode SQLite
+  reader. `TestCodexTotalIsFlooredAtOutput` in agentusage pins the floor, the
+  negative counter beside it and a real context that must survive it.
 - The audit log no longer loses a line in silence when stderr refuses one. The
   `log/slog` API discards whatever a handler returns, so a stderr that is full,
   redirected to a full disk, or a pipe whose reader had gone dropped every line

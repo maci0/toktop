@@ -409,7 +409,8 @@ func parseGeneric(line []byte) (values, string, bool) {
 	}
 	// A record carrying a total below the output it reports is as unsupported a
 	// reading as one that omits it, so both are floored the way foldCounters,
-	// parseQwen, parseDsh and the opencode sqlite reader floor theirs.
+	// parseQwen, parseCodex, parseDsh and the opencode sqlite reader floor
+	// theirs.
 	v := values{
 		output:   out,
 		thinking: counter(ev.Usage.Thinking),
