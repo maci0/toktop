@@ -28,36 +28,36 @@ func benchEnginesOnly() core.Snapshot {
 	return core.Snapshot{At: now, Providers: provs}
 }
 
-// BenchmarkTimedSeriesEndEnginesOnly measures the engines-only series build:
+// BenchmarkTimedSeriesEnginesOnly measures the engines-only series build:
 // a run watching engines with no agent feed never fills the dense grid, so the
 // series must not reserve room for it.
-func BenchmarkTimedSeriesEndEnginesOnly(b *testing.B) {
+func BenchmarkTimedSeriesEnginesOnly(b *testing.B) {
 	s := benchEnginesOnly()
 	b.ReportAllocs()
 	for b.Loop() {
-		tv, end := timedSeriesEnd(s, true, time.Second)
-		if len(tv) == 0 || end.IsZero() {
+		tv := timedSeries(s, true, time.Second)
+		if len(tv) == 0 || newestOf(tv).IsZero() {
 			b.Fatal("empty series")
 		}
 	}
 }
 
-// BenchmarkTimedSeriesEndWithAgents is the same series over a feed that does
+// BenchmarkTimedSeriesWithAgents is the same series over a feed that does
 // fill the grid, so the reservation still has to cover it.
-func BenchmarkTimedSeriesEndWithAgents(b *testing.B) {
+func BenchmarkTimedSeriesWithAgents(b *testing.B) {
 	s := benchEnginesOnly()
 	now := time.Unix(1789581724, 0)
 	s.Agents = make([]core.AgentEvent, core.AgentHistoryLen)
 	for i := range s.Agents {
 		s.Agents[i] = core.AgentEvent{
-			At: now.Add(time.Duration(i) * time.Second),
+			At:    now.Add(time.Duration(i) * time.Second),
 			Agent: "claude", OutputTokens: int64(20 + i%97), PromptTokens: int64(100 + i),
 		}
 	}
 	b.ReportAllocs()
 	for b.Loop() {
-		tv, end := timedSeriesEnd(s, true, time.Second)
-		if len(tv) == 0 || end.IsZero() {
+		tv := timedSeries(s, true, time.Second)
+		if len(tv) == 0 || newestOf(tv).IsZero() {
 			b.Fatal("empty series")
 		}
 	}

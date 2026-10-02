@@ -21,13 +21,13 @@ func agentEvents(end time.Time, n int) []core.AgentEvent {
 	return evs
 }
 
-// TestTimedSeriesReservesOnlyWhenTheGridFills pins the reservation rule
-// timedSeriesEnd sizes its slice against: room for the dense agent grid is
-// held only when the feed holds an event this direction counts that did not
-// go through an engine, because that is the only condition under which the
-// grid's columns are appended. A run watching engines alone reserves no grid,
-// so its series slice is exactly the engine samples.
-func TestTimedSeriesReservesOnlyWhenTheGridFills(t *testing.T) {
+// TestTimedSeriesReserveAndGrid pins both halves of the reservation rule
+// timedSeries works under. The slice is sized against a fixed room for the
+// dense agent grid (one entry per column) whatever the feed holds, because
+// the grid is HistoryLen wide regardless of how much of it fills; and the
+// grid's columns are appended only when agentDenseHist returns a nonzero one,
+// which is the condition hasAgentTokens used to test in a second pass.
+func TestTimedSeriesReserveAndGrid(t *testing.T) {
 	end := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	prov := core.ProviderSnapshot{
 		OutHist:   make([]float64, 4),
@@ -43,16 +43,17 @@ func TestTimedSeriesReservesOnlyWhenTheGridFills(t *testing.T) {
 	}
 	s := core.Snapshot{Providers: []core.ProviderSnapshot{prov}}
 
-	// Engines alone: neither direction reserves a grid.
-	tv, e := timedSeriesEnd(s, true, time.Second)
-	if e != end {
+	// Engines alone: the grid never fills, so nothing is appended, but the
+	// slice still holds the fixed grid reservation.
+	tv := timedSeries(s, true, time.Second)
+	if e := newestOf(tv); !e.Equal(end) {
 		t.Errorf("end = %v, want the newest engine stamp %v", e, end)
 	}
-	if got, want := cap(tv), len(prov.OutHist); got != want {
-		t.Errorf("engines-only series cap = %d, want %d: the agent grid was reserved for a run that never fills it", got, want)
+	if got, want := cap(tv), len(prov.OutHist)+core.HistoryLen; got != want {
+		t.Errorf("engines-only series cap = %d, want %d: the grid reservation is what the slice is sized against", got, want)
 	}
 	if got, want := len(tv), len(prov.OutHist); got != want {
-		t.Errorf("engines-only series len = %d, want %d", got, want)
+		t.Errorf("engines-only series len = %d, want %d: an unfilled grid appends nothing", got, want)
 	}
 
 	// A feed with unattributed tokens fills the grid, and both directions
@@ -60,8 +61,8 @@ func TestTimedSeriesReservesOnlyWhenTheGridFills(t *testing.T) {
 	withAgents := s
 	withAgents.Agents = agentEvents(end, 2)
 	for _, out := range []bool{true, false} {
-		tv, e := timedSeriesEnd(withAgents, out, time.Second)
-		if e != end {
+		tv := timedSeries(withAgents, out, time.Second)
+		if e := newestOf(tv); !e.Equal(end) {
 			t.Errorf("out=%v: end = %v, want %v", out, e, end)
 		}
 		if got, want := len(tv), len(prov.OutHist)+core.HistoryLen; got != want {
@@ -72,23 +73,28 @@ func TestTimedSeriesReservesOnlyWhenTheGridFills(t *testing.T) {
 		}
 	}
 
-	// Every event through an engine: no reservation, in either direction.
+	// Every event through an engine: the grid stays empty, so nothing is
+	// appended and the series is the engine samples alone.
 	viaEngine := s
 	viaEngine.Agents = agentEvents(end, 2)
 	for i := range viaEngine.Agents {
 		viaEngine.Agents[i].ViaEngine = "ollama"
 	}
 	for _, out := range []bool{true, false} {
-		if tv, _ := timedSeriesEnd(viaEngine, out, time.Second); cap(tv) != len(prov.OutHist) {
-			t.Errorf("out=%v: engine-attributed feed reserved cap %d, want %d", out, cap(tv), len(prov.OutHist))
+		if tv := timedSeries(viaEngine, out, time.Second); len(tv) != len(prov.OutHist) {
+			t.Errorf("out=%v: engine-attributed feed appended %d entries, want the %d engine samples",
+				out, len(tv), len(prov.OutHist))
 		}
 	}
 }
 
-// TestHasAgentTokensAgreesWithDenseHist pins the reservation helper to the
-// filter it stands in for: hasAgentTokens reports true exactly when
-// agentDenseHist returns a grid with a nonzero column.
-func TestHasAgentTokensAgreesWithDenseHist(t *testing.T) {
+// TestTimedSeriesAppendsGridExactlyWhenDenseHistIsNonzero pins the condition
+// timedSeries gates the grid append on: one entry per column of agentDenseHist
+// exactly when that grid holds a nonzero column, and none otherwise. That is
+// the rule hasAgentTokens used to answer in a second pass over the feed, and
+// a gate that disagreed with the grid would either append zeros the chart
+// draws as activity or drop real columns off the left of the series.
+func TestTimedSeriesAppendsGridExactlyWhenDenseHistIsNonzero(t *testing.T) {
 	end := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	feeds := map[string][]core.AgentEvent{
 		"empty":   nil,
@@ -107,6 +113,19 @@ func TestHasAgentTokensAgreesWithDenseHist(t *testing.T) {
 		PromptTokens: 7,
 	}}
 
+	prov := core.ProviderSnapshot{
+		OutHist:   make([]float64, 4),
+		OutStamps: make([]time.Time, 4),
+		InHist:    make([]float64, 4),
+		InStamps:  make([]time.Time, 4),
+	}
+	for i := range prov.OutHist {
+		prov.OutHist[i] = float64(i)
+		prov.OutStamps[i] = end.Add(-time.Duration(3-i) * time.Second)
+		prov.InHist[i] = float64(i)
+		prov.InStamps[i] = prov.OutStamps[i]
+	}
+
 	for name, feed := range feeds {
 		for _, out := range []bool{true, false} {
 			grid := agentDenseHist(feed, out, end, core.HistoryLen, time.Second)
@@ -116,8 +135,16 @@ func TestHasAgentTokensAgreesWithDenseHist(t *testing.T) {
 					nonzero = true
 				}
 			}
-			if got := hasAgentTokens(feed, out, end, core.HistoryLen, time.Second); got != nonzero {
-				t.Errorf("%s out=%v: hasAgentTokens = %v, grid nonzero = %v", name, out, got, nonzero)
+			s := core.Snapshot{Providers: []core.ProviderSnapshot{prov}, Agents: feed}
+			tv := timedSeries(s, out, time.Second)
+			got := len(tv) - len(prov.OutHist)
+			want := 0
+			if nonzero {
+				want = len(grid)
+			}
+			if got != want {
+				t.Errorf("%s out=%v: %d grid entries appended, want %d (grid nonzero = %v)",
+					name, out, got, want, nonzero)
 			}
 		}
 	}
