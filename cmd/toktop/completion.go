@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -99,8 +100,37 @@ a file wherever a completion belongs.
 	return err
 }
 
+// unknownFlagIn is the parse failure completion has instead of a FlagSet: it
+// parses no flags of its own, so a word shaped like one is the whole of the
+// failure. Only a word carrying the unknown-flag message is passed on, which
+// keeps a leftover that is not a flag (`toktop completion bash extra`) on the
+// unexpected-argument path below and lets a --help beside either one through
+// explicitHelpArg.
+func unknownFlagIn(args []string) error {
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") && !isHelpArg(a) && !isVersionArg(a) {
+			return errors.New(unknownFlagPrefix + strings.TrimPrefix(a, "-"))
+		}
+	}
+	return nil
+}
+
 // runCompletion implements `toktop completion <shell>`.
 func runCompletion(out io.Writer, args []string) int {
+	// An unknown flag does not swallow a --help or --version written beside
+	// it, the same rule the top-level command and update both apply and for
+	// the same reason: `toktop completion --help --bogus` printed the
+	// complaint where it now prints the screen that lists the flags.
+	// Only that one parse failure is answered; a leftover that is not a
+	// flag is still an unexpected argument, which is why the shell below is
+	// reached for anything else.
+	switch explicitHelpArg(args, unknownFlagIn(args)) {
+	case "help":
+		return outputStatus(completionUsage(out))
+	case "version":
+		_, err := fmt.Fprintln(out, "toktop", version)
+		return outputStatus(err)
+	}
 	if len(args) > 0 {
 		if isHelpArg(args[0]) {
 			if len(args) > 1 {

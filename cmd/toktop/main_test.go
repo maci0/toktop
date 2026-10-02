@@ -1657,6 +1657,80 @@ func TestTUIExitOnCanceledContext(t *testing.T) {
 	}
 }
 
+// An unknown flag stops the flag package before it reaches a --help written
+// later on the line, so `toktop --help --bogus` used to answer with the
+// complaint and exit 2 rather than with the screen it asked for. The screen is
+// what names every flag the command takes, so it is the better answer for a
+// reader who mistyped one word and also asked for help. The same rule holds on
+// all three commands, which is the point: three spellings of --help that
+// behaved three ways read as three features.
+func TestExplicitHelpBeatsUnknownFlag(t *testing.T) {
+	updateRun := func(w io.Writer, a []string) int {
+		return runUpdate(context.Background(), w, a)
+	}
+	commands := []struct {
+		name   string
+		run    func(io.Writer, []string) int
+		args   []string
+		wantOn string // required substring on stdout
+	}{
+		{"toktop update help", updateRun, []string{"--help", "--bogus"}, "toktop update -"},
+		{"toktop update version", updateRun, []string{"--version", "--bogus"}, "toktop "},
+		{"toktop completion help", runCompletion, []string{"--help", "--bogus"}, "toktop completion -"},
+		{"toktop completion version", runCompletion, []string{"--version", "--bogus"}, "toktop "},
+	}
+	for _, cmd := range commands {
+		t.Run(cmd.name, func(t *testing.T) {
+			var out bytes.Buffer
+			var code int
+			stderr := captureStderr(t, func() { code = cmd.run(&out, cmd.args) })
+			if code != 0 {
+				t.Fatalf("%s%v = %d, want 0", cmd.name, cmd.args, code)
+			}
+			if !strings.Contains(out.String(), cmd.wantOn) {
+				t.Fatalf("%s%v stdout = %q, want it to carry %q", cmd.name, cmd.args, out.String(), cmd.wantOn)
+			}
+			if stderr != "" {
+				t.Fatalf("%s%v wrote %q to stderr; a help request is answered, not explained", cmd.name, cmd.args, stderr)
+			}
+		})
+	}
+}
+
+// The top-level command answers through the pre-parse switch in runMain, which
+// is not reachable from a test in this package, so the scan it runs is
+// exercised on its own: an unknown flag plus a --help is a help request, the
+// same unknown flag alone is not, and a word that merely looks like a help flag
+// is an unknown flag like any other.
+func TestExplicitHelpArgScan(t *testing.T) {
+	unknown := func(name string) error { return errors.New(unknownFlagPrefix + name) }
+	for _, tt := range []struct {
+		name string
+		args []string
+		err  error
+		want string
+	}{
+		{"help before an unknown flag", []string{"--help", "--bogus"}, unknown("bogus"), "help"},
+		{"help after an unknown flag", []string{"--bogus", "--help"}, unknown("bogus"), "help"},
+		{"short help", []string{"-h", "--bogus"}, unknown("bogus"), "help"},
+		{"version beside an unknown flag", []string{"--version", "--bogus"}, unknown("bogus"), "version"},
+		{"help wins over a later version", []string{"--bogus", "--help", "--version"}, unknown("bogus"), "help"},
+		{"no help flag", []string{"--bogus"}, unknown("bogus"), ""},
+		{"no parse error", []string{"--help"}, nil, ""},
+		{"a bad value is not answered", []string{"--help", "--interval", "abc"}, errors.New(`invalid value "abc" for flag -interval: parse error`), ""},
+		{"a missing argument is not answered", []string{"--help", "--interval"}, errors.New("flag needs an argument: -interval"), ""},
+		{"a lookalike is not a help flag", []string{"--helpful"}, unknown("helpful"), ""},
+		{"an eq-suffixed version is not a help flag", []string{"--version=2"}, unknown("version=2"), ""},
+		{"a bundled short flag is not a help flag", []string{"-hv"}, unknown("hv"), ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := explicitHelpArg(tt.args, tt.err); got != tt.want {
+				t.Fatalf("explicitHelpArg(%v, %v) = %q, want %q", tt.args, tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestInformationalCommandsRejectExtraArguments(t *testing.T) {
 	for _, tt := range []struct {
 		name string

@@ -76,8 +76,19 @@ func runMain() int {
 	// The flag package reports a bad flag in its own single-dash spelling;
 	// flagParseError restores the long form so the error names the flag as
 	// the help screen and the README document it.
-	if err := topFS.Parse(os.Args[1:]); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %s%s%s\n", flagParseError(err), valueHint(err), subcommandFlagHint(err))
+	parseErr := topFS.Parse(os.Args[1:])
+	// An unknown flag does not swallow a --help or --version written beside
+	// it: `toktop --help --bogus` printed the screen and exited 0 where it
+	// had printed the complaint and exited 2. Only that one failure is
+	// answered, so a bad value or a missing argument still reports itself.
+	switch explicitHelpArg(os.Args[1:], parseErr) {
+	case "help":
+		return runHelp(os.Stdout, nil)
+	case "version":
+		return runVersion(os.Stdout, nil)
+	}
+	if parseErr != nil {
+		fmt.Fprintf(os.Stderr, "toktop: %s%s%s\n", flagParseError(parseErr), valueHint(parseErr), subcommandFlagHint(parseErr))
 		usage(os.Stderr)
 		return 2
 	}

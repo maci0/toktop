@@ -89,11 +89,25 @@ func updateFlagSet() (*flag.FlagSet, *updateOpts) {
 // over a running image, so the dashboard exits and asks you to start it again.
 func runUpdate(ctx context.Context, out io.Writer, args []string) int {
 	fs, opts := updateFlagSet()
-	if err := fs.Parse(args); err != nil {
+	parseErr := fs.Parse(args)
+	// An unknown flag does not swallow a --help or --version written beside
+	// it, the same rule the top-level command applies and for the same
+	// reason: `toktop update --check --bogus --help` is a line somebody
+	// writes while working out the spelling of a flag, and the screen it
+	// asks for is what lists the spellings. Only that one parse failure is
+	// answered; a bad value and a missing argument still report themselves.
+	switch explicitHelpArg(args, parseErr) {
+	case "help":
+		return outputStatus(updateUsage(out, fs))
+	case "version":
+		_, err := fmt.Fprintln(out, "toktop", version)
+		return outputStatus(err)
+	}
+	if parseErr != nil {
 		// Reported here rather than by the package, so the message and the
 		// usage screen under it both use the long flag spelling the help
 		// screen documents.
-		fmt.Fprintf(os.Stderr, "toktop update: %s\n", flagParseError(err))
+		fmt.Fprintf(os.Stderr, "toktop update: %s\n", flagParseError(parseErr))
 		updateUsage(os.Stderr, fs)
 		return 2
 	}

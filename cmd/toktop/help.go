@@ -252,9 +252,8 @@ func frameEnvHelp() string {
 // the reader was never shown and that is not the one accepted elsewhere.
 func flagParseError(err error) string {
 	msg := err.Error()
-	const unknownFlag = "flag provided but not defined: "
-	if name, rest, ok := strings.Cut(msg, unknownFlag); ok && name == "" {
-		return unknownFlag + longFlag(rest)
+	if name, rest, ok := strings.Cut(msg, unknownFlagPrefix); ok && name == "" {
+		return unknownFlagPrefix + longFlag(rest)
 	}
 	// The package names the flag two ways: "for flag -x" for a value that
 	// failed to parse, and a bare "for -x" for a boolean given a non-boolean.
@@ -289,8 +288,7 @@ var subcommandFlags = map[string]string{
 // that would work; a name no subcommand declares gets nothing, as a misplaced
 // word that names no command does.
 func subcommandFlagHint(err error) string {
-	const unknownFlag = "flag provided but not defined: "
-	name, ok := strings.CutPrefix(err.Error(), unknownFlag)
+	name, ok := strings.CutPrefix(err.Error(), unknownFlagPrefix)
 	if !ok {
 		return ""
 	}
@@ -367,6 +365,50 @@ var versionFlags = []string{"--version", "-version", "-v"}
 
 // isVersionArg reports whether arg is one of the spellings of --version.
 func isVersionArg(arg string) bool { return slices.Contains(versionFlags, arg) }
+
+// explicitHelpArg reports the help or version flag named in args, and why a
+// line carrying one should not have failed to parse.
+//
+// The flag package stops at the first word it cannot parse, so a `--help`
+// written beside an unknown flag was never reached: `toktop --help --bogus`
+// answered "flag provided but not defined: --bogus" and exited 2, and so did
+// `toktop --bogus --help`. A reader who asked for help and got the complaint
+// instead has to work out which word they mistyped before they learn they had
+// asked the right thing, and the screen they asked for is what names every flag
+// the command takes. So an unknown flag is answered with the screen.
+//
+// A leftover that is not a flag is left alone: `toktop update --help extra`
+// is a usage error about a word that should not be there, and the help flag
+// beside it does not make the word right. Only the parse failure the package
+// raised is answered, so every other check -- a bad value, a missing argument,
+// an unusable address -- still reports itself.
+//
+// The first such flag wins, so `--bogus --help --version` is a help request:
+// the flags were written left to right and the first of the two is the one the
+// reader reached for. A word that merely looks like one is not a match:
+// "--helpful", "--version=2" and "-hv" are unknown flags in their own right
+// and are named back at the reader.
+func explicitHelpArg(args []string, parseErr error) string {
+	if parseErr == nil || !strings.Contains(parseErr.Error(), unknownFlagPrefix) {
+		return ""
+	}
+	for _, a := range args {
+		if isHelpArg(a) {
+			return "help"
+		}
+		if isVersionArg(a) {
+			return "version"
+		}
+	}
+	return ""
+}
+
+// unknownFlagPrefix is the flag package's message for a flag it does not
+// define. It is spelled once because three places compare against it:
+// flagParseError rewrites it into the long spelling, subcommandFlagHint points
+// the flag at the subcommand that owns it, and explicitHelpArg lets a --help
+// beside one of these failures answer with the screen instead of the complaint.
+const unknownFlagPrefix = "flag provided but not defined: "
 
 // runHelp implements `toktop help [topic]`. Unknown topics are a usage error
 // so a typo does not dump the top-level screen and look like success. A topic
