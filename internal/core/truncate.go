@@ -11,6 +11,12 @@ import (
 	"golang.org/x/text/unicode/norm"
 )
 
+// ZWJ is the joiner an emoji ZWJ sequence is built from. It is kept by
+// [SanitizeText] precisely so those sequences survive as one cluster, which
+// makes it the one character a cut can strand: it joins what is on either
+// side, so a joiner with nothing on one side of it has lost its partner.
+const ZWJ = "\u200D"
+
 // TruncateClusters caps s at n grapheme clusters, cutting only between
 // clusters. A grapheme cluster is one user-perceived character: a base letter
 // with its combining marks, an emoji ZWJ sequence, a flag built from two
@@ -18,14 +24,17 @@ import (
 // zero-width joiner, half a flag), so length caps on retained text must move
 // in whole clusters even though they are counted in code points.
 //
-// The result therefore never holds more than n characters and never ends
-// mid-character. n <= 0 yields "".
+// A cluster boundary is not always far enough back to avoid that garbage: a
+// base letter with a trailing joiner is one cluster to uniseg and the emoji
+// that joiner points at is the next, so capping at one cluster leaves the
+// letter and an unpaired joiner. The joiners a cut strands are dropped, so
+// the result never ends mid-character. n <= 0 yields "".
 func TruncateClusters(s string, n int) string {
 	if n <= 0 {
 		return ""
 	}
 	if uniseg.GraphemeClusterCount(s) <= n {
-		return s
+		return s // fits whole: a trailing joiner still has its partner
 	}
 	var b strings.Builder
 	state := -1
@@ -34,7 +43,7 @@ func TruncateClusters(s string, n int) string {
 		cluster, s, _, state = uniseg.FirstGraphemeClusterInString(s, state)
 		b.WriteString(cluster)
 	}
-	return b.String()
+	return strings.TrimRight(b.String(), ZWJ)
 }
 
 // TailClusters keeps the last n grapheme clusters of s, dropping whole
@@ -44,8 +53,9 @@ func TruncateClusters(s string, n int) string {
 // a byte offset lands inside a multi-byte sequence, and trimming the partial
 // rune that leaves still lands inside a grapheme: an "e" whose U+0301
 // combining acute fell on the wrong side prints as an unaccented letter, and
-// a family emoji cut before its last element prints as a bare person. n <= 0
-// yields "".
+// a family emoji cut before its last element prints as a bare person. A cut
+// that strands a ZWJ, at either end, is dropped for the reason
+// TruncateClusters states. n <= 0 yields "".
 func TailClusters(s string, n int) string {
 	if n <= 0 {
 		return ""
@@ -58,7 +68,11 @@ func TailClusters(s string, n int) string {
 	for ; drop > 0 && s != ""; drop-- {
 		_, s, _, state = uniseg.FirstGraphemeClusterInString(s, state)
 	}
-	return s
+	// The joiner a drop stranded at the head is the same loss TruncateClusters
+	// guards, from the other end: a leading joiner stands for a character that
+	// was not kept, and survives every fold downstream as a mark no reader
+	// can name.
+	return strings.TrimLeft(s, ZWJ)
 }
 
 // ClampField composes s to NFC and caps it at n grapheme clusters, cutting
