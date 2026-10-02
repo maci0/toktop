@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"unicode/utf8"
 
 	"github.com/maci0/toktop/internal/core"
 	"golang.org/x/text/unicode/norm"
@@ -474,41 +473,50 @@ func validTargetField(s string) error {
 // a '*' that is not a wildcard, so only the two wildcards below are
 // special.
 //
-// '?' consumes one character, not one byte: a host name is UTF-8, so
-// `Host cafe?` has to match "café" rather than stop inside its last rune
-// and report no match. On an ill-formed name there is no character to take,
-// so the byte stands in and the match is decided on the bytes that arrived.
+// Both wildcards consume one character, not one byte: a host name is UTF-8,
+// so `Host cafe?` has to match "café" rather than stop inside its last rune
+// and report no match. The star's backtrack has to move by a character for
+// the same reason. Advancing it by a byte slides the wildcard into the middle
+// of a rune, where the byte compare reads a continuation byte (0x80-0xBF)
+// that no ASCII pattern byte equals, so the star can never resume past the
+// rune it is stuck in: `Host a*a*` reported no match for "aa*é", and an
+// ssh_config block written for an accented host silently stopped applying,
+// leaving the dial on the default port with the default key. On an ill-formed
+// name there is no character to take, so the byte stands in and the match is
+// decided on the bytes that arrived.
 func patternMatch(pat, s string) bool {
+	p := []rune(pat)
+	t := []rune(s)
 	pIdx, sIdx := 0, 0
 	starIdx := -1
 	sTmpIdx := -1
 
-	for sIdx < len(s) {
-		if pIdx < len(pat) && pat[pIdx] == '?' {
-			_, size := utf8.DecodeRuneInString(s[sIdx:])
-			pIdx++
-			sIdx += size
-		} else if pIdx < len(pat) && pat[pIdx] == s[sIdx] {
+	for sIdx < len(t) {
+		switch {
+		case pIdx < len(p) && p[pIdx] == '?':
 			pIdx++
 			sIdx++
-		} else if pIdx < len(pat) && pat[pIdx] == '*' {
+		case pIdx < len(p) && p[pIdx] == '*':
 			starIdx = pIdx
 			sTmpIdx = sIdx
 			pIdx++
-		} else if starIdx != -1 {
+		case pIdx < len(p) && p[pIdx] == t[sIdx]:
+			pIdx++
+			sIdx++
+		case starIdx != -1:
 			pIdx = starIdx + 1
 			sTmpIdx++
 			sIdx = sTmpIdx
-		} else {
+		default:
 			return false
 		}
 	}
 
-	for pIdx < len(pat) && pat[pIdx] == '*' {
+	for pIdx < len(p) && p[pIdx] == '*' {
 		pIdx++
 	}
 
-	return pIdx == len(pat)
+	return pIdx == len(p)
 }
 
 // ResolveKeyFile expands a leading tilde in file and checks that the result

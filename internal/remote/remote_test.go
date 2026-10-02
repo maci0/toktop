@@ -467,6 +467,22 @@ func TestPatternMatch(t *testing.T) {
 		{"caf??", "cafés", true},
 		{"caf?", "caf", false},
 		{"caf?", "cafés", false},
+		// The star backtracks by a character too. Advancing it by a byte
+		// stranded it inside a rune, where no ASCII pattern byte equals a
+		// continuation byte, so the wildcard could never resume: a block
+		// whose wildcard has to span an accented character stopped matching
+		// the host it was written for.
+		{"a*a*", "aa*é", true},
+		{"box*", "boxé", true},
+		{"café*", "cafés", true},
+		{"*é*", "café-prod", true},
+		{"caf?*", "café", true},
+		{"*fé", "café", true},
+		{"*fé", "café-prod", false},
+		// An ill-formed name is still decided on the bytes that arrived:
+		// there is no character to take, so the byte stands in.
+		{"caf?", "caf\xff", true},
+		{"caf?", "caf\xff\xfe", false},
 	}
 	for _, c := range cases {
 		if got := patternMatch(c.pat, c.s); got != c.want {
