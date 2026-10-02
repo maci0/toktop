@@ -64,6 +64,14 @@ func probeOpenAI(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		if msg := sseErrorMessage(chunk.Error); msg != "" {
 			return 0, ttft, fmt.Errorf("engine error: %s", msg)
 		}
+		// A choice that declined, or one a content filter cut, is an engine
+		// error in the way the SSE error event above is: a 200 stream carrying
+		// an answer no model produced. Counted as content it read as the
+		// fastest generation the engine ever ran, and the pane would show that
+		// beside a real measurement with nothing to tell them apart.
+		if msg := refusalMessage(chunk); msg != "" {
+			return 0, ttft, fmt.Errorf("engine refused: %s", msg)
+		}
 		if chunk.Usage != nil && chunk.Usage.CompletionTokens > 0 {
 			reported = chunk.Usage.CompletionTokens
 		}
@@ -287,13 +295,19 @@ func openaiBody(model string, shape openaiShape) []byte {
 
 type openaiChunk struct {
 	Choices []struct {
-		Delta struct {
+		// FinishReason is the model's own account of how the generation ended,
+		// and Refusal its reason when it declined. Both are read by
+		// refusalMessage below and by nothing else.
+		FinishReason string `json:"finish_reason"`
+		Refusal      string `json:"refusal"`
+		Delta        struct {
 			Content          string `json:"content"`
 			Reasoning        string `json:"reasoning"`
 			ReasoningContent string `json:"reasoning_content"`
 		} `json:"delta"`
 		Message struct {
 			Content          string `json:"content"`
+			Refusal          string `json:"refusal"`
 			Reasoning        string `json:"reasoning"`
 			ReasoningContent string `json:"reasoning_content"`
 		} `json:"message"`
@@ -354,6 +368,13 @@ func readOpenAIJSON(body io.Reader) (tokens int, ttft time.Duration, err error) 
 	}
 	if msg := sseErrorMessage(chunk.Error); msg != "" {
 		return 0, 0, fmt.Errorf("engine error: %s", msg)
+	}
+	// The streaming path's refusal gate, on the same body: an engine that
+	// ignored stream:true answers a filtered or declined turn in one piece,
+	// and counting it as a completion reports a time to first token and a
+	// decode rate for text no model produced.
+	if msg := refusalMessage(chunk); msg != "" {
+		return 0, 0, fmt.Errorf("engine refused: %s", msg)
 	}
 	var reported, n int
 	if chunk.Usage != nil && chunk.Usage.CompletionTokens > 0 {

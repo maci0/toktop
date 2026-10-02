@@ -59,6 +59,7 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 			Response     string `json:"response"`
 			Thinking     string `json:"thinking"`
 			Done         bool   `json:"done"`
+			DoneReason   string `json:"done_reason"`
 			EvalCount    int    `json:"eval_count"`
 			EvalDuration int64  `json:"eval_duration"`
 			Error        string `json:"error"`
@@ -75,6 +76,16 @@ func probeOllama(ctx context.Context, r Request, s *core.ProbeSample) (tokens in
 		// them as content would report a green probe with invented throughput.
 		if chunk.Error != "" {
 			return 0, 0, ttft, fmt.Errorf("engine error: %s", core.Snippet([]byte(chunk.Error)))
+		}
+		// The same closed set the OpenAI dialect's finish_reason is read
+		// against, on the frame field that spells it here: a serving stack in
+		// front of the daemon can end a turn without decoding it, and the
+		// reason it says so is engine- and model-chosen text, so it takes the
+		// same bound and the same terminal-escape stripping. Checked on every
+		// frame rather than on the terminal one, because a stack that ends the
+		// exchange early need not mark the frame done.
+		if chunk.DoneReason != "" && refusedFinishReasons[chunk.DoneReason] {
+			return 0, 0, ttft, fmt.Errorf("engine refused: %s", core.Snippet([]byte(chunk.DoneReason)))
 		}
 		// Non-stream Ollama answers in one object with both response and
 		// done=true; counting only !Done frames treated that as empty.

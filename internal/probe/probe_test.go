@@ -160,6 +160,11 @@ func TestRunRejectsUsageWithoutContent(t *testing.T) {
 			kind:        core.KindVLLM,
 			contentType: "application/json",
 			body:        `{"choices":[{"message":{"content":null,"refusal":"declined"}}],"usage":{"completion_tokens":32}}`,
+			// A refusal the model states, not a missing answer: the engine
+			// said why it would not decode, and that is the sentence the
+			// operator needs instead of "empty stream" pointing at a model
+			// that never ran.
+			wantErr: "engine refused: declined",
 		},
 		{
 			name:        "ollama usage only",
