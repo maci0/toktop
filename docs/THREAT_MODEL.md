@@ -11,8 +11,11 @@ they live and what already stands in their way.
   64, `maxHeaderBytes` 16 KiB, `maxReportedName` 64, `ModelNameMax` 256,
   `maxLineBytes` 8 MiB, `maxDefinitionsBytes` 8 MiB, `jsonBodyMax` 4 MiB,
   `textCap` 8 MiB, `bearer.DrainCap` 64 KiB, `maxToolOutput` 1 MiB,
-  `maxAssetBytes` 256 MiB, `AgentHistoryLen` 512, `ProbeHistoryLen` 128,
+  `maxAssetBytes` 256 MiB, `maxChecksumsArchive` 1 MiB,
+  `maxChecksumsDecoded` 2 MiB, `maxChecksumsListing` 1 MiB,
+  `AgentHistoryLen` 512, `ProbeHistoryLen` 128,
   `maxSaneTokens` 1<<40, `SnippetCap` 256, `maxEvalDuration` 24h,
+  `maxEventSkew` 2m, `maxTurnMs` `math.MaxInt64`/ms,
   `zstdMaxFrameBytes` 8 MiB, `forwardAcceptRetryMax` 5 s), the self-update
   gate (`ValidateRepo`, `githubRedirect`, `TrustedReleaseURL`), the host
   guard (`loopbackHostGuard`), the HSTS header the site sets on every response,
@@ -27,6 +30,28 @@ they live and what already stands in their way.
   previously highest-ranked risks were re-read against
   `internal/ingest/middleware.go`, `internal/selfupdate/`, and
   `.github/workflows/release.yml` rather than carried from the last pass.
+- **Last drift sweep (same date, later pass):** every symbol in backticks was
+  resolved against the Go tree, the Worker, the Makefile and both workflows,
+  and every line citation was resolved against the file it names. Seven
+  citations had rotted and now name the symbol instead, which is the rule
+  the maintenance section already set for churning files: the subcommand
+  switch in `runMain` (cmd/toktop/main.go, cited as a line range that
+  17a393d2 moved), the `remote.ParseTargets` call, the `ParseTargets` dedup
+  key and `Forward`'s `c.forwards` reuse in M33, `closeListeners` in
+  entry point 6 (it lives in internal/remote/forward.go, not client.go, and
+  `watchClose` is the unattended-drop site `Close` is not), the
+  `attachLog` call sites in cmd/toktop/attach.go, and
+  `ModelNameMax`/`ModelName` in M34. Two names were
+  renamed by ac2f5f45 and the file still carried the old spellings:
+  `maxTurnMS` is `maxTurnMs` (M43) and the site's method-not-allowed template
+  is `notAllowedMessage` over `ALLOWED_METHODS`, not `methodNotAllowed`
+  (B9). The risk table is unchanged: no entry point, boundary, asset or rank
+  moved. Two claims the code had already contradicted were checked and hold
+  as written rather than being corrected: the checksums bounds are three
+  separate caps, not the two B5's DoS bullet names (M18's "2 MiB
+  decompressed" is the archive, with the listing itself held at 1 MiB), and
+  `maxTurnMs` bounds the turn span to what converts to a `time.Duration`
+  rather than to a wall-clock ceiling.
 - **Owner:** none assigned in this repository
 - **Review cadence:** none scheduled organizationally; re-run whenever an entry
   point, auth path, or bind default changes
@@ -259,8 +284,10 @@ What is worth stealing, corrupting, or denying:
 
 Every externally reachable input, with its code location:
 
-1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or
-   NDJSON stream), `GET`/`HEAD /healthz`
+1. **Ingest HTTP server** (on by default): `POST /v1/events` (single JSON or a
+   stream of them — NDJSON is the usual form, but the body is a JSON value
+   stream and any JSON whitespace separates two objects, so no separator is
+   required), `GET`/`HEAD /healthz`
    (internal/ingest/server.go; routes registered from the endpoint table at
    `ingestEndpoints`, endpoints.go, the 405 `Allow` header names `GET, HEAD` at
    the method guard). The health route is a
@@ -432,12 +459,15 @@ Every externally reachable input, with its code location:
    discover.go), see gap 8).
 6. **SSH loopback relays**: `Forward` binds one `127.0.0.1:0` listener per
    remote engine port and pipes accepted connections through ssh direct-tcpip
-   (internal/remote/client.go). The map of remote-port to local-port
+   (internal/remote/forward.go, where the listen is and the relays run;
+   `Client.Close` in client.go is the shutdown). The map of remote-port to
+   local-port
    is used as soon as Forward returns. Any process on the host that can
    connect to loopback can speak to those remote engines for the life of the
    session; listeners are closed on Client.Close and on unattended drop
-   (closeListeners :412-421, Close :423). Dial into the tunnel is bounded
-   (forwardDialTimeout 8s, client.go).
+   (`closeListeners`, called from `Close` and from `watchClose`, so a drop
+   nobody asked for reclaims them too). Dial into the tunnel is bounded
+   (forwardDialTimeout 8s, forward.go).
 7. **Engine HTTP polling** (outbound GET/POST): startup probe of well-known
    localhost ports (internal/provider/discover.go), process-derived
    candidates, operator-supplied `--add` URLs, and remote ports discovered
@@ -891,8 +921,9 @@ Deployment surface:
   bytes for the favicon, and the asset store's own bytes for the image paths, so
   no request value is interpolated into a page. The one caller-shaped string
   that reaches an HTML body is not in the page at all: it is the
-  `method not allowed; <path> accepts ...` text answer (`methodNotAllowed`, the
-  only template in the Worker taking `path` and `method`), which is served as
+  `method not allowed; <path> accepts ...` text answer (`notAllowedMessage`, the
+  only template in the Worker taking `path` and `method`, spelled off
+  `ALLOWED_METHODS`), which is served as
   `text/plain` through `ERROR_HEADERS` and never parsed as markup, so a caller
   who controls the path cannot turn it into script. Crossing out: the page now
   executes script in every visitor's browser, since commit 11c9820b added the
@@ -931,12 +962,21 @@ ports that are then exposed on local loopback (client.go).
   and are then refused as outside the window. The accepted grammar grew one
   stamp since that clamp was written: `parseLeapSecond` (event.go) takes the
   leap second 23:59:60 that `time.Parse` refuses, because a refused stamp ends
-  the NDJSON stream at that line rather than dropping one event, and lands it
+  the event stream at that object rather than dropping one event, and lands it
   on the following second. The date is not checked against a leap-second
   table, so an unauthenticated sender may put :60 on any date it names; what
   bounds that is the same two-minute clamp, which folds a stamp the sender
   invented onto arrival like any other. Mixed Latin+Cyrillic/Greek
-  agent names collapse to `anonymous` (event.go).
+  agent names collapse to `anonymous` (event.go). The body is a JSON value
+  stream rather than a line protocol: NDJSON is the usual sender form, but
+  any JSON whitespace separates two objects and none is required, so
+  `{...} {...}` is a two-event body exactly as two lines are
+  (`decodeStream`, internal/ingest/stream.go). A sender cannot therefore
+  smuggle a second event past a per-line bound by removing its newlines, and
+  a byte where a separator could go — a comma between objects — is a failure
+  after the objects before it were already recorded, not a truncation of the
+  body up to that point. The value each object contributes is bounded by the
+  body cap and the field clamps, not by how the body was split.
 - *Repudiation*: POST handlers emit remote, request id, status, accepted
   count, and stored count at info on success, warn for rejection/write
   errors, and error for
@@ -1243,13 +1283,13 @@ Controls verified in code, with the threats they cover:
 | M30: In-flight POST cap. `eventSlots` (post.go) is a process-wide counting channel of `maxInFlightEvents` 64 acquired before the body is read; a POST that cannot take a slot is refused immediately with 503 and one shared `Retry-After: 1` (RFC 9110 whole seconds) rather than queued. `handleHealth` reports the same degraded state with the same delay, so a probe that keeps saying `ok` while every POST is refused cannot be believed, and the crossing into that state and back out of it is audited once each by `auditHealth` (internal/ingest/health.go, on the `healthMu`/`healthDegraded` latch in server.go): on a box whose senders have all stopped posting, the refused POSTs that would otherwise carry the news never arrive. `stallReason` names which of the two 408 bounds broke (`no body bytes for 1m` vs `stream exceeded the 10m lifetime`), since the raw i/o timeout is identical for both and the two have opposite sender-side fixes | a local pile-up of stalled POST bodies holding an fd and goroutine each for a minute (B1 DoS); a sender or health probe inventing a shorter retry interval than the slots free (B1 DoS); a saturated endpoint whose only symptom is a 503 nobody reads (response readiness) | internal/ingest/post.go, `maxInFlightEvents`, `eventSlots`, `stallReason`, the shared `retryAfterSeconds`, and the 408 body in `handlePost`; internal/ingest/health.go, `handleHealth` and `auditHealth`; internal/ingest/server.go, `healthMu` and `healthDegraded`; tests internal/ingest/server_test.go, `TestHealthzAuditsSaturationCrossings` |
 | M31: `--ssh-key` is rejected when set to an empty value (exit 2). An empty value is indistinguishable from the flag never being given: the run silently fell back to `~/.ssh/config` and authenticated with a key the operator did not choose | silent identity substitution from a mistyped or quoted-empty flag (B4 disclosure) | cmd/toktop/validate.go, `validateSSHKeyFlag`; cmd/toktop/main.go, the call from `main` |
 | M32: `currentUser` validates `USER` and `USERNAME` through `validTargetField` before handing either to the transport and falls through to the passwd database when either is empty or would fail validation; the passwd name is passed through `basenameLogin` so a Windows `DOMAIN\user` yields `user`. `TOKTOP_SSH_PASSWORD` moved behind the exported `remote.PasswordEnv` constant so the startup warning that names an unusable variable spells it the way the code reads it | a hostile environment redirecting the ssh connection to a different account, or naming an invalid string the transport would reject later as a password failure (B6) | internal/remote/client.go, `currentUser`; internal/remote/target.go, `validTargetField`; internal/remote/auth.go, `PasswordEnv`; cmd/toktop/validate.go, the `remote.PasswordEnv` branch of `warnUnusedEnv` |
-| M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it. The macOS identity probe reads `system_profiler` through the same writer rather than `cmd.Output`, which grows an unbounded buffer for whatever the tool prints inside `identityTimeout` and is retried every `identityRetry` for as long as it fails | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick, or from a `system_profiler` that keeps printing across every identity retry (B5 DoS) | cmd/toktop/main.go, 149 (`remote.ParseTargets`); internal/remote/target.go, the dedup key at 104; internal/remote/forward.go, the listener reuse at 68-71; internal/gpu/run.go, `maxToolOutput` and the `cappedOutput` writer; internal/gpu/gpu_darwin.go, `appleGPUs` |
-| M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` 91, `ModelName` 104; call sites the `core.ModelName` folds in internal/provider/openai.go, internal/provider/ollama.go, and the one in internal/probe/model.go |
+| M33: A repeated `ssh://` target resolves to one attachment, keeping the first, keyed on ASCII-folded host plus user, port, and key file; `Forward` reuses the listener a port already has and returns the same local port instead of binding a second one that no map entry reaches. Vendor CLI stdout is capped at `maxToolOutput` 1 MiB through a `cappedOutput` writer that fails the write and reports a miss; over the cap the tool's read end closes under it. The macOS identity probe reads `system_profiler` through the same writer rather than `cmd.Output`, which grows an unbounded buffer for whatever the tool prints inside `identityTimeout` and is retried every `identityRetry` for as long as it fails | one host attached twice: a second ssh connection, a second set of loopback relays (widening B3b), and double-counted engine rows, since the UI keys rates by endpoint (B3b availability and dashboard integrity); unbounded memory growth from a wedged or hostile `nvidia-smi` on `$PATH`, sampled several times per tick, or from a `system_profiler` that keeps printing across every identity retry (B5 DoS) | cmd/toktop/main.go, the `remote.ParseTargets` call; internal/remote/target.go, the dedup key in `ParseTargets`; internal/remote/forward.go, the `c.forwards` listener reuse in `Forward`; internal/gpu/run.go, `maxToolOutput` and the `cappedOutput` writer; internal/gpu/gpu_darwin.go, `appleGPUs` |
+| M34: One bound for every engine-supplied model id: `core.ModelNameMax` 256 grapheme clusters, applied through `core.ModelName` (trim, sanitize, cap) at each place a listing or health response becomes a `ModelInfo`, and reused as the probe's own cap so a name that reached a snapshot is one the probe sends unchanged. A `/v1/models` answering with megabyte strings can no longer ride every snapshot, every probe body and the `--json` report at full length | a hostile engine using a single field to inflate memory, log, and report size on every poll (B2 DoS/disclosure) | internal/core/truncate.go, `ModelNameMax` and `ModelName`; call sites the `core.ModelName` folds in internal/provider/openai.go, internal/provider/ollama.go, and the one in internal/probe/model.go |
 | M35: Redaction in the log handler rather than at each call site. `logcfg.Logger` wraps stderr in `HomeHandler`, which folds `$HOME` to `~` in every record message, in every top-level string attribute, and in every top-level attribute whose value is an `error`, rewriting the error to its folded text (the `slog.KindAny` branch of `foldHomeAttrs`, internal/logcfg/logcfg.go). The error case is the one a stat, open or read failure arrives as: handed over as a value rather than as a string it used to be a kind the walk passed over untouched, so a line reading `"error", err` printed the account's own directory in full (`os.PathError.Error` names the file it failed on) on the very line that exists to explain the failure, while the path beside it folded to `~`. `Handle`'s changed-check now counts an error attribute so the fast path cannot forward a record the fold would have rewritten (the `slog.KindAny` branch of the pre-walk, and the comment on it). `logcfg.Field` sanitizes, collapses whitespace so a payload cannot split a line, and caps an attribute before it is logged. Every audit logger in the tree builds from that one function: the `logcfg.Logger()` call in `newServer` (internal/ingest/server.go), `var audit` in internal/remote/client.go, internal/gpu/run.go, internal/sysmon/sysmon.go and internal/procs/procs.go, `audit()` over `auditLog` in internal/collector/collector.go, `attachLog` and `configLog` in cmd/toktop/attach.go and cmd/toktop/config.go, the `SwapLogger`s in internal/selfreload/selfreload.go and internal/collector/collector.go, the direct `logcfg.Logger()` calls in cmd/toktop/main.go (ingest startup, the binary-changed restart, and `reportFailure`), and the agentusage package's own logger, handed over by `agentusage.SetLogger(logcfg.Logger())` at cmd/toktop/main.go. So the redaction reaches every subsystem's line, not only the six this row named before; the ssh client's own audit lines additionally run `RedactAddrs` over the text through `logcfg.RedactedField` (the ssh audit calls in client.go). Documented limits: group attributes are not walked and attributes bound with `WithAttrs` before the wrap are not reached, since the inner handler owns them; an error carried inside a group or a struct field is not walked either, since only the top level is; a destination the operator typed (an engine `addr`) is not a peer address, so nothing short of the home fold removes it, while an ssh `target` is stripped of its account at the call site before the fold ever sees it (M40); and the one payload that quotes text the process did not author, the recovered panic value and its stack, is folded at the call site instead (M46) rather than by the handler, since `logcfg.Field` alone would not reach the message | the operator pasting a diagnostic line into an issue and publishing the account name inside it, or the names of the hosts and gateways the run polls; a caller-shaped attribute splitting or padding an audit line; a failed stat or read printing the absolute path it failed on (B1/B4 disclosure, response readiness) | internal/logcfg/logcfg.go, `Logger`, `HomeHandler`, `Handle`, `foldHomeAttrs`, `Field`, `RedactedField`; internal/core/redact.go, `RedactHome`; tests internal/logcfg/logcfg_test.go, internal/selfreload/watch_audit_test.go |
 | M37: `make release` refuses a non-dev `VERSION` built from a tree that cannot be tied to the bytes shipped. `check-release-source` fails the cut when `git rev-parse HEAD` fails (a source export, where buildinfo has no commit to record and `SOURCE_DATE_EPOCH` falls back to 0, dating every archive member to the epoch) and, unless `ALLOW_DIRTY=1` is passed by name, when `git status --porcelain` is nonempty; a non-numeric `SOURCE_DATE_EPOCH` is refused too. `VERSION=dev` is exempt, since a dev build is a local artifact whose manifest records the tree honestly. This is the reproducibility half of the update channel's trust story: an artifact whose bytes do not match the commit the release page points at cannot be re-derived or audited by anyone who downloads it | a release cut from an uncommitted or non-git tree, shipping binaries that buildinfo names a commit for while the archive members carry something else, against the same trust anchor as summary risk 3 (B5 tampering/repudiation) | Makefile, `check-release-source`, a prerequisite of `release` |
 | M38: One watcher per agent store. `discover` stops the trackers of exited processes before it installs a follower onto a store a dead tracker was still tailing (`for _, t := range exited { w.stopOne(t) }` ahead of the install, internal/agentwatch/discover.go, the `exited` loop in `discover`), and `stopOne` reports the dead watcher's final growth first, so the follower's baseline is taken after the stopped tracker's last sample. Two watchers on one store each report the same growth under their own PID, and the collector's id window cannot merge two sample ids, so every token written in the overlap is counted twice | doubled token counts and a follower whose baseline overlaps the partition it replaced: a dashboard-integrity defect on a path a process exit alone triggers, with no hostile input (B7 tampering) | internal/agentwatch/discover.go, `discover`, and internal/agentwatch/agentwatch.go, `stopOne`; test internal/agentwatch/handover_test.go |
 | M39: Clocks and callbacks a running goroutine reads are taken under a lock rather than raced. The ingest server's `SetNow` writes `s.now` under `nowMu` and `instant` reads it under `RLock` (internal/ingest/server.go, `nowMu`, `SetNow`, `instant`); the agent watcher guards the two fields `SetNow` and `SetOnError` write with `clockMu`, because every tracker's own reader goroutine stamps events from that clock (internal/agentwatch/agentwatch.go, `clockMu` with `reportError` releasing the lock before calling a caller-supplied sink); `gpu.Sample` collects its per-tool results under a local mutex; the host-vitals sampler reads its clock through `instant`, which takes `clockMu` before calling the caller's function, so a `SetNow` swap cannot tear against a cache window being aged (internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`). Two more reads ride those same accessors rather than taking a fresh wall-clock reading: the collector's probe wave takes its instant once per wave (`c.instant()`, internal/collector/probe.go, `probeWave`), so the cadence floor, the 429/503 backoff and the wave gap are all compared against one value; and the ingest POST body's read deadlines are stamped from `s.instant()` (internal/ingest/post.go, `handlePost`), so a run that steps its own clock also steps the bounds it applies to a sender | a data race on the demo clock or the error sink between a handler goroutine and a tracker, which is a correctness and availability fault rather than a boundary crossing, recorded here because the ingest clock is set from demo mode and a race there lands in the same audit surface as B1; a rate limit compared against a clock the run does not step, which under a driver is no rate limit at all (B2 DoS) | internal/ingest/server.go, `nowMu`, `SetNow`, `instant`; internal/agentwatch/agentwatch.go, `clockMu`, `reportError`; internal/gpu/gpu.go, `Sample` (the local mutex around the per-tool results); internal/sysmon/sysmon.go, `clockMu`, `SetNow`, `instant`; internal/collector/probe.go, `probeWave`; internal/ingest/post.go, `handlePost`; tests internal/ingest/server_test.go, internal/agentwatch/concurrency_test.go |
-| M43: A JSONL record's own counters bound what it can put in a display. `maxTurnMS` caps a recorded turn length — grok's `apiDurationMs`/`elapsed_ms`, microagent's `elapsed_ms` — before it is multiplied out to nanoseconds, so a record naming a millisecond count near `MaxInt64` cannot wrap its span negative and report the turn's rate with the wrong sign. A session directory name that percent-decodes to a path carrying a NUL byte is refused rather than read as a working directory. agy's `last_conversations.json` winner is chosen by sorted workspace, not by Go's randomized map order, so one conversation named under two workspaces cannot change directory between polls. Pinned by `FuzzParseAgentLines` (every record parser, its negative-counter, determinism, and restatement-refusal invariants), `FuzzAgyIndex`, `FuzzGrokSessionCwd`, and `FuzzGrokSessionPath` | a hostile or corrupt session store steering attribution between workspaces, or reporting a rate of the wrong sign (B1 tampering) | agentusage/grok.go, `maxTurnMS` and `grokSessionCwd`; agentusage/microagent.go, `parseMicroagent`; agentusage/agy.go, `loadAgyLast`; tests agentusage/fuzz_test.go, agentusage/agy_grok_fuzz_test.go |
+| M43: A JSONL record's own counters bound what it can put in a display. `maxTurnMs` caps a recorded turn length — grok's `apiDurationMs`/`elapsed_ms`, microagent's `elapsed_ms` — before it is multiplied out to nanoseconds, so a record naming a millisecond count near `MaxInt64` cannot wrap its span negative and report the turn's rate with the wrong sign. A session directory name that percent-decodes to a path carrying a NUL byte is refused rather than read as a working directory. agy's `last_conversations.json` winner is chosen by sorted workspace, not by Go's randomized map order, so one conversation named under two workspaces cannot change directory between polls. Pinned by `FuzzParseAgentLines` (every record parser, its negative-counter, determinism, and restatement-refusal invariants), `FuzzAgyIndex`, `FuzzGrokSessionCwd`, and `FuzzGrokSessionPath` | a hostile or corrupt session store steering attribution between workspaces, or reporting a rate of the wrong sign (B1 tampering) | agentusage/grok.go, `maxTurnMs` and `grokSessionCwd`; agentusage/microagent.go, `parseMicroagent`; agentusage/agy.go, `loadAgyLast`; tests agentusage/fuzz_test.go, agentusage/agy_grok_fuzz_test.go |
 | M36: The release guard that refuses a version that is already published now runs `gh` with `GH_TOKEN` from the job token and admits only a 404. Before 9ef37e9 the guard was a bare `if gh release view ... ; then exit 1; fi`: with no token in the environment (the checkout writes no credentials) every call failed on auth, the non-zero status read as "not published", and the guard passed anything. A moved tag then re-runs the job and replaces binaries, checksums and SBOM under a version people have already verified | a repeated or hijacked release replacing artifacts an operator has a recorded checksum for, which is the same trust anchor as summary risk 3 (B5 tampering) | .github/workflows/release.yml, the `refuse a version that is already published` step |
 | M40: The ssh account name is dropped where an audit line is written. `Target.LogHost` returns the host alone and every audit call site uses it (every `audit` call in internal/remote/client.go and the four in cmd/toktop/attach.go), and `Target.RedactUser` folds `user@` out of the error text the transport prefixes with the target (target.go, at the connect, forward and connection-lost sites), so a `~/.ssh/config` User or the local login name does not reach the line either. `UserHost` remains what goes into the ssh argv and into the message on the operator's own terminal. The auth-chain lines are folded the same way: a default key path, the `$SSH_AUTH_SOCK` path and both error texts pass through `core.RedactHome`, and the socket through `logcfg.Field` | the account name of the ssh login reaching a line the operator pastes into a public issue, and a key or agent-socket path under `$HOME` naming the account in the same line (B4/response-readiness disclosure) | internal/remote/target.go, `LogHost`, `RedactUser`; internal/remote/auth.go, the `default ssh key unusable` and `ssh agent unreachable` lines in `authMethods`; tests internal/remote/audit_test.go |
 | M41: The agent definitions file is read under a cap and every diagnostic it produces is folded. `readCapped` reads through `io.LimitReader(f, maxDefinitionsBytes+1)` and refuses a longer file as `errDefinitionsTooLarge`, joined into `ErrInvalidDefinitions` so the caller contract (a missing file is nil, a file that exists but cannot be used is `ErrInvalidDefinitions`) is unchanged; `defsErr` renders every message through `core.RedactHome` and keeps the cause reachable through `errors.Is`/`errors.As` by wrapping rather than rewriting, because a `*fs.PathError` carries its own copy of the absolute path. The startup line that prints it folds again on the way out (cmd/toktop/main.go, the `loadAgentDefs` failure line) | an unbounded read of a file that is only nominally a few kilobytes (`json.Unmarshal` builds a second copy of everything it decodes), and the account name in the one diagnostic an operator pastes into an issue (B7/response-readiness disclosure, DoS) | agentusage/definitions.go, `maxDefinitionsBytes`, `readCapped`, `defsErr` and `redactedError`; cmd/toktop/main.go, the folded startup line; tests agentusage/definitions_test.go |
@@ -1458,7 +1498,7 @@ Other claims checked against code on this pass, all of which hold as written:
 - The ingest route registers GET and HEAD on `/healthz`
   (internal/ingest/endpoints.go, the `ingestEndpoints` table and the 405 `Allow`
   header written by the shared method guard); the `help` and `version` subcommands take arbitrary
-  trailing arguments (cmd/toktop/main.go, 55-76).
+  trailing arguments (cmd/toktop/main.go, the subcommand switch in `runMain`).
 - `XDG_CONFIG_HOME` and `XDG_DATA_HOME` are honored only when absolute. A
   relative `XDG_CONFIG_HOME` would write the known_hosts store under the
   working directory, where a later run from another directory would not find
@@ -1826,10 +1866,10 @@ Recorded as threats with locations; fixes do not happen in this document:
     unreadable is distinguishable from one that is idle rather than reading
     as zero usage.
   - the `--add` attach path (`var attachLog = logcfg.Logger`,
-    cmd/toktop/attach.go, 28): a refused bearer and an unrecognized endpoint
-    (`:39`, `:45`), an ssh target that was not attached and one that was (`:70`,
-    `:77`), a remote port that could not be forwarded (`:167`), and a remote
-    port skipped for speaking no recognized engine API (`:210`).
+    cmd/toktop/attach.go): a refused bearer and an unrecognized endpoint, an
+    ssh target that was not attached and one that was, a remote port that
+    could not be forwarded, and a remote port skipped for speaking no
+    recognized engine API.
   - the run's own lifecycle (`logcfg.Logger()` calls in cmd/toktop/main.go and
     `configLog` in cmd/toktop/config.go):
     the address the ingest endpoint actually bound, which is what makes a
