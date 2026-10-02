@@ -1012,7 +1012,17 @@ site-fmt: require-bun ## rewrite the included files with the BIOME formatter, th
 # without naming it, so it is named here; the check is a command -v, so it
 # costs nothing and the health poll's own --max-time still bounds the rest.
 define SITE_GUARD
-mkdir -p $(DIST); \
+# The lock below is a directory under $(DIST), so $(DIST) has to exist first.
+# The failure is named here rather than left to the lock: taking the lock
+# without its parent answers the same "cannot create directory" the mkdir above
+# did, and the branch after it reads that as another deploy or rollback holding
+# the lock, which sends the operator looking for a process instead of at a
+# read-only or full filesystem.
+mkdir -p $(DIST) || { \
+	echo "make: cannot create $(DIST), and the deploy lock, the deploy record and the health poll all live under it" >&2; \
+	echo "  fix the directory (permissions, a full disk), then run the target again" >&2; \
+	exit 1; \
+}; \
 command -v curl >/dev/null 2>&1 || { \
 	echo "make: curl is not on PATH; it is what reads $(SITE_HEALTH_URL) to confirm the site is serving" >&2; \
 	echo "  install it, or the health poll below cannot distinguish a broken deploy from a missing curl" >&2; \
