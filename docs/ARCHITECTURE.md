@@ -93,7 +93,9 @@ alongside them would be a layer importing sideways into itself.
   throughput rather than read a counter. One concern per file: `probe.go` the
   request, the budgets that bound a generation and the HTTP handling both
   dialects share, `ollama.go` the Ollama dialect, `openai.go` the
-  OpenAI-compatible one, `model.go` the choice of which model to ask.
+  OpenAI-compatible one, `model.go` the choice of which model to ask,
+  `refusal.go` the endings that mean no model answered, which the engine-error
+  paths refuse to score.
 - `internal/procs`: finds local inference engines by inspecting running
   processes, over procfs on linux and the OS tooling elsewhere.
 - `internal/provider`: engine discovery and metric scraping for local

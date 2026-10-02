@@ -3,8 +3,9 @@
 //
 // One concern per file: server.go is the listener and the clock, endpoints.go
 // the route table, middleware.go the chain every request passes, post.go the
-// POST handler and the bounds on its body, stream.go the decode loop, and
-// health.go the liveness probe.
+// POST handler and the bounds on its body, stream.go the decode loop,
+// event.go the wire format those decode into, and health.go the liveness
+// probe.
 package ingest
 
 import (

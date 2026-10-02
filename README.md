@@ -357,6 +357,11 @@ result from any of them means "cannot tell", which reads as "not connected".
   TTFT and decode speed per engine. `p` runs on demand; `--probe N` fires every
   N seconds but still holds each engine to one probe every 10s, so a 1s tick
   does not turn into a per-second generation on an endpoint that bills them.
+  A generation the model declined, or that a host-side content filter cut, is
+  refused rather than scored: it arrives as an ordinary 200 carrying the shape
+  of a completion, and scored as one it would report a speed for text no model
+  produced, sitting in the pane beside real measurements. The probe row then
+  reads `failed engine refused: <reason>`.
 - **Agent feed** - any harness can POST usage events:
   ```
   curl -X POST localhost:8420/v1/events \

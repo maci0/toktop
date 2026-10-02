@@ -4,7 +4,8 @@
 // One concern per file: probe.go is the request, the budgets that bound a
 // generation, and the HTTP handling both dialects share, ollama.go the Ollama
 // dialect, openai.go the OpenAI-compatible one, model.go the choice of which
-// model to ask.
+// model to ask, refusal.go the endings that mean no model answered at all
+// rather than a turn that measured short.
 package probe
 
 import (
