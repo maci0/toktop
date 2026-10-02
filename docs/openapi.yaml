@@ -22,7 +22,7 @@
 openapi: 3.1.0
 info:
   title: toktop agent feed
-  version: "0.23.0"
+  version: "0.24.0"
   license:
     name: MIT
     identifier: MIT
