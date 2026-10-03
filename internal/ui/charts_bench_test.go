@@ -50,7 +50,8 @@ func BenchmarkTimedSeriesEnginesOnly(b *testing.B) {
 	s := benchEnginesOnly()
 	b.ReportAllocs()
 	for b.Loop() {
-		if len(timedSeries(s, true, time.Second)) == 0 {
+		tv := timedSeries(s, true, time.Second)
+		if len(tv) == 0 || newestOf(tv).IsZero() {
 			b.Fatal("empty series")
 		}
 	}
@@ -63,7 +64,7 @@ func BenchmarkTimedSeriesWithAgents(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		tv := timedSeries(s, true, time.Second)
-		if len(tv) == 0 {
+		if len(tv) == 0 || newestOf(tv).IsZero() {
 			b.Fatal("empty series")
 		}
 		// The engines' own samples plus the dense grid appended for the feed.
