@@ -13,6 +13,11 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-03
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.25.0).
+
 ### Fixed
 
 - `toktop update` no longer panics on a checksums listing line that ends on its
@@ -4231,7 +4236,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/maci0/toktop/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/maci0/toktop/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/maci0/toktop/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/maci0/toktop/compare/v0.21.0...v0.22.0

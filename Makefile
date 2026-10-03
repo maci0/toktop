@@ -676,14 +676,15 @@ test: ## run all tests shuffled (both sqlite tag halves); RACE=0 skips -race
 # and `make ci` runs it, so the local gate and the merge gate are the same
 # list.
 #
-# ASAN_SKIP is the one test that cannot run here, skipped by name and not by
-# package: TestStaticFrameAllocBudget asserts an exact per-frame allocation
-# count, and -asan swaps Go's allocator for the runtime's own, so the number
-# the assertion reads is the sanitizer's, not the frame path's. The budget is
-# a performance ratchet, and the plain loop above still asserts it on the
-# uninstrumented allocator, where the count means what it says. Everything
-# else runs, so an out-of-bounds access anywhere in the tree still fails here.
-ASAN_SKIP := TestStaticFrameAllocBudget
+# ASAN_SKIP lists the tests that cannot run here, skipped by name and not by
+# package: TestStaticFrameAllocBudget and TestRedactAnyUserHomeCopiesOnceForAMatch
+# assert exact allocation counts, and -asan swaps Go's allocator for the
+# runtime's own, so the number the assertion reads is the sanitizer's, not the
+# code path's. The budget is a performance ratchet, and the plain loop above
+# still asserts it on the uninstrumented allocator, where the count means what
+# it says. Everything else runs, so an out-of-bounds access anywhere in the
+# tree still fails here.
+ASAN_SKIP := TestStaticFrameAllocBudget|TestRedactAnyUserHomeCopiesOnceForAMatch
 .PHONY: test-asan
 test-asan: ## run all tests under the address sanitizer (needs cgo; not combinable with -race)
 	@$(call NEED_CC,go test -asan,)
