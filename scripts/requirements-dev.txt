@@ -16,16 +16,16 @@
 # with the tool that needed it.
 -r requirements.txt
 black==26.5.1
-ruff==0.16.9
+ruff==0.16.10
 click==8.5.0 \
     --hash=sha256:255bc9599cf7748b4b1a446ccc735421bd08a2ae529a8b88597d3de5664ee360
 packaging==26.3 \
     --hash=sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c
 pathspec==1.1.1 \
     --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
-platformdirs==4.11.15 \
-    --hash=sha256:84508421c77d3c6462e71dd8c0d2776c2ace0e94eb006dc4fd383bc1dcf5a176 \
-    --hash=sha256:d7419e973b2b740d428200130f80c0e79304d1c71081001db911e15b26a3a6d4
+platformdirs==4.12.2 \
+    --hash=sha256:29dbf06d96c500bc6bdbce75fb0a14d63279c93b1842f97e72a135b33e856983 \
+    --hash=sha256:eab5f70271a490ef74618bb314fbb86e3c7e82fa3b9c922c2ea0e0a1a155d329
 mypy-extensions==1.1.0 \
     --hash=sha256:1be4cccdb0f2482337c4743e60421de3a356cd97508abadd57d47403e94f5505 \
     --hash=sha256:52e68efc3284861e772bbcd66823fde5ae21fd2fdb51c62a211403730b916558
@@ -37,8 +37,8 @@ pytokens==0.4.1
 # mypy-extensions, pathspec, packaging and pytokens above are mypy's remaining
 # dependencies; .python-version pins 3.12, which is past the point where mypy
 # wants tomli, so that marker is not in the set.
-mypy==2.3.1
-librt==0.15.0
+mypy==2.4.0
+librt==0.16.0
 ast-serialize==0.11.2
 typing-extensions==4.16.0 \
     --hash=sha256:481caa481374e813c1b176ada14e97f1f67a4539ce9cfeb3f350d78d6370c2e8
