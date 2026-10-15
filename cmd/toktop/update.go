@@ -88,6 +88,14 @@ func updateFlagSet() (*flag.FlagSet, *updateOpts) {
 // in another terminal lands in the session already open. Windows cannot exec
 // over a running image, so the dashboard exits and asks you to start it again.
 func runUpdate(ctx context.Context, out io.Writer, args []string) int {
+	rest, dropErr := dropOutputFlags(args)
+	if dropErr != nil {
+		fmt.Fprintf(os.Stderr, "toktop update: %s\n", dropErr)
+		fs, _ := updateFlagSet()
+		updateUsage(os.Stderr, fs)
+		return 2
+	}
+	args = rest
 	fs, opts := updateFlagSet()
 	parseErr := fs.Parse(args)
 	// An unknown flag does not swallow a --help or --version written beside

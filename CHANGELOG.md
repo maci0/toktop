@@ -13,6 +13,40 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.26.0] - 2026-10-15
+
+Binaries, checksums, and a CycloneDX SBOM are on
+[GitHub Releases](https://github.com/maci0/toktop/releases/tag/v0.26.0).
+
+### Breaking
+
+- Piping or redirecting `toktop --once` prints the JSON snapshot. It used to
+  print the text frame. `toktop -o text --once` keeps the frame, including
+  `toktop -o text --once >frame.txt`. `--plain` still selects the linear report
+  when the format is text.
+- Starting the full-screen UI with stdout not a terminal exits 4
+  (`tty_required`) instead of 2. The message is unchanged. `toktop snapshot`
+  and `toktop --once` are the non-interactive runs.
+
+### Added
+
+- `toktop schema` prints the CLI Spec 0.3 document as one JSON object and
+  exits 0. It needs no config, credentials, or network. `toktop schema snapshot`
+  returns the same document with `commands` limited to that command.
+- `-o` / `--output` accept `auto`, `text`, or `json`. `auto` is text on a
+  terminal and JSON otherwise. `--json` remains a synonym for `--output json`.
+  The flag is accepted before the subcommand.
+- `toktop snapshot` is the same run as `--once`. `toktop dashboard` is the
+  full-screen UI, which is also what a run with no subcommand does.
+- In JSON mode, a usage error, a snapshot failure, and `tty_required` write
+  `{"error":{"kind","message","hint"}}` as the last line on stderr. Text mode
+  stays one human line.
+
+### Changed
+
+- `docs/openapi.yaml` `info.version` is 0.26.0 so it names this release. The
+  agent feed itself is unchanged.
+
 ## [0.25.0] - 2026-10-03
 
 Binaries, checksums, and a CycloneDX SBOM are on
@@ -4236,7 +4270,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.25.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.26.0...HEAD
+[0.26.0]: https://github.com/maci0/toktop/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/maci0/toktop/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/maci0/toktop/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/maci0/toktop/compare/v0.22.0...v0.23.0

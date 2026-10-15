@@ -31,6 +31,7 @@ type cliFlags struct {
 	once      bool
 	plain     bool
 	jsonOut   bool
+	output    string
 	frames    int
 	noReload  bool
 	seed      int64
@@ -58,9 +59,11 @@ func registerFlags() *cliFlags {
 		// way --ingest and --frames carry theirs; a "default on" left in the
 		// usage string printed the default twice, in two spellings.
 		topFS.BoolVar(&cli.opencode, "opencode-db", true, "with --agents: read opencode's SQLite session database (needs a build with -tags sqlite; --opencode-db=false skips it)")
-		topFS.BoolVar(&cli.once, "once", false, "render one frame and exit (non-interactive; use when piping)")
-		topFS.BoolVar(&cli.plain, "plain", false, "render a linear text report instead of the dashboard frame (screen-reader friendly); with --once it prints one report and exits, without it the report stays live and keeps the keys; --json replaces it")
-		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once: print the final snapshot as JSON on stdout instead of a frame (for scripts; replaces the text report)")
+		topFS.BoolVar(&cli.once, "once", false, "render one snapshot and exit (non-interactive; use when piping; JSON when stdout is not a terminal, -o text keeps the frame)")
+		topFS.BoolVar(&cli.plain, "plain", false, "render a linear text report instead of the dashboard frame (screen-reader friendly); with --once it prints one report and exits, without it the report stays live and keeps the keys; JSON output replaces it")
+		topFS.BoolVar(&cli.jsonOut, "json", false, "with --once or snapshot: print the snapshot as JSON on stdout instead of a frame (same as --output json; replaces the text report)")
+		topFS.StringVar(&cli.output, "output", "auto", "snapshot format: auto, text, or json (auto is text on a terminal and JSON otherwise; an explicit value wins, including text when piping)")
+		topFS.StringVar(&cli.output, "o", "auto", "snapshot format: auto, text, or json (auto is text on a terminal and JSON otherwise; an explicit value wins, including text when piping)")
 		// The plain and JSON reports render the last snapshot alone, so a count
 		// above one buys only the wait before rendering. Stated here because
 		// warnIgnoredFlags says exactly that at run time, and a warning the help

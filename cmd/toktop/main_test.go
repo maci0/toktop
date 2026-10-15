@@ -786,33 +786,34 @@ func TestUsage(t *testing.T) {
 	usage(&buf)
 	got := buf.String()
 	for _, want := range []string{
-		"toktop -",                         // what the tool is
-		"Usage:",                           // invocation line
-		"[ssh://user@host ...",             // positional targets documented
-		"toktop help",                      // git-style help command
-		"toktop version",                   // git-style version command
-		"help [update|version|completion]", // the extra commands are help topics
-		"Examples:",                        // worked examples section
-		"-demo",                            // generated flag docs survive
-		"-interval",                        // PrintDefaults, not just the examples
-		"-add",                             // repeatable backend flag
-		"1s or 500ms",                      // --interval names the duration format
-		"min 50ms",                         // --interval floor (bare numbers are nanoseconds)
-		"OMNIROUTE_API_KEY",                // env fallbacks named
-		"--add",                            // http(s) leftovers hint at --add
-		"userinfo",                         // --add must not embed credentials
-		"TOKTOP_SSH_PASSWORD",              // ssh URL must not embed a password
-		"ssh://[user@]host",                // ssh target shape
-		"host:port",                        // --ingest listen address shape
-		"piping",                           // --once is the non-TTY path
-		"needs a terminal",                 // live dashboard vs --once
-		"Exit codes:",                      // the scripting contract
-		"130",                              // Ctrl+C
-		"stderr",                           // status never lands on stdout
-		"Environment",                      // env table lives in --help, not only the README
-		"TOKTOP_LOG_LEVEL",                 // the env vars a run actually reads
-		"TOKTOP_COLUMNS",                   // --once frame overrides
-		"a flag always wins",               // flag beats the variable it mirrors
+		"toktop -",             // what the tool is
+		"Usage:",               // invocation line
+		"[ssh://user@host ...", // positional targets documented
+		"toktop help",          // git-style help command
+		"toktop version",       // git-style version command
+		"help [update|version|completion|schema]", // schema is a help topic
+		"Examples:",           // worked examples section
+		"-demo",               // generated flag docs survive
+		"-interval",           // PrintDefaults, not just the examples
+		"-add",                // repeatable backend flag
+		"1s or 500ms",         // --interval names the duration format
+		"min 50ms",            // --interval floor (bare numbers are nanoseconds)
+		"OMNIROUTE_API_KEY",   // env fallbacks named
+		"--add",               // http(s) leftovers hint at --add
+		"userinfo",            // --add must not embed credentials
+		"TOKTOP_SSH_PASSWORD", // ssh URL must not embed a password
+		"ssh://[user@]host",   // ssh target shape
+		"host:port",           // --ingest listen address shape
+		"piping",              // --once is the non-TTY path
+		"needs a terminal",    // live dashboard vs --once
+		"tty_required",        // exit 4 names the kind
+		"Exit codes:",         // the scripting contract
+		"130",                 // Ctrl+C
+		"stderr",              // status never lands on stdout
+		"Environment",         // env table lives in --help, not only the README
+		"TOKTOP_LOG_LEVEL",    // the env vars a run actually reads
+		"TOKTOP_COLUMNS",      // --once frame overrides
+		"a flag always wins",  // flag beats the variable it mirrors
 	} {
 		if !strings.Contains(got, want) {
 			t.Errorf("usage() missing %q", want)
@@ -2895,12 +2896,14 @@ func TestWarnBlankGitHubToken(t *testing.T) {
 	}
 }
 
-// A run whose stdout is not a terminal is a usage error, and the message has
-// to name the mode actually running: --plain renders no frame and opens no
-// alt screen, so telling that reader "the live dashboard needs one" names a
-// mode they did not ask for and hides the flag they did pass. Drives the real
-// binary, since the gate reads os.Stdout's fd and no in-process writer can
-// make stdout a terminal or not one.
+// A run whose stdout is not a terminal refuses the live UI with tty_required
+// (exit 4) instead of painting or waiting. The message has to name the mode
+// actually running: --plain renders no frame and opens no alt screen, so
+// telling that reader "the live dashboard needs one" names a mode they did
+// not ask for and hides the flag they did pass. Piped stdout with no -o is
+// JSON mode, so the phrase lives in the error envelope. -o text keeps the
+// human line. Drives the real binary, since the gate reads os.Stdout's fd
+// and no in-process writer can make stdout a terminal or not one.
 func TestNonTTYMessageNamesTheRunningMode(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "toktop")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
@@ -2909,9 +2912,12 @@ func TestNonTTYMessageNamesTheRunningMode(t *testing.T) {
 	for _, tt := range []struct {
 		args []string
 		want string
+		json bool
 	}{
-		{[]string{"--plain"}, "the live text report needs one"},
-		{[]string{}, "the live dashboard needs one"},
+		{[]string{"--plain"}, "the live text report needs one", true},
+		{[]string{}, "the live dashboard needs one", true},
+		{[]string{"-o", "text", "--plain"}, "the live text report needs one", false},
+		{[]string{"-o", "text"}, "the live dashboard needs one", false},
 	} {
 		t.Run(strings.Join(tt.args, " "), func(t *testing.T) {
 			cmd := exec.Command(bin, tt.args...)
@@ -2920,15 +2926,41 @@ func TestNonTTYMessageNamesTheRunningMode(t *testing.T) {
 			// The child inherits a pipe for stdout, so the gate fires;
 			// without that it is taken or skipped by whatever terminal the
 			// test run happens to have.
-			if err := cmd.Run(); err == nil {
-				t.Fatalf("%v exited 0 with stdout a pipe, want a usage error\nstderr: %s", tt.args, stderr.String())
+			err := cmd.Run()
+			var exitErr *exec.ExitError
+			if !errors.As(err, &exitErr) || exitErr.ExitCode() != exitTTYRequired {
+				t.Fatalf("%v exit = %v, want %d\nstderr: %s", tt.args, err, exitTTYRequired, stderr.String())
 			}
 			if !strings.Contains(stderr.String(), tt.want) {
 				t.Errorf("%v stderr = %q, want it to name %q", tt.args, stderr.String(), tt.want)
 			}
 			if stdout.Len() != 0 {
-				t.Errorf("%v wrote %d bytes to stdout on a usage error", tt.args, stdout.Len())
+				t.Errorf("%v wrote %d bytes to stdout on tty_required", tt.args, stdout.Len())
+			}
+			last := lastLine(stderr.String())
+			if tt.json {
+				var doc struct {
+					Error struct {
+						Kind string `json:"kind"`
+					} `json:"error"`
+				}
+				if err := json.Unmarshal([]byte(last), &doc); err != nil {
+					t.Fatalf("last stderr line is not the envelope: %v\n%s", err, last)
+				}
+				if doc.Error.Kind != "tty_required" {
+					t.Errorf("kind = %q, want tty_required", doc.Error.Kind)
+				}
+			} else if strings.HasPrefix(strings.TrimSpace(last), "{") {
+				t.Errorf("-o text stderr is JSON: %s", last)
 			}
 		})
 	}
+}
+
+func lastLine(s string) string {
+	s = strings.TrimRight(s, "\n")
+	if i := strings.LastIndex(s, "\n"); i >= 0 {
+		return s[i+1:]
+	}
+	return s
 }

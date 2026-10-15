@@ -91,6 +91,18 @@ func warnIgnoredFlags(set map[string]bool, f *cliFlags, nAdd, nRemote int) {
 	}
 }
 
+// warnIgnoredOutput names -o / --output when the run is the live UI, which
+// does not read it. --json is already named by warnIgnoredFlags. A piped
+// auto that became JSON is not warned about: the caller did not pass the flag.
+func warnIgnoredOutput(set map[string]bool, f *cliFlags, leading outputSpec) {
+	if !f.once && (set["output"] || set["o"] || (leading.explicit && !leading.json)) {
+		fmt.Fprintln(os.Stderr, "toktop: --output has no effect without --once or snapshot")
+	}
+	if f.jsonOut && f.plain && !set["json"] && (set["output"] || set["o"] || (leading.explicit && leading.mode == "json")) {
+		fmt.Fprintln(os.Stderr, "toktop: --plain has no effect with --output json; the JSON report replaces the text report")
+	}
+}
+
 // warnIgnoredFrameEnv names TOKTOP_COLUMNS / TOKTOP_LINES when they are set
 // but no sized frame is rendered: the overrides only size the --once
 // dashboard frame, and a silently ignored variable looks like a broken knob,

@@ -738,9 +738,11 @@ technology:
 - **Status never rides on color alone** - down engines show `✗` plus their
   error text, probes show `✓`/`✗`, gauges print their percentage, and the
   engine count is spelled out numerically in the header.
-- **Non-visual output** - `--once` prints one static frame instead of running
-  the full-screen UI; pair it with `TOKTOP_COLUMNS` / `TOKTOP_LINES` for a
-  fixed size. `--plain` replaces the drawn frame with a linear text report:
+- **Non-visual output** - `--once` (or `toktop snapshot`) prints one snapshot
+  instead of running the full-screen UI. On a terminal that snapshot is a
+  frame; when stdout is not a terminal it is JSON, and `-o text` keeps the
+  frame. Pair the frame with `TOKTOP_COLUMNS` / `TOKTOP_LINES` for a fixed
+  size. `--plain` replaces the drawn frame with a linear text report:
   no braille chart glyphs (which screen readers announce as endless
   dot-pattern noise or skip entirely), no box-drawing borders, no
   multi-column panels, just the data in reading order. On its own it stays
@@ -750,7 +752,7 @@ technology:
 
   ```
   $ toktop --once --plain
-  toktop v0.25.0
+  toktop v0.26.0
 
   5/5 engines up · out 1.5k tok/s · in 10k tok/s · 2 agents · session 24s
 
@@ -805,6 +807,16 @@ toktop version    same as --version (-v), which `toktop help`, `toktop version`
 toktop completion <bash|zsh|fish>
                   print a shell completion script on stdout, so installing
                   is one redirect (see Shell completion below)
+toktop schema     CLI Spec 0.3 document, one JSON object, no config needed.
+                  `toktop schema snapshot` limits `commands` to that command
+toktop snapshot   one snapshot and exit (same as --once)
+toktop dashboard  full-screen UI (also the run with no subcommand). Needs a
+                  terminal; without one it exits 4
+--output, -o FORMAT
+                  auto, text, or json (default auto). auto is text on a
+                  terminal and JSON otherwise. An explicit value wins,
+                  including text when piping. Accepted before the subcommand.
+                  --json is the same choice as --output json
 --demo            simulated fleet, zero setup
 --add URL         attach an openai-compatible http(s) endpoint (repeatable,
                   once per endpoint; host required; no userinfo, query or
@@ -834,15 +846,16 @@ ssh://user@host   positional; monitor remote hosts (repeatable;
 --ingest ADDR     agent event listen address, host:port
                   (default 127.0.0.1:8420; empty is rejected)
 --no-ingest       disable the event endpoint (`--ingest` is then ignored)
---once            render one frame and exit (use when piping or redirecting)
+--once            render one snapshot and exit (use when piping or redirecting;
+                  JSON when stdout is not a terminal, -o text keeps the frame)
 --plain           linear text report instead of the dashboard frame
                   (screen-reader friendly); with --once it prints one report
                   and exits, without it the report stays live and keeps the
-                  keys
---json            with --once: print the final snapshot as one JSON object on
-                  stdout instead of a frame, for scripts (--plain has no
-                  effect alongside it; TOKTOP_COLUMNS / TOKTOP_LINES have no
-                  effect with either)
+                  keys. JSON output replaces it
+--json            with --once or snapshot: print the snapshot as one JSON
+                  object on stdout instead of a frame, for scripts (same as
+                  --output json; --plain has no effect alongside it;
+                  TOKTOP_COLUMNS / TOKTOP_LINES have no effect with either)
 --frames N        with --once: snapshots to accumulate before rendering
                   (max 180, the chart history length; with --plain and
                   --json only the wait before rendering changes)
@@ -863,19 +876,26 @@ Password auth for ssh targets: interactive prompt, or `TOKTOP_SSH_PASSWORD`.
 Flags come before the positional `ssh://` targets; a flag written after one is
 a usage error that says so. Results (the rendered frame, the JSON report, the
 version, the release URL) go to stdout and progress, warnings and errors to
-stderr, so `toktop --once >frame.txt` and `toktop version` stay pipeable.
+stderr, so `toktop -o text --once >frame.txt` and `toktop version` stay
+pipeable. A pipe with no `-o` gets JSON from `--once` and from `snapshot`.
+The full-screen UI needs a terminal.
 Exit codes: `0`
-success, `1` runtime failure, `2` usage error, `130` interrupted (`--once`,
+success, `1` runtime failure, `2` usage error, `4` the full-screen UI was
+started without a terminal (`tty_required`), `130` interrupted (`--once`,
 `toktop update`, and the live dashboard when SIGINT or SIGTERM stops it; the
-dashboard's own `q` and Ctrl+C are a clean `0`).
+dashboard's own `q` and Ctrl+C are a clean `0`). In JSON mode the last line
+on stderr is `{"error":{"kind","message","hint"}}`.
 
 ## Scripting
 
-`toktop --once --json` prints the last snapshot as one JSON object: the
-aggregate throughput, every engine with its rates, queue depths and models,
+`toktop --once --json` (or `toktop snapshot`, which prints JSON on its own
+when stdout is not a terminal) prints the last snapshot as one JSON object:
+the aggregate throughput, every engine with its rates, queue depths and models,
 the agent feed and per-agent rates, the probe samples and the host vitals.
 It is the machine-readable counterpart of `--once --plain`, for a script that
-wants the numbers rather than a report:
+wants the numbers rather than a report. `-o text` keeps the frame when the
+pipe would otherwise get JSON. `toktop schema` describes the commands without
+reading a config.
 
 ```sh
 toktop --demo --once --json | jq -r '.engines[] | select(.ok) | .label'

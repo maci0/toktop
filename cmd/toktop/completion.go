@@ -22,7 +22,7 @@ var completionShells = []string{"bash", "zsh", "fish"}
 
 // completionSubs are the words that select a subcommand, so a shell can offer
 // them before the first character of a flag is typed.
-var completionSubs = []string{"completion", "help", "update", "version"}
+var completionSubs = []string{"completion", "dashboard", "help", "schema", "snapshot", "update", "version"}
 
 // plainSubFlags are the flags every subcommand that parses no FlagSet of its
 // own accepts: completion, help and version answer --help and --version and
@@ -117,6 +117,13 @@ func unknownFlagIn(args []string) error {
 
 // runCompletion implements `toktop completion <shell>`.
 func runCompletion(out io.Writer, args []string) int {
+	rest, dropErr := dropOutputFlags(args)
+	if dropErr != nil {
+		fmt.Fprintf(os.Stderr, "toktop completion: %s\n", dropErr)
+		completionUsage(os.Stderr)
+		return 2
+	}
+	args = rest
 	// An unknown flag does not swallow a --help or --version written beside
 	// it, the same rule the top-level command and update both apply and for
 	// the same reason: `toktop completion --help --bogus` printed the
@@ -192,12 +199,22 @@ func topFlags() []string {
 // subFlags is the flag list for one subcommand, or nil for a word that is not
 // one. Each subcommand's own flags are offered under that subcommand alone, so
 // a completion is never a command line the binary rejects.
+// schemaFlags are the flags schema accepts. The document is JSON either way;
+// --output still selects the error envelope, and --help / --version keep the
+// meaning they have on every other command.
+var schemaFlags = []string{"--help", "--json", "--output", "--version"}
+
 func subFlags(sub string) []string {
 	switch sub {
 	case "update":
 		return updateFlags
 	case "completion", "help", "version":
 		return plainSubFlags
+	case "schema":
+		return schemaFlags
+	case "snapshot", "dashboard":
+		registerFlags()
+		return flagNames(topFS)
 	}
 	return nil
 }
@@ -246,6 +263,8 @@ _toktop() {
             case "${COMP_WORDS[i]}" in
                 completion) subflags="$plainflags"; subargs="$shells" ;;
                 help|version) subflags="$plainflags" ;;
+                schema) subflags="--help --json --output --version" ;;
+                snapshot|dashboard) subflags="$topflags" ;;
                 update) subflags="$upflags" ;;
             esac
             if [ -n "$subflags" ]; then
@@ -367,6 +386,8 @@ _toktop() {
     case ${words[2]} in
         completion) subflags=($plainflags); subargs=($shells) ;;
         help|version) subflags=($plainflags) ;;
+        schema) subflags=(--help --json --output --version) ;;
+        snapshot|dashboard) subflags=($topflags) ;;
         update) subflags=($upflags) ;;
     esac
     if (( ${#subflags} )); then
@@ -478,8 +499,12 @@ func fishFlagSpec(fs *flag.FlagSet, name string) string {
 // subFlagSet is the FlagSet a subcommand's flags are read from, so a flag
 // that takes a value is completed as one.
 func subFlagSet(sub string) *flag.FlagSet {
-	if sub == "update" {
+	switch sub {
+	case "update":
 		return updateFS
+	case "snapshot", "dashboard", "schema":
+		registerFlags()
+		return topFS
 	}
 	return plainSubFS
 }

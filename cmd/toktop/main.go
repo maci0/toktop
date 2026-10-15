@@ -54,43 +54,97 @@ func runMain() int {
 	// contract holds whatever the reader does.
 	signal.Ignore(syscall.SIGPIPE)
 
-	f := registerFlags()
-	// Subcommands taken before flag parsing so their own flags
-	// (`update --check`) are not rejected by the top-level FlagSet, and so
-	// `toktop help --anything` never dies as an unknown flag.
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	// -o, --output, and --json are accepted before the subcommand, which is
+	// how a caller selects the format without knowing which word comes first.
+	args, leading, peelErr := peelLeadingOutput(os.Args[1:])
+	if peelErr != nil {
+		reportError(leading.mode, "usage", peelErr.Error(), "see 'toktop --help'")
+		return exitUsage
+	}
+	forceOnce := false
+	if len(args) > 0 {
+		// Subcommands taken before flag parsing so their own flags
+		// (`update --check`) are not rejected by the top-level FlagSet, and so
+		// `toktop help --anything` never dies as an unknown flag. Output flags
+		// are dropped first: the success bytes of these commands do not change
+		// for -o, and an unknown value is still a usage error.
+		switch args[0] {
 		case "update":
+			rest, err := dropOutputFlags(args[1:])
+			if err != nil {
+				reportError(leading.mode, "usage", err.Error(), "see 'toktop update --help'")
+				return exitUsage
+			}
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			code := runUpdate(ctx, os.Stdout, os.Args[2:])
+			code := runUpdate(ctx, os.Stdout, rest)
 			stop()
 			return code
 		case "help":
-			return runHelp(os.Stdout, os.Args[2:])
+			rest, err := dropOutputFlags(args[1:])
+			if err != nil {
+				reportError(leading.mode, "usage", err.Error(), "see 'toktop --help'")
+				return exitUsage
+			}
+			return runHelp(os.Stdout, rest)
 		case "version":
-			return runVersion(os.Stdout, os.Args[2:])
+			rest, err := dropOutputFlags(args[1:])
+			if err != nil {
+				reportError(leading.mode, "usage", err.Error(), "see 'toktop version --help'")
+				return exitUsage
+			}
+			return runVersion(os.Stdout, rest)
 		case "completion":
-			return runCompletion(os.Stdout, os.Args[2:])
+			rest, err := dropOutputFlags(args[1:])
+			if err != nil {
+				reportError(leading.mode, "usage", err.Error(), "see 'toktop completion --help'")
+				return exitUsage
+			}
+			return runCompletion(os.Stdout, rest)
+		case "schema":
+			// No config, no credentials, no network: the document is this binary.
+			return runSchema(os.Stdout, args[1:], leading.mode)
+		case "snapshot":
+			forceOnce = true
+			args = args[1:]
+		case "dashboard":
+			args = args[1:]
 		}
 	}
+
+	f := registerFlags()
 	// The flag package reports a bad flag in its own single-dash spelling;
 	// flagParseError restores the long form so the error names the flag as
 	// the help screen and the README document it.
-	parseErr := topFS.Parse(os.Args[1:])
+	parseErr := topFS.Parse(args)
+	// Format for a parse failure comes from the flags that did parse as
+	// output flags. A bad value still reports itself, in the mode those
+	// flags selected, or in auto when they did not.
+	format := leading.mode
+	if absorbed, aerr := absorbOutput(leading, args); aerr == nil {
+		format = absorbed.mode
+		if absorbed.json {
+			format = "json"
+		}
+	}
 	// An unknown flag does not swallow a --help or --version written beside
 	// it: `toktop --help --bogus` printed the screen and exited 0 where it
 	// had printed the complaint and exited 2. Only that one failure is
 	// answered, so a bad value or a missing argument still reports itself.
-	switch explicitHelpArg(os.Args[1:], parseErr) {
+	switch explicitHelpArg(args, parseErr) {
 	case "help":
 		return runHelp(os.Stdout, nil)
 	case "version":
 		return runVersion(os.Stdout, nil)
 	}
 	if parseErr != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %s%s%s\n", flagParseError(parseErr), valueHint(parseErr), subcommandFlagHint(unknownFlagName(parseErr)))
-		usage(os.Stderr)
-		return 2
+		msg := flagParseError(parseErr) + valueHint(parseErr) + subcommandFlagHint(unknownFlagName(parseErr))
+		if resolvedFormat(format) == "json" {
+			reportError(format, "usage", msg, "see 'toktop --help'")
+		} else {
+			fmt.Fprintf(os.Stderr, "toktop: %s\n", msg)
+			usage(os.Stderr)
+		}
+		return exitUsage
 	}
 
 	// Leftovers are forwarded so `toktop --help update` matches
@@ -104,21 +158,40 @@ func runMain() int {
 	}
 	log.SetFlags(0)
 
+	explicit := map[string]bool{}
+	topFS.Visit(func(fl *flag.Flag) { explicit[fl.Name] = true })
+	if forceOnce {
+		f.once = true
+	}
+	merged, ferr := mergeOutput(leading, f, explicit)
+	if ferr != nil {
+		reportError(leading.mode, "usage", ferr.Error(), "see 'toktop --help'")
+		return exitUsage
+	}
+	format = merged
+	// JSON for the snapshot only when the selected format is json. auto on a
+	// terminal stays text, and a piped auto becomes json here. The explicit
+	// set is not marked "json" for that, so a warning about --json does not
+	// fire for a caller who never passed it.
+	if resolvedFormat(format) == "json" {
+		f.jsonOut = true
+	}
+	if leading.json {
+		explicit["json"] = true
+	}
+
 	if err := validateFlags(f.once, f.interval, f.probeSecs, f.frames); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		return 2
+		return usageFail(format, err.Error())
 	}
 	if err := validateLogLevelEnv(); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		return 2
+		return usageFail(format, err.Error())
 	}
 	// Parsed before anything reads it, and only where it is read: --origin
 	// configures the demo timeline, so a non-demo run has no use for it
 	// (cfg.DemoOrigin below is set only from the demo branch).
 	origin, err := resolveOrigin(f.demo, f.origin)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		return 2
+		return usageFail(format, err.Error())
 	}
 	// agentusage is a package other programs embed, so it audits through the
 	// process logger until a host hands it one. Here that host is toktop:
@@ -131,8 +204,7 @@ func runMain() int {
 	// whose output does not read the variable at all.
 	if f.once && !f.plain && !f.jsonOut {
 		if err := validateOnceEnv(); err != nil {
-			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-			return 2
+			return usageFail(format, err.Error())
 		}
 	}
 
@@ -140,8 +212,7 @@ func runMain() int {
 	// `toktop http://host` must name that mistake, not "stdout is not a terminal".
 	cmd, remoteTargets, err := interpretArgs(topFS.Args())
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		return 2
+		return usageFail(format, err.Error())
 	}
 	switch cmd {
 	case "help":
@@ -159,18 +230,14 @@ func runMain() int {
 		// The fold, like every other startup diagnostic here: an unreadable
 		// ~/.ssh/config is reported by the os error, which carries the path
 		// it tried and so the account.
-		fmt.Fprintln(os.Stderr, "toktop:", core.RedactHome(err.Error()))
-		return 2
+		return usageFail(format, core.RedactHome(err.Error()))
 	}
 	for _, dup := range dupTargets {
 		fmt.Fprintf(os.Stderr, "toktop: %s named more than once; attaching it once\n", operatorText(dup.Host))
 	}
 
-	explicit := map[string]bool{}
-	topFS.Visit(func(f *flag.Flag) { explicit[f.Name] = true })
 	if err := validateSSHKeyFlag(explicit["ssh-key"], f.sshKey); err != nil {
-		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-		return 2
+		return usageFail(format, err.Error())
 	}
 	// Both halves of opencode's gate, resolved once before the config line:
 	// the sqlite build tag decides whether the driver is linked in, and
@@ -187,21 +254,20 @@ func runMain() int {
 	// here changes answer, but a count that means "ssh connections this run
 	// opens" has to come from one place.
 	warnIgnoredFlags(explicit, f, len(f.adds), len(targets))
+	warnIgnoredOutput(explicit, f, leading)
 	warnIgnoredFrameEnv(f.once, f.plain, f.jsonOut)
 	warnUnusedEnv(explicit["bearer"], f.demo, f.noIngest, f.agents, len(f.adds), len(targets))
 	warnIgnoredGauntletHome(f.agents)
 	warnIgnoredXDGHome(opencodeOn, !f.demo && len(targets) > 0, f.agents)
 	if !f.noIngest {
 		if err := validateIngestAddr(f.ingest); err != nil {
-			fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
-			return 2
+			return usageFail(format, err.Error())
 		}
 	}
 	if f.sshKey != "" && !f.demo && len(targets) > 0 {
 		resolved, err := remote.ResolveKeyFile(f.sshKey)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "toktop: --ssh-key: %v\n", err)
-			return 2
+			return usageFail(format, "--ssh-key: "+err.Error())
 		}
 		f.sshKey = resolved
 	}
@@ -212,8 +278,7 @@ func runMain() int {
 			// lives under $HOME unless GAUNTLET_HOME says otherwise, so the
 			// home is folded to "~": this line is the only record of what is
 			// wrong with the file, and it gets pasted into issues.
-			fmt.Fprintf(os.Stderr, "toktop: %s\n", core.RedactHome(err.Error()))
-			return 2
+			return usageFail(format, core.RedactHome(err.Error()))
 		}
 		// The definitions file was found, so a home that cannot place the
 		// built-in stores did not stop the run; say so rather than leaving
@@ -223,8 +288,9 @@ func runMain() int {
 
 	if !f.once && !term.IsTerminal(int(os.Stdout.Fd())) {
 		// The live dashboard paints with alt-screen sequences; piped or
-		// redirected they are garbage bytes in the capture, and --once is
-		// the supported way to get output without a terminal.
+		// redirected they are garbage bytes in the capture. snapshot and
+		// --once are the supported way to get output without a terminal.
+		// The command refuses rather than waiting on a UI that cannot paint.
 		//
 		// --plain is named as itself rather than as the dashboard: it renders
 		// no frame and opens no alt screen, so telling a reader who asked for
@@ -232,12 +298,14 @@ func runMain() int {
 		// mode they did not ask for, and hides that --plain is the only flag
 		// they passed. The gate is unchanged; only the message follows the
 		// mode actually running.
+		msg := "stdout is not a terminal; the live dashboard needs one (use --once for static output)"
+		hint := "use --once or snapshot for static output"
 		if f.plain {
-			fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live text report needs one (use --once --plain for static output)")
-		} else {
-			fmt.Fprintln(os.Stderr, "toktop: stdout is not a terminal; the live dashboard needs one (use --once for static output)")
+			msg = "stdout is not a terminal; the live text report needs one (use --once --plain for static output)"
+			hint = "use --once --plain or snapshot for static output"
 		}
-		return 2
+		reportError(format, "tty_required", msg, hint)
+		return exitTTYRequired
 	}
 
 	// targets, not remoteTargets: remote.ParseTargets collapsed the repeated
@@ -727,6 +795,14 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 	wait := max(onceWaitFloor, onceWaitPolls*cfg.PollEvery)
 	snap, err := waitForFrames(ctx, ch, n, wait)
 	if err != nil {
+		if jsonOut {
+			kind, code := "failure", exitFailure
+			if errors.Is(err, errInterrupted) {
+				kind, code = "interrupted", 130
+			}
+			reportError("json", kind, err.Error(), "")
+			return code
+		}
 		fmt.Fprintf(os.Stderr, "toktop: %v\n", err)
 		if errors.Is(err, errInterrupted) {
 			return 130
@@ -738,10 +814,12 @@ func runOnce(ctx context.Context, out io.Writer, cfg ui.Config, ch <-chan core.S
 		if err != nil {
 			// A marshal failure is toktop's own, not the operator's, so it
 			// is a runtime failure (1) rather than a usage error.
-			fmt.Fprintf(os.Stderr, "toktop: render JSON: %v\n", err)
-			return 1
+			reportError("json", "failure", "render JSON: "+err.Error(), "")
+			return exitFailure
 		}
-		_, err = fmt.Fprintln(out, report)
+		// Indented on a terminal, one line when piped. JSONFrame itself stays
+		// indented for in-process callers.
+		_, err = fmt.Fprintln(out, compactJSONIfPiped(report))
 		return outputStatus(err)
 	}
 	var frame string

@@ -22,6 +22,7 @@ import (
 var flagAliases = map[string]string{
 	"help":    "h",
 	"version": "v",
+	"output":  "o",
 }
 
 // flagPlaceholders overrides the argument word the flag package would print.
@@ -36,6 +37,7 @@ var flagPlaceholders = map[string]string{
 	"ingest":   "ADDR",
 	"interval": "D",
 	"origin":   "TIME",
+	"output":   "FORMAT",
 	"probe":    "N",
 	"repo":     "owner/name",
 	"seed":     "N",
@@ -130,9 +132,13 @@ Usage:
   toktop [flags] [ssh://user@host ...]
   toktop update [--check] [--repo owner/name]   install the latest release
   toktop completion <bash|zsh|fish>              print a shell completion script
-  toktop help [update|version|completion]        this screen; update and
+  toktop help [update|version|completion|schema]
+                                                 this screen; update and
                                                  completion have their own
   toktop version                                print version and exit
+  toktop schema [command]                       CLI Spec description, as JSON
+  toktop snapshot                               one snapshot and exit (same as --once)
+  toktop dashboard                              full-screen UI (the default with no subcommand)
 
 Examples:
   toktop --demo                simulated fleet, works instantly
@@ -142,10 +148,12 @@ Examples:
   toktop --agents              also watch coding agents on this machine
                                (opencode's session database included)
   toktop --agents --opencode-db=false   ...without opencode's session database
-  toktop --once >frame.txt     render one static frame and exit
+  toktop -o text --once >frame.txt
+                               one static frame, including when redirected
   toktop --once --plain        one frame as a linear text report (screen readers)
   toktop --plain               the same live text report, still updating
   toktop --once --json         one snapshot as JSON, for scripts
+  toktop schema                machine-readable command list, no config needed
   toktop --demo --seed 7 --origin 2026-01-01T00:00:00Z
                                demo run a seed reproduces byte for byte
 
@@ -153,18 +161,22 @@ Flags:
 `)
 	buf.WriteString(flagDocs(topFS))
 	fmt.Fprint(&buf, `
-Positional arguments are ssh:// targets and may repeat; help, version and
-completion are also accepted as commands. 'toktop help update', 'toktop
---help update' and 'toktop update --help' print the update screen; the same
-three spellings print the completion screen for 'toktop help completion'.
-'toktop help version' and 'toktop version --help' both print this one, since
-version takes no flags of its own. http(s) URLs are rejected with an --add
-hint; anything else points at --help. --add URLs must be http(s) with a host
-and must not embed userinfo. ssh:// targets must be ssh://[user@]host[:port]
-and must not embed a password (use $TOKTOP_SSH_PASSWORD or --ssh-key); a
-host or user carrying a bidi control, zero-width or other invisible
-character is refused, since the name shown is not the one ssh dials.
-The live dashboard needs a terminal; use --once when piping or redirecting.
+Positional arguments are ssh:// targets and may repeat; help, version,
+completion, schema, snapshot and dashboard are also accepted as commands.
+'toktop help update', 'toktop --help update' and 'toktop update --help' print
+the update screen; the same three spellings print the completion screen for
+'toktop help completion'. 'toktop help version' and 'toktop version --help'
+both print this one, since version takes no flags of its own. http(s) URLs
+are rejected with an --add hint; anything else points at --help. --add URLs
+must be http(s) with a host and must not embed userinfo. ssh:// targets must
+be ssh://[user@]host[:port] and must not embed a password (use
+$TOKTOP_SSH_PASSWORD or --ssh-key); a host or user carrying a bidi control,
+zero-width or other invisible character is refused, since the name shown is
+not the one ssh dials.
+The live dashboard needs a terminal; use --once or snapshot when piping or
+redirecting. A snapshot is JSON when stdout is not a terminal. -o text keeps
+the frame. toktop schema prints the CLI Spec document and does not need a
+config file.
 
 Environment (a flag always wins over the variable it mirrors):
   TOKTOP_BEARER           bearer token for --add endpoints; OMNIROUTE_API_KEY
@@ -209,6 +221,7 @@ Exit codes:
   0    success, including a reader such as head closing stdout early
   1    runtime failure (no telemetry arrived, a write or the update failed)
   2    usage error (unknown flag, command or ssh:// target, bad value)
+  4    the full-screen UI was started without a terminal (tty_required)
   130  interrupted (--once, toktop update, and the live dashboard when
        SIGINT or SIGTERM stops it; the dashboard's own q and Ctrl+C are a
        clean 0)
@@ -425,6 +438,12 @@ const unknownFlagPrefix = "flag provided but not defined: "
 // names the command whose help applies, so the extra-argument message points
 // at the screen that would have answered it.
 func runHelp(out io.Writer, args []string) int {
+	rest, dropErr := dropOutputFlags(args)
+	if dropErr != nil {
+		fmt.Fprintf(os.Stderr, "toktop: %s\n", dropErr)
+		return 2
+	}
+	args = rest
 	if len(args) == 0 || isHelpArg(args[0]) || args[0] == "help" {
 		if len(args) > 1 {
 			return rejectExtra("toktop help", args[1])
@@ -456,6 +475,11 @@ func runHelp(out io.Writer, args []string) int {
 			return rejectExtra("toktop version", args[1])
 		}
 		return outputStatus(usage(out))
+	case "schema", "snapshot", "dashboard":
+		if len(args) > 1 {
+			return rejectExtra("toktop "+args[0], args[1])
+		}
+		return outputStatus(usage(out))
 	}
 	if strings.HasPrefix(args[0], "-") {
 		// subcommandFlagHint, the hint `toktop --check` already gives: a flag
@@ -477,6 +501,12 @@ func rejectExtra(cmd, arg string) int {
 // --version prints the version, matching what `toktop update` accepts; any
 // other extra argument is a usage error.
 func runVersion(out io.Writer, args []string) int {
+	rest, dropErr := dropOutputFlags(args)
+	if dropErr != nil {
+		fmt.Fprintf(os.Stderr, "toktop version: %s\n", dropErr)
+		return 2
+	}
+	args = rest
 	if len(args) > 0 {
 		if isVersionArg(args[0]) {
 			if len(args) > 1 {
@@ -538,7 +568,7 @@ func unexpectedArg(arg string) error {
 	switch {
 	case arg == "update":
 		return fmt.Errorf("toktop: unexpected argument %q (the update subcommand must be first: toktop update)", arg)
-	case arg == "help" || arg == "version" || arg == "completion":
+	case arg == "help" || arg == "version" || arg == "completion" || arg == "schema" || arg == "snapshot" || arg == "dashboard":
 		return fmt.Errorf("toktop: unexpected argument %q (the %s subcommand must be first: toktop %s)", arg, arg, arg)
 	case strings.HasPrefix(arg, "http://") || strings.HasPrefix(arg, "https://"):
 		return fmt.Errorf("toktop: unexpected argument %q (did you mean --add %s?)", arg, arg)
