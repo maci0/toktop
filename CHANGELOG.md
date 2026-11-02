@@ -13,6 +13,8 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-11-02
+
 ### Fixed
 
 - Oversized OpenCode 2 counters no longer hide valid usage from other records.
@@ -4325,7 +4327,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.26.1...HEAD
+[0.26.1]: https://github.com/maci0/toktop/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/maci0/toktop/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/maci0/toktop/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/maci0/toktop/compare/v0.23.0...v0.24.0
