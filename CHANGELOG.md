@@ -13,6 +13,63 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.26.2] - 2026-11-02
+
+### Fixed
+
+- Oversized OpenCode 2 counters no longer hide valid usage from other records.
+- OpenCode 2 rows with missing event or message IDs no longer prevent a watcher
+  from reading other usage in the database.
+- OpenCode 2's peak context includes timestamped title, compaction, and retry
+  events as well as assistant messages, including events written in the
+  attachment millisecond and untimed events recorded after attachment. Messages
+  completed in the attachment millisecond also contribute their context.
+- OpenCode 2 retry attempts retain their token counts when a later attempt
+  replaces the assistant message's projected usage, without treating stale
+  counters from a retry in progress or a final failure without both usage and
+  cost as new usage. Event reads, including attachment baselines, use OpenCode's
+  type index to avoid scanning unrelated events in each session.
+- OpenCode 2 usage written in the millisecond a watcher attaches is counted
+  without including older records from that same millisecond, including retries
+  that report the same token counts as the previous attempt.
+- A missing home directory warning no longer claims explicitly configured
+  agent stores cannot be read.
+- A relative `XDG_DATA_HOME` resolves OpenCode's database from the watched
+  agent's working directory, matching OpenCode 2.
+- OpenCode's timestamped and untimed usage are read from the same database
+  snapshot, avoiding inconsistent samples while the store changes.
+
+- OpenCode usage from untimed events remains counted when its database is
+  upgraded while a watcher is running.
+- OpenCode databases with a renamed session table and untimed events remain
+  readable.
+- OpenCode session tables without fork metadata remain readable after rename.
+- OpenCode 2's separate reasoning tokens now count toward output tokens, so
+  output rates and budgets include all generated tokens.
+- OpenCode 2 message and auxiliary usage counters saturate when their combined
+  value exceeds the supported limit instead of reporting zero.
+- Agents that change working directory are moved to the new project's store,
+  including OpenCode 2 when it starts in an explicitly requested directory.
+- Readings at the same instant from a process before and after changing its
+  project or agent are no longer mistaken for duplicate events.
+- OpenCode 2 session databases report token usage using their updated schema.
+- OpenCode 2 stores created before its session-table rename use their V2
+  messages instead of the older V1 message table. Untimed auxiliary events in
+  older stores are counted from an attach-time per-session baseline.
+- OpenCode auxiliary-read failures retain the last complete token sample, so a
+  later recovery does not count the same usage twice.
+- OpenCode 2 title and compaction usage is included in token counts.
+- OpenCode usage reads use one database snapshot while sessions are changing.
+- OpenCode 2 steps that finish after a watcher attaches are counted even when
+  they started before it attached.
+- The OpenCode database reader honors `OPENCODE_DB`, including relative paths
+  under OpenCode's data directory and the in-memory setting.
+
+### Changed
+
+- Documented the process-directory attribution limit for external OpenCode
+  ACP clients that open a session in another directory.
+
 ## [0.26.1] - 2026-11-02
 
 ### Fixed
@@ -4327,7 +4384,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.26.1...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.26.2...HEAD
+[0.26.2]: https://github.com/maci0/toktop/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/maci0/toktop/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/maci0/toktop/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/maci0/toktop/compare/v0.24.0...v0.25.0
