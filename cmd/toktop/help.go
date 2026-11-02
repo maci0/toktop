@@ -193,7 +193,9 @@ Environment (a flag always wins over the variable it mirrors):
                           ~/.gauntlet; a relative value is ignored
   XDG_DATA_HOME           where opencode's session database is read
                           (--opencode-db), default ~/.local/share; a relative
-                          value is ignored
+                          value is relative to each agent's working directory
+  OPENCODE_DB             opencode database path (--opencode-db); relative
+                          paths are under its data directory
   XDG_CONFIG_HOME         where the ssh host-key store lives, default
                           ~/.config; a relative value is ignored, and on
                           Linux it names no store at all, so every ssh://
@@ -211,7 +213,7 @@ Environment (a flag always wins over the variable it mirrors):
 An unrecognized TOKTOP_* name is reported as a typo at startup, and one that
 cannot take effect in the chosen mode is named rather than silently ignored. A
 name outside that prefix that is within two edits of one this build reads
-(GAUNTLET_HOME, KIMI_CODE_HOME, XDG_DATA_HOME, XDG_CONFIG_HOME, GITHUB_TOKEN,
+(GAUNTLET_HOME, KIMI_CODE_HOME, XDG_DATA_HOME, OPENCODE_DB, XDG_CONFIG_HOME, GITHUB_TOKEN,
 SSH_AUTH_SOCK, OMNIROUTE_API_KEY) is named with the variable it was meant to
 be, since nothing claims the prefix of those and a typo in one falls back to
 a default with nothing saying so.

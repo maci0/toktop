@@ -25,8 +25,12 @@ type usageSource interface {
 // sessionCounts is one session's cumulative counters, snapshotted at attach
 // so a continued session contributes only growth after that.
 type sessionCounts struct {
-	output int64
-	input  int64
+	output   int64
+	input    int64
+	thinking int64
+	context  int64
+	sequence int64
+	content  [32]byte
 }
 
 // sessionSource reports per-session cumulative counters. Watch snapshots
@@ -36,21 +40,28 @@ type sessionCounts struct {
 // path, so two projects cannot collide on a session id.
 //
 // A zero since returns every session (the attach baseline). A non-zero
-// since returns sessions written at or after that instant, which is enough
-// to compute growth: untouched sessions contribute a zero delta.
+// since may restrict the read to sessions updated since then when the store
+// supplies timestamps; untouched sessions contribute a zero delta.
 type sessionSource interface {
 	sessions(dirs []string, since time.Time) (map[string]map[string]sessionCounts, bool)
 }
 
-// tokenSource is a non-file usage reader. One struct, two shapes: usage
-// (opencode) sums this attach's tokens via read; session (crush) snapshots
-// per-session counters via sessions so a continued session contributes only
-// growth. Exactly one shape is set per tool. usageSource and sessionSource
-// stay separate interfaces because the two shapes have different methods and
-// callers, and merging them would force every source to implement both.
+type snapshotUsageSource interface {
+	readSnapshot(dirs []string, since time.Time) (values, map[string]map[string]sessionCounts, bool)
+}
+
+type fixedSessionSource map[string]map[string]sessionCounts
+
+func (s fixedSessionSource) sessions([]string, time.Time) (map[string]map[string]sessionCounts, bool) {
+	return s, true
+}
+
+// tokenSource reads timestamped usage, per-session counters, or both. The
+// auxiliary counters cover OpenCode events with no usable timestamp.
 type tokenSource struct {
-	usage   usageSource
-	session sessionSource
+	usage     usageSource
+	session   sessionSource
+	auxiliary sessionSource
 }
 
 func (s tokenSource) present() bool {

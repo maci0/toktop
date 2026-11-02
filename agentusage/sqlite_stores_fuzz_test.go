@@ -357,6 +357,48 @@ func FuzzOpenCodeDBUsage(f *testing.F) {
 	})
 }
 
+func FuzzOpenCodeV2BoundaryUsage(f *testing.F) {
+	for _, seed := range []string{
+		`{"tokens":{"input":100,"output":5,"reasoning":2}}`,
+		`{"source":"title","tokens":{"output":10}}`,
+		`{"tokens":{"input":1e30}}`, `{"tokens":"many"}`, `{"tokens":null}`, `broken`,
+	} {
+		f.Add([]byte(seed))
+	}
+	f.Fuzz(func(t *testing.T, payload []byte) {
+		if len(payload) > fuzzPayloadCap {
+			t.Skip()
+		}
+		path := filepath.Join(t.TempDir(), "opencode.db")
+		execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+		execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+		execSQL(t, path, `CREATE TABLE event (id TEXT PRIMARY KEY, aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+		start := time.Unix(1700000000, 0)
+		execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, start.UnixMilli())
+		execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, ?)`, start.UnixMilli(), string(payload))
+		execSQL(t, path, `INSERT INTO event VALUES ('e', 's', 1, 'session.usage.recorded.1', ?, ?)`, start.UnixMilli(), string(payload))
+		defer forgetStoreRead("opencode", path)
+		v, snapshot, ok := (openCodeDBSource{path: path}).readSnapshot([]string{"/work"}, start)
+		if !ok {
+			t.Fatalf("valid database with payload %q could not be read", payload)
+		}
+		for _, n := range []int{v.output, v.input, v.thinking, v.total} {
+			if n < 0 || n > maxSaneTokensInt() {
+				t.Fatalf("invalid usage %+v for payload %q", v, payload)
+			}
+		}
+		for _, records := range snapshot {
+			for _, record := range records {
+				for _, n := range []int64{record.output, record.input, record.thinking, record.context} {
+					if n < 0 || n > maxSaneTokens {
+						t.Fatalf("invalid boundary record %+v for payload %q", record, payload)
+					}
+				}
+			}
+		}
+	})
+}
+
 // openCodeUsage reads the store at path as the opencode source would, for one
 // directory spelling and no lower bound.
 func openCodeUsage(t *testing.T, path, dir string) (values, bool) {

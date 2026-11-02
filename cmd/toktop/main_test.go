@@ -598,13 +598,16 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 		sshTarget  bool
 		agents     bool
 		dataHome   string
+		dbPath     string
 		configHome string
 		kimiHome   string
 		wantStderr []string
 	}{
 		{name: "unset passes", opencodeDB: true, sshTarget: true, agents: true},
 		{name: "absolute passes", opencodeDB: true, sshTarget: true, agents: true, dataHome: abs, configHome: abs, kimiHome: kimiHome},
-		{name: "relative data home is named", opencodeDB: true, dataHome: "share", wantStderr: []string{"$XDG_DATA_HOME"}},
+		{name: "relative data home is named", opencodeDB: true, dataHome: "share", wantStderr: []string{"$XDG_DATA_HOME", "each agent's working directory"}},
+		{name: "absolute database bypasses data home", opencodeDB: true, dataHome: "share", dbPath: filepath.Join(abs, "custom.db")},
+		{name: "memory database bypasses data home", opencodeDB: true, dataHome: "share", dbPath: ":memory:"},
 		{name: "relative config home is named", sshTarget: true, configHome: "cfg", wantStderr: []string{"$XDG_CONFIG_HOME"}},
 		{name: "relative kimi home is named", agents: true, kimiHome: "kimi", wantStderr: []string{"$KIMI_CODE_HOME"}},
 		{
@@ -624,6 +627,7 @@ func TestWarnIgnoredXDGHome(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("XDG_DATA_HOME", tt.dataHome)
+			t.Setenv("OPENCODE_DB", tt.dbPath)
 			t.Setenv("XDG_CONFIG_HOME", tt.configHome)
 			t.Setenv("KIMI_CODE_HOME", tt.kimiHome)
 			got := captureStderr(t, func() { warnIgnoredXDGHome(tt.opencodeDB, tt.sshTarget, tt.agents) })
@@ -684,7 +688,7 @@ func TestWarnIgnoredUserHome(t *testing.T) {
 		t.Setenv("HOME", filepath.Join("relative", "home"))
 		t.Setenv("USERPROFILE", filepath.Join("relative", "home"))
 		got := captureStderr(t, func() { warnIgnoredUserHome() })
-		if !strings.Contains(got, "not an absolute path") {
+		if !strings.Contains(got, "not an absolute path") || !strings.Contains(got, "default home-based agent stores") {
 			t.Fatalf("warnIgnoredUserHome() printed %q, want the relative home named", got)
 		}
 	})

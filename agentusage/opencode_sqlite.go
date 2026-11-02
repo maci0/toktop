@@ -7,6 +7,7 @@ package agentusage
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -68,24 +69,341 @@ func setOpenCodeDB(on bool) bool {
 		registerSource("opencode", tokenSource{})
 		return true
 	}
-	registerSource("opencode", tokenSource{usage: openCodeDBSource{path: openCodeDBPath()}})
+	path := openCodeDBPath()
+	registerSource("opencode", tokenSource{usage: openCodeDBSource{path: path}, auxiliary: openCodeUntimedSource{path: path}})
 	return true
 }
 
-// openCodeDBPath locates the session database, honoring XDGDataHomeEnv the way
-// opencode itself does. A relative value is ignored: the XDG base-directory
-// spec calls it invalid, and joining onto it would read a database under
-// whatever directory the run started in, which reads as an agent producing
-// no tokens.
-func openCodeDBPath() string {
-	if data := os.Getenv(XDGDataHomeEnv); filepath.IsAbs(data) {
-		return filepath.Join(data, "opencode", "opencode.db")
+// openCodeUntimedSource snapshots events without usable timestamps and
+// records at the attach millisecond, where timestamps cannot order writes.
+type openCodeUntimedSource struct {
+	path  string
+	since time.Time
+}
+
+func (o openCodeUntimedSource) withSince(since time.Time) sessionSource {
+	o.since = since
+	return o
+}
+
+func openCodeRetryPredicate() string {
+	id := jsonToken("$.assistantMessageID")
+	return `m.type = 'session.step.failed.1' AND ` + id + ` IS NOT NULL AND (EXISTS (
+		SELECT 1 FROM event later WHERE later.aggregate_id = m.aggregate_id AND later.seq > m.seq
+		AND later.type IN ('session.step.started.1', 'session.step.failed.1', 'session.step.ended.1') AND ` +
+		strings.ReplaceAll(id, "m.data", "later.data") + ` = ` + id + `) OR (` + jsonToken("$.tokens") + ` IS NOT NULL AND ` + jsonToken("$.cost") + ` IS NULL))`
+}
+
+func openCodeEventPredicate(sequenced bool) string {
+	usage := "m.type = 'session.usage.recorded.1' AND " + jsonToken("$.source") + " IN ('title', 'compaction')"
+	if !sequenced {
+		return usage
 	}
-	dir := HomeDir()
-	if dir == "" {
+	return "(m.type IN ('session.usage.recorded.1', 'session.step.failed.1') AND ((" + usage + ") OR (" + openCodeRetryPredicate() + ")))"
+}
+
+func openCodeV2BoundCounters(query string) string {
+	for _, path := range []string{"$.tokens.output", "$.tokens.reasoning", "$.tokens.input"} {
+		value := "CAST(" + jsonToken(path) + " AS REAL)"
+		query = strings.ReplaceAll(query, "MAX("+value+", 0)", fmt.Sprintf("CASE WHEN %s BETWEEN 0 AND %d THEN %s ELSE 0 END", value, maxSaneTokens, value))
+	}
+	return query
+}
+
+func openCodeMessagePredicate() string {
+	// A final failure without both tokens and cost leaves old projected tokens.
+	id := jsonToken("$.assistantMessageID")
+	failedID := strings.ReplaceAll(id, "m.data", "failed.data")
+	startedID := strings.ReplaceAll(id, "m.data", "started.data")
+	laterID := strings.ReplaceAll(id, "m.data", "later.data")
+	return `(` + jsonToken("$.time.completed") + ` IS NOT NULL OR NOT EXISTS (
+		SELECT 1 FROM event failed JOIN event started ON started.aggregate_id = failed.aggregate_id
+		AND started.seq > failed.seq AND started.type = 'session.step.started.1'
+		WHERE failed.aggregate_id = session.id AND failed.type = 'session.step.failed.1'
+		AND ` + failedID + ` = m.id AND ` + startedID + ` = m.id)) AND NOT EXISTS (
+		SELECT 1 FROM event failed WHERE failed.aggregate_id = session.id
+		AND failed.type = 'session.step.failed.1' AND ` + failedID + ` = m.id
+		AND (` + strings.ReplaceAll(jsonToken("$.tokens"), "m.data", "failed.data") + ` IS NULL OR ` + strings.ReplaceAll(jsonToken("$.cost"), "m.data", "failed.data") + ` IS NULL)
+		AND NOT EXISTS (SELECT 1 FROM event later WHERE later.aggregate_id = failed.aggregate_id
+		AND later.seq > failed.seq AND later.type IN ('session.step.started.1', 'session.step.failed.1', 'session.step.ended.1')
+		AND ` + laterID + ` = m.id))`
+}
+
+func (o openCodeUntimedSource) sessions(dirs []string, since time.Time) (_ map[string]map[string]sessionCounts, ok bool) {
+	o.path = openCodeSourcePath(o.path, dirs)
+	if o.path == "" || len(dirs) == 0 {
+		return nil, false
+	}
+	h, err := openStore(o.path)
+	if err != nil {
+		if !storeAbsent(o.path) {
+			auditStoreRead("opencode auxiliary", o.path, err)
+		}
+		return nil, false
+	}
+	defer releaseStore(h)
+	defer func() {
+		if !ok {
+			closeStore(o.path)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
+	defer cancel()
+	tx, err := h.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		auditStoreRead("opencode auxiliary", o.path, err)
+		return nil, false
+	}
+	defer tx.Rollback()
+	return o.sessionsTx(ctx, tx, dirs, since.IsZero())
+}
+
+func (o openCodeUntimedSource) sessionsTx(ctx context.Context, tx *sql.Tx, dirs []string, baseline bool) (map[string]map[string]sessionCounts, bool) {
+	var applicable, split, timed, sequenced, eventID bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_message')
+		OR EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_v2'),
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_v2'),
+		EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'created'),
+		EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'seq'),
+		EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'id')`).Scan(&applicable, &split, &timed, &sequenced, &eventID); err != nil {
+		auditStoreRead("opencode auxiliary", o.path, err)
+		return nil, false
+	}
+	counts := map[string]sessionCounts{}
+	retries := map[string]sessionCounts{}
+	contexts := map[string]sessionCounts{}
+	boundaryMessages := map[string]sessionCounts{}
+	if applicable {
+		fold := foldSessionDirectory.Load()
+		sessionTable, untimed := "session", "1"
+		if split {
+			sessionTable = "session_v2"
+		}
+		if timed {
+			untimed = "m.created = 0"
+			if !o.since.IsZero() {
+				untimed = fmt.Sprintf("(m.created = 0 OR m.created = %d)", o.since.UnixMilli())
+			}
+		}
+		eventKind := openCodeEventPredicate(false)
+		if eventID {
+			eventKind = "(" + eventKind + ") AND m.id IS NOT NULL"
+		}
+		query := fmt.Sprintf(`SELECT session.id,
+			COALESCE(CAST(SUM(MAX(CAST(%s AS REAL), 0)) AS INTEGER), 0),
+			COALESCE(CAST(SUM(MAX(CAST(%s AS REAL), 0)) AS INTEGER), 0),
+			COALESCE(CAST(SUM(MAX(CAST(%s AS REAL), 0)) AS INTEGER), 0)
+			FROM %s AS session LEFT JOIN event m ON m.aggregate_id = session.id
+			AND %s AND %s
+			WHERE %s
+			GROUP BY session.id`, jsonToken("$.tokens.output"), jsonToken("$.tokens.input"), jsonToken("$.tokens.reasoning"),
+			sessionTable, eventKind, untimed, directoryPred(len(dirs), fold))
+		query = openCodeV2BoundCounters(query)
+		rows, err := tx.QueryContext(ctx, query, dirArgs(dirs, fold)...)
+		if err != nil {
+			auditStoreRead("opencode auxiliary", o.path, err)
+			return nil, false
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id sql.NullString
+			var output, input, thinking sql.NullInt64
+			if err := rows.Scan(&id, &output, &input, &thinking); err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+			if id.Valid {
+				counts[id.String] = sessionCounts{output: int64(satAdd(counter64(output.Int64), counter64(thinking.Int64))), input: int64(counter64(input.Int64)), thinking: int64(counter64(thinking.Int64))}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			auditStoreRead("opencode auxiliary", o.path, err)
+			return nil, false
+		}
+		var parts []string
+		for _, path := range []string{"$.tokens.input", "$.tokens.output", "$.tokens.reasoning", "$.tokens.cache.read", "$.tokens.cache.write"} {
+			parts = append(parts, "MAX(COALESCE(CAST("+jsonToken(path)+" AS REAL), 0), 0)")
+		}
+		kind := eventKind
+		if sequenced {
+			kind = openCodeEventPredicate(true)
+			if baseline {
+				kind = "m.type IN ('session.usage.recorded.1', 'session.step.failed.1') AND (" + eventKind + " OR m.type = 'session.step.failed.1')"
+			}
+			if eventID {
+				kind = "(" + kind + ") AND m.id IS NOT NULL"
+			}
+		}
+		identity := "CAST(m.rowid AS TEXT)"
+		if eventID {
+			identity = "m.id"
+		}
+		query = fmt.Sprintf(`SELECT %s, CAST((%s) AS INTEGER)
+			FROM %s AS session CROSS JOIN event m
+			WHERE m.aggregate_id = session.id AND %s AND %s AND %s`,
+			identity, strings.Join(parts, " + "), sessionTable, directoryPred(len(dirs), fold), untimed, kind)
+		rows, err = tx.QueryContext(ctx, query, dirArgs(dirs, fold)...)
+		if err != nil {
+			auditStoreRead("opencode auxiliary", o.path, err)
+			return nil, false
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var id sql.NullString
+			var context int64
+			if err := rows.Scan(&id, &context); err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+			if id.Valid {
+				contexts["event\x00"+id.String] = sessionCounts{context: int64(counter64(context))}
+			}
+		}
+		if err := rows.Err(); err != nil {
+			auditStoreRead("opencode auxiliary", o.path, err)
+			return nil, false
+		}
+		// A failure present at attach can become superseded only after attach.
+		if sequenced && !o.since.IsZero() {
+			kind := "m.type = 'session.step.failed.1'"
+			if !baseline {
+				kind = openCodeRetryPredicate()
+			}
+			if eventID {
+				kind = "(" + kind + ") AND m.id IS NOT NULL"
+			}
+			query := fmt.Sprintf(`SELECT session.id, m.seq,
+				COALESCE(CAST(MAX(CAST(%s AS REAL), 0) AS INTEGER), 0),
+				COALESCE(CAST(MAX(CAST(%s AS REAL), 0) AS INTEGER), 0),
+				COALESCE(CAST(MAX(CAST(%s AS REAL), 0) AS INTEGER), 0)
+				FROM %s AS session CROSS JOIN event m
+				WHERE m.aggregate_id = session.id AND %s AND %s AND %s`,
+				jsonToken("$.tokens.output"), jsonToken("$.tokens.input"), jsonToken("$.tokens.reasoning"),
+				sessionTable, directoryPred(len(dirs), fold), untimed, kind)
+			query = openCodeV2BoundCounters(query)
+			rows, err := tx.QueryContext(ctx, query, dirArgs(dirs, fold)...)
+			if err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+			defer rows.Close()
+			for rows.Next() {
+				var id sql.NullString
+				var seq, output, input, thinking int64
+				if err := rows.Scan(&id, &seq, &output, &input, &thinking); err != nil {
+					auditStoreRead("opencode auxiliary", o.path, err)
+					return nil, false
+				}
+				if id.Valid {
+					retries[fmt.Sprintf("%s\x00%d", id.String, seq)] = sessionCounts{output: int64(satAdd(counter64(output), counter64(thinking))), input: int64(counter64(input)), thinking: int64(counter64(thinking))}
+				}
+			}
+			if err := rows.Err(); err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+		}
+		if !o.since.IsZero() {
+			var hasFork bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = 'fork_session_id')`, sessionTable).Scan(&hasFork); err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+			fork := ""
+			if hasFork {
+				fork = "AND (session.fork_session_id IS NULL OR m.time_created >= session.time_created)"
+			}
+			contextFork := fork
+			if sequenced {
+				fork += " AND " + openCodeMessagePredicate()
+				if !baseline {
+					contextFork = fork
+				}
+			}
+			ended := "0"
+			if sequenced {
+				// Retries can complete with exactly the same tokens as the previous attempt.
+				ended = `COALESCE((SELECT MAX(e.seq) FROM event e WHERE e.aggregate_id = session.id AND e.type IN ('session.step.ended.1', 'session.step.failed.1') AND ` + strings.ReplaceAll(jsonToken("$.assistantMessageID"), "m.data", "e.data") + ` = m.id), 0)`
+			}
+			query = fmt.Sprintf(`SELECT m.id, CAST((%s) AS INTEGER), COALESCE(%s, ''), %s,
+				COALESCE(CAST(MAX(CAST(%s AS REAL), 0) AS INTEGER), 0),
+				COALESCE(CAST(MAX(CAST(%s AS REAL), 0) AS INTEGER), 0),
+				COALESCE(CAST(MAX(CAST(%s AS REAL), 0) AS INTEGER), 0), %s
+				FROM %s AS session CROSS JOIN session_message m
+				WHERE m.session_id = session.id AND m.id IS NOT NULL AND m.type = 'assistant' AND %s
+				AND COALESCE(CAST(%s AS INTEGER), m.time_created) = %d %s`,
+				strings.Join(parts, " + "), jsonToken("$.tokens"), ended, jsonToken("$.tokens.output"), jsonToken("$.tokens.input"), jsonToken("$.tokens.reasoning"),
+				"CASE WHEN 1=1 "+fork+" THEN 1 ELSE 0 END", sessionTable, directoryPred(len(dirs), fold), jsonToken("$.time.completed"), o.since.UnixMilli(), contextFork)
+			query = openCodeV2BoundCounters(query)
+			messages, err := tx.QueryContext(ctx, query, dirArgs(dirs, fold)...)
+			if err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+			defer messages.Close()
+			for messages.Next() {
+				var id sql.NullString
+				var context, sequence, output, input, thinking int64
+				var included bool
+				var data []byte
+				if err := messages.Scan(&id, &context, &data, &sequence, &output, &input, &thinking, &included); err != nil {
+					auditStoreRead("opencode auxiliary", o.path, err)
+					return nil, false
+				}
+				if !id.Valid {
+					continue
+				}
+				contexts["message\x00"+id.String] = sessionCounts{context: int64(counter64(context)), content: sha256.Sum256(fmt.Appendf(data, "\x00%d", sequence))}
+				if included {
+					boundaryMessages[id.String] = sessionCounts{output: int64(satAdd(counter64(output), counter64(thinking))), input: int64(counter64(input)), thinking: int64(counter64(thinking)), sequence: sequence}
+				}
+			}
+			if err := messages.Err(); err != nil {
+				auditStoreRead("opencode auxiliary", o.path, err)
+				return nil, false
+			}
+		}
+	}
+	noteStoreReadOK("opencode auxiliary", o.path)
+	return map[string]map[string]sessionCounts{o.path: counts, o.path + "\x00retry": retries, o.path + "\x00context": contexts, o.path + "\x00message": boundaryMessages}, true
+}
+
+// openCodeDBPath locates the session database. A relative data root stays
+// relative until the watched agent's working directory is known.
+func openCodeDBPath() string {
+	data := os.Getenv(XDGDataHomeEnv)
+	if data == "" {
+		if dir := HomeDir(); dir != "" {
+			data = filepath.Join(dir, ".local", "share")
+		} else {
+			data = ""
+		}
+	}
+	name, set := os.LookupEnv(OpenCodeDBEnv)
+	if !set {
+		name = "opencode.db"
+	}
+	if name == ":memory:" {
 		return ""
 	}
-	return filepath.Join(dir, ".local", "share", "opencode", "opencode.db")
+	if filepath.IsAbs(name) {
+		return filepath.Clean(name)
+	}
+	if data == "" {
+		return ""
+	}
+	return filepath.Join(data, "opencode", name)
+}
+
+func openCodeSourcePath(path string, dirs []string) string {
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	if len(dirs) == 0 || !filepath.IsAbs(dirs[0]) {
+		return ""
+	}
+	return filepath.Join(dirs[0], path)
 }
 
 // usageQuery sums what this directory's sessions spent after a point in time.
@@ -280,9 +598,15 @@ func dirArgs(dirs []string, fold bool) []any {
 	return args
 }
 
-func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok bool) {
+func (o openCodeDBSource) read(dirs []string, since time.Time) (values, bool) {
+	v, _, ok := o.readSnapshot(dirs, since)
+	return v, ok
+}
+
+func (o openCodeDBSource) readSnapshot(dirs []string, since time.Time) (v values, snapshot map[string]map[string]sessionCounts, ok bool) {
+	o.path = openCodeSourcePath(o.path, dirs)
 	if o.path == "" || len(dirs) == 0 {
-		return values{}, false
+		return values{}, nil, false
 	}
 	// mode=ro leaves the database alone; a missing one is an answer ("nothing
 	// to report"), not an error worth surfacing, since most machines running
@@ -294,7 +618,7 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok boo
 		if !storeAbsent(o.path) {
 			auditStoreRead("opencode", o.path, err)
 		}
-		return values{}, false
+		return values{}, nil, false
 	}
 	// The handle is held for this read, so a reader that is on it while
 	// another read drops it, or the cache evicts it, still has a live
@@ -328,24 +652,129 @@ func (o openCodeDBSource) read(dirs []string, since time.Time) (v values, ok boo
 
 	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
 	defer cancel()
+	// Schema, message usage and auxiliary events must come from one snapshot.
+	// OpenCode can write or migrate the store between any two statements.
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		auditStoreRead("opencode", o.path, err)
+		return values{}, nil, false
+	}
+	defer tx.Rollback()
 
 	var out, thinking, total, input sql.NullInt64
-	row := db.QueryRowContext(ctx, usageQuery(len(dirs), fold, bounded), args...)
+	var v2, split bool
+	if err := tx.QueryRowContext(ctx, `SELECT
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_message'),
+		EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'session_v2')`).Scan(&v2, &split); err != nil {
+		auditStoreRead("opencode", o.path, err)
+		return values{}, nil, false
+	}
+	v2 = v2 || split
+	hasFork, eventTime, eventSeq, eventID := false, false, false, false
+	if v2 {
+		sessionTable := "session"
+		if split {
+			sessionTable = "session_v2"
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT
+			EXISTS(SELECT 1 FROM pragma_table_info(?) WHERE name = 'fork_session_id'),
+			EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'created'),
+			EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'seq'),
+			EXISTS(SELECT 1 FROM pragma_table_info('event') WHERE name = 'id')`, sessionTable).Scan(&hasFork, &eventTime, &eventSeq, &eventID); err != nil {
+			auditStoreRead("opencode", o.path, err)
+			return values{}, nil, false
+		}
+	}
+	query := usageQuery(len(dirs), fold, bounded)
+	if v2 {
+		if split {
+			query = strings.Replace(query, "FROM session\n", "FROM session_v2 AS session\n", 1)
+		}
+		query = strings.Replace(query, "CROSS JOIN message m", "CROSS JOIN session_message m", 1)
+		query = strings.Replace(query, jsonToken("$.role"), "m.type", 1)
+		query = strings.Replace(query, "AND m.type = 'assistant'", "AND m.id IS NOT NULL AND m.type = 'assistant'", 1)
+		if bounded {
+			// OpenCode 2 publishes a step's usage at completion, which can be
+			// later than the watch attaching to its already-created message.
+			query = strings.Replace(query, sincePred(true), "COALESCE(CAST("+jsonToken("$.time.completed")+" AS INTEGER), m.time_created) > ?", 1)
+		}
+		var tokens []string
+		for _, path := range []string{"$.tokens.input", "$.tokens.output", "$.tokens.reasoning", "$.tokens.cache.read", "$.tokens.cache.write"} {
+			tokens = append(tokens, "MAX(COALESCE(CAST("+jsonToken(path)+" AS REAL), 0), 0)")
+		}
+		contextTotal := strings.Join(tokens, " + ")
+		query = strings.Replace(query, jsonToken("$.tokens.total"), fmt.Sprintf("CASE WHEN (%s) <= %d THEN (%s) END", contextTotal, maxSaneTokens, contextTotal), 1)
+		if hasFork {
+			query = strings.Replace(query, "AND m.type = 'assistant'", "AND m.type = 'assistant' AND (session.fork_session_id IS NULL OR m.time_created >= session.time_created)", 1)
+		}
+		if eventSeq {
+			query = strings.Replace(query, "AND m.type = 'assistant'", "AND m.type = 'assistant' AND "+openCodeMessagePredicate(), 1)
+		}
+		query = openCodeV2BoundCounters(query)
+	}
+	row := tx.QueryRowContext(ctx, query, args...)
 	if err := row.Scan(&out, &thinking, &total, &input); err != nil {
 		if !errors.Is(err, sql.ErrNoRows) && !storeAbsent(o.path) {
 			auditStoreRead("opencode", o.path, err)
 		}
-		return values{}, false
+		return values{}, nil, false
+	}
+	// Untimed events use the watcher's per-session baseline for bounded reads.
+	if v2 && (eventTime || !bounded) {
+		// Title and compaction usage is stored as events, not assistant messages.
+		sessionTable := "session"
+		if split {
+			sessionTable = "session_v2"
+		}
+		eventKind := openCodeEventPredicate(eventSeq)
+		if eventID {
+			eventKind = "(" + eventKind + ") AND m.id IS NOT NULL"
+		}
+		var eventTokens []string
+		for _, path := range []string{"$.tokens.input", "$.tokens.output", "$.tokens.reasoning", "$.tokens.cache.read", "$.tokens.cache.write"} {
+			eventTokens = append(eventTokens, "MAX(COALESCE(CAST("+jsonToken(path)+" AS REAL), 0), 0)")
+		}
+		eventTotal := strings.Join(eventTokens, " + ")
+		query = fmt.Sprintf(`SELECT
+			COALESCE(CAST(SUM(MAX(CAST(%s AS REAL), 0)) AS INTEGER), 0),
+			COALESCE(CAST(SUM(MAX(CAST(%s AS REAL), 0)) AS INTEGER), 0),
+			COALESCE(CAST(SUM(MAX(CAST(%s AS REAL), 0)) AS INTEGER), 0),
+			COALESCE(CAST(MAX(CASE WHEN (%s) <= %d THEN (%s) END) AS INTEGER), 0)
+			FROM %s AS session CROSS JOIN event m
+			WHERE m.aggregate_id = session.id AND %s AND %s
+			AND %s`,
+			jsonToken("$.tokens.output"), jsonToken("$.tokens.reasoning"), jsonToken("$.tokens.input"), eventTotal, maxSaneTokens, eventTotal, sessionTable,
+			directoryPred(len(dirs), fold), strings.Replace(sincePred(bounded), "m.time_created", "m.created", 1), eventKind)
+		query = openCodeV2BoundCounters(query)
+		var extraOut, extraThinking, extraInput, extraTotal sql.NullInt64
+		if err := tx.QueryRowContext(ctx, query, args...).Scan(&extraOut, &extraThinking, &extraInput, &extraTotal); err != nil {
+			auditStoreRead("opencode", o.path, err)
+			return values{}, nil, false
+		}
+		out.Int64 = int64(satAdd(counter64(out.Int64), counter64(extraOut.Int64)))
+		thinking.Int64 = int64(satAdd(counter64(thinking.Int64), counter64(extraThinking.Int64)))
+		input.Int64 = int64(satAdd(counter64(input.Int64), counter64(extraInput.Int64)))
+		total.Int64 = int64(max(counter64(total.Int64), counter64(extraTotal.Int64)))
 	}
 	outCount := counter64(out.Int64)
+	if v2 {
+		// OpenCode 2 stores visible output and reasoning as separate counters.
+		outCount = satAdd(outCount, counter64(thinking.Int64))
+	}
 	v = values{
 		output:   outCount,
 		thinking: counter64(thinking.Int64),
 		total:    floorTotal(counter64(total.Int64), outCount),
 		input:    counter64(input.Int64),
 	}
+	if bounded {
+		snapshot, ok = (openCodeUntimedSource{path: o.path, since: since}).sessionsTx(ctx, tx, dirs, false)
+		if !ok {
+			return values{}, nil, false
+		}
+	}
 	noteStoreReadOK("opencode", o.path)
 	// The read itself succeeded whatever the totals came to, so the handle
 	// stays open even when the store holds nothing for this window.
-	return v, true
+	return v, snapshot, true
 }

@@ -298,6 +298,21 @@ func TestSameProcess(t *testing.T) {
 	if sameProcess(a, otherPID) {
 		t.Fatal("different PIDs treated as the same process")
 	}
+	changedDir := a
+	changedDir.Dir = "/b"
+	if sameProcess(a, changedDir) {
+		t.Fatal("a working-directory change kept the old store")
+	}
+	changedTool := a
+	changedTool.Tool = "codex"
+	if sameProcess(a, changedTool) {
+		t.Fatal("an exec of another agent kept the old store")
+	}
+	changedScope := a
+	changedScope.AllDirs = true
+	if sameProcess(a, changedScope) {
+		t.Fatal("a change in store scope kept the old watcher")
+	}
 
 	// Platforms that do not report a start time (Darwin) compare tool and dir.
 	a.Started = time.Time{}
@@ -823,14 +838,17 @@ func TestSampleIDDistinguishesProcessAndInstant(t *testing.T) {
 	at := time.Unix(50, 7)
 	a := agentusage.Process{PID: 1, Started: time.Unix(10, 0)}
 	b := agentusage.Process{PID: 2, Started: time.Unix(10, 0)}
-	if sampleID(a, at) == sampleID(b, at) {
+	if sampleID(a, at, 0) == sampleID(b, at, 0) {
 		t.Fatal("different PIDs produced the same id")
 	}
-	if sampleID(a, at) == sampleID(a, at.Add(time.Nanosecond)) {
+	if sampleID(a, at, 0) == sampleID(a, at.Add(time.Nanosecond), 0) {
 		t.Fatal("different instants produced the same id")
 	}
-	got := sampleID(a, at)
-	if again := sampleID(a, at); got != again {
+	if sampleID(a, at, 0) == sampleID(a, at, 1) {
+		t.Fatal("different tracker generations produced the same id")
+	}
+	got := sampleID(a, at, 0)
+	if again := sampleID(a, at, 0); got != again {
 		t.Fatalf("same process and instant must be stable: %q vs %q", got, again)
 	}
 }

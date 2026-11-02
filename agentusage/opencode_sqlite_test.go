@@ -126,6 +126,702 @@ func TestOpenCodeDBCountsThisReviewOnly(t *testing.T) {
 	}
 }
 
+func TestOpenCodeV2Usage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('other', '/elsewhere', NULL, ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('fork', '/work', 's', ?)`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('old', 's', 'assistant', ?, '{"tokens":{"output":999}}')`, start.Add(-time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('crossing', 's', 'assistant', ?, ?)`, start.Add(-time.Second).UnixMilli(), fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"output":10}}`, start.Add(time.Second).UnixMilli()))
+	execSQL(t, path, `INSERT INTO session_message VALUES ('copy', 'fork', 'assistant', ?, '{"tokens":{"output":999}}')`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('prompt', 's', 'user', ?, '{"tokens":{"output":999}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('new', 's', 'assistant', ?, '{"tokens":{"input":12,"output":34,"reasoning":5,"cache":{"read":100,"write":10}}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"compaction","tokens":{"input":3,"output":7,"reasoning":2}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"output":999}}')`, start.Add(-time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('other', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"output":999}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, 'broken')`, start.Add(time.Second).UnixMilli())
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.input != 15 || v.output != 58 || v.thinking != 7 || v.total != 161 {
+		t.Fatalf("read = %+v, %v; want input 15, output 58, thinking 7, total 161", v, ok)
+	}
+}
+
+func TestOpenCodeV2EventContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"compaction","tokens":{"input":100,"output":5,"reasoning":2,"cache":{"read":50,"write":3}}}'), ('s', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":20,"output":4}}')`, start.Add(time.Second).UnixMilli(), start.Add(2*time.Second).UnixMilli())
+	for _, since := range []time.Time{start, {}} {
+		v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, since)
+		if !ok || v.total != 160 || v.input != 120 || v.output != 11 {
+			t.Fatalf("since %v: usage = %+v, %v; want peak context 160", since, v, ok)
+		}
+	}
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":1e30}}')`, start.Add(3*time.Second).UnixMilli())
+	if v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start); !ok || v.total != 160 {
+		t.Fatalf("oversized event hid valid context: %+v, %v", v, ok)
+	}
+}
+
+func TestOpenCodeV2OversizedMessageDoesNotHideContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('valid', 's', 'assistant', ?, '{"tokens":{"input":100,"output":5}}'), ('invalid', 's', 'assistant', ?, '{"tokens":{"input":1e30,"output":1e30}}')`, start.Add(time.Second).UnixMilli(), start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":1e30,"output":1e30}}')`, start.Add(time.Second).UnixMilli())
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.total != 105 || v.output != 5 || v.input != 100 {
+		t.Fatalf("usage = %+v, %v; want context 105, input 100, output 5", v, ok)
+	}
+}
+
+func TestOpenCodeV2WatcherEventContext(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":999}}')`, start.Add(-time.Second).UnixMilli())
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"compaction","tokens":{"input":100,"output":5,"reasoning":2,"cache":{"read":50,"write":3}}}')`, start.Add(time.Second).UnixMilli())
+	for range 2 {
+		got := w.Poll()
+		if got.Input != 100 || got.Output != 7 || got.Thinking != 2 || got.Total != 160 {
+			t.Fatalf("watcher usage = %+v, want input 100, output 7, thinking 2, context 160", got)
+		}
+	}
+}
+
+func TestOpenCodeV2NullIDsDoNotBreakWatcher(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (id TEXT PRIMARY KEY, aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	at := start.UnixMilli()
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, at)
+	execSQL(t, path, `INSERT INTO event VALUES (NULL, 's', 'session.usage.recorded.1', ?, '{"source":"title"}')`, at)
+	execSQL(t, path, `INSERT INTO session_message VALUES (NULL, 's', 'assistant', ?, '{}')`, at)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('valid', 's', 'assistant', ?, '{"tokens":{"input":10,"output":5}}')`, at)
+	execSQL(t, path, `INSERT INTO event VALUES (NULL, 's', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":900,"output":900}}')`, at)
+	execSQL(t, path, `INSERT INTO session_message VALUES (NULL, 's', 'assistant', ?, '{"tokens":{"input":900,"output":900}}')`, at)
+	execSQL(t, path, `INSERT INTO event VALUES (NULL, 's', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":900,"output":900}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES (NULL, 's', 'assistant', ?, '{"tokens":{"input":900,"output":900}}')`, start.Add(time.Second).UnixMilli())
+	if got := w.Poll(); got.Input != 10 || got.Output != 5 || got.Total != 15 {
+		t.Fatalf("usage with null IDs = %+v, want input 10, output 5, context 15", got)
+	}
+}
+
+func TestOpenCodeV2ProductionSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	work := t.TempDir()
+	// The relevant columns and indexes from OpenCode 2's generated schema.
+	for _, stmt := range []string{
+		`CREATE TABLE session_v2 (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, parent_id TEXT, fork_session_id TEXT, slug TEXT NOT NULL, directory TEXT NOT NULL, version TEXT NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL)`,
+		`CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT NOT NULL, type TEXT NOT NULL, seq INTEGER NOT NULL, time_created INTEGER NOT NULL, time_updated INTEGER NOT NULL, data TEXT NOT NULL)`,
+		`CREATE UNIQUE INDEX session_message_session_seq_idx ON session_message (session_id, seq)`,
+		`CREATE INDEX session_message_session_type_seq_idx ON session_message (session_id, type, seq)`,
+		`CREATE INDEX session_message_session_time_created_id_idx ON session_message (session_id, time_created, id)`,
+		`CREATE TABLE event (id TEXT PRIMARY KEY, aggregate_id TEXT NOT NULL, seq INTEGER NOT NULL, created INTEGER DEFAULT 0 NOT NULL, type TEXT NOT NULL, data TEXT NOT NULL)`,
+		`CREATE INDEX event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)`,
+	} {
+		execSQL(t, path, stmt)
+	}
+	start := time.Now().Add(-time.Second).Truncate(time.Millisecond)
+	for _, row := range []struct{ id, parent string }{{"root", ""}, {"child", "root"}} {
+		execSQL(t, path, `INSERT INTO session_v2 (id, project_id, parent_id, slug, directory, version, time_created, time_updated) VALUES (?, 'p', NULLIF(?, ''), 's', ?, '2', ?, ?)`, row.id, row.parent, work, start.UnixMilli(), start.UnixMilli())
+	}
+	withOpenCodeDB(t, path)
+	// Use the public registration path so the watcher snapshots auxiliary events.
+	registerSource("opencode", tokenSource{usage: openCodeDBSource{path: path}, auxiliary: openCodeUntimedSource{path: path}})
+	w := Watch("opencode", work, start)
+	at := start.Add(500 * time.Millisecond).UnixMilli()
+	execSQL(t, path, `INSERT INTO session_message VALUES ('root-msg', 'root', 'assistant', 1, ?, ?, '{"tokens":{"input":10,"output":20,"reasoning":3}}'), ('child-msg', 'child', 'assistant', 1, ?, ?, '{"tokens":{"input":4,"output":5,"reasoning":2}}')`, at, at, at, at)
+	execSQL(t, path, `INSERT INTO event VALUES ('title', 'root', 1, ?, 'session.usage.recorded.1', '{"source":"title","tokens":{"input":2,"output":1,"reasoning":1}}')`, at)
+	got := w.Poll()
+	if got.Input != 16 || got.Output != 32 || got.Thinking != 6 {
+		t.Fatalf("production schema usage = %+v, want input 16, output 32, thinking 6", got)
+	}
+}
+
+func TestOpenCodeV2CountsChildSessionUsage(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, parent_id TEXT, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('root', NULL, '/work', NULL, ?), ('child', 'root', '/work', NULL, ?), ('other', NULL, '/other', NULL, ?)`, start.UnixMilli(), start.UnixMilli(), start.UnixMilli())
+	for _, row := range []struct{ id, session, tokens string }{
+		{"root-message", "root", `{"output":40,"reasoning":7}`},
+		{"child-message", "child", `{"output":20,"reasoning":3}`},
+		{"other-message", "other", `{"output":999}`},
+	} {
+		execSQL(t, path, `INSERT INTO session_message VALUES (?, ?, 'assistant', ?, ?)`, row.id, row.session, start.Add(time.Second).UnixMilli(), `{"tokens":`+row.tokens+`}`)
+	}
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.output != 70 || v.thinking != 10 {
+		t.Fatalf("usage = %+v, %v; want root and child output 70, thinking 10", v, ok)
+	}
+}
+
+func TestOpenCodeV2CountsUsageAtAttachMillisecond(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (id TEXT PRIMARY KEY, aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('old', 's', 'assistant', ?, '{"tokens":{"output":100}}')`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('crossing', 's', 'assistant', ?, '{}')`, start.Add(-time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('old', 's', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"output":200}}')`, start.UnixMilli())
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('new', 's', 'assistant', ?, '{"tokens":{"output":4,"reasoning":1}}')`, start.UnixMilli())
+	execSQL(t, path, `UPDATE session_message SET data = ? WHERE id = 'crossing'`, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"output":3}}`, start.UnixMilli()))
+	execSQL(t, path, `INSERT INTO event VALUES ('new', 's', 'session.usage.recorded.1', ?, '{"source":"compaction","tokens":{"input":100,"output":2,"reasoning":1,"cache":{"read":57}}}')`, start.UnixMilli())
+	for range 2 {
+		if got := w.Poll(); got.Output != 11 || got.Thinking != 2 || got.Total != 160 {
+			t.Fatalf("same-millisecond usage = %+v, want output 11, thinking 2 and context 160 without old usage", got)
+		}
+	}
+	execSQL(t, path, `INSERT INTO session_message VALUES ('later', 's', 'assistant', ?, '{"tokens":{"input":1000,"output":1,"cache":{"read":499}}}')`, start.UnixMilli())
+	if got := w.Poll(); got.Output != 12 || got.Total != 1500 {
+		t.Fatalf("same-millisecond message context = %+v, want output 12 and context 1500", got)
+	}
+}
+
+func TestOpenCodeV2CountsUsageFromRetriedSteps(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, ?)`, start.UnixMilli())
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, '{"tokens":{"output":5,"reasoning":2}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 1, 'session.step.failed.1', ?, '{"assistantMessageID":"m","tokens":{"output":3,"reasoning":1}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 2, 'session.step.ended.1', ?, '{"assistantMessageID":"m","tokens":{"output":5,"reasoning":2}}')`, start.Add(2*time.Second).UnixMilli())
+	if got := w.Poll(); got.Output != 11 || got.Thinking != 3 {
+		t.Fatalf("retried usage = %+v, want output 11 and thinking 3", got)
+	}
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m2', 's', 'assistant', ?, '{"tokens":{"output":1}}'), ('m3', 's', 'assistant', ?, '{"tokens":{"output":4}}')`, start.Add(time.Second).UnixMilli(), start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 3, 'session.step.failed.1', ?, '{"assistantMessageID":"m2","tokens":{"output":2,"reasoning":1}}')`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 4, 'session.step.ended.1', ?, '{"assistantMessageID":"m2","tokens":{"output":1}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 5, 'session.step.failed.1', ?, '{"assistantMessageID":"m3","tokens":{"output":4}}')`, start.Add(time.Second).UnixMilli())
+	if got := w.Poll(); got.Output != 19 || got.Thinking != 4 {
+		t.Fatalf("boundary and final failure usage = %+v, want output 19 and thinking 4", got)
+	}
+	if got := Watch("opencode", "/work", time.Time{}).Poll(); got.Output != 19 || got.Thinking != 4 {
+		t.Fatalf("unbounded retried usage = %+v, want output 19 and thinking 4", got)
+	}
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m4', 's', 'assistant', ?, '{"tokens":{"output":6,"reasoning":1}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 6, 'session.step.failed.1', ?, '{"assistantMessageID":"m4","tokens":{"output":6,"reasoning":1}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 7, 'session.step.started.1', ?, '{"assistantMessageID":"m4"}')`, start.Add(2*time.Second).UnixMilli())
+	if got := w.Poll(); got.Output != 26 || got.Thinking != 5 {
+		t.Fatalf("running retry = %+v, want output 26 and thinking 5", got)
+	}
+	execSQL(t, path, `UPDATE session_message SET data = ? WHERE id = 'm4'`, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"output":3}}`, start.Add(3*time.Second).UnixMilli()))
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 8, 'session.step.ended.1', ?, '{"assistantMessageID":"m4","tokens":{"output":3}}')`, start.Add(3*time.Second).UnixMilli())
+	if got := w.Poll(); got.Output != 29 || got.Thinking != 5 {
+		t.Fatalf("completed retry = %+v, want output 29 and thinking 5", got)
+	}
+}
+
+func TestOpenCodeV2RetryFailureWithoutUsageDoesNotRepeatOldTokens(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Add(-time.Second).Truncate(time.Millisecond)
+	at := start.Add(500 * time.Millisecond).UnixMilli()
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, at)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, ?)`, at, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"output":5,"reasoning":2}}`, at))
+	execSQL(t, path, `INSERT INTO event VALUES ('s',1,'session.step.failed.1',?, '{"assistantMessageID":"m","tokens":{"output":5,"reasoning":2}}'), ('s',2,'session.step.started.1',?, '{"assistantMessageID":"m"}'), ('s',3,'session.step.failed.1',?, '{"assistantMessageID":"m"}')`, at, at, at)
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.output != 7 || v.thinking != 2 {
+		t.Fatalf("retry usage = %+v, ok %v; want output 7 and thinking 2", v, ok)
+	}
+	v, ok = (openCodeDBSource{path: path}).read([]string{"/work"}, time.Time{})
+	if !ok || v.output != 7 || v.thinking != 2 {
+		t.Fatalf("unbounded retry usage = %+v, ok %v; want output 7 and thinking 2", v, ok)
+	}
+	execSQL(t, path, `UPDATE event SET data = '{"assistantMessageID":"m","tokens":{"output":3}}' WHERE seq = 3`)
+	for _, since := range []time.Time{start, {}} {
+		v, ok = (openCodeDBSource{path: path}).read([]string{"/work"}, since)
+		if !ok || v.output != 10 || v.thinking != 2 {
+			t.Fatalf("retry usage without cost = %+v, ok %v; want output 10 and thinking 2", v, ok)
+		}
+	}
+	execSQL(t, path, `UPDATE event SET data = '{"assistantMessageID":"m","cost":0,"tokens":{"output":3}}' WHERE seq = 3`)
+	execSQL(t, path, `UPDATE session_message SET data = ? WHERE id = 'm'`, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"output":3}}`, at))
+	v, ok = (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.output != 10 || v.thinking != 2 {
+		t.Fatalf("projected retry usage = %+v, ok %v; want output 10 and thinking 2", v, ok)
+	}
+}
+
+func TestOpenCodeV2RetryDoesNotCountFailureBeforeAttach(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, '{"tokens":{"output":100}}')`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 1, 'session.step.failed.1', ?, '{"assistantMessageID":"m","tokens":{"output":100}}')`, start.UnixMilli())
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	if got := w.Poll(); got.Output != 0 {
+		t.Fatalf("counted pre-attach failure: %+v", got)
+	}
+	execSQL(t, path, `UPDATE session_message SET time_created = ? WHERE id = 'm'`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 2, 'session.step.started.1', ?, '{"assistantMessageID":"m"}')`, start.Add(time.Second).UnixMilli())
+	if got := w.Poll(); got.Output != 0 {
+		t.Fatalf("counted previous attempt while retry is running: %+v", got)
+	}
+	execSQL(t, path, `UPDATE session_message SET time_created = ?, data = ? WHERE id = 'm'`, start.Add(time.Second).UnixMilli(), fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"output":5}}`, start.Add(time.Second).UnixMilli()))
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 3, 'session.step.ended.1', ?, '{"assistantMessageID":"m","tokens":{"output":5}}')`, start.Add(time.Second).UnixMilli())
+	if got := w.Poll(); got.Output != 5 {
+		t.Fatalf("counted pre-attach failure after retry: %+v, want 5", got)
+	}
+}
+
+func TestOpenCodeV2RetryWithoutCostAtAttachBoundary(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	at := start.UnixMilli()
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, at)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, ?)`, at, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"input":1000,"output":100}}`, at))
+	execSQL(t, path, `INSERT INTO event VALUES ('s',1,'session.step.failed.1',?, '{"assistantMessageID":"m","cost":0,"tokens":{"input":1000,"output":100}}')`, at)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO event VALUES ('s',2,'session.step.started.1',?, '{"assistantMessageID":"m"}'), ('s',3,'session.step.failed.1',?, '{"assistantMessageID":"m","tokens":{"output":3,"reasoning":1}}')`, at, at)
+	for range 2 {
+		if got := w.Poll(); got.Output != 4 || got.Thinking != 1 {
+			t.Fatalf("boundary retry = %+v, want output 4 and thinking 1", got)
+		}
+	}
+	execSQL(t, path, `UPDATE session_message SET data = ? WHERE id = 'm'`, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"input":20,"output":2,"reasoning":1}}`, at))
+	execSQL(t, path, `INSERT INTO event VALUES ('s',4,'session.step.failed.1',?, '{"assistantMessageID":"m","cost":0,"tokens":{"input":20,"output":2,"reasoning":1}}')`, at)
+	if got := w.Poll(); got.Total != 23 || got.Output != 7 || got.Input != 20 || got.Thinking != 2 {
+		t.Fatalf("smaller failed retry = %+v, want context 23, output 7, input 20, thinking 2", got)
+	}
+}
+
+func TestOpenCodeV2IdenticalRetryContextAtAttach(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	at := start.UnixMilli()
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, at)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, ?)`, at, fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"input":100,"output":5}}`, at))
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 1, 'session.step.failed.1', ?, '{"assistantMessageID":"m","cost":0,"tokens":{"input":100,"output":5}}')`, at)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	if got := w.Poll(); got.Total != 0 {
+		t.Fatalf("counted context before attach: %+v", got)
+	}
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 2, 'session.step.started.1', ?, '{"assistantMessageID":"m"}'), ('s', 3, 'session.step.ended.1', ?, '{"assistantMessageID":"m"}')`, at, at)
+	for range 2 {
+		if got := w.Poll(); got.Total != 105 || got.Output != 5 || got.Input != 100 {
+			t.Fatalf("identical retry usage = %+v, want context 105, output 5 and input 100", got)
+		}
+	}
+}
+
+func TestOpenCodeV2BoundaryMessagesUseIndependentBaselines(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	at := start.UnixMilli()
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, at)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('old', 's', 'assistant', ?, '{"tokens":{"output":100}}'), ('retry', 's', 'assistant', ?, '{"tokens":{"input":50,"output":5}}')`, at, at)
+	execSQL(t, path, `INSERT INTO event VALUES ('s',1,'session.step.ended.1',?, '{"assistantMessageID":"retry"}')`, at)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('new', 's', 'assistant', ?, '{"tokens":{"input":20,"output":3}}')`, at)
+	execSQL(t, path, `INSERT INTO event VALUES ('s',2,'session.step.started.1',?, '{"assistantMessageID":"retry"}'), ('s',3,'session.step.ended.1',?, '{"assistantMessageID":"retry"}')`, at, at)
+	for range 2 {
+		if got := w.Poll(); got.Input != 70 || got.Output != 8 || got.Total != 55 {
+			t.Fatalf("boundary messages = %+v, want input 70, output 8, context 55", got)
+		}
+	}
+}
+
+func TestOpenCodeV2UntimedRetryUsesAttachBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('old', 's', 'assistant', ?, '{"tokens":{"output":100}}')`, start.Add(-time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 1, 'session.step.failed.1', '{"assistantMessageID":"old","tokens":{"output":100}}')`)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	if got := w.Poll(); got.Output != 0 {
+		t.Fatalf("counted pre-attach failure: %+v", got)
+	}
+	execSQL(t, path, `UPDATE session_message SET time_created = ?, data = '{"tokens":{"output":5}}' WHERE id = 'old'`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 2, 'session.step.ended.1', '{"assistantMessageID":"old","tokens":{"output":5}}')`)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('new', 's', 'assistant', ?, '{"tokens":{"output":2}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 3, 'session.step.failed.1', '{"assistantMessageID":"new","tokens":{"output":3,"reasoning":1}}')`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 4, 'session.step.ended.1', '{"assistantMessageID":"new","tokens":{"output":2}}')`)
+	if got := w.Poll(); got.Output != 11 || got.Thinking != 1 {
+		t.Fatalf("untimed retries = %+v, want output 11 and thinking 1", got)
+	}
+}
+
+func TestOpenCodeV2BeforeSessionTableRename(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE message (id TEXT PRIMARY KEY, session_id TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session VALUES ('s', '/work', NULL, ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session VALUES ('fork', '/work', 's', ?)`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO message VALUES ('legacy', 's', ?, '{"role":"assistant","tokens":{"output":999}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('copy', 'fork', 'assistant', ?, '{"tokens":{"output":999}}')`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('step', 's', 'assistant', ?, ?)`, start.Add(-time.Second).UnixMilli(), fmt.Sprintf(`{"time":{"completed":%d},"tokens":{"input":12,"output":34,"reasoning":5}}`, start.Add(time.Second).UnixMilli()))
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', ?, '{"source":"title","tokens":{"input":3,"output":7,"reasoning":2}}')`, start.Add(time.Second).UnixMilli())
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.input != 15 || v.output != 48 || v.thinking != 7 {
+		t.Fatalf("read = %+v, %v; want input 15, output 48, thinking 7", v, ok)
+	}
+}
+
+func TestOpenCodeV2BeforeEventTimestamps(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('step', 's', 'assistant', ?, '{"tokens":{"output":34}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":7}}')`)
+	source := openCodeDBSource{path: path}
+	if v, ok := source.read([]string{"/work"}, start); !ok || v.output != 34 {
+		t.Fatalf("bounded read = %+v, %v; want 34 without untimed events", v, ok)
+	}
+	if v, ok := source.read([]string{"/work"}, time.Time{}); !ok || v.output != 41 {
+		t.Fatalf("unbounded read = %+v, %v; want 41", v, ok)
+	}
+}
+
+func TestOpenCodeV2RenamedSessionWithoutForkColumn(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, '{"tokens":{"output":10,"reasoning":2}}')`, start.Add(time.Second).UnixMilli())
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, start)
+	if !ok || v.output != 12 || v.thinking != 2 {
+		t.Fatalf("read = %+v, %v; want output 12, thinking 2", v, ok)
+	}
+}
+
+func TestOpenCodeV2UntimedEventsCountOnlyGrowth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session VALUES ('s', '/work', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"input":100,"output":200,"reasoning":30}}')`)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	if w == nil {
+		t.Fatal("OpenCode source unavailable")
+	}
+	execSQL(t, path, `INSERT INTO session_message VALUES ('step', 's', 'assistant', ?, '{"tokens":{"input":12,"output":34,"reasoning":5}}')`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"compaction","tokens":{"input":3,"output":7,"reasoning":2}}')`)
+	execSQL(t, path, `INSERT INTO session VALUES ('new', '/work', ?)`, start.Add(time.Second).UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('new', 'session.usage.recorded.1', '{"source":"title","tokens":{"input":1,"output":4,"reasoning":1}}')`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', 'invalid')`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"input":1e30,"output":1e30,"reasoning":1e30}}')`)
+	execSQL(t, path, `INSERT INTO session VALUES ('other', '/elsewhere', ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('other', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":999}}')`)
+	s := w.Poll()
+	if s.Input != 16 || s.Output != 53 || s.Thinking != 8 {
+		t.Fatalf("sample = %+v; want input 16, output 53, thinking 8", s)
+	}
+	if again := w.Poll(); again.Input != 16 || again.Output != 53 || again.Thinking != 8 {
+		t.Fatalf("repeat sample = %+v", again)
+	}
+	execSQL(t, path, `ALTER TABLE event RENAME TO unavailable_event`)
+	if failed := w.Poll(); failed.Input != 16 || failed.Output != 53 || failed.Thinking != 8 {
+		t.Fatalf("auxiliary read failure changed the last sample: %+v", failed)
+	}
+	execSQL(t, path, `ALTER TABLE unavailable_event RENAME TO event`)
+	if recovered := w.Poll(); recovered.Input != 16 || recovered.Output != 53 || recovered.Thinking != 8 {
+		t.Fatalf("recovered sample changed without new usage: %+v", recovered)
+	}
+	all := Watch("opencode", "/work", time.Time{}).Poll()
+	if all.Input != 116 || all.Output != 283 || all.Thinking != 38 {
+		t.Fatalf("unbounded sample = %+v; want all history counted once", all)
+	}
+	execSQL(t, path, `DELETE FROM event WHERE aggregate_id IN ('s', 'new')`)
+	if cleared := w.Poll(); cleared.Input != 12 || cleared.Output != 39 || cleared.Thinking != 5 {
+		t.Fatalf("successful empty auxiliary read was not applied: %+v", cleared)
+	}
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":7}}')`)
+	if next := w.Poll(); next.Output != 46 {
+		t.Fatalf("growth after auxiliary history was cleared = %+v, want output 46", next)
+	}
+}
+
+func TestOpenCodeV2UntimedEventsWaitForBaseline(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", time.Now())
+	execSQL(t, path, `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, data TEXT)`)
+	execSQL(t, path, `INSERT INTO session VALUES ('s', '/work', 1)`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":200}}')`)
+	if s := w.Poll(); s.Output != 0 {
+		t.Fatalf("history credited before a baseline: %+v", s)
+	}
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":7}}')`)
+	if s := w.Poll(); s.Output != 7 {
+		t.Fatalf("growth after baseline = %+v, want 7", s)
+	}
+}
+
+func TestOpenCodeV2MigrationPreservesUntimedGrowth(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, data TEXT)`)
+	start := time.Now().Truncate(time.Millisecond)
+	execSQL(t, path, `INSERT INTO session VALUES ('s', '/work', NULL, ?)`, start.UnixMilli())
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":100}}')`)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", start)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"compaction","tokens":{"output":7,"reasoning":2}}')`)
+	if got := w.Poll(); got.Output != 9 || got.Thinking != 2 {
+		t.Fatalf("before migration = %+v; want 9 output, 2 thinking", got)
+	}
+	execSQL(t, path, `ALTER TABLE session RENAME TO session_v2`)
+	if got := w.Poll(); got.Output != 9 || got.Thinking != 2 {
+		t.Fatalf("after table rename = %+v; want 9 output, 2 thinking", got)
+	}
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":3}}')`)
+	if got := w.Poll(); got.Output != 12 || got.Thinking != 2 {
+		t.Fatalf("untimed growth after table rename = %+v; want 12 output, 2 thinking", got)
+	}
+	if all, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, time.Time{}); !ok || all.output != 112 || all.thinking != 2 {
+		t.Fatalf("unbounded read after table rename = %+v, %v", all, ok)
+	}
+	execSQL(t, path, `ALTER TABLE event ADD COLUMN created INTEGER NOT NULL DEFAULT 0`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', '{"source":"title","tokens":{"output":4,"reasoning":1}}', ?)`, start.Add(time.Second).UnixMilli())
+	for range 2 {
+		if got := w.Poll(); got.Output != 17 || got.Thinking != 3 {
+			t.Fatalf("after migration = %+v; want 17 output, 3 thinking", got)
+		}
+	}
+}
+
+func TestOpenCodeV2UsageSnapshot(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `PRAGMA journal_mode=WAL`)
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, 1)`)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', 1, '{"tokens":{"output":0}}')`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', 1, '{"source":"title","tokens":{"output":0}}')`)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`PRAGMA synchronous=NORMAL`); err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() {
+		for i := 1; i <= 300; i++ {
+			tx, err := db.Begin()
+			if err != nil {
+				done <- err
+				return
+			}
+			_, err = tx.Exec(`UPDATE session_message SET data = ?`, fmt.Sprintf(`{"tokens":{"output":%d}}`, i))
+			if err == nil {
+				_, err = tx.Exec(`UPDATE event SET data = ?`, fmt.Sprintf(`{"source":"title","tokens":{"output":%d}}`, i))
+			}
+			if err != nil {
+				tx.Rollback()
+				done <- err
+				return
+			}
+			if err = tx.Commit(); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	for range 300 {
+		v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, time.Time{})
+		if !ok || v.output%2 != 0 {
+			<-done
+			t.Fatalf("inconsistent snapshot = %+v, %v", v, ok)
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestOpenCodeV2WatcherUsesOneSnapshotForUntimedEvents(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `PRAGMA journal_mode=WAL`)
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, 1)`)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', 2, '{"tokens":{"output":0}}')`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', 0, '{"source":"title","tokens":{"output":0}}')`)
+	t.Setenv(OpenCodeDBEnv, path)
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	w := Watch("opencode", "/work", time.UnixMilli(1))
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	done := make(chan error, 1)
+	go func() {
+		for i := 1; i <= 300; i++ {
+			tx, err := db.Begin()
+			if err != nil {
+				done <- err
+				return
+			}
+			_, err = tx.Exec(`UPDATE session_message SET data = ?`, fmt.Sprintf(`{"tokens":{"output":%d}}`, i))
+			if err == nil {
+				_, err = tx.Exec(`UPDATE event SET data = ?`, fmt.Sprintf(`{"source":"title","tokens":{"output":%d}}`, i))
+			}
+			if err != nil {
+				tx.Rollback()
+				done <- err
+				return
+			}
+			if err = tx.Commit(); err != nil {
+				done <- err
+				return
+			}
+		}
+		done <- nil
+	}()
+	for range 300 {
+		if sample := w.Poll(); sample.Output%2 != 0 {
+			<-done
+			t.Fatalf("inconsistent watcher sample = %+v", sample)
+		}
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if sample := w.Poll(); sample.Output != 600 {
+		t.Fatalf("final watcher sample = %+v; want 600 output tokens", sample)
+	}
+}
+
+func TestOpenCodeV2UsageSaturatesCombinedCounters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, fork_session_id TEXT, time_created INTEGER)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+	execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', '/work', NULL, 1)`)
+	n := int64(maxSaneTokensInt())/2 + 1
+	tokens := fmt.Sprintf(`{"output":%d,"input":%d,"reasoning":%d}`, n, n, n)
+	execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', 2, ?)`, `{"tokens":`+tokens+`}`)
+	execSQL(t, path, `INSERT INTO event VALUES ('s', 'session.usage.recorded.1', 2, ?)`, `{"source":"title","tokens":`+tokens+`}`)
+	v, ok := (openCodeDBSource{path: path}).read([]string{"/work"}, time.Time{})
+	if !ok || v.output != maxSaneTokensInt() || v.input != maxSaneTokensInt() || v.thinking != maxSaneTokensInt() {
+		t.Fatalf("combined usage = %+v, %v; want saturated counters", v, ok)
+	}
+}
+
 // Reasoning without billed output is still a reading: Sample.Empty says so,
 // and an agent that thinks before it writes must show a rate rather than
 // nothing until the first completion token lands.
@@ -676,6 +1372,70 @@ func explainQueryPlan(t *testing.T, db *sql.DB, query string, args ...any) strin
 	return b.String()
 }
 
+func TestOpenCodeV2RetryQueryUsesEventTypeIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, created INTEGER, data TEXT)`)
+	execSQL(t, path, `CREATE INDEX event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)`)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	query := `SELECT COUNT(*) FROM session_v2 session CROSS JOIN event m
+		WHERE m.aggregate_id = session.id AND session.directory = ? AND m.created > ? AND ` + openCodeEventPredicate(true)
+	plan := explainQueryPlan(t, db, query, "/work", 1)
+	if !strings.Contains(plan, "event_aggregate_type_seq_idx (aggregate_id=? AND type=?)") {
+		t.Fatalf("event lookup does not restrict the event type:\n%s", plan)
+	}
+	baseline := `SELECT COUNT(*) FROM session_v2 session CROSS JOIN event m
+		WHERE m.aggregate_id = session.id AND session.directory = ? AND (m.created = 0 OR m.created = ?)
+		AND m.type IN ('session.usage.recorded.1', 'session.step.failed.1') AND (` + openCodeEventPredicate(false) + ` OR m.type = 'session.step.failed.1')`
+	plan = explainQueryPlan(t, db, baseline, "/work", 1)
+	if !strings.Contains(plan, "event_aggregate_type_seq_idx (aggregate_id=? AND type=?)") {
+		t.Fatalf("event baseline scans unrelated types:\n%s", plan)
+	}
+}
+
+func TestOpenCodeV2MessageRetryChecksUseEventIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT)`)
+	execSQL(t, path, `CREATE INDEX event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)`)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	query := `SELECT COUNT(*) FROM session_v2 session CROSS JOIN session_message m WHERE m.session_id = session.id AND ` + openCodeMessagePredicate()
+	plan := explainQueryPlan(t, db, query)
+	if strings.Count(plan, "event_aggregate_type_seq_idx") < 3 || strings.Contains(plan, "SCAN failed") || strings.Contains(plan, "SCAN started") || strings.Contains(plan, "SCAN later") {
+		t.Fatalf("retry checks scan the event table:\n%s", plan)
+	}
+}
+
+func TestOpenCodeV2BoundarySequenceUsesEventTypeIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.db")
+	execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT)`)
+	execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, data TEXT)`)
+	execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, seq INTEGER, type TEXT, data TEXT)`)
+	execSQL(t, path, `CREATE INDEX event_aggregate_type_seq_idx ON event (aggregate_id, type, seq)`)
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	query := `SELECT m.id, (SELECT MAX(e.seq) FROM event e WHERE e.aggregate_id = session.id
+		AND e.type IN ('session.step.ended.1', 'session.step.failed.1')
+		AND ` + strings.ReplaceAll(jsonToken("$.assistantMessageID"), "m.data", "e.data") + ` = m.id)
+		FROM session_v2 session CROSS JOIN session_message m WHERE m.session_id = session.id`
+	plan := explainQueryPlan(t, db, query)
+	if !strings.Contains(plan, "event_aggregate_type_seq_idx (aggregate_id=? AND type=?)") {
+		t.Fatalf("boundary sequence scans unrelated event types:\n%s", plan)
+	}
+}
+
 // The usage query must walk session first, and must not scan message. The
 // store is filled out because a plan is a cost estimate: on a handful of rows
 // SQLite indexes a scan away, so a shape that only becomes expensive at scale
@@ -743,10 +1503,8 @@ func TestUsageQueryStartsAtSession(t *testing.T) {
 	}
 }
 
-// A relative XDG_DATA_HOME is invalid per the base-directory spec. Joining
-// onto one would look for the session database under the working directory,
-// which reads as an agent that produced nothing.
-func TestOpenCodeDBPathIgnoresRelativeXDGDataHome(t *testing.T) {
+func TestOpenCodeDBPathResolvesRelativeXDGDataHomePerAgent(t *testing.T) {
+	t.Setenv("OPENCODE_DB", "opencode.db")
 	t.Setenv("HOME", t.TempDir())
 	abs := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", abs)
@@ -756,8 +1514,73 @@ func TestOpenCodeDBPathIgnoresRelativeXDGDataHome(t *testing.T) {
 
 	t.Setenv("XDG_DATA_HOME", "relative/data")
 	got := openCodeDBPath()
-	if !filepath.IsAbs(got) || strings.HasPrefix(got, "relative") {
-		t.Fatalf("relative XDG_DATA_HOME resolved the database to %q", got)
+	if want := filepath.Join("relative", "data", "opencode", "opencode.db"); got != want {
+		t.Fatalf("relative XDG_DATA_HOME = %q, want %q", got, want)
+	}
+}
+
+func TestOpenCodeRelativeDataHomeTracksEachAgentDirectory(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", "relative/data")
+	t.Setenv("OPENCODE_DB", "custom.db")
+	if !EnableOpenCodeDB(true) {
+		t.Fatal("SQLite source unavailable")
+	}
+	t.Cleanup(func() { EnableOpenCodeDB(false) })
+	start := time.Now().Add(-time.Second)
+	for i, want := range []int{17, 29} {
+		dir := t.TempDir()
+		path := filepath.Join(dir, "relative", "data", "opencode", "custom.db")
+		if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+			t.Fatal(err)
+		}
+		execSQL(t, path, `CREATE TABLE session_v2 (id TEXT PRIMARY KEY, directory TEXT, time_created INTEGER)`)
+		execSQL(t, path, `CREATE TABLE session_message (id TEXT PRIMARY KEY, session_id TEXT, type TEXT, time_created INTEGER, data TEXT)`)
+		execSQL(t, path, `CREATE TABLE event (aggregate_id TEXT, type TEXT, created INTEGER, data TEXT)`)
+		execSQL(t, path, `INSERT INTO session_v2 VALUES ('s', ?, ?)`, dir, start.UnixMilli())
+		execSQL(t, path, `INSERT INTO session_message VALUES ('m', 's', 'assistant', ?, ?)`, time.Now().UnixMilli(), fmt.Sprintf(`{"tokens":{"output":%d}}`, want))
+		if got := Watch("opencode", dir, start).Poll(); got.Output != want {
+			t.Errorf("agent %d: output = %d, want %d", i, got.Output, want)
+		}
+	}
+}
+
+func TestOpenCodeDBPathOverride(t *testing.T) {
+	data := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", data)
+	for _, tt := range []struct{ name, want string }{
+		{"custom.db", filepath.Join(data, "opencode", "custom.db")},
+		{filepath.Join(data, "absolute.db"), filepath.Join(data, "absolute.db")},
+		{":memory:", ""},
+	} {
+		t.Setenv("OPENCODE_DB", tt.name)
+		if got := openCodeDBPath(); got != tt.want {
+			t.Errorf("OPENCODE_DB=%q: got %q, want %q", tt.name, got, tt.want)
+		}
+	}
+	t.Setenv("XDG_DATA_HOME", "relative")
+	abs := filepath.Join(data, "absolute.db")
+	t.Setenv(OpenCodeDBEnv, abs)
+	if got := openCodeDBPath(); got != abs {
+		t.Fatalf("absolute database with relative data home = %q, want %q", got, abs)
+	}
+}
+
+func TestOpenCodeDBPathOverrideWithoutUsableHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	t.Setenv("XDG_DATA_HOME", "")
+	abs := filepath.Join(t.TempDir(), "custom.db")
+	t.Setenv(OpenCodeDBEnv, abs)
+	if got := openCodeDBPath(); got != abs {
+		t.Fatalf("absolute database without home = %q, want %q", got, abs)
+	}
+	t.Setenv(OpenCodeDBEnv, "custom.db")
+	if got := openCodeDBPath(); got != "" {
+		t.Fatalf("relative database without a data root = %q, want no store", got)
+	}
+	t.Setenv("XDG_DATA_HOME", "relative")
+	if got, want := openCodeDBPath(), filepath.Join("relative", "opencode", "custom.db"); got != want {
+		t.Fatalf("relative database without home = %q, want %q", got, want)
 	}
 }
 

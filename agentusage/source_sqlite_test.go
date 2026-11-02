@@ -64,3 +64,28 @@ func TestWatcherStopsReadingWithdrawnSource(t *testing.T) {
 		t.Fatalf("sample moved after withdrawal: output %d, want the last reading 1", got)
 	}
 }
+
+type scriptedSessionSource struct {
+	values []int64
+	reads  int
+}
+
+func (s *scriptedSessionSource) sessions([]string, time.Time) (map[string]map[string]sessionCounts, bool) {
+	value := s.values[s.reads]
+	s.reads++
+	return map[string]map[string]sessionCounts{"new": {"s": {output: value}}}, true
+}
+
+func TestNewStoreBaselineDoesNotRebaseToAnOlderRead(t *testing.T) {
+	src := &scriptedSessionSource{values: []int64{5, 6, 6, 7}}
+	w := &Watcher{sourceBase: map[string]map[string]sessionCounts{"old": {}}, hasSessionBase: true, since: time.Now()}
+	if v, ok := w.readSessionSource(src, true); !ok || v.output != 0 {
+		t.Fatalf("adoption = %+v, %v; want no growth", v, ok)
+	}
+	if v, ok := w.readSessionSource(src, true); !ok || v.output != 0 {
+		t.Fatalf("same baseline = %+v, %v; want no growth", v, ok)
+	}
+	if v, ok := w.readSessionSource(src, true); !ok || v.output != 1 {
+		t.Fatalf("later growth = %+v, %v; want one", v, ok)
+	}
+}

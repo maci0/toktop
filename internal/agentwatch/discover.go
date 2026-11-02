@@ -19,6 +19,10 @@ import (
 func (w *Watcher) discover(ctx context.Context) {
 	found := w.runningAgents()
 	newProcs, replaced, exited := w.classify(found)
+	generations := make(map[int]uint64, len(replaced))
+	for _, t := range replaced {
+		generations[t.proc.PID] = t.generation + 1
+	}
 
 	// Stop the reused-PID tracker before attaching its replacement: two
 	// watchers tailing the same transcripts would double-count growth.
@@ -74,7 +78,7 @@ func (w *Watcher) discover(ctx context.Context) {
 		// event on every replay.
 		watch.SetNow(w.instant)
 		tctx, cancel := context.WithCancel(ctx)
-		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
+		t := &tracked{proc: p, generation: generations[p.PID], dirNote: core.ShortDir(p.Dir), watch: watch, done: make(chan struct{}), cancel: cancel}
 		w.mu.Lock()
 		prev, seen := w.tracked[p.PID]
 		switch {
@@ -105,7 +109,7 @@ func (w *Watcher) discover(ctx context.Context) {
 		startCtx = append(startCtx, tctx)
 	}
 	follow := func(p agentusage.Process) {
-		t := &tracked{proc: p, dirNote: core.ShortDir(p.Dir), done: closedDone(), cancel: func() {}}
+		t := &tracked{proc: p, generation: generations[p.PID], dirNote: core.ShortDir(p.Dir), done: closedDone(), cancel: func() {}}
 		w.mu.Lock()
 		if _, seen := w.tracked[p.PID]; seen {
 			w.mu.Unlock()

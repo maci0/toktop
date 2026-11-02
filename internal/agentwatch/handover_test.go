@@ -61,6 +61,30 @@ func TestFollowerTakesStoreWhenClaimantExits(t *testing.T) {
 	}
 }
 
+func TestDirectoryChangeReassignsStore(t *testing.T) {
+	firstDir, _ := claudeHome(t)
+	secondDir := t.TempDir()
+	process := agentusage.Process{PID: 101, Tool: "claude", Dir: firstDir, Started: time.Unix(100, 0)}
+	follower := agentusage.Process{PID: 102, Tool: "claude", Dir: firstDir, Started: time.Unix(101, 0)}
+	live := []agentusage.Process{process, follower}
+	w := New(&recorder{}, nil)
+	w.readEvery = time.Hour
+	w.listAgents = func() []agentusage.Process { return live }
+	defer w.stopAll()
+	w.discover(t.Context())
+	if !w.watching(process.PID) || w.watching(follower.PID) {
+		t.Fatal("initial store claim is incorrect")
+	}
+	live[0].Dir = secondDir
+	w.discover(t.Context())
+	if tr := trackerFor(t, w, process.PID); tr == nil || tr.watch == nil || !agentusage.SameDir(tr.proc.Dir, secondDir) {
+		t.Fatal("the process did not move to its new directory's store")
+	}
+	if !w.watching(follower.PID) {
+		t.Fatal("the follower did not take over the old store")
+	}
+}
+
 // blockingRecorder holds the first event it is handed until released, so a
 // test can stop a discover pass partway through and inspect what has and has
 // not happened by then.

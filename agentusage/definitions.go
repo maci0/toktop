@@ -627,6 +627,9 @@ const GauntletHomeEnv = "GAUNTLET_HOME"
 // variable the operator set.
 const XDGDataHomeEnv = "XDG_DATA_HOME"
 
+// OpenCodeDBEnv overrides the OpenCode session database path.
+const OpenCodeDBEnv = "OPENCODE_DB"
+
 // DefinitionsPath is where agent definitions live by default. It follows
 // gauntlet's location so one file serves both tools.
 //

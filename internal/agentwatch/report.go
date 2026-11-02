@@ -32,6 +32,7 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	}
 	t.last = cur
 	proc := t.proc
+	generation := t.generation
 	dir := t.dirNote
 	via := t.viaEngine
 	rec := w.rec
@@ -41,7 +42,7 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	}
 	rec.RecordAgent(core.AgentEvent{
 		At:             w.instant(),
-		ID:             sampleID(proc, cur.At),
+		ID:             sampleID(proc, cur.At, generation),
 		Agent:          core.AgentNameField(proc.Tool),
 		Kind:           core.AgentKindTurn,
 		PromptTokens:   core.ClampEventTokens(int64(d.Input)),
@@ -53,13 +54,12 @@ func (w *Watcher) report(t *tracked, cur agentusage.Sample) {
 	})
 }
 
-// sampleID is stable for one process at one sample instant, so a retried
-// report of the same reading (final Poll after Run's last callback, a
-// tracker that forgot its baseline) is ignored by the collector's id window.
-func sampleID(proc agentusage.Process, at time.Time) string {
+// sampleID distinguishes stores at the same instant without exposing paths;
+// a retried reading of the same store is ignored by the collector's id window.
+func sampleID(proc agentusage.Process, at time.Time, generation uint64) string {
 	return "aw:" + strconv.Itoa(proc.PID) + ":" +
 		strconv.FormatInt(proc.Started.UnixNano(), 10) + ":" +
-		strconv.FormatInt(at.UnixNano(), 10)
+		strconv.FormatInt(at.UnixNano(), 10) + ":" + strconv.FormatUint(generation, 10)
 }
 
 // noteSeparator is what the feed reads the note's own parts apart with, and

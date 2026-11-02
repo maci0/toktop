@@ -99,9 +99,10 @@ type Watcher struct {
 
 // tracked is one agent process being followed.
 type tracked struct {
-	proc  agentusage.Process
-	watch *agentusage.Watcher
-	last  agentusage.Sample
+	proc       agentusage.Process
+	watch      *agentusage.Watcher
+	last       agentusage.Sample
+	generation uint64
 	// viaEngine names the monitored engine this agent generates through, when
 	// it has one. Token deltas are still recorded so the agent stays on the
 	// dashboard; ViaEngine on the event is what stops aggregates adding them
@@ -109,8 +110,7 @@ type tracked struct {
 	viaEngine string
 	// dirNote is core.ShortDir(proc.Dir), resolved once at discovery. Every
 	// reported event carries it, and deriving it walks the path's symlinks,
-	// which is one lstat per component on a path that cannot change while the
-	// process lives.
+	// which is one lstat per component. A directory change replaces the tracker.
 	dirNote string
 	cancel  context.CancelFunc
 	done    chan struct{}
@@ -283,21 +283,17 @@ func (w *Watcher) runningAgents() []agentusage.Process {
 	return agentusage.Discover()
 }
 
-// sameProcess reports whether found is the OS process already being followed
-// at that PID. Linux supplies a start time, which changes when the kernel
-// reuses the PID; when the platform does not (Darwin), tool and working
-// directory stand in. The directory is compared the way the file system
-// compares it: on macOS and Windows two spellings of one checkout differ byte
-// for byte, and treating them as two processes restarts the session's counters
-// on every poll.
+// sameProcess reports whether the tracked process still uses the same store.
+// A process can change directory or exec another agent without changing its
+// start time. The directory follows the file system's comparison rules.
 func sameProcess(was, found agentusage.Process) bool {
-	if was.PID != found.PID {
+	if was.PID != found.PID || was.Tool != found.Tool || was.AllDirs != found.AllDirs || !agentusage.SameDir(was.Dir, found.Dir) {
 		return false
 	}
 	if !was.Started.IsZero() && !found.Started.IsZero() {
 		return was.Started.Equal(found.Started)
 	}
-	return was.Tool == found.Tool && agentusage.SameDir(was.Dir, found.Dir)
+	return true
 }
 
 // storeKey names the transcript store a process writes to. A store is

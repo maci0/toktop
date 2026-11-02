@@ -166,12 +166,8 @@ func warnIgnoredGauntletHome(agents bool) {
 		agentusage.GauntletHomeEnv, core.RedactHome(path))
 }
 
-// warnIgnoredUserHome names a home directory the built-in agent stores cannot
-// be built from. Every store this binary knows is a path under it
-// (~/.claude/projects and its siblings), and the rule the XDG and GAUNTLET
-// variables are held to is that an unusable value names no path rather than a
-// path under the directory the run started in, where a missing store is an
-// empty one and the agent reports no tokens.
+// warnIgnoredUserHome names a home directory the default agent stores cannot
+// be built from. Explicit store overrides can still be readable.
 //
 // A home that is unset or not absolute stops the run before this is reached:
 // loadAgentDefs cannot place agents.json without one, and refuses to start.
@@ -188,48 +184,19 @@ func warnIgnoredUserHome() {
 		// pasted into issues. Naming the directory is what tells the operator
 		// the variable to change; the account it holds is not theirs to
 		// publish.
-		fmt.Fprintln(os.Stderr, "toktop: the home directory is not an absolute path; no built-in agent store is read")
+		fmt.Fprintln(os.Stderr, "toktop: the home directory is not an absolute path; default home-based agent stores are unavailable")
 		return
 	}
-	fmt.Fprintln(os.Stderr, "toktop: the home directory cannot be located; no built-in agent store is read")
+	fmt.Fprintln(os.Stderr, "toktop: the home directory cannot be located; default home-based agent stores are unavailable")
 }
 
-// warnIgnoredXDGHome names an $XDG_DATA_HOME, $XDG_CONFIG_HOME or
-// $KIMI_CODE_HOME that is set but not a path DefinitionsPath-style consumers
-// can use. Every reader honors its variable only when it is absolute, so a
-// relative value silently falls back to the default directory: opencode's
-// session database is read from ~/.local/share (agents that generated tokens
-// report none), the ssh trust-on-first-use store from ~/.config, and kimi's
-// session logs from ~/.kimi-code/sessions. Nothing else would report it.
-//
-// Each variable is named only where it would have been read: XDG_DATA_HOME
-// with the opencode database open (f.agents && --opencode-db, resolved),
-// XDG_CONFIG_HOME with an ssh:// target to connect to, KIMI_CODE_HOME with
-// --agents. Without one, the variable cannot take effect, and the rule
-// GAUNTLET_HOME follows above names only a --agents run for the same reason.
-//
-// A relative value is named with the consequence that follows, which is not
-// the same for all three: the opencode database and the kimi store have a
-// home directory to fall back to, and the ssh host-key store resolves through
-// os.UserConfigDir, which refuses a relative XDG_CONFIG_HOME outright on
-// Linux. There the run does not read a default directory, it names no store
-// and every connect fails, so the warning says so rather than sending the
-// operator after a fallback that does not exist.
-//
-// An absolute KIMI_CODE_HOME is checked for the store under it, the way
-// GAUNTLET_HOME is checked for the file beside it. kimi creates its sessions
-// directory itself on first run, so a variable the operator set naming no
-// sessions directory is a home kimi does not use: every session reads as an
-// agent producing no tokens, which is the failure the relative case above
-// already names. The other two are not checked, because nothing is wrong with
-// a variable naming a directory the reader creates: the ssh host-key store is
-// written on first contact, and most machines running this have no opencode at
-// all.
-// Each entry names the reader that decides the consequence, rather than
-// branching on the variable's spelling: a table keyed by name sends the two
-// special cases to whichever row happens to carry the string, and a rename
-// there would silently downgrade both to the generic line.
+// warnIgnoredXDGHome explains relative paths only when their readers are used.
+// OpenCode resolves its data root per agent; the other readers reject relative
+// roots. Kimi's absolute override is also checked for a missing session store.
 func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
+	if data := os.Getenv(agentusage.XDGDataHomeEnv); opencodeDB && data != "" && !filepath.IsAbs(data) && !filepath.IsAbs(os.Getenv(agentusage.OpenCodeDBEnv)) && os.Getenv(agentusage.OpenCodeDBEnv) != ":memory:" {
+		fmt.Fprintf(os.Stderr, "toktop: $%s is relative; OpenCode databases resolve from each agent's working directory\n", agentusage.XDGDataHomeEnv)
+	}
 	for _, e := range [...]struct {
 		name string
 		read bool
@@ -239,7 +206,6 @@ func warnIgnoredXDGHome(opencodeDB, sshTargets, agents bool) {
 		// variable. Nil for the readers that have a default to fall back to.
 		noStore func() bool
 	}{
-		{name: agentusage.XDGDataHomeEnv, read: opencodeDB},
 		{name: remote.XDGConfigHomeEnv, read: sshTargets, noStore: warnNoHostKeyStore},
 		{name: agentusage.KimiHomeEnv, read: agents},
 	} {
@@ -712,6 +678,7 @@ func knownForeignEnv() []string {
 		agentusage.GauntletHomeEnv,
 		agentusage.KimiHomeEnv,
 		agentusage.XDGDataHomeEnv,
+		agentusage.OpenCodeDBEnv,
 		remote.XDGConfigHomeEnv,
 		remote.AgentSockEnv,
 		selfupdate.TokenEnv,

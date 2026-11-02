@@ -36,6 +36,7 @@ var publicConsts = []string{
 	"DefaultSuffix",
 	"GauntletHomeEnv",
 	"KimiHomeEnv",
+	"OpenCodeDBEnv",
 	"XDGDataHomeEnv",
 }
 

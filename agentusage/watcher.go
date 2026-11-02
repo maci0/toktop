@@ -93,7 +93,7 @@ type Watcher struct {
 	ownsFailed map[string]bool
 
 	// sourceBase is per-session counters at attach for a sessionSource
-	// (crush). completion_tokens and prompt_tokens are cumulative for the
+	// (crush or untimed OpenCode events). Those counters are cumulative for the
 	// session's life, so without this a continued session would dump its
 	// history into this attach the first time it was updated. hasSessionBase
 	// is the latch: an empty map is a valid snapshot (no sessions yet), and
@@ -155,12 +155,19 @@ func Watch(tool, dir string, since time.Time) *Watcher {
 func openWatch(tool, dir string, since time.Time, allDirs bool) *Watcher {
 	tool = canonicalTool(tool)
 	if source, ok := sourceFor(tool); ok {
+		if bounded, ok := source.auxiliary.(interface{ withSince(time.Time) sessionSource }); ok {
+			source.auxiliary = bounded.withSince(since)
+		}
 		w := &Watcher{source: source, tool: tool, dir: resolveDir(dir), dirs: dirSpellings(dir), since: since, now: time.Now, pace: core.WallPacer}
-		if source.session != nil {
+		baseline := source.session
+		if baseline == nil && !since.IsZero() {
+			baseline = source.auxiliary
+		}
+		if baseline != nil {
 			// A failed snapshot must not become an empty baseline: that
 			// would credit every pre-attach token the first time the store
 			// becomes readable. Leave sourceBase unset and retry on poll.
-			if base, ok := source.session.sessions(w.dirs, time.Time{}); ok {
+			if base, ok := baseline.sessions(w.dirs, time.Time{}); ok {
 				w.sourceBase = base
 				w.hasSessionBase = true
 			}
@@ -674,10 +681,34 @@ func (w *Watcher) pacer() core.Pacer {
 // each time so a withdrawn provider stops being read.
 func (w *Watcher) readSource(src tokenSource) (values, bool) {
 	if src.session != nil {
-		return w.readSessionSource(src.session)
+		v, ok := w.readSessionSource(src.session, false)
+		return v, ok && v.present()
 	}
 	if src.usage != nil {
-		return src.usage.read(w.dirs, w.since)
+		var v values
+		var ok bool
+		auxiliary := src.auxiliary
+		if combined, yes := src.usage.(snapshotUsageSource); yes && auxiliary != nil && !w.since.IsZero() {
+			var snapshot map[string]map[string]sessionCounts
+			v, snapshot, ok = combined.readSnapshot(w.dirs, w.since)
+			auxiliary = fixedSessionSource(snapshot)
+		} else {
+			v, ok = src.usage.read(w.dirs, w.since)
+		}
+		if !ok {
+			return values{}, false
+		}
+		if auxiliary != nil && !w.since.IsZero() {
+			extra, ok := w.readSessionSource(auxiliary, true)
+			if !ok {
+				return values{}, false
+			}
+			v.output = satAdd(v.output, extra.output)
+			v.input = satAdd(v.input, extra.input)
+			v.thinking = satAdd(v.thinking, extra.thinking)
+			v.total = floorTotal(max(v.total, extra.total), v.output)
+		}
+		return v, true
 	}
 	return values{}, false
 }
@@ -699,11 +730,10 @@ func (w *Watcher) readSource(src tokenSource) (values, bool) {
 // well as for the watcher: the first reading of a new store establishes what
 // it had already spent, and only what it spends afterwards is counted.
 //
-// The store is keyed on its own path, not on the session ids within it. A
-// session id the baseline does not hold is a session that started after
-// attach, and its first turn is this attach's to count; only a store that was
-// never snapshotted at all makes every id in it history.
-func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
+// The store is keyed independently of the session ids within it. A
+// session absent from a known baseline has no earlier counted usage, so its
+// first counter is growth; an unseen store is adopted before counting it.
+func (w *Watcher) readSessionSource(ss sessionSource, rebase bool) (values, bool) {
 	if !w.hasSessionBase {
 		base, ok := ss.sessions(w.dirs, time.Time{})
 		if !ok {
@@ -711,13 +741,13 @@ func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
 		}
 		w.sourceBase = base
 		w.hasSessionBase = true
-		return values{}, false // attach baseline: nothing yet is this attach's
+		return values{}, true // attach baseline: nothing yet is this attach's
 	}
 	cur, ok := ss.sessions(w.dirs, w.since)
 	if !ok {
 		return values{}, false
 	}
-	var outN, inN int64
+	var outN, inN, thinkN, contextN int64
 	for path, sess := range cur {
 		base, known := w.sourceBase[path]
 		if !known {
@@ -737,23 +767,39 @@ func (w *Watcher) readSessionSource(ss sessionSource) (values, bool) {
 			for p, s := range adopted {
 				w.sourceBase[p] = s
 			}
-			base, known = w.sourceBase[path]
-			if !known {
-				continue // the store vanished between the two reads
-			}
+			continue // the baseline was read after this candidate snapshot
 		}
 		for id, tokens := range sess {
 			b := base[id]
+			if b.sequence > 0 && tokens.sequence > b.sequence {
+				b.output, b.input, b.thinking = 0, 0, 0
+			}
+			if tokens.context != b.context || tokens.content != b.content {
+				contextN = max(contextN, tokens.context)
+			}
+			if rebase && (tokens.output < b.output || tokens.input < b.input || tokens.thinking < b.thinking) {
+				b.output = min(b.output, tokens.output)
+				b.input = min(b.input, tokens.input)
+				b.thinking = min(b.thinking, tokens.thinking)
+				if base == nil {
+					base = map[string]sessionCounts{}
+					w.sourceBase[path] = base
+				}
+				base[id] = b
+			}
 			if d := tokens.output - b.output; d > 0 {
 				outN = satAdd64(outN, d)
 			}
 			if d := tokens.input - b.input; d > 0 {
 				inN = satAdd64(inN, d)
 			}
+			if d := tokens.thinking - b.thinking; d > 0 {
+				thinkN = satAdd64(thinkN, d)
+			}
 		}
 	}
-	v := values{output: counter64(outN), input: counter64(inN)}
-	return v, v.present()
+	v := values{output: counter64(outN), input: counter64(inN), thinking: counter64(thinkN), total: counter64(contextN)}
+	return v, true
 }
 
 // Poll reads whatever the transcripts have gained since the last read and

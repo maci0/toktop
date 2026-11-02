@@ -109,12 +109,23 @@ Two agents keep databases instead of transcripts, and both need the `sqlite`
 build tag, which decides whether a driver is compiled in at all (released
 binaries and `make build` carry it; `make build TAGS=` leaves it out).
 
-opencode keeps one session store for the whole machine, so it is gated twice:
+opencode keeps its sessions in a shared database, so it is gated twice:
 the tag links the driver, and `--opencode-db` decides whether a binary that has
 it opens the operator's database. `--opencode-db` is on by default with
 `--agents`; pass `--opencode-db=false` to leave the store alone. A build
 without the driver reports nothing for opencode, and asking for it explicitly
 says so on stderr rather than reporting a silent zero.
+Some OpenCode 2 channels use a channel-specific database. Set `OPENCODE_DB` to
+the path reported by `opencode debug paths db` to monitor that store; toktop
+reads one OpenCode database per run.
+Toktop attributes OpenCode sessions by the server process's working directory.
+An external ACP client can request a session in a different directory; that
+session is not attributed to the server unless a watched OpenCode process has
+the session directory as its working directory. Start the server in the project
+directory when that attribution is needed.
+For OpenCode 2 events without timestamps, including older events given a zero
+timestamp by migration, title and compaction usage is counted from the
+per-session baseline taken when monitoring attaches.
 
 crush keeps its database inside the project it is working on
 (`.crush/crush.db`, at the project root it resolves), with
@@ -973,7 +984,8 @@ completed into a subcommand name.
 | `TOKTOP_SCREENSHOT_FONT` | used only by `scripts/screenshot.py` (path to a regular-weight `.ttf`); the `toktop` binary ignores it, and only the renderer reports a path it cannot open. Surrounding whitespace is trimmed, the rule the other variables follow, so `export TOKTOP_SCREENSHOT_FONT=$(cat font.path)` works |
 | `GITHUB_TOKEN` | optional; authenticates `toktop update`'s GitHub API calls past the anonymous rate limit. A trailing newline (from `$(cat file)`) is stripped; a line break anywhere else is refused by name, since it cannot be sent as a header, and a set-but-blank value is named before the request, since the rate-limit error it produces otherwise advises setting a variable that is already set |
 | `GAUNTLET_HOME` | directory holding `agents.json` (default `~/.gauntlet`); a relative value is ignored and named at startup, matching the XDG rows, and so is an absolute one with no `agents.json` under it |
-| `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value is ignored and named at startup |
+| `XDG_DATA_HOME` | with `--opencode-db` (on by default with `--agents`): directory under which `opencode/opencode.db` is read (default `~/.local/share`); a relative value resolves from each watched agent's working directory and is named at startup |
+| `OPENCODE_DB` | with `--opencode-db`: OpenCode's database path; relative paths are resolved under its data directory, and `:memory:` cannot be read by toktop |
 | `XDG_CONFIG_HOME` | directory for the ssh trust-on-first-use host-key store (`toktop/known_hosts`; default is the platform user config directory, `~/.config` on Linux, `~/Library/Application Support` on macOS, `%AppData%` on Windows); a relative value is ignored rather than placing the store under the working directory, and is named at startup with a non-demo `ssh://` target; a run on Linux with one fails at connect |
 | `KIMI_CODE_HOME` | with `--agents`: directory under which kimi's `sessions` are read (default `~/.kimi-code`); a relative value is ignored and named at startup, and so is an absolute one with no `sessions` directory under it |
 | `SSH_AUTH_SOCK` | ssh-agent socket for `ssh://` targets; on Windows the OpenSSH named pipe is used when unset. Surrounding whitespace and a trailing newline (from `$(...)`) are stripped, the rule the other secret variables follow, since a socket named with one does not exist and the run would fall back to keys and then to a password prompt |
@@ -1007,11 +1019,10 @@ blank value, which is named as ignored where another source supplies the
 token and as sending no token at all where none does),
 `$TOKTOP_SSH_PASSWORD` without an `ssh://` target, and `$TOKTOP_LOG_LEVEL` with
 `--demo --no-ingest` (and no `--agents`) are named as unused, matching the flag
-warnings, as is a `GAUNTLET_HOME` that is not an absolute path under `--agents`
-(or one with no `agents.json` under it), a relative `XDG_DATA_HOME` while
-opencode's database is read, a `KIMI_CODE_HOME` under `--agents` with no
-`sessions` directory in it, and a relative `XDG_CONFIG_HOME` with an `ssh://`
-target outside `--demo`. Out-of-range flag values (`--interval 0`, `--interval`
+warnings. Startup also names an unusable `GAUNTLET_HOME` or `KIMI_CODE_HOME`
+under `--agents`, explains a relative `XDG_DATA_HOME` while reading OpenCode's
+database, and names a relative `XDG_CONFIG_HOME` with an `ssh://` target outside
+`--demo`. Out-of-range flag values (`--interval 0`, `--interval`
 below 50ms or above 1h, negative `--probe`, `--probe` above 86400, `--frames`
 below 1 or above 180 with `--once`, an empty `--repo`, a malformed or duplicated
 `--add` or `--ingest`, an `ssh://` URL with a password, a path other than the

@@ -43,7 +43,7 @@ func TestSortByPIDOrdersAnyListing(t *testing.T) {
 }
 
 func TestAgentName(t *testing.T) {
-	known := map[string]bool{"claude": true, "codex": true, "node": false}
+	known := map[string]bool{"claude": true, "codex": true, "opencode": true, "node": false}
 
 	cases := []struct {
 		name string
@@ -54,6 +54,9 @@ func TestAgentName(t *testing.T) {
 		{"kernel name wins", "claude", []string{"/opt/node", "/x/claude"}, "claude"},
 		{"argv0 basename", "", []string{"/usr/local/bin/codex", "--full-auto"}, "codex"},
 		{"node script in argv1", "", []string{"node", "/home/u/.local/bin/codex", "--full-auto"}, "codex"},
+		{"opencode ACP client", "opencode", []string{"opencode", "acp"}, "opencode"},
+		{"opencode standalone server", "opencode", []string{"opencode", "serve", "--stdio"}, "opencode"},
+		{"opencode script client", "node", []string{"node", "/opt/bin/opencode", "acp"}, "opencode"},
 		{"extension is not stripped", "", []string{"node", "/home/u/.claude/local/claude.js"}, ""},
 		{"later mention is not the agent", "", []string{"node", "server.js", "--agent=claude"}, ""},
 		{"empty argv", "bash", nil, ""},
