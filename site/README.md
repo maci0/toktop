@@ -21,8 +21,8 @@ Deploy credentials come from the environment (`CLOUDFLARE_API_TOKEN` plus
 `wrangler` login already on the machine); nothing about them is written to
 this repo.
 
-`make site-deploy` also refuses to run while `site/wrangler.jsonc` holds
-an uncommitted change (`make check-deploy-source`), the rule a release already
+`make site-deploy` also refuses to run while the Worker, its captures or
+`site/wrangler.jsonc` hold an uncommitted change (`make check-deploy-source`), the rule a release already
 applies to the binaries. A rollback undoes an upload, not the edit behind it,
 so a Worker or a capture that is only on the operator's machine would come
 back on the next deploy and go to production held by no commit. Pass

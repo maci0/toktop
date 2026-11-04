@@ -608,7 +608,7 @@ Every externally reachable input, with its code location:
     digests of `worker.js` and of the captures, so the version that reached
     production is on record without reading the Cloudflare dashboard; a
     rollback moves it with the directory. A deploy also refuses to run
-    while `site/wrangler.jsonc` holds uncommitted changes
+    while the Worker, its captures or `site/wrangler.jsonc` hold uncommitted changes
     (`check-deploy-source`, `ALLOW_DIRTY=1` overrides), the rule
     `check-release-source` already applies to a release, because an
     uncommitted Worker or capture reaches the live site held by no commit and

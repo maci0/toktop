@@ -273,7 +273,7 @@ in day-to-day work:
 | `make check-changelog` | verify CHANGELOG.md has release section and link for VERSION |
 | `make check-api` | verify VERSION drops no declaration `agentusage` exported at the last release (`make release` runs it; a patch is refused, a minor bump passes only once CHANGELOG.md records the removal under `Breaking`) |
 | `make check-release-source` | fail unless a non-dev VERSION builds from a clean, git-backed tree with a nonzero `SOURCE_DATE_EPOCH` (`make release` runs it; `ALLOW_DIRTY=1` overrides the tree check) |
-| `make check-deploy-source` | fail unless `site/wrangler.jsonc` holds no uncommitted changes, so the Worker and the captures it serves are in a commit (`make site-deploy` runs it; `ALLOW_DIRTY=1` overrides the tree check, the same override the release path uses) |
+| `make check-deploy-source` | fail unless the Worker, its captures and `site/wrangler.jsonc` hold no uncommitted changes, so the bytes `make site-deploy` uploads are in a commit (`make site-deploy` runs it; `ALLOW_DIRTY=1` overrides the tree check, the same override the release path uses) |
 | `make buildinfo` | write the toolchain, commit, and flags behind `dist/` to a manifest |
 | `make licenses` / `make license` | write the license text of every module the binary links, and this project's own LICENSE, into `dist/` (`make release` publishes and checksums both) |
 | `make host-dist` | print the path of this host's `VERSION` artifact in `dist/`, or fail when that platform is not in `PLATFORMS` (the release job smoke-tests this path) |
