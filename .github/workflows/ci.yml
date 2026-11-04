@@ -219,7 +219,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install --yes zsh fish
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install --yes --no-install-recommends zsh fish
           make check-shell
       # The other shell in the tree: the bash this file's own run: blocks are
       # written in. yamllint parses the document and no other analyzer reads

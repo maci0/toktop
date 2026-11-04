@@ -16,11 +16,12 @@ The `/health` wait is a `curl`, so both targets refuse to start without one:
 a missing curl fails every attempt for a reason that has nothing to do with
 the site, and the poll would end reporting "the site is not serving", which
 points the operator at a deploy that published perfectly.
-Deploy credentials come from the environment (`CLOUDFLARE_API_TOKEN`, or a
+Deploy credentials come from the environment (`CLOUDFLARE_API_TOKEN` plus
+`CLOUDFLARE_ACCOUNT_ID` for the account that owns the Worker, or a
 `wrangler` login already on the machine); nothing about them is written to
 this repo.
 
-`make site-deploy` also refuses to run while `site/` or `wrangler.jsonc` holds
+`make site-deploy` also refuses to run while `site/wrangler.jsonc` holds
 an uncommitted change (`make check-deploy-source`), the rule a release already
 applies to the binaries. A rollback undoes an upload, not the edit behind it,
 so a Worker or a capture that is only on the operator's machine would come

@@ -1123,7 +1123,7 @@ define SITE_DEPLOYINFO
 if command -v sha256sum >/dev/null 2>&1; then sha256() { sha256sum "$$@"; }; else sha256() { shasum -a 256 "$$@"; }; fi; \
 { \
 	echo "commit: $$(git rev-parse HEAD 2>/dev/null || echo unknown)"; \
-	if [ -n "$$(git status --porcelain -- site wrangler.jsonc 2>/dev/null)" ]; then echo "dirty: true"; else echo "dirty: false"; fi; \
+	if [ -n "$$(git status --porcelain -- site/wrangler.jsonc 2>/dev/null)" ]; then echo "dirty: true"; else echo "dirty: false"; fi; \
 	echo "wrangler: $(WRANGLER)"; \
 	echo "bun: $$(tr -d '[:space:]' < .bun-version 2>/dev/null || echo unknown)"; \
 	echo "worker: $$(sha256 site/worker.js | cut -d' ' -f1)"; \
@@ -1543,9 +1543,9 @@ check-deploy-source: ## fail unless the files 'make site-deploy' uploads are com
 		exit 1; \
 	fi; \
 	if [ "$(ALLOW_DIRTY)" != "1" ]; then \
-		dirty=$$(git status --porcelain -- site wrangler.jsonc); \
+		dirty=$$(git status --porcelain -- site/wrangler.jsonc); \
 		if [ -n "$$dirty" ]; then \
-			echo "make site-deploy: site/ or wrangler.jsonc has uncommitted changes, so production would be serving bytes no branch holds:" >&2; \
+			echo "make site-deploy: site/wrangler.jsonc has uncommitted changes, so production would be serving bytes no branch holds:" >&2; \
 			printf '%s\n' "$$dirty" | sed 's/^/  /' >&2; \
 			echo "  commit them, or pass ALLOW_DIRTY=1 to deploy the tree as it stands" >&2; \
 			exit 1; \
