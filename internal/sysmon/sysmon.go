@@ -273,18 +273,32 @@ func cutMeminfoLine(line []byte) ([]byte, uint64, bool) {
 // NaN, ±Inf and negatives (ParseFloat accepts all of them) collapse to
 // zero rather than reaching the load readout.
 func ParseLoadavg(s string) (l1, l5, l15 float64) {
-	f := strings.Fields(s)
-	at := func(i int) float64 {
-		if i >= len(f) {
-			return 0
+	return ParseLoadavgBytes([]byte(s))
+}
+
+// ParseLoadavgBytes is ParseLoadavg on the file bytes, so the per-poll
+// /proc/loadavg read pays no string conversion and no Fields slice: the
+// fields are scanned in place, and only the three the readout shows are
+// converted. The same non-finite and negative rejection as ParseLoadavg
+// applies, so a hostile file cannot reach the load readout either way.
+func ParseLoadavgBytes(b []byte) (l1, l5, l15 float64) {
+	var out [3]float64
+	for i := range out {
+		b = bytes.TrimLeft(b, " \t\r\n")
+		if len(b) == 0 {
+			break
 		}
-		v, err := strconv.ParseFloat(f[i], 64)
-		if err != nil || !(v >= 0) || math.IsInf(v, 0) {
-			return 0
+		end := bytes.IndexAny(b, " \t\r\n")
+		if end < 0 {
+			end = len(b)
 		}
-		return v
+		v, err := strconv.ParseFloat(string(b[:end]), 64)
+		if err == nil && v >= 0 && !math.IsInf(v, 0) {
+			out[i] = v
+		}
+		b = b[end:]
 	}
-	return at(0), at(1), at(2)
+	return out[0], out[1], out[2]
 }
 
 // ParseUptimeSecs converts a /proc/uptime first field (seconds, possibly
@@ -293,6 +307,25 @@ func ParseLoadavg(s string) (l1, l5, l15 float64) {
 // implementation-defined, often MinInt64 on amd64).
 func ParseUptimeSecs(s string) time.Duration {
 	secs, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0
+	}
+	return durationFromSecs(secs)
+}
+
+// ParseUptimeBytes is ParseUptimeSecs on the file bytes, so the per-poll
+// /proc/uptime read pays no string conversion and no Fields slice: the first
+// field is scanned in place. The same non-finite rejection applies.
+func ParseUptimeBytes(b []byte) time.Duration {
+	b = bytes.TrimLeft(b, " \t\r\n")
+	end := bytes.IndexAny(b, " \t\r\n")
+	if end < 0 {
+		end = len(b)
+	}
+	if end == 0 {
+		return 0
+	}
+	secs, err := strconv.ParseFloat(string(b[:end]), 64)
 	if err != nil {
 		return 0
 	}

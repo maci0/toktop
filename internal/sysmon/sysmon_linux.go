@@ -49,7 +49,7 @@ func init() {
 	platformMemory = sampleMemoryLinux
 	platformLoad = func(s *core.SysSample) {
 		if b, ok := readProc(procLoadavg); ok {
-			s.Load1, s.Load5, s.Load15 = ParseLoadavg(string(b))
+			s.Load1, s.Load5, s.Load15 = ParseLoadavgBytes(b)
 		}
 	}
 	platformTemps = func() []core.TempReading { return scanTemps(sysHwmon, sysThermal) }
@@ -270,11 +270,7 @@ func linuxUptime() time.Duration {
 	if !ok {
 		return 0
 	}
-	f := strings.Fields(string(b))
-	if len(f) == 0 {
-		return 0
-	}
-	return ParseUptimeSecs(f[0])
+	return ParseUptimeBytes(b)
 }
 
 // parseNvidiaVersion extracts "Driver Version: 550.54.14" and
