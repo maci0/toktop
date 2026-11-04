@@ -180,3 +180,17 @@ func procStatCPUAndRSS(stat string) (ticks uint64, rssBytes uint64) {
 	})
 	return core.SatAddU64(utime, stime), core.MulSatU64(pages, uint64(os.Getpagesize()))
 }
+
+// cloneArgs detaches a command line split out of a read buffer from that
+// buffer, so a retained listing pins the arguments it keeps and not the whole
+// /proc/PID/cmdline read they were windows onto.
+func cloneArgs(args []string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = strings.Clone(a)
+	}
+	return out
+}

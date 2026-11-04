@@ -512,20 +512,6 @@ func splitCmdline(line string, dst []string) []string {
 	return dst
 }
 
-// cloneArgs detaches a command line split out of a read buffer from that
-// buffer, so a retained listing pins the arguments it keeps and not the whole
-// /proc/PID/cmdline read they were windows onto.
-func cloneArgs(args []string) []string {
-	if len(args) == 0 {
-		return nil
-	}
-	out := make([]string, len(args))
-	for i, a := range args {
-		out[i] = strings.Clone(a)
-	}
-	return out
-}
-
 // clipUTF8Prefix keeps at most n bytes of s, ending on a code-point
 // boundary so a cut cannot leave a dangling lead byte (é as 0xC3).
 func clipUTF8Prefix(s string, n int) string {
