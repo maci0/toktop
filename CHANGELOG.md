@@ -13,6 +13,23 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-11-04
+
+### Added
+
+- Exported `agentusage.OpenCodeDBEnv` constant for configuring `OPENCODE_DB`.
+
+### Fixed
+
+- Bound collector per-provider maps on run claim to avoid unbounded allocation.
+- Enforce clean git status across Worker scripts, public assets, and wrangler configuration before site deploy.
+- Corrected site deployment workflow step wiring and apt package installation flags.
+- Fixed remote vitals poll deadline to avoid flaky timeouts on slow hosts.
+
+### Performance
+
+- Scan loadavg and uptime bytes in place per poll to eliminate heap allocations during system polling.
+
 ## [0.26.3] - 2026-11-02
 
 ### Fixed
@@ -4441,7 +4458,8 @@ tag you want is the record of what moved. The README and `--help` of the tag
 you upgrade to are the CLI contract for that version; this file covers 0.5.0
 and later only.
 
-[Unreleased]: https://github.com/maci0/toktop/compare/v0.26.3...HEAD
+[Unreleased]: https://github.com/maci0/toktop/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/maci0/toktop/compare/v0.26.3...v0.27.0
 [0.26.3]: https://github.com/maci0/toktop/compare/v0.26.2...v0.26.3
 [0.26.2]: https://github.com/maci0/toktop/compare/v0.26.1...v0.26.2
 [0.26.1]: https://github.com/maci0/toktop/compare/v0.26.0...v0.26.1
