@@ -279,11 +279,11 @@ func writeSystemPlain(b *strings.Builder, sy *core.SysSample) {
 	if sy.MemTotal == 0 {
 		b.WriteString("memory n/a\n")
 	} else {
-		memPct := float64(sy.MemUsed) / float64(sy.MemTotal) * 100
+		memPct := core.UsedPct(sy.MemUsed, sy.MemTotal)
 		line := fmt.Sprintf("memory %.0f%%%s (%s/%s)", memPct, severityWord(memBand(memPct)),
 			humanBytesShort(sy.MemUsed), humanBytesShort(sy.MemTotal))
 		if sy.SwapTotal > 0 {
-			swPct := float64(sy.SwapUsed) / float64(sy.SwapTotal) * 100
+			swPct := core.UsedPct(sy.SwapUsed, sy.SwapTotal)
 			line += fmt.Sprintf(" · swap %.0f%%%s", swPct, severityWord(memBand(swPct)))
 		}
 		if sy.Load1 > 0 || sy.Load5 > 0 {

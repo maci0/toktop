@@ -117,7 +117,7 @@ func (t *tokenAcc) add(ev AgentEvent) {
 	t.prompt = satAddPos(t.prompt, ev.PromptTokens)
 	t.thinking = satAddPos(t.thinking, ev.ThinkingTokens)
 	if ev.Span > 0 {
-		t.span += ev.Span
+		t.span = SatAddSpan(t.span, ev.Span)
 		t.spanned++
 	}
 	t.n++

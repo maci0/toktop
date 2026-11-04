@@ -40,12 +40,12 @@ func (m Model) renderSystem() string {
 	case sy == nil || sy.MemTotal == 0:
 		vitals = append(vitals, dim("mem n/a"))
 	default:
-		memPct := float64(sy.MemUsed) / float64(sy.MemTotal) * 100
+		memPct := core.UsedPct(sy.MemUsed, sy.MemTotal)
 		vitals = append(vitals,
 			"mem "+GaugeBar(memPct, min(max(w/6, 8), 18), memHeat)+
 				" "+dim(humanBytesShort(sy.MemUsed)+"/"+humanBytesShort(sy.MemTotal)))
 		if sy.SwapTotal > 0 {
-			swPct := float64(sy.SwapUsed) / float64(sy.SwapTotal) * 100
+			swPct := core.UsedPct(sy.SwapUsed, sy.SwapTotal)
 			mb := memBand(swPct)
 			vitals = append(vitals, dim("swp ")+
 				wrap(fgRun(mb.color()), mb.markPrefix()+fmt.Sprintf("%.0f%%", swPct)))

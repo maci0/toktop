@@ -7,6 +7,7 @@ import (
 	"math"
 	"slices"
 	"strings"
+	"time"
 )
 
 // ContainsAny reports whether s contains any of subs. The engine and host
@@ -82,6 +83,33 @@ func satAddPos(a, b int64) int64 {
 	}
 	if a > math.MaxInt64-b {
 		return math.MaxInt64
+	}
+	return a + b
+}
+
+// UsedPct returns used as a percentage of total, 0 when total is 0. Both
+// the SYS strip and the plain report compute this division, each guarding
+// total against zero in a different place; one helper keeps the rounding
+// (a plain float division, truncated only by the caller's formatting) and
+// the zero-total rule in one place.
+func UsedPct(used, total uint64) float64 {
+	if total == 0 {
+		return 0
+	}
+	return float64(used) / float64(total) * 100
+}
+
+// SatAddSpan sums two model-time spans saturating at MaxEventSpan rather
+// than wrapping. agentusage accumulates spans the same way; core.Summarize
+// sums event spans with a plain + which wraps negative on large inputs and
+// then disables the span-based rate. One ceiling, because the event
+// boundary already caps a single span at MaxEventSpan.
+func SatAddSpan(a, b time.Duration) time.Duration {
+	if a <= 0 || b <= 0 {
+		return max(a, b, 0)
+	}
+	if a > MaxEventSpan-b {
+		return MaxEventSpan
 	}
 	return a + b
 }
