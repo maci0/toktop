@@ -517,17 +517,25 @@ func TestRunPollsAndMergesRemoteVitals(t *testing.T) {
 	runDone := make(chan struct{})
 	go func() { defer close(runDone); s.Run(ctx, 10*time.Millisecond) }()
 
-	deadline := time.Now().Add(5 * time.Second)
+	// One vitals round trip over the in-process sshd exceeds the old 5s
+	// polling deadline on a slow host: the script probes for GPU tools
+	// (nvidia-smi/rocm-smi) whose PATH lookup alone can take seconds on a
+	// large /opt/rocm install. Direct measurement here: ~12.5s for a full
+	// script run. Polling must therefore tolerate a real round trip, not
+	// assume the first poll lands within seconds; the generous budget
+	// only bounds a genuinely wedged peer.
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		s.mu.Lock()
 		polled := !s.at.IsZero()
+		pollErr := s.err
 		s.mu.Unlock()
 		if polled {
 			break
 		}
 		if time.Now().After(deadline) {
 			cancel()
-			t.Fatal("poll never recorded a successful vitals sample")
+			t.Fatalf("poll never recorded a successful vitals sample (last poll error: %q)", pollErr)
 		}
 		time.Sleep(time.Millisecond)
 	}
