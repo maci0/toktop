@@ -345,6 +345,7 @@ func (c *Collector) claimRun(ctx context.Context) bool {
 	}
 	c.running = true
 	c.baseCtx = ctx
+	c.pruneStaleKeys()
 	// A run started after a finished one is a fresh join: the previous run's
 	// latch is released here, under the same lock the fan-out reads it under.
 	c.probeMu.Lock()
@@ -460,4 +461,71 @@ func (c *Collector) emit(ctx context.Context, out chan<- core.Snapshot) {
 	case out <- snap:
 	case <-ctx.Done():
 	}
+}
+
+// pruneStaleKeys drops per-provider state for keys the current provider set no
+// longer names. Providers are fixed at construction, so a key a finished run
+// added can only be stale here, not backing a poll in flight. Call with c.mu
+// held; probe state is taken under probeMu inside.
+func (c *Collector) pruneStaleKeys() {
+	if len(c.providers) == 0 {
+		return
+	}
+	names := make(map[string]bool, len(c.providers))
+	for _, p := range c.providers {
+		names[providerKey(p)] = true
+	}
+	keys := make([]string, 0, len(c.histOut))
+	for k := range c.histOut {
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		if !names[k] {
+			delete(c.histOut, k)
+		}
+	}
+	keys = keys[:0]
+	for k := range c.prev {
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		if !names[k] {
+			delete(c.prev, k)
+		}
+	}
+	keys = keys[:0]
+	for k := range c.down {
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		if !names[k] {
+			delete(c.down, k)
+		}
+	}
+	keys = keys[:0]
+	for k := range c.errFold {
+		keys = append(keys, k)
+	}
+	for _, k := range keys {
+		if !names[k] {
+			delete(c.errFold, k)
+		}
+	}
+	c.probeMu.Lock()
+	for k := range c.probeBackoff {
+		if !names[k] {
+			delete(c.probeBackoff, k)
+		}
+	}
+	for k := range c.probeLast {
+		if !names[k] {
+			delete(c.probeLast, k)
+		}
+	}
+	for k := range c.probeDown {
+		if !names[k] {
+			delete(c.probeDown, k)
+		}
+	}
+	c.probeMu.Unlock()
 }
