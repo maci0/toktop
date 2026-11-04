@@ -13,6 +13,12 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 
 ## [Unreleased]
 
+### Added
+
+- The OpenCode database reader honors `OPENCODE_DB`, including relative paths
+  under OpenCode's data directory and the in-memory setting. The exported
+  `agentusage.OpenCodeDBEnv` names the variable for Go consumers.
+
 ### Fixed
 
 - Oversized OpenCode 2 counters no longer hide valid usage from other records.
@@ -32,8 +38,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
   that report the same token counts as the previous attempt.
 - A missing home directory warning no longer claims explicitly configured
   agent stores cannot be read.
-- A relative `XDG_DATA_HOME` resolves OpenCode's database from the watched
-  agent's working directory, matching OpenCode 2.
 - OpenCode's timestamped and untimed usage are read from the same database
   snapshot, avoiding inconsistent samples while the store changes.
 
@@ -42,8 +46,6 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - OpenCode databases with a renamed session table and untimed events remain
   readable.
 - OpenCode session tables without fork metadata remain readable after rename.
-- OpenCode 2's separate reasoning tokens now count toward output tokens, so
-  output rates and budgets include all generated tokens.
 - OpenCode 2 message and auxiliary usage counters saturate when their combined
   value exceeds the supported limit instead of reporting zero.
 - Agents that change working directory are moved to the new project's store,
@@ -60,11 +62,16 @@ This file starts at 0.5.0. Releases before that have no notes here; see
 - OpenCode usage reads use one database snapshot while sessions are changing.
 - OpenCode 2 steps that finish after a watcher attaches are counted even when
   they started before it attached.
-- The OpenCode database reader honors `OPENCODE_DB`, including relative paths
-  under OpenCode's data directory and the in-memory setting.
 
 ### Changed
 
+- A relative `XDG_DATA_HOME` is no longer ignored; it resolves OpenCode's
+  database from the watched agent's working directory, matching OpenCode 2.
+  A relative value that previously fell back to the default directory now
+  reads a different store when the working directory differs.
+- OpenCode 2's separate reasoning tokens now count toward output tokens, so
+  output rates and budgets include all generated tokens. Output figures for
+  OpenCode 2 sessions with reasoning are higher than before.
 - Documented the process-directory attribution limit for external OpenCode
   ACP clients that open a session in another directory.
 
